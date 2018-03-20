@@ -213,6 +213,7 @@ files_libnir = files(
   'nir_split_vars.c',
   'nir_sweep.c',
   'nir_to_lcssa.c',
+  'nir_uniform_analysis.c',
   'nir_validate.c',
   'nir_vla.h',
   'nir_worklist.c',
