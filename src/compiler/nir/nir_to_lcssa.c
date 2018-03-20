@@ -203,3 +203,17 @@ nir_convert_loop_to_lcssa(nir_loop *loop) {
 
    ralloc_free(state);
 }
+
+void
+nir_to_lcssa(nir_shader *shader) {
+
+   nir_foreach_function(function, shader) {
+      if (function->impl == NULL) 
+         continue;
+
+      nir_foreach_block(block, function->impl) {
+         if (block->cf_node.type == nir_cf_node_loop)
+            nir_convert_loop_to_lcssa(nir_cf_node_as_loop(&block->cf_node));
+      }
+   }
+}
