@@ -26,22 +26,53 @@ template = """\
  *    Daniel Schuermann (daniel.schuermann@campus.tu-berlin.de)
  */
 
-#include "aco_ir.h"
+#ifndef _ACO_BUILDER_
+#define _ACO_BUILDER_
 
-const opcode_info opcode_infos[num_opcodes] = {
-% for name, opcode in sorted(opcodes.iteritems()):
+#include "aco_IR.cpp"
+#include "aco_builder.h"
+#include "aco_opcodes.h"
+namespace aco {
+
+/* TODO: - insert instructions into CFG */
+class Builder {
+public:
+% for name in SOP2:
+<%
+   Operands = ['src0']
+   if name != 's_rfe_restore_b64':
+      Operands.append('src1')
+   if opcodes[name].num_inputs == 3:
+      Operands.append('scc')
+%>
+static Instruction
+${name}(\\
+   % for op in Operands:
+Operand ${op}${', ' if op != Operands[-1] else ')'}\\
+   % endfor
+
 {
-   .name = "${name}",
-   .num_inputs = ${opcode.num_inputs},
-   .num_outputs = ${opcode.num_outputs},
-   .output_type = { ${ ", ".join(str(type) for type in opcode.output_type) }},
-   .kills_input = {${ ", ".join(str(size) for size in opcode.kills_input) }}
-},
+   std::vector<Operand> operands = {\\
+   % for op in Operands:
+${op}${', ' if op != Operands[-1] else ''}\\
+   % endfor
+};
+   std::vector<Definition> defs = {\\
+   % for type in opcodes[name].output_type:
+Definition(RegClass::${type})${', ' if type != opcodes[name].output_type[-1] else ''}\\
+   % endfor
+};
+   return SOP2<${opcodes[name].num_inputs},${opcodes[name].num_outputs}>(\
+aco_opcode::${name}, operands, defs);
+}
 % endfor
 };
+}
+#endif /* _ACO_BUILDER_H */
 """
 
+import aco_opcodes
 from aco_opcodes import opcodes
 from mako.template import Template
 
-print Template(template).render(opcodes=opcodes)
+print Template(template).render(opcodes=opcodes, SOP2=aco_opcodes.SOP2)
