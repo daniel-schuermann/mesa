@@ -85,6 +85,8 @@ def opcode(name, num_inputs, output_type,
    opcodes[name] = Opcode(name, num_inputs, output_type,
                           read_reg, write_reg, kills_input)
 
+opcode("exp", 0, [])
+opcode("p_parallelcopy", 0, [])
 
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
 SOP2_SCC = [

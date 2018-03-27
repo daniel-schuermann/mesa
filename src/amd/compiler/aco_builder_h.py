@@ -29,14 +29,22 @@ template = """\
 #ifndef _ACO_BUILDER_
 #define _ACO_BUILDER_
 
+#include "aco_IR.cpp"
+
+namespace aco {
+class Builder
+{
 % for name in SOP2:
-aco_instr *
-${name}(aco_builder *builder, aco_src src0\
-${', aco_src src1' if name != 's_rfe_restore_b64' else ''}\
-${', aco_src scc' if opcodes[name].num_inputs == 3 else ''}\
+public:
+Instruction
+${name}(Operand src0\
+${', Operand src1' if name != 's_rfe_restore_b64' else ''}\
+${', Operand scc' if opcodes[name].num_inputs == 3 else ''}\
 );
 
 % endfor
+}
+}
 #endif /* _ACO_BUILDER_H */
 """
 
