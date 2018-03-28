@@ -37,19 +37,26 @@ public:
    * Examples for Builder::instruction_factories()
    * @return 
    */
-  SOPP<0,0>* s_endpgm()
-  {
-     SOPP<0,0>* instr = new SOPP<0,0>(aco_opcode::s_endpgm);
-     insertInstruction(instr);
-     return instr;
-  }
+   PseudoInstruction* p_startpgm(unsigned size)
+   {
+      PseudoInstruction* instr = new PseudoInstruction(aco_opcode::p_startpgm, 0, size);
+      insertInstruction(instr);
+      return instr;
+   }
 
-  PseudoInstruction* p_parallelcopy(unsigned size)
-  {
-     PseudoInstruction* instr = new PseudoInstruction(aco_opcode::p_parallelcopy, size, size);
-     insertInstruction(instr);
-     return instr;
-  }
+   PseudoInstruction* p_parallelcopy(unsigned size)
+   {
+      PseudoInstruction* instr = new PseudoInstruction(aco_opcode::p_parallelcopy, size, size);
+      insertInstruction(instr);
+      return instr;
+   }
+
+   PseudoInstruction* p_phi(unsigned size)
+   {
+      PseudoInstruction* instr = new PseudoInstruction(aco_opcode::p_phi, size, 1);
+      insertInstruction(instr);
+      return instr;
+   }
 
 // here comes the rest of the definitions
 #include "aco_builder_instr_defs.h"

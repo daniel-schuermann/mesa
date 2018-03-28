@@ -363,14 +363,25 @@ template <std::size_t num_src, std::size_t num_dst>
 class SOP1 final : public FixedInstruction<num_src, num_dst>
 {
 public:
-   SOP1(aco_opcode opcode, Operand ssrc0) : FixedInstruction<1,1>{opcode} {}
+   SOP1(aco_opcode opcode)
+      : FixedInstruction<num_src, num_dst>{opcode}
+   {}
 };
 
 template <std::size_t num_src, std::size_t num_dst>
 class SOPP final : public FixedInstruction<num_src, num_dst>
 {
 public:
-   SOPP(aco_opcode opcode) : FixedInstruction<0,0>{opcode} {}
+   SOPP(aco_opcode opcode) : FixedInstruction<num_src, num_dst>{opcode} {}
+};
+
+template <std::size_t num_src, std::size_t num_dst>
+class VOP1 final : public FixedInstruction<num_src, num_dst>
+{
+public:
+   VOP1(aco_opcode opcode)
+      : FixedInstruction<num_src, num_dst>{opcode}
+   {}
 };
 
 /**
