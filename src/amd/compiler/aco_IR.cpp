@@ -31,11 +31,14 @@
 
 #include <cstdint>
 #include <vector>
+#include <bitset>
+#include <deque>
+#include <memory>
 #include "aco_opcodes.h"
 
 namespace aco {
 
-enum class RegClass {
+enum class RegClass : uint16_t{
    b = 0,
    s1 = 1,
    s2 = 2,
@@ -76,32 +79,35 @@ enum RegType {
  */
 class Temp {
 public:
-   Temp();
-   constexpr Temp(std::uint32_t id, RegClass cls) noexcept : id_(id), reg_class(cls) {};
-   //constexpr Temp(std::uint32_t id, std::uint32_t control) noexcept;
- 
-   std::uint32_t id() const noexcept
+   Temp() = default;
+   constexpr Temp(uint32_t id, RegClass cls) noexcept
+      : id_(id), reg_class(cls) {}
+
+   uint32_t id() const noexcept
    {
       return id_;
    }
-   unsigned size()
+
+   unsigned size() const noexcept
    {
       return (unsigned) reg_class & 0x1F;
    }
+
    RegType type()
    {
       if (reg_class == RegClass::b) return RegType::scc;
       if (reg_class <= RegClass::s16) return RegType::sgpr;
       else return RegType::vgpr;
    }
-   
-   
+
+   RegClass regClass() const noexcept
+   {
+      return reg_class;
+   }
+
 private:
-   std::uint32_t id_;
-   //std::uint32_t control_;
+   uint32_t id_;
    RegClass reg_class;
-   friend class Definition;
-   friend class Operand;
 };
 
 struct PhysReg
@@ -121,41 +127,92 @@ struct PhysReg
 class Operand final
 {
 public:
- 
    Operand() = default;
-   explicit Operand(Temp r) noexcept : temp(r) {};
-   Operand(Temp r, PhysReg reg) noexcept : temp(r) {};
-   explicit Operand(std::uint32_t v) noexcept { data_.i = v; };
-   explicit Operand(float v) noexcept { data_.f = v; };
- 
-   bool isTemp() const noexcept;
-   Temp getTemp() const noexcept;
- 
-   std::uint32_t tempId() const noexcept;
-   void setTempId(std::uint32_t) noexcept;
-   RegClass regClass() const noexcept;
-   unsigned size() const noexcept;
- 
-   bool isFixed() const noexcept;
-   PhysReg physReg() const noexcept;
-   void setFixed(PhysReg reg) noexcept;
- 
-   bool isConstant() const noexcept;
-   std::uint32_t constantValue() const noexcept
+   explicit Operand(Temp* r) noexcept
+   {
+      data_.temp = r;
+      control_[0] = 1; /* isTemp */
+   };
+   explicit Operand(uint32_t v) noexcept
+   {
+      data_.i = v;
+      control_[2] = 1; /* isConst */
+   };
+   explicit Operand(float v) noexcept
+   {
+      data_.f = v;
+      control_[2] = 1; /* isConst */
+   };
+
+   bool isTemp() const noexcept
+   {
+      return control_[0];
+   }
+
+   Temp* getTemp() const noexcept
+   {
+      return data_.temp;
+   }
+
+   uint32_t tempId() const noexcept
+   {
+      return data_.temp->id();
+   }
+
+   RegClass regClass() const noexcept
+   {
+      return data_.temp->regClass();
+   }
+
+   unsigned size() const noexcept
+   {
+      return data_.temp->size();
+   }
+
+   bool isFixed() const noexcept
+   {
+      return control_[1];
+   }
+
+   PhysReg physReg() const noexcept
+   {
+      return reg_;
+   }
+
+   void setFixed(PhysReg reg) noexcept
+   {
+      control_[1] = 1;
+      reg_ = reg;
+   }
+
+   bool isConstant() const noexcept
+   {
+      return control_[2];
+   }
+
+   uint32_t constantValue() const noexcept
    {
       return data_.i;
    }
- 
-   void setKill(bool) noexcept;
-   bool kill() const noexcept;
- 
+
+   void setKill(bool) noexcept
+   {
+      control_[3] = 1;
+   }
+
+   bool kill() const noexcept
+   {
+      return control_[3];
+   }
+
 private:
-   Temp temp;
    union {
-      std::uint32_t i;
+      uint32_t i;
       float f;
+      Temp* temp;
    } data_;
-   std::uint32_t control_;
+   PhysReg reg_;
+   std::bitset<8> control_;
 };
 
 /**
@@ -168,26 +225,59 @@ class Definition final
 {
 public:
    Definition() = default;
-   Definition(RegClass type) noexcept;
-   explicit Definition(Temp r) noexcept;
-   explicit Definition(Temp t, PhysReg reg) noexcept;
-   explicit Definition(PhysReg reg) noexcept;
- 
-   bool isTemp() const noexcept;
-   Temp getTemp() const noexcept;
- 
-   std::uint32_t tempId() const noexcept;
-   void setTempId(std::uint32_t) noexcept;
-   RegClass regClass() const noexcept;
-   unsigned size() const noexcept;
- 
-   bool isFixed() const noexcept;
-   PhysReg physReg() const noexcept;
-   void setFixed(PhysReg reg) noexcept;
- 
+   Definition(uint32_t index, RegClass type) noexcept
+      : temp(index, type) {}
+
+   Temp* getTemp() noexcept
+   {
+      return &temp;
+   }
+
+   uint32_t tempId() const noexcept
+   {
+      return temp.id();
+   }
+
+   RegClass regClass() const noexcept
+   {
+      return temp.regClass();
+   }
+
+   unsigned size() const noexcept
+   {
+      return temp.size();
+   }
+
+   bool isFixed() const noexcept
+   {
+      return control_[0];
+   }
+
+   PhysReg physReg() const noexcept
+   {
+      return reg_;
+   }
+
+   void setFixed(PhysReg reg) noexcept
+   {
+      control_[0] = 1;
+      reg_ = reg;
+   }
+
+   bool mustReuseInput() const noexcept
+   {
+      return control_[1];
+   }
+
+   void setReuseInput(bool v) noexcept
+   {
+      control_[1] = v;
+   }
+
 private:
-   std::uint32_t tempId_;
-   std::uint32_t control_;
+   Temp temp;
+   std::bitset<8> control_;
+   PhysReg reg_;
 };
 
 /**
@@ -231,10 +321,6 @@ class FixedInstruction : public Instruction
 {
   public:
    FixedInstruction(aco_opcode opcode) noexcept : Instruction{opcode} {}
-   FixedInstruction(aco_opcode opcode, Operand* operands) noexcept : Instruction{opcode}, operands_(operands) // this doesn't work
-   { }
-   FixedInstruction(aco_opcode opcode, Operand* operands, Definition* defs) noexcept :
-   Instruction{opcode}, operands_(operands), defs_(defs) {}
  
    std::size_t operandCount() const noexcept final override { return num_src; }
    Operand& getOperand(std::size_t index) noexcept final override { return operands_[index]; }
@@ -248,7 +334,7 @@ class FixedInstruction : public Instruction
 
 /**
  * SOP2 Instruction class
- * see aco_builder*cpp for how this class is used
+ * see aco_builder.cpp for how this class is used
  * @param opcode
  * @param operands
  * @param defs
@@ -257,15 +343,20 @@ template <std::size_t num_src, std::size_t num_dst>
 class SOP2 final : public FixedInstruction<num_src, num_dst>
 {
 public:
-   SOP2(aco_opcode opcode, std::vector<Operand> &operands, std::vector<Definition> &defs) : FixedInstruction<num_src,num_dst>(opcode) {};
+   SOP2(aco_opcode opcode)
+      : FixedInstruction<num_src,num_dst>(opcode)
+   {}
 };
 
 template <std::size_t num_src, std::size_t num_dst>
 class SOPK final : public FixedInstruction<num_src, num_dst>
 {
 public:
-   SOPK(aco_opcode opcode, unsigned imm) : FixedInstruction<1,num_dst>{opcode} {}
-   SOPK(aco_opcode opcode, Operand src, unsigned imm) : FixedInstruction<2,1>{opcode} {}
+   SOPK(aco_opcode opcode, unsigned imm)
+      : FixedInstruction<num_src,num_dst>{opcode},
+        imm(imm)
+   {}
+   unsigned imm;
 };
 
 template <std::size_t num_src, std::size_t num_dst>
@@ -280,7 +371,6 @@ class SOPP final : public FixedInstruction<num_src, num_dst>
 {
 public:
    SOPP(aco_opcode opcode) : FixedInstruction<0,0>{opcode} {}
-   SOPP(aco_opcode opcode, Operand src) : FixedInstruction<1,0>{opcode} {}
 };
 
 /**
@@ -327,19 +417,40 @@ private:
     std::vector<Operand*> operands_;
 };
 
-/**
- * Examples for Builder::instruction_factories()
- * @return 
- */
-Instruction s_endpgm()
-{
-   return SOPP<0,0>(aco_opcode::s_endpgm);
-}
 
-Instruction p_parallelcopy(unsigned size)
-{
-   return PseudoInstruction(aco_opcode::p_parallelcopy, size, size);
-}
+// CFG
+typedef struct Block {
+
+   std::deque<std::unique_ptr<Instruction>> instructions;
+   Block* logical_predecessor;
+   Block* linear_predecessor;
+   Block* logical_successor;
+   Block* linear_successor;
+} Block;
+
+
+class Program final {
+public:
+   std::vector<Block> blocks;
+
+   uint32_t allocateId()
+   {
+      return allocationID++;
+   }
+
+   uint32_t peekAllocationId()
+   {
+      return allocationID;
+   }
+
+   void setAllocationId(uint32_t id)
+   {
+      allocationID = id;
+   }
+private:
+   uint32_t allocationID;
+};
+
 }
 #endif /* ACO_IR_H */
 
