@@ -201,7 +201,7 @@ SOPK_SPECIAL = [
 ]
 opcode("s_movk_i32", 0, [s1])
 opcode("s_cmovk_i32", 1, [s1], read_reg = SCC)
-opcode("s_addk_i32", 1, [s1], write_reg = SCC, kills_input = [1])
+opcode("s_addk_i32", 1, [s1,b], write_reg = SCC, kills_input = [1])
 opcode("s_mulk_i32", 1, [s1], kills_input = [1])
 opcode("s_cbranch_i_fork", 1, [])
 opcode("s_getreg_b32", 0, [s1])
