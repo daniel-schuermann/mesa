@@ -87,6 +87,8 @@ def opcode(name, num_inputs, output_type,
 
 opcode("exp", 0, [])
 opcode("p_parallelcopy", 0, [])
+opcode("p_startpgm", 0, [])
+opcode("p_phi", 0, [])
 
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
 SOP2_SCC = [
@@ -290,7 +292,7 @@ SOP1_SPECIAL = [
    "s_getpc_b64",
    "s_setpc_b64",
    "s_rfe_b64",
-   "s_cbranch_join"
+   "s_cbranch_join",
    "s_set_gpr_idx_idx",
    "s_bitreplicate_b64_b32"
 ]
