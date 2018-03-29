@@ -25,20 +25,12 @@
  *
  */
 
-
 #ifndef ACO_IR_H
 #define ACO_IR_H
 
-#include <cstdint>
-#include <vector>
-#include <bitset>
-#include <deque>
-#include <memory>
 #include "aco_opcodes.h"
 
-namespace aco {
-
-enum class RegClass : uint16_t{
+typedef enum {
    b = 0,
    s1 = 1,
    s2 = 2,
@@ -50,7 +42,7 @@ enum class RegClass : uint16_t{
    v2 = s2 | (1 << 5),
    v3 = s3 | (1 << 5),
    v4 = s4 | (1 << 5),
-};
+} RegClass;
 
 typedef struct {
    const char *name;
@@ -62,14 +54,25 @@ typedef struct {
    // like sideeffects on spr's
 
 } opcode_info;
+
 extern const opcode_info opcode_infos[num_opcodes];
+
+#ifdef __cplusplus
+#include <cstdint>
+#include <vector>
+#include <bitset>
+#include <deque>
+#include <memory>
+
+namespace aco {
+
+
 
 enum RegType {
    scc,
    sgpr,
    vgpr,
 };
-
 
 /**
  * Temp Class
@@ -114,7 +117,6 @@ struct PhysReg
 {
    unsigned reg;
 };
-
 
 /**
  * Operand Class
@@ -203,7 +205,7 @@ public:
    bool kill() const noexcept
    {
       return control_[3];
-   }
+}
 
 private:
    union {
@@ -292,7 +294,7 @@ public:
    Instruction(aco_opcode opcode) noexcept : opcode_(opcode) {}
    virtual ~Instruction() noexcept {}
 
-   aco_opcode opcode() const noexcept;
+   aco_opcode opcode() const noexcept { return opcode_; }
    
    /* return a value defined by this instruction as new operand */
    Operand asOperand(uint32_t index = 0)
@@ -369,14 +371,106 @@ public:
 };
 
 template <std::size_t num_src, std::size_t num_dst>
-class SOPP final : public FixedInstruction<num_src, num_dst>
+class SOPC final : public FixedInstruction<num_src, num_dst>
 {
 public:
-   SOPP(aco_opcode opcode) : FixedInstruction<num_src, num_dst>{opcode} {}
+   SOPC(aco_opcode opcode)
+      : FixedInstruction<num_src, num_dst>{opcode}
+   {}
 };
 
 template <std::size_t num_src, std::size_t num_dst>
-class VOP1 final : public FixedInstruction<num_src, num_dst>
+class SOPP final : public FixedInstruction<num_src, num_dst>
+{
+public:
+   SOPP(aco_opcode opcode)
+      : FixedInstruction<num_src, num_dst>{opcode}
+   {}
+};
+
+template <std::size_t num_src, std::size_t num_dst>
+class SMEM final : public FixedInstruction<num_src, num_dst>
+{
+public:
+   SMEM(aco_opcode opcode, bool glc, bool imm)
+      : FixedInstruction<num_src, num_dst>{opcode},
+        glc(glc),
+        imm(imm)
+   {}
+private:
+   bool glc;
+   bool imm;
+};
+
+/**
+ * Mixin Class for Sub-DWord-Addressing:
+ * Must only be used with VOP1, VOP2 or VOPC template parameter.
+ */
+template <template<std::size_t, std::size_t>class T, std::size_t num_src, std::size_t num_dst>
+class SDWA final : public T<num_src, num_dst>
+{
+public:
+   SDWA(aco_opcode opcode, unsigned dst_sel, unsigned dst_u, bool clamp,
+           unsigned src0_sel, bool src0_sext, bool src0_neg, bool src0_abs,
+           unsigned src1_sel, bool src1_sext, bool src1_neg, bool src1_abs)
+   : T<num_src, num_dst>{opcode}, dst_sel(dst_sel), dst_u(dst_u), clamp(clamp),
+     src0_sel(src0_sel), src0_neg(src0_neg), src0_abs(src0_abs),
+     src1_sel(src1_sel), src1_neg(src1_neg), src1_abs(src1_abs)
+   {}
+private: // TODO use Bitset
+   unsigned dst_sel : 3;
+   unsigned dst_u : 2;
+   bool clamp : 1;
+   unsigned src0_sel : 3;
+   bool src0_sext : 1;
+   bool src0_neg : 1;
+   bool src0_abs : 1;
+   unsigned src1_sel : 3;
+   bool src1_sext : 1;
+   bool src1_neg : 1;
+   bool src1_abs : 1;
+   
+};
+
+/**
+ * Mixin Class for Data Parallel Primitives:
+ * Must only be used with VOP1, VOP2 or VOPC template parameter.
+ */
+template <template<std::size_t, std::size_t>class T, std::size_t num_src, std::size_t num_dst>
+class DPP final : public T<num_src, num_dst>
+{
+public:
+   DPP(aco_opcode opcode, unsigned dpp_ctrl, bool bound_ctrl,
+           bool src0_neg, bool src0_abs, bool src1_neg, bool src1_abs,
+           unsigned bank_mask, unsigned row_mask)
+   : T<num_src, num_dst>{opcode},
+     dpp_ctrl(dpp_ctrl), bound_ctrl(bound_ctrl),
+     src0_neg(src0_neg), src0_abs(src0_abs), src1_neg(src1_neg), src1_abs(src1_abs),
+     bank_mask(bank_mask), row_mask(row_mask)
+   {}
+private: // TODO: use Bitset
+   unsigned dpp_ctrl : 9;
+   bool bound_ctrl : 1;
+   bool src0_neg : 1;
+   bool src0_abs : 1;
+   bool src1_neg : 1;
+   bool src1_abs : 1;
+   unsigned bank_mask : 4;
+   unsigned row_mask : 4;
+   
+};
+
+template <std::size_t num_src, std::size_t num_dst>
+class VOP2 : public FixedInstruction<num_src, num_dst>
+{
+public:
+   VOP2(aco_opcode opcode)
+      : FixedInstruction<num_src, num_dst>{opcode}
+   {}
+};
+
+template <std::size_t num_src, std::size_t num_dst>
+class VOP1 : public FixedInstruction<num_src, num_dst>
 {
 public:
    VOP1(aco_opcode opcode)
@@ -428,8 +522,7 @@ private:
     std::vector<Operand*> operands_;
 };
 
-
-// CFG
+/* CFG */
 typedef struct Block {
 
    std::deque<std::unique_ptr<Instruction>> instructions;
@@ -458,10 +551,12 @@ public:
    {
       allocationID = id;
    }
+
 private:
    uint32_t allocationID;
 };
 
 }
+#endif /* __cplusplus */
 #endif /* ACO_IR_H */
 
