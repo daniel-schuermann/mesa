@@ -26,7 +26,8 @@ template = """\
  *    Daniel Schuermann (daniel.schuermann@campus.tu-berlin.de)
  */
 
-#include "aco_ir.h"
+#include <stdbool.h>
+#include "aco_IR.h"
 
 const opcode_info opcode_infos[num_opcodes] = {
 % for name, opcode in sorted(opcodes.iteritems()):

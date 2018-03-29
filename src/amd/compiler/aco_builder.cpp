@@ -25,11 +25,21 @@
  *
  */
 
-#include <memory>
-#include "aco_opcodes.h"
-#include "aco_IR.cpp"
+#include "aco_IR.h"
 
 namespace aco {
+
+struct dpp {
+   unsigned dpp_ctrl : 9;
+   bool bound_ctrl : 1;
+   bool src0_neg : 1;
+   bool src0_abs : 1;
+   bool src1_neg : 1;
+   bool src1_abs : 1;
+   unsigned bank_mask : 4;
+   unsigned row_mask : 4;
+};
+
 class Builder {
 public:
    Builder(Program program) : P(program) {}
@@ -61,6 +71,21 @@ public:
 // here comes the rest of the definitions
 #include "aco_builder_instr_defs.h"
 
+   // DPP example:
+   DPP<VOP1,1,1>*
+   v_mov_b32(Operand src0, dpp ctrl)
+   {
+      DPP<VOP1,1,1>* instr = new DPP<VOP1,1,1>(aco_opcode::v_mov_b32,
+           ctrl.dpp_ctrl, ctrl.bound_ctrl,
+           ctrl.src0_neg, ctrl.src0_abs,
+           ctrl.src1_neg, ctrl.src1_abs,
+           ctrl.bank_mask, ctrl.row_mask);
+      instr->getDefinition(0) = Definition(P.allocateId(), RegClass::v1);
+      instr->getOperand(0) = src0;
+      insertInstruction(instr);
+      return instr;
+   }
+
 private:
    void insertInstruction(Instruction* instr) {
       currentBlock->instructions.push_back(std::unique_ptr<Instruction>(instr));
@@ -68,4 +93,8 @@ private:
    Program& P;
    Block* currentBlock;
 };
+
+
+
+
 }
