@@ -19,6 +19,7 @@
 # SOFTWARE.
 
 inc_amd = include_directories('.')
+inc_amd_compiler = include_directories('compiler')
 
 subdir('addrlib')
 subdir('common')
