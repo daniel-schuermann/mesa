@@ -27,7 +27,7 @@ template = """\
  */
 
 #include <stdbool.h>
-#include "aco_IR.h"
+#include "aco_ir.h"
 
 const opcode_info opcode_infos[num_opcodes] = {
 % for name, opcode in sorted(opcodes.iteritems()):

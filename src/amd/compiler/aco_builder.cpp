@@ -25,7 +25,7 @@
  *
  */
 
-#include "aco_IR.h"
+#include "aco_ir.h"
 
 namespace aco {
 
