@@ -54,7 +54,7 @@ idep_aco_headers = declare_dependency(
 )
 
 libaco_files = files(
-  'aco_IR.h',
+  'aco_ir.h',
   'aco_builder.cpp',
 )
 
