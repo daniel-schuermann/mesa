@@ -48,6 +48,8 @@
 #include "util/debug.h"
 #include "ac_exp_param.h"
 
+#include "aco_interface.h"
+
 #include "util/string_buffer.h"
 
 static const struct nir_shader_compiler_options nir_options = {
@@ -1184,6 +1186,8 @@ shader_variant_compile(struct radv_device *device,
 	} else {
 		radv_compile_nir_shader(&ac_llvm, &binary, &variant_info,
 					shaders, shader_count, options);
+		if (!module->nir)
+			aco_compile_shader(shaders[0]);
 	}
 	binary->variant_info = variant_info;
 
