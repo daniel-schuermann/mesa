@@ -30,9 +30,9 @@ aco_opcodes_h = custom_target(
 )
 
 aco_opcodes_c = custom_target(
-  'aco_opcodes.c',
-  input : 'aco_opcodes_c.py',
-  output : 'aco_opcodes.c',
+  'aco_opcodes.cpp',
+  input : 'aco_opcodes_cpp.py',
+  output : 'aco_opcodes.cpp',
   command : [prog_python2, '@INPUT@'],
   capture : true,
   depend_files : aco_depends,
