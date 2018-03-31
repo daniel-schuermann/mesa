@@ -31,13 +31,13 @@ template = """\
 
 <% opcode_names = sorted(opcodes.iterkeys()) %>
 
-typedef enum {
+enum class aco_opcode {
 % for name in opcode_names:
    ${name},
 % endfor
    last_opcode = ${opcode_names[-1]},
    num_opcodes = last_opcode + 1
-} aco_opcode;
+};
 
 #endif /* _ACO_OPCODES_ */"""
 
