@@ -29,7 +29,7 @@ template = """\
 #include <stdbool.h>
 #include "aco_ir.h"
 
-const opcode_info opcode_infos[num_opcodes] = {
+const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)] = {
 % for name, opcode in sorted(opcodes.iteritems()):
 {
    .name = "${name}",
