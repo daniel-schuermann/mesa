@@ -55,7 +55,7 @@ typedef struct {
 
 } opcode_info;
 
-extern const opcode_info opcode_infos[num_opcodes];
+extern const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)];
 
 #ifdef __cplusplus
 #include <cstdint>
