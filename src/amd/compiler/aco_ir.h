@@ -130,7 +130,7 @@ class Operand final
 {
 public:
    Operand() = default;
-   explicit Operand(Temp* r) noexcept
+   explicit Operand(Temp r) noexcept
    {
       data_.temp = r;
       control_[0] = 1; /* isTemp */
@@ -151,24 +151,24 @@ public:
       return control_[0];
    }
 
-   Temp* getTemp() const noexcept
+   Temp getTemp() const noexcept
    {
       return data_.temp;
    }
 
    uint32_t tempId() const noexcept
    {
-      return data_.temp->id();
+      return data_.temp.id();
    }
 
    RegClass regClass() const noexcept
    {
-      return data_.temp->regClass();
+      return data_.temp.regClass();
    }
 
    unsigned size() const noexcept
    {
-      return data_.temp->size();
+      return data_.temp.size();
    }
 
    bool isFixed() const noexcept
@@ -211,7 +211,7 @@ private:
    union {
       uint32_t i;
       float f;
-      Temp* temp;
+      Temp temp;
    } data_;
    PhysReg reg_;
    std::bitset<8> control_;
@@ -230,9 +230,9 @@ public:
    Definition(uint32_t index, RegClass type) noexcept
       : temp(index, type) {}
 
-   Temp* getTemp() noexcept
+   Temp getTemp() noexcept
    {
-      return &temp;
+      return temp;
    }
 
    uint32_t tempId() const noexcept
