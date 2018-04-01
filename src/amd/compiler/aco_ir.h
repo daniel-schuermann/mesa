@@ -517,9 +517,15 @@ class PseudoInstruction final : public Instruction
 public:
    PseudoInstruction(aco_opcode opcode, std::size_t num_src, std::size_t num_dst) :
       Instruction{opcode}, defs_(num_dst), operands_(num_src) {}
+
+   std::size_t operandCount() const noexcept final override { return operands_.size(); }
+   Operand& getOperand(std::size_t index) noexcept final override { return operands_[index]; }
+   std::size_t definitionCount() const noexcept final override { return defs_.size(); }
+   Definition& getDefinition(std::size_t index) noexcept final override { return defs_[index]; }
+
 private:
-    std::vector<Definition*> defs_;
-    std::vector<Operand*> operands_;
+    std::vector<Definition> defs_;
+    std::vector<Operand> operands_;
 };
 
 /* CFG */
