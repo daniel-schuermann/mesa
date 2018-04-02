@@ -596,6 +596,21 @@ public:
       allocationID = id;
    }
 
+   Block* createAndInsertBlock()
+   {
+      Block* b = new Block
+      {
+         std::deque<std::unique_ptr<Instruction>>(),
+         std::deque<Block*>(),
+         blocks.back().get(), /* linear predecessor */
+         std::deque<Block*>(),
+         nullptr
+      };
+      blocks.back().get()->linear_successor = b;
+      blocks.push_back(std::unique_ptr<Block>(b));
+      return b;
+   }
+
 private:
    uint32_t allocationID;
 };
