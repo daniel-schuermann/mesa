@@ -87,6 +87,39 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
    }
 }
 
+void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   std::unique_ptr<ExportInstruction> exp{new ExportInstruction(0xf, 0, false, true, true)};
+   ExportInstruction *exp_ptr = exp.get();
+
+   ctx->block->instructions.emplace_back(std::move(exp));
+
+   Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
+   for (unsigned i = 0; i < 4; ++i) {
+      Temp tmp{ctx->program->allocateId(), v1};
+      std::unique_ptr<FixedInstruction<2, 1>> extract{new FixedInstruction<2,1>(aco_opcode::p_extract_vector)};
+
+      extract->getOperand(0) = Operand(src);
+      extract->getOperand(1) = Operand(i);
+      extract->getDefinition(0) = Definition(tmp);
+
+      ctx->block->instructions.emplace_back(std::move(extract));
+
+      exp_ptr->getOperand(i) = Operand(tmp);
+   }
+}
+
+void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   switch(instr->intrinsic) {
+   case nir_intrinsic_store_output:
+      visit_store_output(ctx, instr);
+      break;
+   default:
+      break;
+   }
+}
+
 void visit_block(isel_context *ctx, nir_block *block)
 {
    nir_foreach_instr_reverse(instr, block) {
@@ -97,21 +130,9 @@ void visit_block(isel_context *ctx, nir_block *block)
       case nir_instr_type_load_const:
          visit_load_const(ctx, nir_instr_as_load_const(instr));
          break;
-		/*case nir_instr_type_intrinsic:
-			visit_intrinsic(ctx, nir_instr_as_intrinsic(instr));
-			break;
-		case nir_instr_type_tex:
-			visit_tex(ctx, nir_instr_as_tex(instr));
-			break;
-		case nir_instr_type_phi:
-			visit_phi(ctx, nir_instr_as_phi(instr));
-			break;
-		case nir_instr_type_ssa_undef:
-			visit_ssa_undef(ctx, nir_instr_as_ssa_undef(instr));
-			break;
-		case nir_instr_type_jump:
-			visit_jump(&ctx->ac, nir_instr_as_jump(instr));
-			break;*/
+      case nir_instr_type_intrinsic:
+         visit_intrinsic(ctx, nir_instr_as_intrinsic(instr));
+         break;
       default:
          fprintf(stderr, "Unknown NIR instr type: ");
          nir_print_instr(instr, stderr);
