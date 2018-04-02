@@ -90,11 +90,20 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
    ${type}*
    ${name}(\\
       % if op:
-Operand ${op}\\
+Operand ${op}, \\
       % endif
-)
+      % if name.startswith('s_cbranch') or name.startswith('s_branch'):
+Block* block)
+      % else:
+unsigned imm)
+      % endif
    {
-      ${type}* instr = new ${type}(aco_opcode::${name});
+      ${type}* instr = new ${type}(aco_opcode::${name}, \\
+      % if name.startswith('s_cbranch') or name.startswith('s_branch'):
+block);
+      % else:
+imm);
+      % endif
       % if op:
       instr->getOperand(${0}) = ${op};
       % endif
@@ -137,6 +146,21 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
       return instr;
    }
 % endfor
+% for name in VOPC:
+<%
+   type = 'VOPC<'+ str(opcodes[name].num_inputs) +','+str(opcodes[name].num_outputs)+'>'
+%>
+   ${type}*
+   ${name}(Operand src0, Operand vsrc1)
+   {
+      ${type}* instr = new ${type}(aco_opcode::${name});
+      instr->getDefinition(0) = Definition(P.allocateId(), RegClass::s2);
+      instr->getOperand(0) = src0;
+      instr->getOperand(1) = vsrc1;
+      insertInstruction(instr);
+      return instr;
+   }
+% endfor
 """
 
 import aco_opcodes
@@ -149,4 +173,5 @@ print Template(template).render(
    SOPK=aco_opcodes.SOPK,
    SOP1=aco_opcodes.SOP1,
    SOPP=aco_opcodes.SOPP,
-   VOP1=aco_opcodes.VOP1)
+   VOP1=aco_opcodes.VOP1,
+   VOPC=aco_opcodes.VOPC)

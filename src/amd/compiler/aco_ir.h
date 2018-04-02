@@ -383,6 +383,9 @@ public:
    {}
 };
 
+// Forward declaration
+struct Block;
+
 template <std::size_t num_src, std::size_t num_dst>
 class SOPP final : public FixedInstruction<num_src, num_dst>
 {
@@ -390,6 +393,15 @@ public:
    SOPP(aco_opcode opcode)
       : FixedInstruction<num_src, num_dst>{opcode}
    {}
+   SOPP(aco_opcode opcode, Block* block)
+      : FixedInstruction<num_src, num_dst>{opcode}, block_(block)
+   {}
+   SOPP(aco_opcode opcode, unsigned imm)
+      : FixedInstruction<num_src, num_dst>{opcode}, immediate(imm)
+   {}
+private:
+   unsigned immediate;
+   Block* block_;
 };
 
 template <std::size_t num_src, std::size_t num_dst>
@@ -482,6 +494,15 @@ public:
    {}
 };
 
+template <std::size_t num_src, std::size_t num_dst>
+class VOPC : public FixedInstruction<num_src, num_dst>
+{
+public:
+   VOPC(aco_opcode opcode)
+      : FixedInstruction<num_src, num_dst>{opcode}
+   {}
+};
+
 /**
  * Export Instruction class
  * @param enabledMask
@@ -546,14 +567,14 @@ private:
 };
 
 /* CFG */
-typedef struct Block {
+struct Block {
 
    std::deque<std::unique_ptr<Instruction>> instructions;
-   Block* logical_predecessor;
+   std::deque<Block*> logical_predecessors;
    Block* linear_predecessor;
-   Block* logical_successor;
+   std::deque<Block*> logical_successors;
    Block* linear_successor;
-} Block;
+};
 
 
 class Program final {
