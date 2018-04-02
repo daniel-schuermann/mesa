@@ -90,6 +90,9 @@ opcode("p_parallelcopy", 0, [])
 opcode("p_startpgm", 0, [])
 opcode("p_phi", 0, [])
 
+opcode("p_create_vector", 0, [])
+opcode("p_extract_vector", 0, [])
+
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
 SOP2_SCC = [
    "s_add_u32", 
