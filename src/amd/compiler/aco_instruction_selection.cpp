@@ -142,7 +142,48 @@ void visit_block(isel_context *ctx, nir_block *block)
    }
 }
 
+static void visit_if(isel_context *ctx, nir_if *if_stmt)
+{
+   Temp cond = get_ssa_temp(ctx, if_stmt->condition.ssa);
 
+   Block* aco_then = ctx->program->createAndInsertBlock();
+   aco_then->logical_predecessors.push_back(ctx->block);
+   ctx->block->logical_successors.push_back(aco_then);
+
+   std::unique_ptr<SOPP<1,0>> instr;
+   if (cond.type() == RegType::scc) {
+      Block* aco_else = ctx->program->createAndInsertBlock();
+      aco_else->logical_predecessors.push_back(ctx->block);
+      ctx->block->logical_successors.push_back(aco_else);
+      std::unique_ptr<SOPP<1,0>> instr {new SOPP<1,0>(aco_opcode::s_cbranch_scc0, aco_else)};
+      instr->getOperand(0) = Operand(cond);
+      ctx->block->instructions.emplace_back(std::move(instr));
+
+      ctx->block = aco_then;
+      visit_cf_list(ctx, &if_stmt->then_list);
+      if (!exec_list_is_empty(&if_stmt->else_list)) {
+
+         Block* aco_cont = ctx->program->createAndInsertBlock();
+         aco_else->logical_successors.push_back(aco_cont);
+         aco_cont->logical_predecessors.push_back(aco_else);
+         std::unique_ptr<SOPP<1,0>> instr {new SOPP<1,0>(aco_opcode::s_branch, aco_cont)};
+         instr->getOperand(0) = Operand(cond);
+         ctx->block->instructions.emplace_back(std::move(instr));
+
+         ctx->block = aco_else;
+         visit_cf_list(ctx, &if_stmt->else_list);
+         ctx->block = aco_cont;
+      } else {
+         ctx->block = aco_else;
+      }
+      aco_then->logical_successors.push_back(ctx->block);
+      ctx->block->logical_predecessors.push_back(aco_then);
+
+   } else { /* RegType vcc */
+      unreachable("unimplemented if-branch");
+
+   }
+}
 
 static void visit_cf_list(isel_context *ctx,
                           struct exec_list *list)
@@ -151,6 +192,9 @@ static void visit_cf_list(isel_context *ctx,
       switch (node->type) {
       case nir_cf_node_block:
          visit_block(ctx, nir_cf_node_as_block(node));
+         break;
+      case nir_cf_node_if:
+         visit_if(ctx, nir_cf_node_as_if(node));
          break;
       default:
          unreachable("unimplemented cf list type");
