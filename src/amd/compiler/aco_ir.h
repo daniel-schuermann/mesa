@@ -506,6 +506,19 @@ class ExportInstruction final : public FixedInstruction<4, 0>
     bool validMask_;
 };
 
+
+template <std::size_t num_src, std::size_t num_dst>
+class InterpInstruction final : public FixedInstruction<num_src, num_dst>
+{
+   public:
+      InterpInstruction(aco_opcode opcode, unsigned attribute, unsigned component) noexcept
+        : FixedInstruction<num_src, num_dst>{opcode}, attribute_{attribute}, component_{component} {}
+
+   private:
+      unsigned attribute_;
+      unsigned component_;
+};
+
 /**
  * PseudoInstruction Class
  * @param opcode
