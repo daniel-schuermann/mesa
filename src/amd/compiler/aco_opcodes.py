@@ -222,9 +222,13 @@ SOP1_NOSCC = [
    "s_mov_b32",
    "s_brev_b32",
    "s_ff0_i32_b32",
+   "s_ff0_i32_b64",
    "s_ff1_i32_b32",
+   "s_ff1_i32_b64",
    "s_flbit_i32_b32",
+   "s_flbit_i32_b64",
    "s_flbit_i32",
+   "s_flbit_i32_i64"
    "s_sext_i32_i8",
    "s_sext_i32_i16",
    "s_bitset0_b32",
@@ -246,15 +250,6 @@ SOP1_NOSCC_64 = [
 ]
 for name in SOP1_NOSCC_64:
    opcode(name, 1, [s2])
-
-SOP1_32_64 = [
-   "s_ff0_i32_b64",
-   "s_ff1_i32_b64",
-   "s_flbit_i32_b64",
-   "s_flbit_i32_i64"
-]
-for name in SOP1_32_64:
-   opcode(name, 1, [s1])
 
 SOP1_SCC = [
    "s_not_b32",
@@ -310,7 +305,7 @@ opcode("s_cbranch_join", 1, [])
 opcode("s_set_gpr_idx_idx", 1, [])
 opcode("s_bitreplicate_b64_b32", 1, [s2])
 
-SOP1 = SOP1_NOSCC + SOP1_NOSCC_64 + SOP1_32_64 + SOP1_SCC + SOP1_SCC_64 + SOP1_SPECIAL
+SOP1 = SOP1_NOSCC + SOP1_NOSCC_64 + SOP1_SCC + SOP1_SCC_64 + SOP1_SPECIAL
 
 
 # SOPC instructions: 2 inputs and 0 outputs (+SCC)
@@ -328,25 +323,21 @@ SOPC_SCC = [
    "s_cmp_lt_u32",
    "s_cmp_le_u32",
    "s_bitcmp0_b32",
-   "s_bitcmp1_b32"
+   "s_bitcmp1_b32",
+   "s_bitcmp0_b64",
+   "s_bitcmp1_b64",
+   "s_cmp_eq_u64",
+   "s_cmp_lg_u64"
 ]
 for name in SOPC_SCC:
    opcode(name, 2, [b], write_reg = SCC)
 
 SOPC_SPECIAL = [
-   "s_bitcmp0_b64",
-   "s_bitcmp1_b64",
    "s_setvskip",
-   "s_set_gpr_idx_on",
-   "s_cmp_eq_u64",
-   "s_cmp_lg_u64"
+   "s_set_gpr_idx_on"
 ]
-opcode("s_bitcmp0_b64", 2, [b], write_reg = SCC)
-opcode("s_bitcmp1_b64", 2, [b], write_reg = SCC)
 opcode("s_setvskip", 2, [])
 opcode("s_set_gpr_idx_on", 1, [])
-opcode("s_cmp_eq_u64", 2, [b], write_reg = SCC)
-opcode("s_cmp_lg_u64", 2, [b], write_reg = SCC)
 
 SOPC = SOPC_SCC + SOPC_SPECIAL
 
@@ -614,6 +605,7 @@ VOP2 = VOP2_NOVCC + VOP2_LITERAL + VOP2_VCCOUT + VOP2_VCCINOUT + VOP2_SPECIAL
 VOP1_32 = [
    "v_mov_b32",
    "v_readfirstlane_b32",
+   "v_cvt_i32_f64",
    "v_cvt_f32_i32",
    "v_cvt_f32_u32",
    "v_cvt_u32_f32",
@@ -623,10 +615,12 @@ VOP1_32 = [
    "v_cvt_rpi_i32_f32",
    "v_cvt_flr_i32_f32",
    "v_cvt_off_f32_i4",
+   "v_cvt_f32_f64",
    "v_cvt_f32_ubyte0",
    "v_cvt_f32_ubyte1",
    "v_cvt_f32_ubyte2",
    "v_cvt_f32_ubyte3",
+   "v_cvt_u32_f64",
    "v_fract_f32",
    "v_trunc_f32",
    "v_ceil_f32",
@@ -645,6 +639,7 @@ VOP1_32 = [
    "v_ffbh_u32",
    "v_ffbl_b32",
    "v_ffbh_i32",
+   "v_frexp_exp_i32_f64",
    "v_frexp_exp_i32_f32",
    "v_frexp_mant_f32",
    "v_screen_partition_4se_b32",
@@ -676,6 +671,9 @@ for name in VOP1_32:
    opcode(name, 1, [v1])
 
 VOP1_64 = [
+   "v_cvt_f64_i32",
+   "v_cvt_f64_f32",
+   "v_cvt_f64_u32",
    "v_trunc_f64",
    "v_ceil_f64",
    "v_rndne_f64",
@@ -689,24 +687,6 @@ VOP1_64 = [
 for name in VOP1_64:
    opcode(name, 1, [v2])
 
-VOP1_32_64 = [
-   "v_cvt_i32_f64",
-   "v_cvt_f32_f64",
-   "v_cvt_u32_f64",
-   "v_frexp_exp_i32_f64"
-]
-for name in VOP1_32_64:
-   opcode(name, 1, [v1])
-
-
-VOP1_64_32 = [
-   "v_cvt_f64_i32",
-   "v_cvt_f64_f32",
-   "v_cvt_f64_u32"
-]
-for name in VOP1_64_32:
-   opcode(name, 1, [v2])
-
 VOP1_SPECIAL = [
    "v_nop",
    "v_clrexcp",
@@ -716,7 +696,7 @@ opcode("v_nop", 0, [])
 opcode("v_clrexcp", 0, [])
 opcode("v_swap_b32", 2, [v1,v1], kills_input = [1,1])
 
-VOP1 = VOP1_32 + VOP1_64 + VOP1_32_64 + VOP1_64_32 + VOP1_SPECIAL
+VOP1 = VOP1_32 + VOP1_64 + VOP1_SPECIAL
 
 
 # VOPC instructions:
@@ -1204,3 +1184,33 @@ MUBUF_ATOMIC = [
    "buffer_atomic_inc_x2",
    "buffer_atomic_dec_x2"
 ]
+
+NOT_DPP = [
+   "v_madmk_f32",
+   "v_madak_f32",
+   "v_madmk_f16",
+   "v_madak_f16",
+   "v_readfirstlane_b32",
+   "v_cvt_i32_f64",
+   "v_cvt_f64_i32",
+   "v_cvt_f32_f64",
+   "v_cvt_f64_f32",
+   "v_cvt_u32_f64",
+   "v_cvt_f64_u32",
+   "v_trunc_f64",
+   "v_ceil_f64",
+   "v_rndne_f64",
+   "v_floor_f64",
+   "v_rcp_f64",
+   "v_rsq_f64",
+   "v_sqrt_f64",
+   "v_frexp_exp_i32_f64",
+   "v_frexp_mant_f64",
+   "v_fract_f64",
+   "v_clrexcp",
+   "v_swap_b32"
+]
+
+VOP2_DPP = [ x for x in VOP2 if x not in NOT_DPP ]
+VOP1_DPP = [ x for x in VOP1 if x not in NOT_DPP ]
+VOPC_DPP = [ x for x in VOPC if x not in VOPC_64 ]
