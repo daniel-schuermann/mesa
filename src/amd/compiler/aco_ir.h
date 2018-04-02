@@ -556,7 +556,7 @@ typedef struct Block {
 
 class Program final {
 public:
-   std::vector<Block> blocks;
+   std::vector<std::unique_ptr<Block>> blocks;
 
    uint32_t allocateId()
    {
