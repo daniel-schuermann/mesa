@@ -229,6 +229,8 @@ public:
    Definition() = default;
    Definition(uint32_t index, RegClass type) noexcept
       : temp(index, type) {}
+   Definition(Temp tmp) noexcept
+      : temp(tmp) {}
 
    Temp getTemp() noexcept
    {
