@@ -28,6 +28,8 @@
 #ifndef ACO_IR_H
 #define ACO_IR_H
 
+#include "nir/nir.h"
+
 #include "aco_opcodes.h"
 
 typedef enum {
@@ -577,6 +579,7 @@ private:
    uint32_t allocationID;
 };
 
+std::unique_ptr<Program> select_program(struct nir_shader *nir);
 }
 #endif /* __cplusplus */
 #endif /* ACO_IR_H */

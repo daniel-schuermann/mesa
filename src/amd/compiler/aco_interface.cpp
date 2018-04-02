@@ -26,4 +26,5 @@
 
 void aco_compile_shader(struct nir_shader *shader)
 {
+   aco::select_program(shader);
 }
