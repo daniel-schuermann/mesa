@@ -649,7 +649,7 @@ public:
       return b;
    }
 
-   void print(std::ostream out)
+   void print(std::ostream& out)
    {
       int BB = 0;
       for (auto const& block : blocks)
