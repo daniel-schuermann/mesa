@@ -18,7 +18,7 @@ Operand ${op}${', ' if op != operands[-1] else ')'}\\
    {
       ${type}* instr = new ${type}(aco_opcode::${name});
       % for idx,ty in enumerate(opcodes[name].output_type):
-      instr->getDefinition(${idx}) = Definition(P.allocateId(), RegClass::${ty});
+      instr->getDefinition(${idx}) = Definition(P->allocateId(), RegClass::${ty});
       % endfor
       % for idx,op in enumerate(operands):
       instr->getOperand(${idx}) = ${op};
@@ -41,7 +41,7 @@ Operand ${op}${', ' if op != operands[-1] else ')'}\\
    {
       ${type}* instr = new ${type}(aco_opcode::${name}, imm);
       % for idx,ty in enumerate(opcodes[name].output_type):
-      instr->getDefinition(${idx}) = Definition(P.allocateId(), RegClass::${ty});
+      instr->getDefinition(${idx}) = Definition(P->allocateId(), RegClass::${ty});
       % endfor
       % if op:
       instr->getOperand(${0}) = ${op};
@@ -72,7 +72,7 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
    {
       ${type}* instr = new ${type}(aco_opcode::${name});
       % for idx,ty in enumerate(opcodes[name].output_type):
-      instr->getDefinition(${idx}) = Definition(P.allocateId(), RegClass::${ty});
+      instr->getDefinition(${idx}) = Definition(P->allocateId(), RegClass::${ty});
       % endfor
       % for idx,op in enumerate(operands):
       instr->getOperand(${idx}) = ${op};
@@ -131,7 +131,7 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
    {
       ${type}* instr = new ${type}(aco_opcode::${name});
       % for idx,ty in enumerate(opcodes[name].output_type):
-      instr->getDefinition(${idx}) = Definition(P.allocateId(), RegClass::${ty});
+      instr->getDefinition(${idx}) = Definition(P->allocateId(), RegClass::${ty});
       % endfor
       % for idx,op in enumerate(operands):
       instr->getOperand(${idx}) = ${op};
@@ -154,7 +154,7 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
    ${name}(Operand src0, Operand vsrc1)
    {
       ${type}* instr = new ${type}(aco_opcode::${name});
-      instr->getDefinition(0) = Definition(P.allocateId(), RegClass::s2);
+      instr->getDefinition(0) = Definition(P->allocateId(), RegClass::s2);
       instr->getOperand(0) = src0;
       instr->getOperand(1) = vsrc1;
       insertInstruction(instr);
