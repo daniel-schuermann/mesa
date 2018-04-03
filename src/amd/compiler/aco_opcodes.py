@@ -764,10 +764,9 @@ VINTERP = [
    "v_interp_p2_f32",
    "v_interp_mov_f32"
 ]
-opcode("v_interp_p1_f32", 2, [v1])
-opcode("v_interp_p2_f32", 3, [v1])
-opcode("v_interp_mov_f32", 2, [v1])
-#TODO
+opcode("v_interp_p1_f32", 1, [v1])
+opcode("v_interp_p2_f32", 1, [v1])
+opcode("v_interp_mov_f32", 1, [v1])
 
 # VOP3 instructions: 3 inputs, 1 output
 # VOP3b instructions: have a unique scalar output, e.g. VOP2 with vcc out

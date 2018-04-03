@@ -161,6 +161,18 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
       return instr;
    }
 % endfor
+% for name in VINTERP:
+
+   InterpInstruction<1,1>*
+   ${name}(Operand vsrc, unsigned attribute, unsigned component)
+   {
+      InterpInstruction<1,1>* instr = new InterpInstruction<1,1>(aco_opcode::${name}, attribute, component);
+      instr->getDefinition(0) = Definition(P->allocateId(), RegClass::v1);
+      instr->getOperand(0) = vsrc;
+      insertInstruction(instr);
+      return instr;
+   }
+% endfor
 """
 
 import aco_opcodes
@@ -174,4 +186,5 @@ print Template(template).render(
    SOP1=aco_opcodes.SOP1,
    SOPP=aco_opcodes.SOPP,
    VOP1=aco_opcodes.VOP1,
-   VOPC=aco_opcodes.VOPC)
+   VOPC=aco_opcodes.VOPC,
+   VINTERP=aco_opcodes.VINTERP)
