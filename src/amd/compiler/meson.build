@@ -58,7 +58,7 @@ libaco_files = files(
   'aco_interface.cpp',
   'aco_interface.h',
   'aco_ir.h',
-  'aco_builder.cpp',
+  'aco_builder.h',
 )
 
 libaco = static_library(
