@@ -28,8 +28,9 @@
 #ifndef ACO_IR_H
 #define ACO_IR_H
 
-#include "nir/nir.h"
+#include <ostream>
 
+#include "nir/nir.h"
 #include "aco_opcodes.h"
 
 typedef enum {
@@ -212,7 +213,17 @@ public:
    bool kill() const noexcept
    {
       return control_[3];
-}
+   }
+   
+   std::string to_string()
+   {
+      if (isConstant())
+         return std::to_string(data_.i);
+      else if (isFixed())
+         return (data_.temp.type() == vgpr ? "v[" : "s[") + std::to_string(reg_.reg) + "]";
+      else
+         return "%" + std::to_string(data_.temp.id());
+   }
 
 private:
    union {
@@ -290,6 +301,13 @@ public:
       control_[1] = v;
    }
 
+   std::string to_string()
+   {
+      if (isFixed())
+         return (temp.type() == vgpr ? "v[" : "s[") + std::to_string(reg_.reg) + "]";
+      else
+         return "%" + std::to_string(temp.id());
+   }
 private:
    Temp temp;
    std::bitset<8> control_;
@@ -321,7 +339,17 @@ public:
  
    virtual std::size_t definitionCount() const noexcept { return 0; }
    virtual Definition& getDefinition(std::size_t index) noexcept { __builtin_unreachable(); }
- 
+
+   virtual std::string to_string()
+   {
+      std::string s;
+      if (definitionCount())
+         s.append(getDefinition(0).to_string() + " = ");
+      s.append(std::string(opcode_infos[(int)opcode_].name));
+      for (unsigned i = 0; i < operandCount(); i++)
+         s.append(" " + getOperand(i).to_string());
+      return s;
+   }
 private:
    aco_opcode opcode_;
 };
@@ -619,6 +647,19 @@ public:
       blocks.back().get()->linear_successor = b;
       blocks.push_back(std::unique_ptr<Block>(b));
       return b;
+   }
+
+   void print(std::ostream out)
+   {
+      int BB = 0;
+      for (auto const& block : blocks)
+      {
+         out << "BB" << BB << ":" << std::endl;
+         for (auto const& instr : block->instructions)
+         {
+            out << "\t" << instr->to_string() << std::endl;
+         }
+      }
    }
 
 private:
