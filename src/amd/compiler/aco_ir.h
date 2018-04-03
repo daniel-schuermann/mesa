@@ -147,6 +147,11 @@ public:
       data_.f = v;
       control_[2] = 1; /* isConst */
    };
+   explicit Operand(PhysReg reg, RegClass type) noexcept
+   {
+      data_.temp = Temp(0, type);
+      setFixed(reg);
+   }
 
    bool isTemp() const noexcept
    {
@@ -233,6 +238,11 @@ public:
       : temp(index, type) {}
    Definition(Temp tmp) noexcept
       : temp(tmp) {}
+   Definition(PhysReg reg, RegClass type) noexcept
+      : temp(Temp(0, type))
+   {
+      setFixed(reg);
+   }
 
    Temp getTemp() noexcept
    {
