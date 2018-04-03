@@ -81,7 +81,17 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
       return instr;
    }
 % endfor
-## TODO: SOPC
+% for name in SOPC:
+SOPC<2,1>*
+   ${name}(Operand ssrc0, Operand ssrc1)
+   {
+   SOPC<2,1>* instr = new SOPC<2,1>(aco_opcode::${name});
+   instr->getOperand(0) = ssrc0;
+   instr->getOperand(1) = ssrc1;
+   instr->getDefinition(0) = Definition(P->allocateId(), RegClass::b);
+   return instr;
+   }
+%endfor
 % for name in SOPP:
 <%
    op = 'scc' if opcodes[name].read_reg == 'SCC' else 'vcc' if opcodes[name].read_reg == 'VCC' else ''
@@ -184,6 +194,7 @@ print Template(template).render(
    SOP2=aco_opcodes.SOP2,
    SOPK=aco_opcodes.SOPK,
    SOP1=aco_opcodes.SOP1,
+   SOPC=aco_opcodes.SOPC_SCC,
    SOPP=aco_opcodes.SOPP,
    VOP1=aco_opcodes.VOP1,
    VOPC=aco_opcodes.VOPC,
