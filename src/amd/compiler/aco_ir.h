@@ -663,7 +663,7 @@ public:
    }
 
 private:
-   uint32_t allocationID;
+   uint32_t allocationID = 0;
 };
 
 std::unique_ptr<Program> select_program(struct nir_shader *nir);
