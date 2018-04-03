@@ -24,7 +24,9 @@
 #include "aco_interface.h"
 #include "aco_ir.h"
 
+#include <iostream>
 void aco_compile_shader(struct nir_shader *shader)
 {
-   aco::select_program(shader);
+   auto program = aco::select_program(shader);
+   program->print(std::cerr);
 }
