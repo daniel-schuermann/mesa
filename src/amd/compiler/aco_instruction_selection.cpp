@@ -2,6 +2,7 @@
 #include <unordered_map>
 
 #include "aco_ir.h"
+#include "aco_builder.h"
 #include "aco_interface.h"
 #include "nir/nir.h"
 
@@ -156,9 +157,7 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       ctx->block->logical_successors.push_back(aco_else);
 
       /* branch to the new block if condition is false */
-      std::unique_ptr<SOPP<1,0>> instr {new SOPP<1,0>(aco_opcode::s_cbranch_scc0, aco_else)};
-      instr->getOperand(0) = Operand(cond);
-      ctx->block->instructions.emplace_back(std::move(instr));
+      Builder(ctx->program, ctx->block).s_cbranch_scc0(Operand(cond), aco_else);
 
       /* emit then block */
       ctx->block = aco_then;
@@ -174,9 +173,7 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          aco_cont->logical_predecessors.push_back(aco_else);
 
          /* at the end of the then block, jump to the cont block */
-         std::unique_ptr<SOPP<1,0>> instr {new SOPP<1,0>(aco_opcode::s_branch, aco_cont)};
-         instr->getOperand(0) = Operand(cond);
-         ctx->block->instructions.emplace_back(std::move(instr));
+         Builder(ctx->program, ctx->block).s_branch(aco_cont);
 
          /* emit else block */
          ctx->block = aco_else;
@@ -197,28 +194,19 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          aco_cont->logical_predecessors.push_back(aco_then);
 
          /* without else-list, directly branch on condition */
-         std::unique_ptr<SOPP<1,0>> branch {new SOPP<1,0>(aco_opcode::s_cbranch_vccz, aco_cont)};
-         branch->getOperand(0) = Operand(cond);
-         ctx->block->instructions.emplace_back(std::move(branch));
+         Builder(ctx->program, ctx->block).s_cbranch_vccz(Operand(cond), aco_cont);
 
          ctx->block = aco_then;
+         Builder B(ctx->program, aco_then);
          /* set the exec mask inside then-block */
-         std::unique_ptr<SOP1<1,2>> orig_exec {new SOP1<1,2>(aco_opcode::s_and_saveexec_b64)};
-         orig_exec->getOperand(0) = Operand(cond);
-         orig_exec->getDefinition(0) = Definition(ctx->program->allocateId(), s2);
-         orig_exec->getDefinition(1) = Definition(ctx->program->allocateId(), b);
-         ctx->block->instructions.emplace_back(std::move(orig_exec));
+         Instruction* orig_exec = B.s_and_saveexec_b64(Operand(cond));
 
          /* emit then block */
          visit_cf_list(ctx, &if_stmt->then_list);
 
          /* restore exec mask */
-         std::unique_ptr<SOP2<2,2>> cont_exec {new SOP2<2,2>(aco_opcode::s_or_b64)};
-         cont_exec->getOperand(0) = Operand(PhysReg{126}, s2);
-         cont_exec->getOperand(1) = orig_exec->asOperand(0);
-         cont_exec->getDefinition(0) = Definition(PhysReg{126}, s2);
-         cont_exec->getDefinition(1) = Definition(ctx->program->allocateId(), b);
-         ctx->block->instructions.emplace_back(std::move(cont_exec));
+         Instruction* restore = B.s_mov_b64(orig_exec->asOperand(0));
+         restore->getDefinition(0).setFixed(PhysReg{126});
          ctx->block = aco_cont;
 
       } else {
@@ -231,34 +219,25 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          aco_cont->logical_predecessors.push_back(aco_then);
          aco_else->logical_successors.push_back(aco_cont);
          aco_cont->logical_predecessors.push_back(aco_else);
-
+         Builder B(ctx->program, ctx->block);
          /* with else-list, first set exec mask */
-         std::unique_ptr<SOP1<1,2>> orig_exec {new SOP1<1,2>(aco_opcode::s_and_saveexec_b64)};
-         orig_exec->getOperand(0) = Operand(cond);
-         orig_exec->getDefinition(0) = Definition(ctx->program->allocateId(), s2);
-         orig_exec->getDefinition(1) = Definition(ctx->program->allocateId(), b);
-         ctx->block->instructions.emplace_back(std::move(orig_exec));
+         Instruction* orig_exec = B.s_and_saveexec_b64(Operand(cond));
 
          /* branch on exec mask to T block */
-         std::unique_ptr<SOPP<0,0>> branch_else {new SOPP<0,0>(aco_opcode::s_cbranch_execz, aco_T)};
-         ctx->block->instructions.emplace_back(std::move(branch_else));
+         B.s_cbranch_execz(aco_T);
 
          /* emit then block */
          ctx->block = aco_then;
          visit_cf_list(ctx, &if_stmt->then_list);
 
          ctx->block = aco_T;
+         B = Builder(ctx->program, aco_T);
          /* negate exec mask */
-         std::unique_ptr<SOP2<2,2>> else_exec {new SOP2<2,2>(aco_opcode::s_xor_b64)};
-         else_exec->getOperand(0) = Operand(PhysReg{126}, s2);
-         else_exec->getOperand(1) = orig_exec->asOperand(0);
-         else_exec->getDefinition(0) = Definition(PhysReg{126}, s2);
-         else_exec->getDefinition(1) = Definition(ctx->program->allocateId(), b);
-         ctx->block->instructions.emplace_back(std::move(else_exec));
+         Instruction* else_exec = B.s_xor_b64(Operand(PhysReg{126}, s2), orig_exec->asOperand(0));
+         else_exec->getDefinition(0).setFixed(PhysReg{126});
 
          /* branch on exec mask to cont block */
-         std::unique_ptr<SOPP<0,0>> branch_cont {new SOPP<0,0>(aco_opcode::s_cbranch_execz, aco_cont)};
-         ctx->block->instructions.emplace_back(std::move(branch_cont));
+         B.s_cbranch_execz(aco_cont);
 
          /* emit else block */
          ctx->block = aco_else;
@@ -266,10 +245,8 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
 
          ctx->block = aco_cont;
          /* restore original exec mask */
-         std::unique_ptr<SOP1<1,1>> cont_exec {new SOP1<1,1>(aco_opcode::s_mov_b64)};
-         cont_exec->getOperand(0) = orig_exec->asOperand(0);
-         cont_exec->getDefinition(0) = Definition(PhysReg{126}, s2);
-         ctx->block->instructions.emplace_back(std::move(cont_exec));
+         Instruction* restore = Builder(ctx->program, aco_cont).s_mov_b64(orig_exec->asOperand(0));
+         restore->getDefinition(0).setFixed(PhysReg{126});
       }
    }
 }

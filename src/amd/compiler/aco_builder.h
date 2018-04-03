@@ -42,7 +42,9 @@ struct dpp {
 
 class Builder {
 public:
-   Builder(Program program) : P(program) {}
+   Builder(Program* program, Block* current_block)
+   : P(program), block(current_block)
+   {}
    /**
    * Examples for Builder::instruction_factories()
    * @return 
@@ -80,21 +82,17 @@ public:
            ctrl.src0_neg, ctrl.src0_abs,
            ctrl.src1_neg, ctrl.src1_abs,
            ctrl.bank_mask, ctrl.row_mask);
-      instr->getDefinition(0) = Definition(P.allocateId(), RegClass::v1);
+      instr->getDefinition(0) = Definition(P->allocateId(), RegClass::v1);
       instr->getOperand(0) = src0;
       insertInstruction(instr);
       return instr;
    }
 
 private:
+   Program* P;
+   Block* block;
    void insertInstruction(Instruction* instr) {
-      currentBlock->instructions.push_back(std::unique_ptr<Instruction>(instr));
+      block->instructions.push_back(std::unique_ptr<Instruction>(instr));
    }
-   Program& P;
-   Block* currentBlock;
 };
-
-
-
-
 }
