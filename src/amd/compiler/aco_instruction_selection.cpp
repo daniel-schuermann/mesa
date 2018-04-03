@@ -44,8 +44,6 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
 {
    if (!instr->dest.dest.is_ssa)
       abort();
-   if (ctx->allocated.find(instr->dest.dest.ssa.index) == ctx->allocated.end())
-      return;
    switch(instr->op) {
    case nir_op_vec2:
    case nir_op_vec3:
@@ -73,8 +71,6 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
       abort();
    if (instr->def.num_components != 1)
       abort();
-   if (ctx->allocated.find(instr->def.index) == ctx->allocated.end())
-      return;
    if (ctx->use_vgpr[instr->def.index]) {
       std::unique_ptr<VOP1<1, 1>> mov{new VOP1<1,1>(aco_opcode::v_mov_b32)};
       mov->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->def));
@@ -91,9 +87,6 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
 void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    std::unique_ptr<ExportInstruction> exp{new ExportInstruction(0xf, 0, false, true, true)};
-   ExportInstruction *exp_ptr = exp.get();
-
-   ctx->block->instructions.emplace_back(std::move(exp));
 
    Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
    for (unsigned i = 0; i < 4; ++i) {
@@ -106,8 +99,10 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 
       ctx->block->instructions.emplace_back(std::move(extract));
 
-      exp_ptr->getOperand(i) = Operand(tmp);
+      exp->getOperand(i) = Operand(tmp);
    }
+
+   ctx->block->instructions.emplace_back(std::move(exp));
 }
 
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
@@ -123,7 +118,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 
 void visit_block(isel_context *ctx, nir_block *block)
 {
-   nir_foreach_instr_reverse(instr, block) {
+   nir_foreach_instr(instr, block) {
       switch (instr->type) {
       case nir_instr_type_alu:
          visit_alu_instr(ctx, nir_instr_as_alu(instr));
@@ -145,6 +140,8 @@ void visit_block(isel_context *ctx, nir_block *block)
 
 static void visit_if(isel_context *ctx, nir_if *if_stmt)
 {
+   /* Disabled for now till I find time to untangle the assumptions. */
+#if 0
    Temp cond = get_ssa_temp(ctx, if_stmt->condition.ssa);
 
    Block* aco_then = ctx->program->createAndInsertBlock();
@@ -249,12 +246,13 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          restore->getDefinition(0).setFixed(PhysReg{126});
       }
    }
+#endif
 }
 
 static void visit_cf_list(isel_context *ctx,
                           struct exec_list *list)
 {
-   foreach_list_typed_reverse(nir_cf_node, node, node, list) {
+   foreach_list_typed(nir_cf_node, node, node, list) {
       switch (node->type) {
       case nir_cf_node_block:
          visit_block(ctx, nir_cf_node_as_block(node));
@@ -352,16 +350,11 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir)
 
    ctx.program->blocks.push_back(std::unique_ptr<Block>{new Block});
    ctx.block = ctx.program->blocks.back().get();
-   
-   ctx.block->instructions.push_back(std::unique_ptr<SOPP<0, 0>>(new SOPP<0, 0>(aco_opcode::s_endpgm)));
-   
 
    visit_cf_list(&ctx, &func->impl->body);
 
-   /* We insert the instructions & blocks backwards, this reverses them. */
-   std::reverse(program->blocks.begin(), program->blocks.end());
-   for(auto&& block : program->blocks)
-      std::reverse(block->instructions.begin(), block->instructions.end());
+   ctx.block->instructions.push_back(std::unique_ptr<SOPP<0, 0>>(new SOPP<0, 0>(aco_opcode::s_endpgm)));
+
    return program;
 }
 }
