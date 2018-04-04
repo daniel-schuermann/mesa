@@ -94,7 +94,7 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
    for (unsigned i = 0; i < 4; ++i) {
       Temp tmp{ctx->program->allocateId(), v1};
-      std::unique_ptr<FixedInstruction<2, 1>> extract{new FixedInstruction<2,1>(aco_opcode::p_extract_vector)};
+      std::unique_ptr<FixedInstruction<2, 1>> extract{new FixedInstruction<2,1>(aco_opcode::p_extract_vector, Format::PSEUDO)};
 
       extract->getOperand(0) = Operand(src);
       extract->getOperand(1) = Operand(i);
@@ -115,12 +115,12 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
    Temp coord1{ctx->program->allocateId(), v1};
    Temp coord2{ctx->program->allocateId(), v1};
 
-   std::unique_ptr<FixedInstruction<2, 1>> coord1_extract{new FixedInstruction<2,1>(aco_opcode::p_extract_vector)};
+   std::unique_ptr<FixedInstruction<2, 1>> coord1_extract{new FixedInstruction<2,1>(aco_opcode::p_extract_vector, Format::PSEUDO)};
    coord1_extract->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].ssa)};
    coord1_extract->getOperand(1) = Operand((uint32_t)0);
 
    coord1_extract->getDefinition(0) = Definition{coord1};
-   std::unique_ptr<FixedInstruction<2, 1>> coord2_extract{new FixedInstruction<2,1>(aco_opcode::p_extract_vector)};
+   std::unique_ptr<FixedInstruction<2, 1>> coord2_extract{new FixedInstruction<2,1>(aco_opcode::p_extract_vector, Format::PSEUDO)};
    coord2_extract->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].ssa)};
    coord2_extract->getOperand(1) = Operand((uint32_t)1);
 
