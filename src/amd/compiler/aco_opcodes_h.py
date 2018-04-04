@@ -31,7 +31,7 @@ template = """\
 
 <% opcode_names = sorted(opcodes.iterkeys()) %>
 
-enum class aco_opcode {
+enum class aco_opcode : std::uint16_t {
 % for name in opcode_names:
    ${name},
 % endfor
