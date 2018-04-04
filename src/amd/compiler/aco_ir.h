@@ -55,7 +55,7 @@ typedef struct {
    bool kills_input[4];
    /* TODO: everything that depends on the instruction rather than the format */
    // like sideeffects on spr's
-
+   unsigned opcode;
 } opcode_info;
 
 extern const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)];
@@ -69,7 +69,51 @@ extern const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)]
 
 namespace aco {
 
-
+/**
+ * Representation of the instruction's microcode encoding format
+ * Note: Some Vector ALU Formats can be combined, such that:
+ * - VOP2* | VOP3A represents a VOP2 instruction in VOP3A encoding
+ * - VOP2* | DPP represents a VOP2 instruction with data parallel primitive.
+ * - VOP2* | SDWA represents a VOP2 instruction with sub-dword addressing.
+ * 
+ * (*) The same is applicable for VOP1 and VOPC instructions.
+ */
+enum class Format : std::uint16_t {
+   /* Pseudo Instruction Format */
+   PSEUDO = 0,
+   /* Scalar ALU & Control Formats */
+   SOP1 = 1,
+   SOP2 = 2,
+   SOPK = 3,
+   SOPP = 4,
+   SOPC = 5,
+   /* Scalar Memory Format */
+   SMEM = 6,
+   /* Vector Parameter Interpolation Format */
+   VINTRP = 7,
+   /* LDS/GDS Format */
+   DS = 8,
+   /* Vector Memory Buffer Formats */
+   MTBUF = 9,
+   MUBUF = 10,
+   /* Vector Memory Image Format */
+   MIMG = 11,
+   /* Export Format */
+   EXP = 12,
+   /* Flat Formats */
+   FLAT = 13,
+   GLOBAL = 14,
+   SCRATCH = 15,
+   /* Vector ALU Formats */
+   VOP1 = 16,
+   VOP2 = 17,
+   VOPC = 18,
+   VOP3B = 19,
+   VOP3P = 20,
+   VOP3A = 1 << 8,
+   DPP = 1 << 9,
+   SDWA = 1 << 10,
+};
 
 enum RegType {
    scc,
@@ -338,10 +382,12 @@ private:
 class Instruction
 {
 public:
-   Instruction(aco_opcode opcode) noexcept : opcode_(opcode) {}
+   Instruction(aco_opcode opcode, Format format) noexcept
+      : opcode_(opcode), format_(format) {}
    virtual ~Instruction() noexcept {}
 
    aco_opcode opcode() const noexcept { return opcode_; }
+   Format format() const noexcept { return format_; }
    
    /* return a value defined by this instruction as new operand */
    Operand asOperand(uint32_t index = 0)
@@ -373,6 +419,7 @@ public:
    }
 private:
    aco_opcode opcode_;
+   Format format_;
 };
 
 /**
@@ -385,7 +432,8 @@ template <std::size_t num_src, std::size_t num_dst>
 class FixedInstruction : public Instruction
 {
   public:
-   FixedInstruction(aco_opcode opcode) noexcept : Instruction{opcode} {}
+   FixedInstruction(aco_opcode opcode, Format format) noexcept
+      : Instruction{opcode, format} {}
  
    std::size_t operandCount() const noexcept final override { return num_src; }
    Operand& getOperand(std::size_t index) noexcept final override { return operands_[index]; }
@@ -409,7 +457,7 @@ class SOP2 final : public FixedInstruction<num_src, num_dst>
 {
 public:
    SOP2(aco_opcode opcode)
-      : FixedInstruction<num_src,num_dst>(opcode)
+      : FixedInstruction<num_src,num_dst>(opcode, Format::SOP2)
    {}
 };
 
@@ -418,10 +466,10 @@ class SOPK final : public FixedInstruction<num_src, num_dst>
 {
 public:
    SOPK(aco_opcode opcode, unsigned imm)
-      : FixedInstruction<num_src,num_dst>{opcode},
+      : FixedInstruction<num_src,num_dst>{opcode, Format::SOPK},
         imm(imm)
    {}
-   unsigned imm;
+   uint16_t imm;
 };
 
 template <std::size_t num_src, std::size_t num_dst>
@@ -429,7 +477,7 @@ class SOP1 final : public FixedInstruction<num_src, num_dst>
 {
 public:
    SOP1(aco_opcode opcode)
-      : FixedInstruction<num_src, num_dst>{opcode}
+      : FixedInstruction<num_src, num_dst>{opcode, Format::SOP1}
    {}
 };
 
@@ -438,7 +486,7 @@ class SOPC final : public FixedInstruction<num_src, num_dst>
 {
 public:
    SOPC(aco_opcode opcode)
-      : FixedInstruction<num_src, num_dst>{opcode}
+      : FixedInstruction<num_src, num_dst>{opcode, Format::SOPC}
    {}
 };
 
@@ -450,16 +498,15 @@ class SOPP final : public FixedInstruction<num_src, num_dst>
 {
 public:
    SOPP(aco_opcode opcode)
-      : FixedInstruction<num_src, num_dst>{opcode}
+      : FixedInstruction<num_src, num_dst>{opcode, Format::SOPP}
    {}
    SOPP(aco_opcode opcode, Block* block)
-      : FixedInstruction<num_src, num_dst>{opcode}, block_(block)
+      : FixedInstruction<num_src, num_dst>{opcode, Format::SOPP}, block_(block)
    {}
    SOPP(aco_opcode opcode, unsigned imm)
-      : FixedInstruction<num_src, num_dst>{opcode}, immediate(imm)
+      : FixedInstruction<num_src, num_dst>{opcode, Format::SOPP}, imm(imm)
    {}
-private:
-   unsigned immediate;
+   unsigned imm;
    Block* block_;
 };
 
@@ -468,7 +515,7 @@ class SMEM final : public FixedInstruction<num_src, num_dst>
 {
 public:
    SMEM(aco_opcode opcode, bool glc, bool imm)
-      : FixedInstruction<num_src, num_dst>{opcode},
+      : FixedInstruction<num_src, num_dst>{opcode, Format::SMEM},
         glc(glc),
         imm(imm)
    {}
@@ -488,7 +535,7 @@ public:
    SDWA(aco_opcode opcode, unsigned dst_sel, unsigned dst_u, bool clamp,
            unsigned src0_sel, bool src0_sext, bool src0_neg, bool src0_abs,
            unsigned src1_sel, bool src1_sext, bool src1_neg, bool src1_abs)
-   : T<num_src, num_dst>{opcode}, dst_sel(dst_sel), dst_u(dst_u), clamp(clamp),
+   : T<num_src, num_dst>{opcode, Format::SDWA}, dst_sel(dst_sel), dst_u(dst_u), clamp(clamp),
      src0_sel(src0_sel), src0_neg(src0_neg), src0_abs(src0_abs),
      src1_sel(src1_sel), src1_neg(src1_neg), src1_abs(src1_abs)
    {}
@@ -518,7 +565,7 @@ public:
    DPP(aco_opcode opcode, unsigned dpp_ctrl, bool bound_ctrl,
            bool src0_neg, bool src0_abs, bool src1_neg, bool src1_abs,
            unsigned bank_mask, unsigned row_mask)
-   : T<num_src, num_dst>{opcode},
+   : T<num_src, num_dst>{opcode, Format::DPP},
      dpp_ctrl(dpp_ctrl), bound_ctrl(bound_ctrl),
      src0_neg(src0_neg), src0_abs(src0_abs), src1_neg(src1_neg), src1_abs(src1_abs),
      bank_mask(bank_mask), row_mask(row_mask)
@@ -540,7 +587,10 @@ class VOP2 : public FixedInstruction<num_src, num_dst>
 {
 public:
    VOP2(aco_opcode opcode)
-      : FixedInstruction<num_src, num_dst>{opcode}
+      : FixedInstruction<num_src, num_dst>{opcode, Format::VOP2}
+   {}
+   VOP2(aco_opcode opcode, Format format)
+      : FixedInstruction<num_src, num_dst>{opcode, (Format)((uint16_t) format | (uint16_t) Format::VOP2)}
    {}
 };
 
@@ -549,7 +599,10 @@ class VOP1 : public FixedInstruction<num_src, num_dst>
 {
 public:
    VOP1(aco_opcode opcode)
-      : FixedInstruction<num_src, num_dst>{opcode}
+      : FixedInstruction<num_src, num_dst>{opcode, Format::VOP1}
+   {}
+   VOP1(aco_opcode opcode, Format format)
+      : FixedInstruction<num_src, num_dst>{opcode, (Format)((uint16_t) format | (uint16_t) Format::VOP1)}
    {}
 };
 
@@ -558,7 +611,10 @@ class VOPC : public FixedInstruction<num_src, num_dst>
 {
 public:
    VOPC(aco_opcode opcode)
-      : FixedInstruction<num_src, num_dst>{opcode}
+      : FixedInstruction<num_src, num_dst>{opcode, Format::VOPC}
+   {}
+   VOPC(aco_opcode opcode, Format format)
+      : FixedInstruction<num_src, num_dst>{opcode, (Format)((uint16_t) format | (uint16_t) Format::VOPC)}
    {}
 };
 
@@ -574,7 +630,7 @@ class ExportInstruction final : public FixedInstruction<4, 0>
 {
   public:
     ExportInstruction(unsigned enabledMask, unsigned dest, bool compressed, bool done, bool validMask) noexcept
-      : FixedInstruction{aco_opcode::exp},
+      : FixedInstruction{aco_opcode::exp, Format::EXP},
         enabledMask_{enabledMask},
         dest_{dest},
         compressed_{compressed},
@@ -582,7 +638,6 @@ class ExportInstruction final : public FixedInstruction<4, 0>
         validMask_{validMask}
     {}
  
-  private:
     unsigned enabledMask_;
     unsigned dest_;
     bool compressed_;
@@ -596,9 +651,8 @@ class InterpInstruction final : public FixedInstruction<num_src, num_dst>
 {
    public:
       InterpInstruction(aco_opcode opcode, unsigned attribute, unsigned component) noexcept
-        : FixedInstruction<num_src, num_dst>{opcode}, attribute_{attribute}, component_{component} {}
+        : FixedInstruction<num_src, num_dst>{opcode, Format::VINTRP}, attribute_{attribute}, component_{component} {}
 
-   private:
       unsigned attribute_;
       unsigned component_;
 };
@@ -613,7 +667,7 @@ class PseudoInstruction final : public Instruction
 {
 public:
    PseudoInstruction(aco_opcode opcode, std::size_t num_src, std::size_t num_dst) :
-      Instruction{opcode}, defs_(num_dst), operands_(num_src) {}
+      Instruction{opcode, Format::PSEUDO}, defs_(num_dst), operands_(num_src) {}
 
    std::size_t operandCount() const noexcept final override { return operands_.size(); }
    Operand& getOperand(std::size_t index) noexcept final override { return operands_[index]; }
