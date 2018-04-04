@@ -121,6 +121,18 @@ struct PhysReg
    unsigned reg;
 };
 
+static inline PhysReg fixed_vgpr(unsigned idx)
+{
+   return PhysReg{idx + 256};
+}
+
+static inline PhysReg fixed_sgpr(unsigned idx)
+{
+   return PhysReg{idx};
+}
+
+static constexpr PhysReg m0{124};
+
 /**
  * Operand Class
  * Initially, each Operand refers to either
