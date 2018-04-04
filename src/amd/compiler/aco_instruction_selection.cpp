@@ -14,6 +14,9 @@ struct isel_context {
    bool *uniform_vals;
    std::unique_ptr<bool[]> use_vgpr;
    std::unordered_map<unsigned, unsigned> allocated;
+
+   Temp barycentric_coords;
+   Temp prim_mask;
 };
 
 static void visit_cf_list(struct isel_context *ctx,
@@ -105,9 +108,53 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    ctx->block->instructions.emplace_back(std::move(exp));
 }
 
+void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   unsigned base = nir_intrinsic_base(instr);
+   unsigned component = nir_intrinsic_component(instr);
+   Temp coord1{ctx->program->allocateId(), v1};
+   Temp coord2{ctx->program->allocateId(), v1};
+
+   std::unique_ptr<FixedInstruction<2, 1>> coord1_extract{new FixedInstruction<2,1>(aco_opcode::p_extract_vector)};
+   coord1_extract->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].ssa)};
+   coord1_extract->getOperand(1) = Operand((uint32_t)0);
+
+   coord1_extract->getDefinition(0) = Definition{coord1};
+   std::unique_ptr<FixedInstruction<2, 1>> coord2_extract{new FixedInstruction<2,1>(aco_opcode::p_extract_vector)};
+   coord2_extract->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].ssa)};
+   coord2_extract->getOperand(1) = Operand((uint32_t)1);
+
+   coord2_extract->getDefinition(0) = Definition{coord2};
+
+   ctx->block->instructions.emplace_back(std::move(coord1_extract));
+   ctx->block->instructions.emplace_back(std::move(coord2_extract));
+
+   Temp tmp{ctx->program->allocateId(), v1};
+   std::unique_ptr<InterpInstruction<2, 1>> p1{new InterpInstruction<2, 1>(aco_opcode::v_interp_p1_f32, base, component)};
+   p1->getOperand(0) = Operand(coord1);
+   p1->getOperand(1) = Operand(ctx->prim_mask);
+   p1->getOperand(1).setFixed(m0);
+   p1->getDefinition(0) = Definition(tmp);
+   std::unique_ptr<InterpInstruction<3, 1>> p2{new InterpInstruction<3, 1>(aco_opcode::v_interp_p2_f32, base, component)};
+   p2->getOperand(0) = Operand(coord2);
+   p2->getOperand(1) = Operand(ctx->prim_mask);
+   p2->getOperand(1).setFixed(m0);
+   p2->getOperand(2) = Operand(tmp);
+   p2->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+
+   ctx->block->instructions.emplace_back(std::move(p1));
+   ctx->block->instructions.emplace_back(std::move(p2));
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
+   case nir_intrinsic_load_barycentric_pixel:
+      ctx->allocated[instr->dest.ssa.index] = ctx->barycentric_coords.id();
+      break;
+   case nir_intrinsic_load_interpolated_input:
+      visit_load_interpolated_input(ctx, instr);
+      break;
    case nir_intrinsic_store_output:
       visit_store_output(ctx, instr);
       break;
@@ -332,6 +379,22 @@ type_size(const struct glsl_type *type)
         return glsl_count_attribute_slots(type, false);
 }
 
+void add_startpgm(struct isel_context *ctx)
+{
+   std::unique_ptr<PseudoInstruction> startpgm{new PseudoInstruction(aco_opcode::p_startpgm, 0, 2)};
+
+   ctx->barycentric_coords = Temp{ctx->program->allocateId(), v2};
+   ctx->prim_mask = Temp{ctx->program->allocateId(), s1};
+
+   startpgm->getDefinition(0) = Definition{ctx->barycentric_coords};
+   startpgm->getDefinition(0).setFixed(fixed_vgpr(0));
+
+   startpgm->getDefinition(1) = Definition{ctx->prim_mask};
+   startpgm->getDefinition(1).setFixed(fixed_sgpr(0));
+
+   ctx->block->instructions.push_back(std::move(startpgm));
+}
+
 }
 
 std::unique_ptr<Program> select_program(struct nir_shader *nir)
@@ -350,6 +413,8 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir)
 
    ctx.program->blocks.push_back(std::unique_ptr<Block>{new Block});
    ctx.block = ctx.program->blocks.back().get();
+
+   add_startpgm(&ctx);
 
    visit_cf_list(&ctx, &func->impl->body);
 
