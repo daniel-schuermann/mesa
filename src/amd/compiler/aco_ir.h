@@ -231,10 +231,12 @@ public:
    {
       if (isConstant())
          return std::to_string(data_.i);
-      else if (isFixed())
-         return (data_.temp.type() == vgpr ? "v[" : "s[") + std::to_string(reg_.reg) + "]";
-      else
-         return "%" + std::to_string(data_.temp.id());
+
+      std::string s = "%" + std::to_string(data_.temp.id());
+
+      if (isFixed())
+         return s + ":" +  (data_.temp.type() == vgpr ? "v[" : "s[") + std::to_string(reg_.reg) + "]";
+      return s;
    }
 
 private:
@@ -315,10 +317,11 @@ public:
 
    std::string to_string()
    {
+      std::string s = "%" + std::to_string(temp.id());
+
       if (isFixed())
-         return (temp.type() == vgpr ? "v[" : "s[") + std::to_string(reg_.reg) + "]";
-      else
-         return "%" + std::to_string(temp.id());
+         return s + ":" +  (temp.type() == vgpr ? "v[" : "s[") + std::to_string(reg_.reg) + "]";
+      return s;
    }
 private:
    Temp temp;
@@ -355,8 +358,14 @@ public:
    virtual std::string to_string()
    {
       std::string s;
-      if (definitionCount())
-         s.append(getDefinition(0).to_string() + " = ");
+      if (definitionCount()) {
+         for (unsigned i = 0; i < definitionCount(); i++) {
+            if (i)
+               s.append(", ");
+            s.append(getDefinition(i).to_string());
+         }
+         s.append(" = ");
+      }
       s.append(std::string(opcode_infos[(int)opcode_].name));
       for (unsigned i = 0; i < operandCount(); i++)
          s.append(" " + getOperand(i).to_string());
