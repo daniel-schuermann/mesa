@@ -36,7 +36,8 @@ const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)] = {
    .num_inputs = ${opcode.num_inputs},
    .num_outputs = ${opcode.num_outputs},
    .output_type = { ${ ", ".join(str(type) for type in opcode.output_type) }},
-   .kills_input = {${ ", ".join(str(size) for size in opcode.kills_input) }}
+   .kills_input = {${ ", ".join(str(size) for size in opcode.kills_input) }},
+   .opcode = ${opcode.opcode},
 },
 % endfor
 };
