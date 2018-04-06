@@ -51,7 +51,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_vec2:
    case nir_op_vec3:
    case nir_op_vec4: {
-      std::unique_ptr<PseudoInstruction> vec{new PseudoInstruction(aco_opcode::p_create_vector, instr->dest.dest.ssa.num_components, 1)};
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->dest.dest.ssa.num_components, 1)};
       for (unsigned i = 0; i < instr->dest.dest.ssa.num_components; ++i) {
          if (instr->src[i].swizzle[0])
             abort();
@@ -75,12 +75,12 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
    if (instr->def.num_components != 1)
       abort();
    if (ctx->use_vgpr[instr->def.index]) {
-      std::unique_ptr<VOP1<1, 1>> mov{new VOP1<1,1>(aco_opcode::v_mov_b32)};
+      std::unique_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
       mov->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->def));
       mov->getOperand(0) = Operand{instr->value.u32[0]};
       ctx->block->instructions.emplace_back(std::move(mov));
    } else {
-      std::unique_ptr<SOP1<1, 1>> mov{new SOP1<1,1>(aco_opcode::s_mov_b32)};
+      std::unique_ptr<Instruction> mov{create_instruction<Instruction>(aco_opcode::v_mov_b32, Format::SOP1, 1, 1)};
       mov->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->def));
       mov->getOperand(0) = Operand{instr->value.u32[0]};
       ctx->block->instructions.emplace_back(std::move(mov));
@@ -89,12 +89,17 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
 
 void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 {
-   std::unique_ptr<ExportInstruction> exp{new ExportInstruction(0xf, 0, false, true, true)};
+   std::unique_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
+   exp->valid_mask = true;
+   exp->done = true;
+   exp->compressed = false;
+   exp->dest = 0;
+   exp->enabled_mask = 0xf;
 
    Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
    for (unsigned i = 0; i < 4; ++i) {
       Temp tmp{ctx->program->allocateId(), v1};
-      std::unique_ptr<FixedInstruction<2, 1>> extract{new FixedInstruction<2,1>(aco_opcode::p_extract_vector, Format::PSEUDO)};
+      std::unique_ptr<Instruction> extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
 
       extract->getOperand(0) = Operand(src);
       extract->getOperand(1) = Operand(i);
@@ -115,12 +120,12 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
    Temp coord1{ctx->program->allocateId(), v1};
    Temp coord2{ctx->program->allocateId(), v1};
 
-   std::unique_ptr<FixedInstruction<2, 1>> coord1_extract{new FixedInstruction<2,1>(aco_opcode::p_extract_vector, Format::PSEUDO)};
+   std::unique_ptr<Instruction> coord1_extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
    coord1_extract->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].ssa)};
    coord1_extract->getOperand(1) = Operand((uint32_t)0);
 
    coord1_extract->getDefinition(0) = Definition{coord1};
-   std::unique_ptr<FixedInstruction<2, 1>> coord2_extract{new FixedInstruction<2,1>(aco_opcode::p_extract_vector, Format::PSEUDO)};
+   std::unique_ptr<Instruction> coord2_extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
    coord2_extract->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].ssa)};
    coord2_extract->getOperand(1) = Operand((uint32_t)1);
 
@@ -130,17 +135,21 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
    ctx->block->instructions.emplace_back(std::move(coord2_extract));
 
    Temp tmp{ctx->program->allocateId(), v1};
-   std::unique_ptr<InterpInstruction<2, 1>> p1{new InterpInstruction<2, 1>(aco_opcode::v_interp_p1_f32, base, component)};
+   std::unique_ptr<Interp_instruction> p1{create_instruction<Interp_instruction>(aco_opcode::v_interp_p1_f32, Format::VINTRP, 2, 1)};
    p1->getOperand(0) = Operand(coord1);
    p1->getOperand(1) = Operand(ctx->prim_mask);
    p1->getOperand(1).setFixed(m0);
    p1->getDefinition(0) = Definition(tmp);
-   std::unique_ptr<InterpInstruction<3, 1>> p2{new InterpInstruction<3, 1>(aco_opcode::v_interp_p2_f32, base, component)};
+   p1->attribute = base;
+   p1->component = component;
+   std::unique_ptr<Interp_instruction> p2{create_instruction<Interp_instruction>(aco_opcode::v_interp_p2_f32, Format::VINTRP, 3, 1)};
    p2->getOperand(0) = Operand(coord2);
    p2->getOperand(1) = Operand(ctx->prim_mask);
    p2->getOperand(1).setFixed(m0);
    p2->getOperand(2) = Operand(tmp);
    p2->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+   p2->attribute = base;
+   p2->component = component;
 
    ctx->block->instructions.emplace_back(std::move(p1));
    ctx->block->instructions.emplace_back(std::move(p2));
@@ -381,7 +390,7 @@ type_size(const struct glsl_type *type)
 
 void add_startpgm(struct isel_context *ctx)
 {
-   std::unique_ptr<PseudoInstruction> startpgm{new PseudoInstruction(aco_opcode::p_startpgm, 0, 2)};
+   std::unique_ptr<Instruction> startpgm{create_instruction<Instruction>(aco_opcode::p_startpgm, Format::PSEUDO, 0, 2)};
 
    ctx->barycentric_coords = Temp{ctx->program->allocateId(), v2};
    ctx->prim_mask = Temp{ctx->program->allocateId(), s1};
@@ -418,7 +427,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir)
 
    visit_cf_list(&ctx, &func->impl->body);
 
-   ctx.block->instructions.push_back(std::unique_ptr<SOPP<0, 0>>(new SOPP<0, 0>(aco_opcode::s_endpgm)));
+   ctx.block->instructions.push_back(std::unique_ptr<SOPP_instruction>(create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)));
 
    return program;
 }
