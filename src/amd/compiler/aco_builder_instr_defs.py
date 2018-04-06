@@ -7,7 +7,7 @@ template = """\
       operands.append('ssrc1')
    if opcodes[name].num_inputs == 3:
       operands.append('scc')
-   type = 'SOP2<'+str(opcodes[name].num_inputs)+','+str(opcodes[name].num_outputs)+'>'
+   type = 'Instruction'
 %>
    ${type}*
    ${name}(\\
@@ -16,7 +16,7 @@ Operand ${op}${', ' if op != operands[-1] else ')'}\\
       % endfor
 
    {
-      ${type}* instr = new ${type}(aco_opcode::${name});
+      ${type}* instr = create_instruction<${type}>(aco_opcode::${name}, Format::SOP2, ${str(opcodes[name].num_inputs)}, ${str(opcodes[name].num_outputs)});
       % for idx,ty in enumerate(opcodes[name].output_type):
       instr->getDefinition(${idx}) = Definition(P->allocateId(), RegClass::${ty});
       % endfor
@@ -30,7 +30,7 @@ Operand ${op}${', ' if op != operands[-1] else ')'}\\
 % for name in SOPK:
 <%
    op = 'scc' if opcodes[name].read_reg == 'SCC' else 'ssrc' if opcodes[name].num_inputs == 1 else ''
-   type = 'SOPK<'+ str(opcodes[name].num_inputs) +','+str(opcodes[name].num_outputs)+'>'
+   type = 'SOPK_instruction'
 %>
    ${type}*
    ${name}(unsigned imm\\
@@ -39,7 +39,7 @@ Operand ${op}${', ' if op != operands[-1] else ')'}\\
       % endif
 )
    {
-      ${type}* instr = new ${type}(aco_opcode::${name}, imm);
+      ${type}* instr = create_instruction<${type}>(aco_opcode::${name}, Format::SOPK, ${str(opcodes[name].num_inputs)}, ${str(opcodes[name].num_outputs)});
       % for idx,ty in enumerate(opcodes[name].output_type):
       instr->getDefinition(${idx}) = Definition(P->allocateId(), RegClass::${ty});
       % endfor
@@ -50,6 +50,7 @@ Operand ${op}${', ' if op != operands[-1] else ')'}\\
       instr->getOperand(0).setKill(true);
       instr->getDefinition(0).setReuseInput(true);
       % endif
+      instr->imm = imm;
       insertInstruction(instr);
       return instr;
    }
@@ -61,7 +62,7 @@ Operand ${op}${', ' if op != operands[-1] else ')'}\\
       operands.append('ssrc0')
    if opcodes[name].num_inputs == 2:
       operands.append('scc')
-   type = 'SOP1<'+ str(opcodes[name].num_inputs) +','+str(opcodes[name].num_outputs)+'>'
+   type = 'Instruction'
 %>
    ${type}*
    ${name}(\\
@@ -70,7 +71,7 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
       % endfor
 )
    {
-      ${type}* instr = new ${type}(aco_opcode::${name});
+      ${type}* instr = create_instruction<${type}>(aco_opcode::${name}, Format::SOP1, ${str(opcodes[name].num_inputs)}, ${str(opcodes[name].num_outputs)});
       % for idx,ty in enumerate(opcodes[name].output_type):
       instr->getDefinition(${idx}) = Definition(P->allocateId(), RegClass::${ty});
       % endfor
@@ -82,10 +83,10 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
    }
 % endfor
 % for name in SOPC:
-SOPC<2,1>*
+Instruction*
    ${name}(Operand ssrc0, Operand ssrc1)
    {
-   SOPC<2,1>* instr = new SOPC<2,1>(aco_opcode::${name});
+   Instruction* instr = create_instruction<Instruction>(aco_opcode::${name}, Format::SOPC, ${str(opcodes[name].num_inputs)}, ${str(opcodes[name].num_outputs)});
    instr->getOperand(0) = ssrc0;
    instr->getOperand(1) = ssrc1;
    instr->getDefinition(0) = Definition(P->allocateId(), RegClass::b);
@@ -95,7 +96,7 @@ SOPC<2,1>*
 % for name in SOPP:
 <%
    op = 'scc' if opcodes[name].read_reg == 'SCC' else 'vcc' if opcodes[name].read_reg == 'VCC' else ''
-   type = 'SOPP<'+ str(opcodes[name].num_inputs) +','+str(opcodes[name].num_outputs)+'>'
+   type = 'SOPP_instruction'
 %>
    ${type}*
    ${name}(\\
@@ -108,11 +109,11 @@ Block* block)
 unsigned imm)
       % endif
    {
-      ${type}* instr = new ${type}(aco_opcode::${name}, \\
+      ${type}* instr = create_instruction<${type}>(aco_opcode::${name}, Format::SOPP, ${str(opcodes[name].num_inputs)}, ${str(opcodes[name].num_outputs)});
       % if name.startswith('s_cbranch') or name.startswith('s_branch'):
-block);
+        instr->block = block;
       % else:
-imm);
+        instr->imm = imm;
       % endif
       % if op:
       instr->getOperand(${0}) = ${op};
@@ -130,7 +131,7 @@ imm);
       operands.append('src0')
    if opcodes[name].num_inputs == 2:
       operands.append('src1')
-   type = 'VOP1<'+ str(opcodes[name].num_inputs) +','+str(opcodes[name].num_outputs)+'>'
+   type = 'VOP1_instruction'
 %>
    ${type}*
    ${name}(\\
@@ -139,7 +140,7 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
       % endfor
 )
    {
-      ${type}* instr = new ${type}(aco_opcode::${name});
+      ${type}* instr = create_instruction<${type}>(aco_opcode::${name}, Format::VOP1, ${str(opcodes[name].num_inputs)}, ${str(opcodes[name].num_outputs)});
       % for idx,ty in enumerate(opcodes[name].output_type):
       instr->getDefinition(${idx}) = Definition(P->allocateId(), RegClass::${ty});
       % endfor
@@ -158,12 +159,12 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
 % endfor
 % for name in VOPC:
 <%
-   type = 'VOPC<'+ str(opcodes[name].num_inputs) +','+str(opcodes[name].num_outputs)+'>'
+   type = 'VOPC_instruction'
 %>
    ${type}*
    ${name}(Operand src0, Operand vsrc1)
    {
-      ${type}* instr = new ${type}(aco_opcode::${name});
+      ${type}* instr = create_instruction<${type}>(aco_opcode::${name}, Format::VOPC, ${str(opcodes[name].num_inputs)}, ${str(opcodes[name].num_outputs)});
       instr->getDefinition(0) = Definition(P->allocateId(), RegClass::s2);
       instr->getOperand(0) = src0;
       instr->getOperand(1) = vsrc1;
@@ -173,10 +174,10 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
 % endfor
 % for name in VINTERP:
 
-   InterpInstruction<1,1>*
+   Interp_instruction*
    ${name}(Operand vsrc, unsigned attribute, unsigned component)
    {
-      InterpInstruction<1,1>* instr = new InterpInstruction<1,1>(aco_opcode::${name}, attribute, component);
+      auto* instr = create_instruction<Interp_instruction>(aco_opcode::${name}, Format::VINTRP, ${str(opcodes[name].num_inputs)}, ${str(opcodes[name].num_outputs)});
       instr->getDefinition(0) = Definition(P->allocateId(), RegClass::v1);
       instr->getOperand(0) = vsrc;
       insertInstruction(instr);
