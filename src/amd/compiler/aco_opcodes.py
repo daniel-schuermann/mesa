@@ -46,7 +46,7 @@ class Opcode(object):
    """Class that represents all the information we have about the opcode
    NOTE: this must be kept in sync with aco_op_info
    """
-   def __init__(self, name, num_inputs, output_type,
+   def __init__(self, name, num_inputs, output_type, code,
                 read_reg, write_reg, kills_input):
       """Parameters:
 
@@ -62,6 +62,7 @@ class Opcode(object):
       assert isinstance(num_inputs, int)
       assert isinstance(output_type, list)
       assert isinstance(kills_input, list)
+      assert isinstance(code, int)
 
       num_outputs = len(output_type)
       assert 0 <= num_inputs <= 4
@@ -69,6 +70,7 @@ class Opcode(object):
       self.name = name
       self.num_inputs = num_inputs
       self.num_outputs = num_outputs
+      self.opcode = code
       self.output_type = output_type
       self.read_reg = read_reg
       self.write_reg = write_reg
@@ -77,12 +79,12 @@ class Opcode(object):
 # global dictionary of opcodes
 opcodes = {}
 
-def opcode(name, num_inputs, output_type,
+def opcode(name, num_inputs, output_type, code = 0,
            read_reg = 0, write_reg = 0, kills_input = []):
    assert name not in opcodes
    if not kills_input:
       kills_input = [0] * num_inputs
-   opcodes[name] = Opcode(name, num_inputs, output_type,
+   opcodes[name] = Opcode(name, num_inputs, output_type, code,
                           read_reg, write_reg, kills_input)
 
 opcode("exp", 0, [])
@@ -94,85 +96,85 @@ opcode("p_create_vector", 0, [])
 opcode("p_extract_vector", 0, [])
 
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
-SOP2_SCC = [
-   "s_add_u32", 
-   "s_sub_u32", 
-   "s_add_i32", 
-   "s_sub_i32", 
-   "s_min_i32",
-   "s_min_u32",
-   "s_max_i32",
-   "s_max_u32",
-   "s_and_b32",
-   "s_or_b32",
-   "s_xor_b32",
-   "s_andn2_b32",
-   "s_orn2_b32",
-   "s_nand_b32",
-   "s_nor_b32",
-   "s_xnor_b32",
-   "s_lshl_b32",
-   "s_lshr_b32",
-   "s_ashr_i32",
-   "s_bfe_u32",
-   "s_bfe_i32",
-   "s_absdiff_i32",
-   "s_lshl1_add_u32",
-   "s_lshl2_add_u32",
-   "s_lshl3_add_u32",
-   "s_lshl4_add_u32"
-]
-for name in SOP2_SCC:
-   opcode(name, 2, [s1, b], write_reg = SCC)
+SOP2_SCC = {
+   (0, "s_add_u32"), 
+   (1, "s_sub_u32"),
+   (2, "s_add_i32"),
+   (3, "s_sub_i32"),
+   (6, "s_min_i32"),
+   (7, "s_min_u32"),
+   (8, "s_max_i32"),
+   (9, "s_max_u32"),
+   (12, "s_and_b32"),
+   (14, "s_or_b32"),
+   (16, "s_xor_b32"),
+   (18, "s_andn2_b32"),
+   (20, "s_orn2_b32"),
+   (22, "s_nand_b32"),
+   (24, "s_nor_b32"),
+   (26, "s_xnor_b32"),
+   (28, "s_lshl_b32"),
+   (30, "s_lshr_b32"),
+   (32, "s_ashr_i32"),
+   (37, "s_bfe_u32"),
+   (38, "s_bfe_i32"),
+   (42, "s_absdiff_i32"),
+   (46, "s_lshl1_add_u32"),
+   (47, "s_lshl2_add_u32"),
+   (48, "s_lshl3_add_u32"),
+   (49, "s_lshl4_add_u32"),
+}
+for code, name in SOP2_SCC:
+   opcode(name, 2, [s1, b], code, write_reg = SCC)
 
-SOP2_NOSCC = [
-   "s_bfm_b32",
-   "s_mul_i32",
-   "s_mul_hi_u32",
-   "s_mul_hi_i32",
-   "s_pack_ll_b32_b16",
-   "s_pack_lh_b32_b16",
-   "s_pack_hh_b32_b16"
-]
-for name in SOP2_NOSCC:
-   opcode(name, 2, [s1])
+SOP2_NOSCC = {
+   (34, "s_bfm_b32"),
+   (36, "s_mul_i32"),
+   (44, "s_mul_hi_u32"),
+   (45, "s_mul_hi_i32"),
+   (50, "s_pack_ll_b32_b16"),
+   (51, "s_pack_lh_b32_b16"),
+   (52, "s_pack_hh_b32_b16"),
+}
+for code, name in SOP2_NOSCC:
+   opcode(name, 2, [s1], code)
 
-SOP2_64 = [
-   "s_and_b64",
-   "s_or_b64",
-   "s_xor_b64",
-   "s_andn2_b64",
-   "s_orn2_b64",
-   "s_nand_b64",
-   "s_nor_b64",
-   "s_xnor_b64",
-   "s_lshl_b64",
-   "s_lshr_b64",
-   "s_ashr_i64",
-   "s_bfe_u64",
-   "s_bfe_i64"
-]
-for name in SOP2_64:
-   opcode(name, 2, [s2,b], write_reg = SCC)
+SOP2_64 = {
+   (13, "s_and_b64"),
+   (15, "s_or_b64"),
+   (17, "s_xor_b64"),
+   (19, "s_andn2_b64"),
+   (21, "s_orn2_b64"),
+   (23, "s_nand_b64"),
+   (25, "s_nor_b64"),
+   (27, "s_xnor_b64"),
+   (29, "s_lshl_b64"),
+   (31, "s_lshr_b64"),
+   (33, "s_ashr_i64"),
+   (39, "s_bfe_u64"),
+   (40, "s_bfe_i64"),
+}
+for code, name in SOP2_64:
+   opcode(name, 2, [s2,b], code, write_reg = SCC)
 
-SOP2_SPECIAL = [
-   "s_addc_u32",
-   "s_subb_u32",
-   "s_cselect_b32",
-   "s_cselect_b64",
-   "s_bfm_b64",
-   "s_cbranch_g_fork",
-   "s_rfe_restore_b64"
-]
-opcode("s_addc_u32", 3, [s1,b], SCC, SCC)
-opcode("s_subb_u32", 3, [s1,b], SCC, SCC)
-opcode("s_cselect_b32", 3, [s1], read_reg = SCC)
-opcode("s_cselect_b64", 3, [s2], read_reg = SCC)
-opcode("s_bfm_b64", 2, [s2])
-opcode("s_cbranch_g_fork", 2, [])
-opcode("s_rfe_restore_b64", 1, [])
+SOP2_SPECIAL = {
+   (4, "s_addc_u32"),
+   (5, "s_subb_u32"),
+   (10, "s_cselect_b32"),
+   (11, "s_cselect_b64"),
+   (35, "s_bfm_b64"),
+   (41, "s_cbranch_g_fork"),
+   (43, "s_rfe_restore_b64"),
+}
+opcode("s_addc_u32", 3, [s1,b], 4, read_reg = SCC, write_reg = SCC)
+opcode("s_subb_u32", 3, [s1,b], 5, read_reg = SCC, write_reg = SCC)
+opcode("s_cselect_b32", 3, [s1], 10, read_reg = SCC)
+opcode("s_cselect_b64", 3, [s2], 11, read_reg = SCC)
+opcode("s_bfm_b64", 2, [s2], 35)
+opcode("s_cbranch_g_fork", 2, [], 41)
+opcode("s_rfe_restore_b64", 1, [], 43)
 
-SOP2 = SOP2_SCC + SOP2_NOSCC + SOP2_64 + SOP2_SPECIAL
+SOP2 = dict(SOP2_SCC).values() + dict(SOP2_NOSCC).values() + dict(SOP2_64).values() + dict(SOP2_SPECIAL).values()
 
 
 # SOPK instructions: 0 input (+ imm), 1 output + optional scc
@@ -277,10 +279,10 @@ SOP1_SCC_64 = [
    "s_andn1_saveexec_b64",
    "s_orn1_saveexec_b64",
    "s_andn1_wrexec_b64",
-   "s_orn1_wrexec_b64",
+   "s_andn2_wrexec_b64",
 ]
 for name in SOP1_SCC_64:
-   opcode(name, 1, [s2,b], write_reg = SCC)
+   opcode(name, 1, [s2,b], write_reg = SCC + ", EXEC" if 'exec' in name else "")
 
 SOP1_SPECIAL = [
    "s_cmov_b32",
@@ -711,11 +713,11 @@ SUFFIX_U64 = ["_i64", "_u64"]
 
 VOPC_32 = [pre+mid+post for pre in PREFIX for mid in COMPF for post in SUFFIX_F32]+[pre+mid+post for pre in PREFIX for mid in COMPI for post in SUFFIX_U32]
 for name in VOPC_32:
-   opcode(name, 2, [s2], write_reg = VCC)
+   opcode(name, 2, [s2], write_reg = VCC + ", EXEC" if 'x' in name else "")
 
 VOPC_64 = [pre+mid+"_f64" for pre in PREFIX for mid in COMPF]+[pre+mid+post for pre in PREFIX for mid in COMPI for post in SUFFIX_U64]
 for name in VOPC_64:
-   opcode(name, 2, [s2], write_reg = VCC)
+   opcode(name, 2, [s2], write_reg = VCC + ", EXEC" if 'x' in name else "")
 
 VOPC = VOPC_32 + VOPC_64
 
