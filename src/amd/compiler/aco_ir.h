@@ -373,311 +373,74 @@ private:
    PhysReg reg_;
 };
 
-/**
- * Basic Instruction class
- * which derives into FixedInstruction
- * or PseudoInstruction
- * @param opcode
- */
-class Instruction
-{
-public:
-   Instruction(aco_opcode opcode, Format format) noexcept
-      : opcode_(opcode), format_(format) {}
-   virtual ~Instruction() noexcept {}
+class Block;
 
-   aco_opcode opcode() const noexcept { return opcode_; }
-   Format format() const noexcept { return format_; }
-   
-   /* return a value defined by this instruction as new operand */
-   Operand asOperand(uint32_t index = 0)
-   {
-      return Operand(getDefinition(index).getTemp());
-   }
- 
-   virtual std::size_t operandCount() const noexcept { return 0; }
-   virtual Operand& getOperand(std::size_t index) noexcept { __builtin_unreachable(); }
- 
-   virtual std::size_t definitionCount() const noexcept { return 0; }
-   virtual Definition& getDefinition(std::size_t index) noexcept { __builtin_unreachable(); }
+struct Instruction {
+   aco_opcode opcode;
+   Format format;
 
-   virtual std::string to_string()
-   {
-      std::string s;
-      if (definitionCount()) {
-         for (unsigned i = 0; i < definitionCount(); i++) {
-            if (i)
-               s.append(", ");
-            s.append(getDefinition(i).to_string());
-         }
-         s.append(" = ");
-      }
-      s.append(std::string(opcode_infos[(int)opcode_].name));
-      for (unsigned i = 0; i < operandCount(); i++)
-         s.append(" " + getOperand(i).to_string());
-      return s;
-   }
-private:
-   aco_opcode opcode_;
-   Format format_;
+   Operand *operands;
+   uint32_t num_operands;
+
+   Definition *definitions;
+   uint32_t num_definitions;
+
+   // TODO remove
+   uint32_t definitionCount() const { return num_definitions; }
+   uint32_t operandCount() const { return num_operands; }
+   Operand& getOperand(int index) { return operands[index]; }
+   Definition& getDefinition(int index) { return definitions[index]; }
 };
 
-/**
- * FixedInstruction class
- * number of Operands and Definitions is known at instantiation.
- * All FixedInstructions are actual machine instructions.
- * @param opcode
- */
-template <std::size_t num_src, std::size_t num_dst>
-class FixedInstruction : public Instruction
-{
-  public:
-   FixedInstruction(aco_opcode opcode, Format format) noexcept
-      : Instruction{opcode, format} {}
- 
-   std::size_t operandCount() const noexcept final override { return num_src; }
-   Operand& getOperand(std::size_t index) noexcept final override { return operands_[index]; }
-   std::size_t definitionCount() const noexcept final override { return num_dst; }
-   Definition& getDefinition(std::size_t index) noexcept final override { return defs_[index]; }
- 
-  private:
-   Definition defs_[num_dst];
-   Operand operands_[num_src];
-};
-
-/**
- * SOP2 Instruction class
- * see aco_builder.cpp for how this class is used
- * @param opcode
- * @param operands
- * @param defs
- */
-template <std::size_t num_src, std::size_t num_dst>
-class SOP2 final : public FixedInstruction<num_src, num_dst>
-{
-public:
-   SOP2(aco_opcode opcode)
-      : FixedInstruction<num_src,num_dst>(opcode, Format::SOP2)
-   {}
-};
-
-template <std::size_t num_src, std::size_t num_dst>
-class SOPK final : public FixedInstruction<num_src, num_dst>
-{
-public:
-   SOPK(aco_opcode opcode, unsigned imm)
-      : FixedInstruction<num_src,num_dst>{opcode, Format::SOPK},
-        imm(imm)
-   {}
+struct SOPK_instruction : public Instruction {
    uint16_t imm;
 };
 
-template <std::size_t num_src, std::size_t num_dst>
-class SOP1 final : public FixedInstruction<num_src, num_dst>
-{
-public:
-   SOP1(aco_opcode opcode)
-      : FixedInstruction<num_src, num_dst>{opcode, Format::SOP1}
-   {}
+struct SOPP_instruction : public Instruction {
+   uint32_t imm;
+   Block *block;
 };
 
-template <std::size_t num_src, std::size_t num_dst>
-class SOPC final : public FixedInstruction<num_src, num_dst>
-{
-public:
-   SOPC(aco_opcode opcode)
-      : FixedInstruction<num_src, num_dst>{opcode, Format::SOPC}
-   {}
+struct VOP1_instruction : public Instruction {
 };
 
-// Forward declaration
-struct Block;
-
-template <std::size_t num_src, std::size_t num_dst>
-class SOPP final : public FixedInstruction<num_src, num_dst>
-{
-public:
-   SOPP(aco_opcode opcode)
-      : FixedInstruction<num_src, num_dst>{opcode, Format::SOPP}
-   {}
-   SOPP(aco_opcode opcode, Block* block)
-      : FixedInstruction<num_src, num_dst>{opcode, Format::SOPP}, block_(block)
-   {}
-   SOPP(aco_opcode opcode, unsigned imm)
-      : FixedInstruction<num_src, num_dst>{opcode, Format::SOPP}, imm(imm)
-   {}
-   unsigned imm;
-   Block* block_;
+struct VOP2_instruction : public Instruction {
 };
 
-template <std::size_t num_src, std::size_t num_dst>
-class SMEM final : public FixedInstruction<num_src, num_dst>
-{
-public:
-   SMEM(aco_opcode opcode, bool glc, bool imm)
-      : FixedInstruction<num_src, num_dst>{opcode, Format::SMEM},
-        glc(glc),
-        imm(imm)
-   {}
-private:
-   bool glc;
-   bool imm;
+struct VOPC_instruction : public Instruction {
 };
 
-/**
- * Mixin Class for Sub-DWord-Addressing:
- * Must only be used with VOP1, VOP2 or VOPC template parameter.
- */
-template <template<std::size_t, std::size_t>class T, std::size_t num_src, std::size_t num_dst>
-class SDWA final : public T<num_src, num_dst>
-{
-public:
-   SDWA(aco_opcode opcode, unsigned dst_sel, unsigned dst_u, bool clamp,
-           unsigned src0_sel, bool src0_sext, bool src0_neg, bool src0_abs,
-           unsigned src1_sel, bool src1_sext, bool src1_neg, bool src1_abs)
-   : T<num_src, num_dst>{opcode, Format::SDWA}, dst_sel(dst_sel), dst_u(dst_u), clamp(clamp),
-     src0_sel(src0_sel), src0_neg(src0_neg), src0_abs(src0_abs),
-     src1_sel(src1_sel), src1_neg(src1_neg), src1_abs(src1_abs)
-   {}
-private: // TODO use Bitset
-   unsigned dst_sel : 3;
-   unsigned dst_u : 2;
-   bool clamp : 1;
-   unsigned src0_sel : 3;
-   bool src0_sext : 1;
-   bool src0_neg : 1;
-   bool src0_abs : 1;
-   unsigned src1_sel : 3;
-   bool src1_sext : 1;
-   bool src1_neg : 1;
-   bool src1_abs : 1;
-   
+struct Interp_instruction : public Instruction {
+   unsigned attribute;
+   unsigned component;
 };
 
-/**
- * Mixin Class for Data Parallel Primitives:
- * Must only be used with VOP1, VOP2 or VOPC template parameter.
- */
-template <template<std::size_t, std::size_t>class T, std::size_t num_src, std::size_t num_dst>
-class DPP final : public T<num_src, num_dst>
-{
-public:
-   DPP(aco_opcode opcode, unsigned dpp_ctrl, bool bound_ctrl,
-           bool src0_neg, bool src0_abs, bool src1_neg, bool src1_abs,
-           unsigned bank_mask, unsigned row_mask)
-   : T<num_src, num_dst>{opcode, Format::DPP},
-     dpp_ctrl(dpp_ctrl), bound_ctrl(bound_ctrl),
-     src0_neg(src0_neg), src0_abs(src0_abs), src1_neg(src1_neg), src1_abs(src1_abs),
-     bank_mask(bank_mask), row_mask(row_mask)
-   {}
-private: // TODO: use Bitset
-   unsigned dpp_ctrl : 9;
-   bool bound_ctrl : 1;
-   bool src0_neg : 1;
-   bool src0_abs : 1;
-   bool src1_neg : 1;
-   bool src1_abs : 1;
-   unsigned bank_mask : 4;
-   unsigned row_mask : 4;
-   
+struct Export_instruction : public Instruction {
+   unsigned enabled_mask;
+   unsigned dest;
+   bool compressed;
+   bool done;
+   bool valid_mask;
+
 };
 
-template <std::size_t num_src, std::size_t num_dst>
-class VOP2 : public FixedInstruction<num_src, num_dst>
+template<typename T>
+T* create_instruction(aco_opcode opcode, Format format, uint32_t num_operands, uint32_t num_definitions)
 {
-public:
-   VOP2(aco_opcode opcode)
-      : FixedInstruction<num_src, num_dst>{opcode, Format::VOP2}
-   {}
-   VOP2(aco_opcode opcode, Format format)
-      : FixedInstruction<num_src, num_dst>{opcode, (Format)((uint16_t) format | (uint16_t) Format::VOP2)}
-   {}
-};
+   std::size_t size = sizeof(T) + num_operands * sizeof(Operand) + num_definitions * sizeof(Definition);
+   char *data = (char*)calloc(1, size);
+   auto inst = (T*)data;
 
-template <std::size_t num_src, std::size_t num_dst>
-class VOP1 : public FixedInstruction<num_src, num_dst>
-{
-public:
-   VOP1(aco_opcode opcode)
-      : FixedInstruction<num_src, num_dst>{opcode, Format::VOP1}
-   {}
-   VOP1(aco_opcode opcode, Format format)
-      : FixedInstruction<num_src, num_dst>{opcode, (Format)((uint16_t) format | (uint16_t) Format::VOP1)}
-   {}
-};
+   inst->opcode = opcode;
+   inst->format = format;
+   inst->num_operands = num_operands;
+   inst->num_definitions = num_definitions;
 
-template <std::size_t num_src, std::size_t num_dst>
-class VOPC : public FixedInstruction<num_src, num_dst>
-{
-public:
-   VOPC(aco_opcode opcode)
-      : FixedInstruction<num_src, num_dst>{opcode, Format::VOPC}
-   {}
-   VOPC(aco_opcode opcode, Format format)
-      : FixedInstruction<num_src, num_dst>{opcode, (Format)((uint16_t) format | (uint16_t) Format::VOPC)}
-   {}
-};
+   inst->operands = (Operand*)(data + sizeof(T));
+   inst->definitions = (Definition*)(data + sizeof(T) + num_operands * sizeof(Operand));
 
-/**
- * Export Instruction class
- * @param enabledMask
- * @param dest
- * @param compressed
- * @param done
- * @param validMask
- */
-class ExportInstruction final : public FixedInstruction<4, 0>
-{
-  public:
-    ExportInstruction(unsigned enabledMask, unsigned dest, bool compressed, bool done, bool validMask) noexcept
-      : FixedInstruction{aco_opcode::exp, Format::EXP},
-        enabledMask_{enabledMask},
-        dest_{dest},
-        compressed_{compressed},
-        done_{done},
-        validMask_{validMask}
-    {}
- 
-    unsigned enabledMask_;
-    unsigned dest_;
-    bool compressed_;
-    bool done_;
-    bool validMask_;
-};
-
-
-template <std::size_t num_src, std::size_t num_dst>
-class InterpInstruction final : public FixedInstruction<num_src, num_dst>
-{
-   public:
-      InterpInstruction(aco_opcode opcode, unsigned attribute, unsigned component) noexcept
-        : FixedInstruction<num_src, num_dst>{opcode, Format::VINTRP}, attribute_{attribute}, component_{component} {}
-
-      unsigned attribute_;
-      unsigned component_;
-};
-
-/**
- * PseudoInstruction Class
- * @param opcode
- * @param num_src
- * @param num_dst
- */
-class PseudoInstruction final : public Instruction
-{
-public:
-   PseudoInstruction(aco_opcode opcode, std::size_t num_src, std::size_t num_dst) :
-      Instruction{opcode, Format::PSEUDO}, defs_(num_dst), operands_(num_src) {}
-
-   std::size_t operandCount() const noexcept final override { return operands_.size(); }
-   Operand& getOperand(std::size_t index) noexcept final override { return operands_[index]; }
-   std::size_t definitionCount() const noexcept final override { return defs_.size(); }
-   Definition& getDefinition(std::size_t index) noexcept final override { return defs_[index]; }
-
-private:
-    std::vector<Definition> defs_;
-    std::vector<Operand> operands_;
-};
+   return inst;
+}
 
 /* CFG */
 struct Block {
@@ -732,7 +495,7 @@ public:
          out << "BB" << BB << ":" << std::endl;
          for (auto const& instr : block->instructions)
          {
-            out << "\t" << instr->to_string() << std::endl;
+            //out << "\t" << instr->to_string() << std::endl;
          }
       }
    }

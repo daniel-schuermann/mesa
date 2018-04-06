@@ -49,23 +49,23 @@ public:
    * Examples for Builder::instruction_factories()
    * @return 
    */
-   PseudoInstruction* p_startpgm(unsigned size)
+   Instruction* p_startpgm(unsigned size)
    {
-      PseudoInstruction* instr = new PseudoInstruction(aco_opcode::p_startpgm, 0, size);
+      Instruction* instr = create_instruction<Instruction>(aco_opcode::p_startpgm, Format::PSEUDO, 0, size);
       insertInstruction(instr);
       return instr;
    }
 
-   PseudoInstruction* p_parallelcopy(unsigned size)
+   Instruction* p_parallelcopy(unsigned size)
    {
-      PseudoInstruction* instr = new PseudoInstruction(aco_opcode::p_parallelcopy, size, size);
+      Instruction* instr = create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, size, size);
       insertInstruction(instr);
       return instr;
    }
 
-   PseudoInstruction* p_phi(unsigned size)
+   Instruction* p_phi(unsigned size)
    {
-      PseudoInstruction* instr = new PseudoInstruction(aco_opcode::p_phi, size, 1);
+      Instruction* instr = create_instruction<Instruction>(aco_opcode::p_phi, Format::PSEUDO, size, 1);
       insertInstruction(instr);
       return instr;
    }
@@ -73,6 +73,7 @@ public:
 // here comes the rest of the definitions
 #include "aco_builder_instr_defs.h"
 
+#if 0
    // DPP example:
    DPP<VOP1,1,1>*
    v_mov_b32(Operand src0, dpp ctrl)
@@ -87,6 +88,7 @@ public:
       insertInstruction(instr);
       return instr;
    }
+#endif
 
 private:
    Program* P;
