@@ -444,12 +444,12 @@ T* create_instruction(aco_opcode opcode, Format format, uint32_t num_operands, u
 
 /* CFG */
 struct Block {
-
-   std::deque<std::unique_ptr<Instruction>> instructions;
-   std::deque<Block*> logical_predecessors;
-   Block* linear_predecessor;
-   std::deque<Block*> logical_successors;
-   Block* linear_successor;
+   unsigned index;
+   std::vector<std::unique_ptr<Instruction>> instructions;
+   std::vector<Block*> logical_predecessors;
+   std::vector<Block*> linear_predecessors;
+   std::vector<Block*> logical_successors;
+   std::vector<Block*> linear_successors;
 };
 
 
@@ -476,13 +476,15 @@ public:
    {
       Block* b = new Block
       {
-         std::deque<std::unique_ptr<Instruction>>(),
-         std::deque<Block*>(),
-         blocks.back().get(), /* linear predecessor */
-         std::deque<Block*>(),
-         nullptr
+         (unsigned) blocks.size(),
+         std::vector<std::unique_ptr<Instruction>>(),
+         std::vector<Block*>(2),
+         std::vector<Block*>(2),
+         std::vector<Block*>(2),
+         std::vector<Block*>(2),
       };
-      blocks.back().get()->linear_successor = b;
+      b->linear_predecessors.push_back(blocks.back().get());
+      blocks.back().get()->linear_successors.push_back(b);
       blocks.push_back(std::unique_ptr<Block>(b));
       return b;
    }

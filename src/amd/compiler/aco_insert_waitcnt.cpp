@@ -38,6 +38,8 @@ namespace aco {
  * The in-context is the joined out-contexts of the predecessors.
  * The context contains a hashmap: vgpr -> wait_entry
  * consisting of the information about the cnt values to be waited for.
+ * Note: After merge-nodes, it might occur that for the same register
+ *       multiple cnt values are to be waited for.
  * 
  * The values are updated according to the encountered instructions:
  * - additional events increment the counter of waits of the same type
@@ -61,12 +63,20 @@ uint8_t max_exp_cnt = 7;
 uint8_t max_lgkm_cnt = 15;
 
 struct wait_entry {
-   uint8_t type; /* use wait_type  notion */
+   uint8_t type; /* use wait_type notion */
    uint8_t vm_cnt;
    uint8_t exp_cnt;
    uint8_t lgkm_cnt;
    wait_entry(wait_type t, uint8_t vm, uint8_t exp, uint8_t lgkm)
            : type(t), vm_cnt(vm), lgkm_cnt(lgkm) {}
+
+   bool operator==(const wait_entry& rhs) const
+   {
+      return type == rhs.type &&
+             vm_cnt == rhs.vm_cnt &&
+             exp_cnt == rhs.exp_cnt &&
+             lgkm_cnt == rhs.lgkm_cnt;
+   }
 };
 
 struct wait_ctx {
@@ -96,6 +106,14 @@ struct wait_ctx {
             vgpr_map.insert(entry);
          }
       }
+   }
+
+   bool operator==(const wait_ctx& rhs) const
+   {
+      return vm_cnt == rhs.vm_cnt &&
+             exp_cnt == rhs.exp_cnt &&
+             lgkm_cnt == rhs.lgkm_cnt &&
+             vgpr_map == rhs.vgpr_map;
    }
 };
 
@@ -300,6 +318,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
       ctx.exp_cnt++;
       return true;
    }
+   // TODO: cases which generate vm_cnt and lgkm_cnt
    default:
       return false;
    }
@@ -309,7 +328,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
 bool handle_block(Block* block, wait_ctx& ctx)
 {
    bool has_gen = false;
-   std::deque<std::unique_ptr<Instruction>> new_instructions;
+   std::vector<std::unique_ptr<Instruction>> new_instructions;
    for(auto& instr : block->instructions)
    {
       Instruction* wait_instr;
@@ -325,12 +344,29 @@ bool handle_block(Block* block, wait_ctx& ctx)
 
 void insert_wait_states(Program* program)
 {
-   wait_ctx ctx;
-   /* TODO: create one ctx per BB and iterate in reverse postorder 
-    *       join the predecessors ctx and revisist loops */
-   for (auto& block : program->blocks)
+   wait_ctx out_ctx[program->blocks.size()]; /* per BB ctx */
+   unsigned i = 0; /* i represents the worklist range [i,num_BBs) */
+
+   while (i < program->blocks.size())
    {
-      handle_block(block.get(), ctx);
+      Block* current = program->blocks[i].get();
+      wait_ctx in;
+      for (Block* b : current->linear_predecessors)
+      {
+         in.join(&out_ctx[b->index]);
+      }
+
+      handle_block(current, in);
+
+      if (out_ctx[current->index] == in) /* if old_out == new_out */
+      {
+         i++;
+      } else {
+         /* we re-iterate loops if the out_ctx has changed */
+         for (Block* b : current->linear_successors)
+            i = std::min(i, b->index);
+         out_ctx[current->index] = in;
+      }
    }
 }
 
