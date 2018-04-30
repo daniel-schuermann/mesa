@@ -390,6 +390,12 @@ struct Instruction {
    uint32_t operandCount() const { return num_operands; }
    Operand& getOperand(int index) { return operands[index]; }
    Definition& getDefinition(int index) { return definitions[index]; }
+
+   std::string to_string()
+   {
+      std::string s = opcode_infos[(int)opcode].name;
+      return s;
+   }
 };
 
 struct SOPK_instruction : public Instruction {
@@ -497,7 +503,7 @@ public:
          out << "BB" << BB << ":" << std::endl;
          for (auto const& instr : block->instructions)
          {
-            //out << "\t" << instr->to_string() << std::endl;
+            out << "\t" << instr->to_string() << std::endl;
          }
       }
    }

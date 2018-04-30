@@ -13,9 +13,20 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
 {
    switch (instr->format)
    {
-   // FIXME: casting is broken.
    // ideally, we don't want to check the number of operands or definitions
    // but only bitwise_or them, if a field can be def or op
+   case Format::VOP3A: {
+      uint32_t encoding = (0b110100 << 26);
+      encoding |= opcode_infos[(int)instr->opcode].opcode << 16;
+      // TODO: clmp, abs, op_sel
+      encoding |= instr->getDefinition(0).physReg().reg;
+      out.push_back(encoding);
+      // TODO: omod, neg
+      encoding = 0;
+      for (unsigned i = 0; i < instr->operandCount(); i++)
+         encoding |= instr->getOperand(i).physReg().reg << (i * 9);
+      out.push_back(encoding);
+   }
    case Format::SOP2: {
       uint32_t encoding = (0b10 << 30);
       encoding |= opcode_infos[(int)instr->opcode].opcode << 23;
@@ -82,7 +93,7 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
    }
    case Format::EXP: {
       Export_instruction* exp = static_cast<Export_instruction*>(instr);
-      uint64_t encoding = 0b110001 << 26;
+      uint32_t encoding = 0b110001 << 26;
       encoding |= exp->valid_mask ? 0b1 << 12 : 0;
       encoding |= exp->done ? 0b1 << 11 : 0;
       encoding |= exp->compressed ? 0b1 << 10 : 0;

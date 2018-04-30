@@ -27,6 +27,8 @@
 # Class that represents all the information we have about the opcode
 # NOTE: this must be kept in sync with aco_op_info
 
+from enum import Enum
+
 # helper variables
 VCC = "VCC"
 SCC = "SCC"
@@ -42,11 +44,38 @@ v2 = "v2"
 v3 = "v3"
 v4 = "v4"
 
+class Format(Enum):
+   PSEUDO = 0
+   SOP1 = 1
+   SOP2 = 2
+   SOPK = 3
+   SOPP = 4
+   SOPC = 5
+   SMEM = 6
+   VINTRP = 7
+   DS = 8
+   MTBUF = 9
+   MUBUF = 10
+   MIMG = 11
+   EXP = 12
+   FLAT = 13
+   GLOBAL = 14
+   SCRATCH = 15
+   VOP1 = 16
+   VOP2 = 17
+   VOPC = 18
+   VOP3B = 19
+   VOP3P = 20
+   VOP3A = 1 << 8
+   DPP = 1 << 9
+   SDWA = 1 << 10
+
+
 class Opcode(object):
    """Class that represents all the information we have about the opcode
    NOTE: this must be kept in sync with aco_op_info
    """
-   def __init__(self, name, num_inputs, output_type, code,
+   def __init__(self, name, num_inputs, output_type, code, format,
                 read_reg, write_reg, kills_input):
       """Parameters:
 
@@ -63,6 +92,7 @@ class Opcode(object):
       assert isinstance(output_type, list)
       assert isinstance(kills_input, list)
       assert isinstance(code, int)
+      assert isinstance(format, Format)
 
       num_outputs = len(output_type)
       assert 0 <= num_inputs <= 4
@@ -79,15 +109,15 @@ class Opcode(object):
 # global dictionary of opcodes
 opcodes = {}
 
-def opcode(name, num_inputs, output_type, code = 0,
+def opcode(name, num_inputs, output_type, code = 0, format = Format.PSEUDO,
            read_reg = 0, write_reg = 0, kills_input = []):
    assert name not in opcodes
    if not kills_input:
       kills_input = [0] * num_inputs
-   opcodes[name] = Opcode(name, num_inputs, output_type, code,
+   opcodes[name] = Opcode(name, num_inputs, output_type, code, format,
                           read_reg, write_reg, kills_input)
 
-opcode("exp", 0, [])
+opcode("exp", 0, [], format = Format.EXP)
 opcode("p_parallelcopy", 0, [])
 opcode("p_startpgm", 0, [])
 opcode("p_phi", 0, [])
@@ -125,7 +155,7 @@ SOP2_SCC = {
    (49, "s_lshl4_add_u32"),
 }
 for code, name in SOP2_SCC:
-   opcode(name, 2, [s1, b], code, write_reg = SCC)
+   opcode(name, 2, [s1, b], code, Format.SOP2, write_reg = SCC)
 
 SOP2_NOSCC = {
    (34, "s_bfm_b32"),
@@ -137,7 +167,7 @@ SOP2_NOSCC = {
    (52, "s_pack_hh_b32_b16"),
 }
 for code, name in SOP2_NOSCC:
-   opcode(name, 2, [s1], code)
+   opcode(name, 2, [s1], code, Format.SOP2)
 
 SOP2_64 = {
    (13, "s_and_b64"),
@@ -155,7 +185,7 @@ SOP2_64 = {
    (40, "s_bfe_i64"),
 }
 for code, name in SOP2_64:
-   opcode(name, 2, [s2,b], code, write_reg = SCC)
+   opcode(name, 2, [s2,b], code, Format.SOP2, write_reg = SCC)
 
 SOP2_SPECIAL = {
    (4, "s_addc_u32"),
@@ -166,57 +196,57 @@ SOP2_SPECIAL = {
    (41, "s_cbranch_g_fork"),
    (43, "s_rfe_restore_b64"),
 }
-opcode("s_addc_u32", 3, [s1,b], 4, read_reg = SCC, write_reg = SCC)
-opcode("s_subb_u32", 3, [s1,b], 5, read_reg = SCC, write_reg = SCC)
-opcode("s_cselect_b32", 3, [s1], 10, read_reg = SCC)
-opcode("s_cselect_b64", 3, [s2], 11, read_reg = SCC)
-opcode("s_bfm_b64", 2, [s2], 35)
-opcode("s_cbranch_g_fork", 2, [], 41)
-opcode("s_rfe_restore_b64", 1, [], 43)
+opcode("s_addc_u32", 3, [s1,b], 4, Format.SOP2, read_reg = SCC, write_reg = SCC)
+opcode("s_subb_u32", 3, [s1,b], 5, Format.SOP2, read_reg = SCC, write_reg = SCC)
+opcode("s_cselect_b32", 3, [s1], 10, Format.SOP2, read_reg = SCC)
+opcode("s_cselect_b64", 3, [s2], 11, Format.SOP2, read_reg = SCC)
+opcode("s_bfm_b64", 2, [s2], 35, Format.SOP2)
+opcode("s_cbranch_g_fork", 2, [], 41, Format.SOP2)
+opcode("s_rfe_restore_b64", 1, [], 43, Format.SOP2)
 
 SOP2 = dict(SOP2_SCC).values() + dict(SOP2_NOSCC).values() + dict(SOP2_64).values() + dict(SOP2_SPECIAL).values()
 
 
 # SOPK instructions: 0 input (+ imm), 1 output + optional scc
-SOPK_SCC = [
-   "s_cmpk_eq_i32",
-   "s_cmpk_lg_i32",
-   "s_cmpk_gt_i32",
-   "s_cmpk_ge_i32",
-   "s_cmpk_lt_i32",
-   "s_cmpk_le_i32",
-   "s_cmpk_eq_u32",
-   "s_cmpk_lg_u32",
-   "s_cmpk_gt_u32",
-   "s_cmpk_ge_u32",
-   "s_cmpk_lt_u32",
-   "s_cmpk_le_u32",
-]
-for name in SOPK_SCC:
-   opcode(name, 1, [b], write_reg = SCC)
+SOPK_SCC = {
+   (2, "s_cmpk_eq_i32"),
+   (3, "s_cmpk_lg_i32"),
+   (4, "s_cmpk_gt_i32"),
+   (5, "s_cmpk_ge_i32"),
+   (6, "s_cmpk_lt_i32"),
+   (7, "s_cmpk_le_i32"),
+   (8, "s_cmpk_eq_u32"),
+   (9, "s_cmpk_lg_u32"),
+   (10, "s_cmpk_gt_u32"),
+   (11, "s_cmpk_ge_u32"),
+   (12, "s_cmpk_lt_u32"),
+   (13, "s_cmpk_le_u32"),
+}
+for code, name in SOPK_SCC:
+   opcode(name, 1, [b], code, Format.SOPK, write_reg = SCC)
 
-SOPK_SPECIAL = [
-   "s_movk_i32",
-   "s_cmovk_i32",
-   "s_addk_i32",
-   "s_mulk_i32",
-   "s_cbranch_i_fork",
-   "s_getreg_b32",
-   "s_setreg_b32",
-   "s_setreg_imm32_b32", # requires 32bit literal
-   "s_call_b64"
-]
-opcode("s_movk_i32", 0, [s1])
-opcode("s_cmovk_i32", 1, [s1], read_reg = SCC)
-opcode("s_addk_i32", 1, [s1,b], write_reg = SCC, kills_input = [1])
-opcode("s_mulk_i32", 1, [s1], kills_input = [1])
-opcode("s_cbranch_i_fork", 1, [])
-opcode("s_getreg_b32", 0, [s1])
-opcode("s_setreg_b32", 1, [])
-opcode("s_setreg_imm32_b32", 0, [])
-opcode("s_call_b64", 0, [s2])
+SOPK_SPECIAL = {
+   (0, "s_movk_i32"),
+   (1, "s_cmovk_i32"),
+   (14, "s_addk_i32"),
+   (15, "s_mulk_i32"),
+   (16, "s_cbranch_i_fork"),
+   (17, "s_getreg_b32"),
+   (18, "s_setreg_b32"),
+   (20, "s_setreg_imm32_b32"), # requires 32bit literal
+   (21, "s_call_b64"),
+}
+opcode("s_movk_i32", 0, [s1], 0, Format.SOPK)
+opcode("s_cmovk_i32", 1, [s1], 1, Format.SOPK, read_reg = SCC)
+opcode("s_addk_i32", 1, [s1,b], 14, Format.SOPK, write_reg = SCC, kills_input = [1])
+opcode("s_mulk_i32", 1, [s1], 15, Format.SOPK, kills_input = [1])
+opcode("s_cbranch_i_fork", 1, [], 16, Format.SOPK)
+opcode("s_getreg_b32", 0, [s1], 17, Format.SOPK)
+opcode("s_setreg_b32", 1, [], 18, Format.SOPK)
+opcode("s_setreg_imm32_b32", 0, [], 20, Format.SOPK)
+opcode("s_call_b64", 0, [s2], 21, Format.SOPK)
 
-SOPK = SOPK_SCC + SOPK_SPECIAL
+SOPK = dict(SOPK_SCC).values() + dict(SOPK_SPECIAL).values()
 
 
 # SOP1 instructions: 1 input, 1 output (+optional SCC)
@@ -761,14 +791,14 @@ VOPP = VOPP_2 + VOPP_3
 
 # VINTERP instructions: 
 
-VINTERP = [
+VINTRP = [
    "v_interp_p1_f32",
    "v_interp_p2_f32",
    "v_interp_mov_f32"
 ]
-opcode("v_interp_p1_f32", 1, [v1])
-opcode("v_interp_p2_f32", 1, [v1])
-opcode("v_interp_mov_f32", 1, [v1])
+opcode("v_interp_p1_f32", 1, [v1], 0, Format.VINTRP)
+opcode("v_interp_p2_f32", 1, [v1], 1, Format.VINTRP)
+opcode("v_interp_mov_f32", 1, [v1], 2, Format.VINTRP)
 
 # VOP3 instructions: 3 inputs, 1 output
 # VOP3b instructions: have a unique scalar output, e.g. VOP2 with vcc out
@@ -782,70 +812,70 @@ VOP3b = [
 #TODO opcode("v_mad_u64_u32", 3, [1,1,2], 2, [2,2], [0, 1], 0, 1, 0, 0, [0, 0, 0])
 
 
-VOP3a_32 = [
-   "v_mad_legacy_f32",
-   "v_mad_f32",
-   "v_mad_i32_i24",
-   "v_mad_u32_u24",
-   "v_cubeid_f32",
-   "v_cubesc_f32",
-   "v_cubetc_f32",
-   "v_cubema_f32",
-   "v_bfe_u32",
-   "v_bfe_i32",
-   "v_bfi_b32",
-   "v_fma_f32",
-   "v_lerp_u8",
-   "v_alignbit_b32",
-   "v_alignbyte_b32",
-   "v_min3_f32",
-   "v_min3_i32",
-   "v_min3_u32",
-   "v_max3_f32",
-   "v_max3_i32",
-   "v_max3_u32",
-   "v_med3_f32",
-   "v_med3_i32",
-   "v_med3_u32",
-   "v_sad_u8",
-   "v_sad_hi_u8",
-   "v_sad_u16",
-   "v_sad_u32",
-   "v_cvt_pk_u8_f32",
-   "v_div_fixup_f32",
-   "v_msad_u8",
-   "v_mad_legacy_f16",
-   "v_mad_legacy_u16",
-   "v_mad_legacy_i16",
-   "v_perm_b32",
-   "v_fma_legacy_f16",
-   "v_div_fixup_legacy_f16",
-   "v_mad_u32_u16",
-   "v_mad_i32_i16",
-   "v_xad_u32",
-   "v_min3_f16",
-   "v_min3_i16",
-   "v_min3_u16",
-   "v_max3_f16",
-   "v_max3_i16",
-   "v_max3_u16",
-   "v_med3_f16",
-   "v_med3_i16",
-   "v_med3_u16",
-   "v_lshl_add_u32",
-   "v_add_lshl_u32",
-   "v_add3_u32",
-   "v_lshl_or_b32",
-   "v_and_or_b32",
-   "v_or3_b32",
-   "v_mad_f16",
-   "v_mad_u16",
-   "v_mad_i16",
-   "v_fma_f16",
-   "v_div_fixup_f16"
-]
-for name in VOP3a_32:
-   opcode(name, 3, [v1])
+VOP3a_32 = {
+   (448, "v_mad_legacy_f32"),
+   (449, "v_mad_f32"),
+   (450, "v_mad_i32_i24"),
+   (451, "v_mad_u32_u24"),
+   (452, "v_cubeid_f32"),
+   (453, "v_cubesc_f32"),
+   (454, "v_cubetc_f32"),
+   (455, "v_cubema_f32"),
+   (456, "v_bfe_u32"),
+   (457, "v_bfe_i32"),
+   (458, "v_bfi_b32"),
+   (459, "v_fma_f32"),
+   (461, "v_lerp_u8"),
+   (462, "v_alignbit_b32"),
+   (463, "v_alignbyte_b32"),
+   (464, "v_min3_f32"),
+   (465, "v_min3_i32"),
+   (466, "v_min3_u32"),
+   (467, "v_max3_f32"),
+   (468, "v_max3_i32"),
+   (469, "v_max3_u32"),
+   (470, "v_med3_f32"),
+   (471, "v_med3_i32"),
+   (472, "v_med3_u32"),
+   (473, "v_sad_u8"),
+   (474, "v_sad_hi_u8"),
+   (475, "v_sad_u16"),
+   (476, "v_sad_u32"),
+   (477, "v_cvt_pk_u8_f32"),
+   (478, "v_div_fixup_f32"),
+   (484, "v_msad_u8"),
+   (490, "v_mad_legacy_f16"),
+   (491, "v_mad_legacy_u16"),
+   (492, "v_mad_legacy_i16"),
+   (493, "v_perm_b32"),
+   (494, "v_fma_legacy_f16"),
+   (495, "v_div_fixup_legacy_f16"),
+   (497, "v_mad_u32_u16"),
+   (498, "v_mad_i32_i16"),
+   (499, "v_xad_u32"),
+   (500, "v_min3_f16"),
+   (501, "v_min3_i16"),
+   (502, "v_min3_u16"),
+   (503, "v_max3_f16"),
+   (504, "v_max3_i16"),
+   (505, "v_max3_u16"),
+   (506, "v_med3_f16"),
+   (507, "v_med3_i16"),
+   (508, "v_med3_u16"),
+   (509, "v_lshl_add_u32"),
+   (510, "v_add_lshl_u32"),
+   (511, "v_add3_u32"),
+   (512, "v_lshl_or_b32"),
+   (513, "v_and_or_b32"),
+   (514, "v_or3_b32"),
+   (515, "v_mad_f16"),
+   (516, "v_mad_u16"),
+   (517, "v_mad_i16"),
+   (518, "v_fma_f16"),
+   (519, "v_div_fixup_f16"),
+}
+for code, name in VOP3a_32:
+   opcode(name, 3, [v1], code, Format.VOP3A)
 
 VOP3a_64 = [
    "v_fma_f64",
@@ -855,31 +885,31 @@ for name in VOP3a_64:
    opcode(name, 3, [v2])
 
 #two parameters
-VOP3a_32_2 = [
-   "v_cvt_pkaccum_u8_f32",
-   "v_mul_lo_u32",
-   "v_mul_hi_u32",
-   "v_mul_hi_i32",
-   "v_ldexp_f32",
-   "v_writelane_b32",
-   "v_mbcnt_lo_u32_b32",
-   "v_mbcnt_hi_u32_b32",
-   "v_bfm_b32",
-   "v_cvt_pknorm_i16_f32",
-   "v_cvt_pknorm_u16_f32",
-   "v_cvt_pkrtz_f16_f32",
-   "v_cvt_pk_u16_u32",
-   "v_cvt_pk_i16_i32",
-   "v_cvt_pknorm_i16_f16",
-   "v_cvt_pknorm_u16_f16",
-   "v_add_i32",
-   "v_sub_i32",
-   "v_add_i16",
-   "v_sub_i16",
-   "v_pack_b32_f16"
-]
-for name in VOP3a_32_2:
-   opcode(name, 2, [v1])
+VOP3a_32_2 = {
+   (496, "v_cvt_pkaccum_u8_f32"),
+   (645, "v_mul_lo_u32"),
+   (646, "v_mul_hi_u32"),
+   (647, "v_mul_hi_i32"),
+   (648, "v_ldexp_f32"),
+   (650, "v_writelane_b32"),
+   (652, "v_mbcnt_lo_u32_b32"),
+   (653, "v_mbcnt_hi_u32_b32"),
+   (659, "v_bfm_b32"),
+   (660, "v_cvt_pknorm_i16_f32"),
+   (661, "v_cvt_pknorm_u16_f32"),
+   (662, "v_cvt_pkrtz_f16_f32"),
+   (663, "v_cvt_pk_u16_u32"),
+   (664, "v_cvt_pk_i16_i32"),
+   (665, "v_cvt_pknorm_i16_f16"),
+   (666, "v_cvt_pknorm_u16_f16"),
+   (668, "v_add_i32"),
+   (669, "v_sub_i32"),
+   (670, "v_add_i16"),
+   (671, "v_sub_i16"),
+   (672, "v_pack_b32_f16"),
+}
+for code, name in VOP3a_32_2:
+   opcode(name, 2, [v1], code, Format.VOP3A)
 
 VOP3a_64_2 = [
    "v_add_f64",
@@ -918,7 +948,7 @@ opcode("v_mqsad_pk_u16_u8", 3, [v1])
 opcode("v_mqsad_u32_u8", 3, [v2])
 # TODO
 
-VOP3a = VOP3a_32 + VOP3a_64 + VOP3a_32_2 + VOP3a_64_2 + VOP3a_SPECIAL
+VOP3a = dict(VOP3a_32).values() + VOP3a_64 + dict(VOP3a_32_2).values() + VOP3a_64_2 + VOP3a_SPECIAL
 
 
 # DS instructions: 3 inputs (1 addr, 2 data), 1 output
