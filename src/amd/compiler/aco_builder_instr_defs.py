@@ -172,7 +172,7 @@ Operand ${op}${', ' if op != operands[-1] else ''}\\
       return instr;
    }
 % endfor
-% for name in VINTERP:
+% for name in VINTRP:
 
    Interp_instruction*
    ${name}(Operand vsrc, unsigned attribute, unsigned component)
@@ -199,4 +199,4 @@ print Template(template).render(
    SOPP=aco_opcodes.SOPP,
    VOP1=aco_opcodes.VOP1,
    VOPC=aco_opcodes.VOPC,
-   VINTERP=aco_opcodes.VINTERP)
+   VINTRP=aco_opcodes.VINTRP)
