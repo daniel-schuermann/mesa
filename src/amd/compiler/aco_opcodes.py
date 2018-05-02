@@ -242,8 +242,8 @@ opcode("s_addk_i32", 1, [s1,b], 14, Format.SOPK, write_reg = SCC, kills_input = 
 opcode("s_mulk_i32", 1, [s1], 15, Format.SOPK, kills_input = [1])
 opcode("s_cbranch_i_fork", 1, [], 16, Format.SOPK)
 opcode("s_getreg_b32", 0, [s1], 17, Format.SOPK)
-opcode("s_setreg_b32", 1, [], 18, Format.SOPK)
-opcode("s_setreg_imm32_b32", 0, [], 20, Format.SOPK)
+opcode("s_setreg_b32", 1, [s1], 18, Format.SOPK)
+opcode("s_setreg_imm32_b32", 0, [s1], 20, Format.SOPK)
 opcode("s_call_b64", 0, [s2], 21, Format.SOPK)
 
 SOPK = dict(SOPK_SCC).values() + dict(SOPK_SPECIAL).values()
