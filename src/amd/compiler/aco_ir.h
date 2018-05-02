@@ -396,6 +396,35 @@ struct Instruction {
       std::string s = opcode_infos[(int)opcode].name;
       return s;
    }
+
+   bool isVALU()
+   {
+      return (uint16_t) format & (uint16_t) Format::VOP1
+          || (uint16_t) format & (uint16_t) Format::VOP1
+          || (uint16_t) format & (uint16_t) Format::VOP2
+          || (uint16_t) format & (uint16_t) Format::VOPC
+          || (uint16_t) format & (uint16_t) Format::VOP3A
+          || (uint16_t) format & (uint16_t) Format::VOP3B
+          || (uint16_t) format & (uint16_t) Format::VOP3P;
+   }
+   bool isSALU()
+   {
+      return (uint16_t) format & (uint16_t) Format::SOP1
+          || (uint16_t) format & (uint16_t) Format::SOP2
+          || (uint16_t) format & (uint16_t) Format::SOPC
+          || (uint16_t) format & (uint16_t) Format::SOPK
+          || (uint16_t) format & (uint16_t) Format::SOPP;              
+   }
+   bool isVMEM()
+   {
+      return (uint16_t) format & (uint16_t) Format::MTBUF
+          || (uint16_t) format & (uint16_t) Format::MUBUF
+          || (uint16_t) format & (uint16_t) Format::MIMG;
+   }
+   bool isDPP()
+   {
+      return (uint16_t) format & (uint16_t) Format::DPP;
+   }
 };
 
 struct SOPK_instruction : public Instruction {
