@@ -215,6 +215,11 @@ public:
       return control_[0];
    }
 
+   void setTemp(Temp t) {
+      assert(control_[0]);
+      data_.temp = t;
+   }
+
    Temp getTemp() const noexcept
    {
       return data_.temp;
@@ -270,7 +275,7 @@ public:
    {
       return control_[3];
    }
-   
+
    std::string to_string()
    {
       if (isConstant())
@@ -313,6 +318,11 @@ public:
       setFixed(reg);
    }
 
+   bool isTemp() const noexcept
+   {
+      return tempId() > 0;
+   }
+
    Temp getTemp() noexcept
    {
       return temp;
@@ -321,6 +331,10 @@ public:
    uint32_t tempId() const noexcept
    {
       return temp.id();
+   }
+
+   void setTemp(Temp t) {
+      temp = t;
    }
 
    RegClass regClass() const noexcept
@@ -538,7 +552,7 @@ public:
    }
 
 private:
-   uint32_t allocationID = 0;
+   uint32_t allocationID = 1;
 };
 
 std::unique_ptr<Program> select_program(struct nir_shader *nir);
