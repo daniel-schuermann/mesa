@@ -62,6 +62,7 @@ libaco_files = files(
   'aco_assembler.cpp',
   'aco_insert_waitcnt.cpp',
   'aco_scheduler_postRA.cpp',
+  'aco_register_allocation.cpp'
 )
 
 libaco = static_library(
