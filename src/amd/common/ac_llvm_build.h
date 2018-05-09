@@ -640,6 +640,9 @@ LLVMValueRef ac_unpack_param(struct ac_llvm_context *ctx, LLVMValueRef param,
 void ac_apply_fmask_to_sample(struct ac_llvm_context *ac, LLVMValueRef fmask,
 			      LLVMValueRef *addr, bool is_array_tex);
 
+unsigned
+ds_pattern_bitmode(unsigned and_mask, unsigned or_mask, unsigned xor_mask);
+
 LLVMValueRef
 ac_build_ds_swizzle(struct ac_llvm_context *ctx, LLVMValueRef src, unsigned mask);
 

@@ -3840,8 +3840,8 @@ ac_build_readlane(struct ac_llvm_context *ctx, LLVMValueRef src, LLVMValueRef la
 	return LLVMBuildBitCast(ctx->builder, ret, src_type, "");
 }
 
-LLVMValueRef
-ac_build_writelane(struct ac_llvm_context *ctx, LLVMValueRef src, LLVMValueRef value, LLVMValueRef lane)
+static inline LLVMValueRef
+_ac_build_writelane(struct ac_llvm_context *ctx, LLVMValueRef src, LLVMValueRef value, LLVMValueRef lane)
 {
 	if (HAVE_LLVM >= 0x0800) {
 		return ac_build_intrinsic(ctx, "llvm.amdgcn.writelane", ctx->i32,
@@ -3852,6 +3852,39 @@ ac_build_writelane(struct ac_llvm_context *ctx, LLVMValueRef src, LLVMValueRef v
 	LLVMValueRef pred = LLVMBuildICmp(ctx->builder, LLVMIntEQ, lane,
 					  ac_get_thread_id(ctx), "");
 	return LLVMBuildSelect(ctx->builder, pred, value, src, "");
+}
+
+LLVMValueRef
+ac_build_writelane(struct ac_llvm_context *ctx, LLVMValueRef src, LLVMValueRef value, LLVMValueRef lane)
+{
+	LLVMTypeRef src_type = LLVMTypeOf(src);
+	src = ac_to_integer(ctx, src);
+	value = ac_to_integer(ctx, value);
+	assert(LLVMTypeOf(src) == LLVMTypeOf(value));
+	unsigned bits = LLVMGetIntTypeWidth(LLVMTypeOf(src));
+	LLVMValueRef ret;
+
+	if (bits == 32) {
+		ret = _ac_build_writelane(ctx, src, value, lane);
+	} else {
+		assert(bits % 32 == 0);
+		LLVMTypeRef vec_type = LLVMVectorType(ctx->i32, bits / 32);
+		LLVMValueRef src_vector =
+			LLVMBuildBitCast(ctx->builder, src, vec_type, "");
+		LLVMValueRef val_vector =
+			LLVMBuildBitCast(ctx->builder, value, vec_type, "");
+		ret = LLVMGetUndef(vec_type);
+		for (unsigned i = 0; i < bits / 32; i++) {
+			src = LLVMBuildExtractElement(ctx->builder, src_vector,
+						LLVMConstInt(ctx->i32, i, 0), "");
+			value = LLVMBuildExtractElement(ctx->builder, val_vector,
+						LLVMConstInt(ctx->i32, i, 0), "");
+			LLVMValueRef ret_comp = _ac_build_writelane(ctx, src, value, lane);
+			ret = LLVMBuildInsertElement(ctx->builder, ret, ret_comp,
+						LLVMConstInt(ctx->i32, i, 0), "");
+		}
+	}
+	return LLVMBuildBitCast(ctx->builder, ret, src_type, "");
 }
 
 LLVMValueRef
@@ -4025,7 +4058,7 @@ ac_build_permlane16(struct ac_llvm_context *ctx, LLVMValueRef src, uint64_t sel,
 	return LLVMBuildBitCast(ctx->builder, ret, src_type, "");
 }
 
-static inline unsigned
+unsigned
 ds_pattern_bitmode(unsigned and_mask, unsigned or_mask, unsigned xor_mask)
 {
 	assert(and_mask < 32 && or_mask < 32 && xor_mask < 32);
