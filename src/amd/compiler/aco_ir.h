@@ -283,8 +283,10 @@ public:
 
       std::string s = "%" + std::to_string(data_.temp.id());
 
-      if (isFixed())
-         return s + ":" +  (data_.temp.type() == vgpr ? "v[" : "s[") + std::to_string(reg_.reg) + "]";
+      if (isFixed()) {
+         int reg = reg_.reg - (data_.temp.type() == vgpr ? 256 : 0);
+         return s + ":" +  (data_.temp.type() == vgpr ? "v[" : "s[") + std::to_string(reg) + "]";
+      }
       return s;
    }
 
@@ -377,8 +379,10 @@ public:
    {
       std::string s = "%" + std::to_string(temp.id());
 
-      if (isFixed())
-         return s + ":" +  (temp.type() == vgpr ? "v[" : "s[") + std::to_string(reg_.reg) + "]";
+      if (isFixed()) {
+         int reg = reg_.reg - (temp.type() == vgpr ? 256 : 0);
+         return s + ":" +  (temp.type() == vgpr ? "v[" : "s[") + std::to_string(reg) + "]";
+      }
       return s;
    }
 private:
@@ -408,6 +412,21 @@ struct Instruction {
    std::string to_string()
    {
       std::string s = opcode_infos[(int)opcode].name;
+      if (definitionCount()) {
+         s = " = " + s;
+         for (int i = definitionCount() - 1; i >= 0; --i) {
+            if (i < definitionCount() - 1)
+               s = ", " + s;
+            s = getDefinition(i).to_string() + s;
+         }
+      }
+      if (operandCount()) {
+         for (int i = 0; i < operandCount(); ++i) {
+            if (i)
+               s += ',';
+            s += " " + getOperand(i).to_string();
+         }
+      }
       return s;
    }
 
