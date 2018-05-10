@@ -575,6 +575,7 @@ private:
 };
 
 std::unique_ptr<Program> select_program(struct nir_shader *nir);
+void register_allocation(Program *program);
 }
 #endif /* __cplusplus */
 #endif /* ACO_IR_H */

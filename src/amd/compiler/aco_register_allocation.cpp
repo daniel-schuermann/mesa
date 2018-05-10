@@ -25,8 +25,8 @@ void insert_copies(Program * program)
             auto& definition = insn->getDefinition(i);
             if (definition.isTemp()) {
                auto it2 = live.find(definition.tempId());
-               assert (it2 != live.end());
-               live.erase(it2);
+               if (it2 != live.end())
+                  live.erase(it2);
                if (definition.isFixed())
                   needMove = true;
             }
@@ -43,12 +43,13 @@ void insert_copies(Program * program)
 
          instructions.push_back(std::move(*it));
 
-         if (needMove) {
+         if (needMove && !live.empty()) {
             std::unique_ptr<Instruction> move{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, live.size(), live.size())};
             int idx = 0;
             for (auto e : live) {
-               insn->getOperand(idx) = Operand{e.second};
-               insn->getDefinition(idx) = Definition{e.second};
+               std::cerr << "Move " << e.second.id() << "\n";
+               move->getOperand(idx) = Operand{e.second};
+               move->getDefinition(idx) = Definition{e.second};
                ++idx;
             }
             instructions.push_back(std::move(move));
@@ -69,7 +70,10 @@ void fix_ssa(Program *program)
       for(auto&& insn : block->instructions) {
          for (int i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
-            operand.setTemp(Temp{renames[operand.tempId()], operand.regClass()});
+            if (operand.isTemp()) {
+               assert(renames.find(operand.tempId()) != renames.end());
+               operand.setTemp(Temp{renames[operand.tempId()], operand.regClass()});
+            }
          }
          for (int i = 0; i < insn->definitionCount(); ++i) {
             auto& definition = insn->getDefinition(i);
@@ -77,10 +81,37 @@ void fix_ssa(Program *program)
             if (renames.find(id) != renames.end()) {
                id = program->allocateId();
                renames[definition.tempId()] = id;
+            } else {
+               renames[definition.tempId()] = definition.tempId();
             }
             definition.setTemp(Temp{id, definition.regClass()});
          }
       }
+   }
+}
+
+static unsigned reg_count(RegClass reg_class)
+{
+   switch (reg_class) {
+      case b:
+      case s1:
+      case v1:
+         return 1;
+      case s2:
+      case v2:
+         return 2;
+      case s3:
+      case v3:
+         return 3;
+      case s4:
+      case v4:
+         return 4;
+      case s8:
+         return 8;
+      case s16:
+         return 16;
+      default:
+         abort();
    }
 }
 
@@ -89,21 +120,21 @@ void register_allocation(Program *program)
    insert_copies(program);
    fix_ssa(program);
 
-   std::unordered_map<unsigned, PhysReg> assignments;
+   std::unordered_map<unsigned, std::pair<PhysReg, unsigned>> assignments;
    /* First assign fixed regs. */
    for(auto&& block : program->blocks) {
       for (auto&& insn : block->instructions) {
          for(unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp() && operand.isFixed()) {
-               assignments[operand.tempId()] = operand.physReg();
+               assignments[operand.tempId()] = {operand.physReg(), reg_count(operand.regClass())};
             }
          }
 
          for (unsigned i = 0; i < insn->definitionCount(); ++i) {
             auto& definition = insn->getDefinition(i);
             if (definition.isTemp() && definition.isFixed()) {
-               assignments[definition.tempId()] = definition.physReg();
+               assignments[definition.tempId()] = {definition.physReg(), reg_count(definition.regClass())};
             }
          }
       }
@@ -111,6 +142,7 @@ void register_allocation(Program *program)
 
    std::set<void*> kills;
    std::set<std::pair<unsigned, unsigned>> interfere;
+   std::vector<Definition*> simplicial_order;
 
    /* Determine operands & defs which are the last use of a temp. */
    /* Also create an interference graph. */
@@ -121,6 +153,8 @@ void register_allocation(Program *program)
          for (unsigned i = 0; i < insn->definitionCount(); ++i) {
             auto& definition = insn->getDefinition(i);
             if (definition.isTemp()) {
+               simplicial_order.push_back(&definition);
+
                auto it = live.find(definition.tempId());
                if (it != live.end())
                   live.erase(it);
@@ -134,6 +168,15 @@ void register_allocation(Program *program)
                }
             }
          }
+
+         if (insn->opcode == aco_opcode::v_interp_p1_f32 ||
+             insn->opcode == aco_opcode::v_interp_p2_f32) {
+            auto& definition = insn->getDefinition(0);
+            auto& operand = insn->getOperand(0);
+            interfere.insert({definition.tempId(), operand.tempId()});
+            interfere.insert({operand.tempId(), definition.tempId()});
+         }
+
          for(unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp()) {
@@ -148,9 +191,65 @@ void register_allocation(Program *program)
    }
 
    /* Finish the assignment */
-   for (auto&& block : program->blocks) {
-      for(auto&& insn : block->instructions) {
+   for (auto def : simplicial_order) {
+      auto id = def->tempId();
+      if (assignments.find(id) != assignments.end())
+         continue;
 
+      unsigned count = reg_count(def->regClass());
+      unsigned alignment = 1;
+      unsigned start = 0;
+      unsigned end = 256;
+      unsigned alloc_reg = 0;
+
+      if (def->getTemp().type() == RegType::vgpr) {
+         start = 256;
+         end = 512;
+      }
+
+      for(unsigned reg = start; reg + count <= end; reg += alignment) {
+         bool can_alloc = true;
+         for (auto it = interfere.lower_bound({id, 0}); it != interfere.end() && it->first == id; ++it) {
+            unsigned other_id = it->second;
+            auto other_it = assignments.find(other_id);
+            if (other_it == assignments.end())
+               continue;
+
+            unsigned other_count = other_it->second.second;
+            unsigned other_reg = other_it->second.first.reg;
+            if (other_reg + other_count <= reg || reg + count <= other_reg)
+               continue;
+
+            can_alloc = false;
+            break;
+         }
+         if (can_alloc) {
+            alloc_reg = reg;
+            break;
+         }
+      }
+      assignments[id] = {PhysReg{alloc_reg}, count};
+   }
+
+   for(auto&& block : program->blocks) {
+      for (auto&& insn : block->instructions) {
+         for(unsigned i = 0; i < insn->operandCount(); ++i) {
+            auto& operand = insn->getOperand(i);
+            if (operand.isTemp()) {
+               auto it = assignments.find(operand.tempId());
+               assert(it != assignments.end());
+               operand.setFixed(it->second.first);
+            }
+         }
+
+         for (unsigned i = 0; i < insn->definitionCount(); ++i) {
+            auto& definition = insn->getDefinition(i);
+            if (definition.isTemp()) {
+               auto it = assignments.find(definition.tempId());
+               assert(it != assignments.end());
+               definition.setFixed(it->second.first);
+            }
+         }
       }
    }
 }
