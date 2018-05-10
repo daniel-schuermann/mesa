@@ -30,5 +30,6 @@ void aco_compile_shader(struct nir_shader *shader)
    if (shader->info.stage != MESA_SHADER_FRAGMENT)
       return;
    auto program = aco::select_program(shader);
+   aco::register_allocation(program.get());
    program->print(std::cerr);
 }
