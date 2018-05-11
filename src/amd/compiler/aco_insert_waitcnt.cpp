@@ -68,7 +68,7 @@ struct wait_entry {
    uint8_t exp_cnt;
    uint8_t lgkm_cnt;
    wait_entry(wait_type t, uint8_t vm, uint8_t exp, uint8_t lgkm)
-           : type(t), vm_cnt(vm), lgkm_cnt(lgkm) {}
+           : type(t), vm_cnt(vm), exp_cnt(exp), lgkm_cnt(lgkm) {}
 
    bool operator==(const wait_entry& rhs) const
    {
@@ -279,7 +279,7 @@ Instruction* kill(Instruction* instr, wait_ctx& ctx)
    {
       imm &= writes_vgpr(instr, ctx);
    }
-   if (imm != -1)
+   if (imm != 0xFFFF)
       return create_waitcnt(imm);
    else
       return nullptr;
@@ -338,13 +338,15 @@ bool handle_block(Block* block, wait_ctx& ctx)
       has_gen = gen(instr.get(), ctx) || has_gen;
       new_instructions.emplace_back(std::move(instr));
    }
-   block->instructions = std::move(new_instructions);
+   block->instructions.swap(new_instructions);
    return has_gen;
 }
 
 void insert_wait_states(Program* program)
 {
    wait_ctx out_ctx[program->blocks.size()]; /* per BB ctx */
+   for (unsigned i = 0; i < program->blocks.size(); i++)
+      out_ctx[i] = wait_ctx();
    unsigned i = 0; /* i represents the worklist range [i,num_BBs) */
 
    while (i < program->blocks.size())
@@ -352,16 +354,14 @@ void insert_wait_states(Program* program)
       Block* current = program->blocks[i].get();
       wait_ctx in;
       for (Block* b : current->linear_predecessors)
-      {
          in.join(&out_ctx[b->index]);
-      }
 
       handle_block(current, in);
-
       if (out_ctx[current->index] == in) /* if old_out == new_out */
       {
          i++;
       } else {
+         i++;
          /* we re-iterate loops if the out_ctx has changed */
          for (Block* b : current->linear_successors)
             i = std::min(i, b->index);
@@ -371,3 +371,4 @@ void insert_wait_states(Program* program)
 }
 
 }
+
