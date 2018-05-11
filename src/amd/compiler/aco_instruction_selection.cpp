@@ -376,6 +376,8 @@ std::unique_ptr<bool[]> init_reg_type(nir_function_impl *impl)
             }
             break;
          }
+         default:
+            break;
          }
       }
    }
@@ -422,6 +424,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir)
 
    ctx.program->blocks.push_back(std::unique_ptr<Block>{new Block});
    ctx.block = ctx.program->blocks.back().get();
+   ctx.block->index = 0;
 
    add_startpgm(&ctx);
 

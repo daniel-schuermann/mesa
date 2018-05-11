@@ -31,5 +31,9 @@ void aco_compile_shader(struct nir_shader *shader)
       return;
    auto program = aco::select_program(shader);
    aco::register_allocation(program.get());
+   //program->print(std::cerr);
+   aco::schedule(program.get());
+   //program->print(std::cerr);
+   aco::insert_wait_states(program.get());
    program->print(std::cerr);
 }

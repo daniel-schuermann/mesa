@@ -415,13 +415,13 @@ struct Instruction {
       if (definitionCount()) {
          s = " = " + s;
          for (int i = definitionCount() - 1; i >= 0; --i) {
-            if (i < definitionCount() - 1)
+            if (i < (int) definitionCount() - 1)
                s = ", " + s;
             s = getDefinition(i).to_string() + s;
          }
       }
       if (operandCount()) {
-         for (int i = 0; i < operandCount(); ++i) {
+         for (int i = 0; i < (int) operandCount(); ++i) {
             if (i)
                s += ',';
             s += " " + getOperand(i).to_string();
@@ -576,6 +576,8 @@ private:
 
 std::unique_ptr<Program> select_program(struct nir_shader *nir);
 void register_allocation(Program *program);
+void schedule(Program* program);
+void insert_wait_states(Program* program);
 }
 #endif /* __cplusplus */
 #endif /* ACO_IR_H */
