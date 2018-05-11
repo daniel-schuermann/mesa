@@ -26,6 +26,7 @@
  */
 
 #include <unordered_map>
+#include <unordered_set>
 #include <set>
 
 #include "aco_ir.h"
@@ -35,11 +36,11 @@ namespace aco {
 struct Node {
    int index;
    int priority;
-   int nops;
-   std::vector<Node*> successors;
+   int nops = 0;
+   std::unordered_set<Node*> successors;
    /* pairs of predecessor (node, num wait_states) */
    std::vector<std::pair<Node*,int>> predecessors;
-   bool scheduled;
+   bool scheduled = false;
 
    Node(int i) : index(i) {}
 
@@ -62,6 +63,10 @@ struct sched_ctx {
    std::unordered_map<unsigned, Node*> def_table;
 
    /* here we can maintain information about the functional units */
+   sched_ctx(unsigned num_instr)
+   {
+      nodes.reserve(num_instr);
+   }
 };
 
 unsigned detect_pipeline_hazard(Instruction* first, Instruction* second)
@@ -151,6 +156,8 @@ Node* select_candidate(sched_ctx& ctx)
    // TODO: choose candidate based on priority
    Node* next = *it;
    ctx.candidates.erase(it);
+   assert (!next->scheduled);
+   next->scheduled = true;
    /* add successors to list of potential candidates */
    for (Node* n : next->successors)
    {
@@ -178,7 +185,6 @@ void build_dag(Block* block, sched_ctx& ctx)
       ctx.nodes.emplace_back(index);
       Node* node = &ctx.nodes.back();
       bool is_candidate = true;
-      
       /* Read after Write */
       for (unsigned i = 0; i < instr->num_operands; i++)
       {
@@ -189,10 +195,11 @@ void build_dag(Block* block, sched_ctx& ctx)
             std::unordered_map<unsigned, Node*>::iterator it = ctx.def_table.find(reg + k);
             if (it != ctx.def_table.end())
             {
+               Node* predecessor = it->second;
                is_candidate = false;
-               it->second->successors.push_back(node);
-               int nops = detect_raw_hazard(block->instructions[it->second->index].get(), instr, i);
-               node->predecessors.emplace_back(std::make_pair(it->second, nops));
+               predecessor->successors.insert(node);
+               int nops = detect_raw_hazard(block->instructions[predecessor->index].get(), instr, i);
+               node->predecessors.emplace_back(std::make_pair(predecessor, nops));
                break;
             }
          }
@@ -211,12 +218,14 @@ void build_dag(Block* block, sched_ctx& ctx)
                /* add all uses of previous write to predecessors */
                for (Node* use : it->second->successors)
                {
-                  use->successors.push_back(node);
+                  if (use == node)
+                     continue;
+                  use->successors.insert(node);
                   int nops = detect_war_hazard(block->instructions[it->second->index].get(), instr);
                   node->predecessors.emplace_back(std::make_pair(it->second, nops));
                }
                /* add previous write as predecessor */
-               it->second->successors.push_back(node);
+               it->second->successors.insert(node);
                int nops = detect_waw_hazard(block->instructions[it->second->index].get(), instr);
                node->predecessors.emplace_back(std::make_pair(it->second, nops));
             }
@@ -232,9 +241,8 @@ void schedule(Program* program)
 {
    for (auto&& block : program->blocks)
    {
-      sched_ctx ctx;
+      sched_ctx ctx(block->instructions.size());
       std::vector<std::unique_ptr<Instruction>> new_instructions;
-
       build_dag(block.get(), ctx);
       while (!ctx.candidates.empty())
       {
@@ -246,7 +254,6 @@ void schedule(Program* program)
             nop->imm = next_instr->nops;
             new_instructions.emplace_back(std::unique_ptr<Instruction>(nop));
          }
-         next_instr->scheduled = true;
          next_instr->index = new_instructions.size();
          ctx.current_index = new_instructions.size();
          new_instructions.emplace_back(std::move(block->instructions[next_instr->index]));
@@ -256,3 +263,4 @@ void schedule(Program* program)
 }
 
 }
+

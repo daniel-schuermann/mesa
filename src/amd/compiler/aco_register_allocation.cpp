@@ -47,7 +47,7 @@ void insert_copies(Program * program)
             std::unique_ptr<Instruction> move{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, live.size(), live.size())};
             int idx = 0;
             for (auto e : live) {
-               std::cerr << "Move " << e.second.id() << "\n";
+               //std::cerr << "Move " << e.second.id() << "\n";
                move->getOperand(idx) = Operand{e.second};
                move->getDefinition(idx) = Definition{e.second};
                ++idx;
@@ -68,14 +68,14 @@ void fix_ssa(Program *program)
    for (auto&& block : program->blocks) {
       std::unordered_map<unsigned, unsigned> renames;
       for(auto&& insn : block->instructions) {
-         for (int i = 0; i < insn->operandCount(); ++i) {
+         for (unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp()) {
                assert(renames.find(operand.tempId()) != renames.end());
                operand.setTemp(Temp{renames[operand.tempId()], operand.regClass()});
             }
          }
-         for (int i = 0; i < insn->definitionCount(); ++i) {
+         for (unsigned i = 0; i < insn->definitionCount(); ++i) {
             auto& definition = insn->getDefinition(i);
             unsigned id = definition.tempId();
             if (renames.find(id) != renames.end()) {
