@@ -432,27 +432,26 @@ struct Instruction {
 
    bool isVALU()
    {
-      return (uint16_t) format & (uint16_t) Format::VOP1
-          || (uint16_t) format & (uint16_t) Format::VOP1
-          || (uint16_t) format & (uint16_t) Format::VOP2
-          || (uint16_t) format & (uint16_t) Format::VOPC
-          || (uint16_t) format & (uint16_t) Format::VOP3A
-          || (uint16_t) format & (uint16_t) Format::VOP3B
-          || (uint16_t) format & (uint16_t) Format::VOP3P;
+      return ((uint16_t) format & (uint16_t) Format::VOP1) == (uint16_t) Format::VOP1
+          || ((uint16_t) format & (uint16_t) Format::VOP2) == (uint16_t) Format::VOP2
+          || ((uint16_t) format & (uint16_t) Format::VOPC) == (uint16_t) Format::VOPC
+          || ((uint16_t) format & (uint16_t) Format::VOP3A) == (uint16_t) Format::VOP3A
+          || ((uint16_t) format & (uint16_t) Format::VOP3B) == (uint16_t) Format::VOP3B
+          || ((uint16_t) format & (uint16_t) Format::VOP3P) == (uint16_t) Format::VOP3P;
    }
    bool isSALU()
    {
-      return (uint16_t) format & (uint16_t) Format::SOP1
-          || (uint16_t) format & (uint16_t) Format::SOP2
-          || (uint16_t) format & (uint16_t) Format::SOPC
-          || (uint16_t) format & (uint16_t) Format::SOPK
-          || (uint16_t) format & (uint16_t) Format::SOPP;              
+      return ((uint16_t) format & (uint16_t) Format::SOP1) == (uint16_t) Format::SOP1
+          || ((uint16_t) format & (uint16_t) Format::SOP2) == (uint16_t) Format::SOP1
+          || ((uint16_t) format & (uint16_t) Format::SOPC) == (uint16_t) Format::SOP1
+          || ((uint16_t) format & (uint16_t) Format::SOPK) == (uint16_t) Format::SOP1
+          || ((uint16_t) format & (uint16_t) Format::SOPP) == (uint16_t) Format::SOPP;
    }
    bool isVMEM()
    {
-      return (uint16_t) format & (uint16_t) Format::MTBUF
-          || (uint16_t) format & (uint16_t) Format::MUBUF
-          || (uint16_t) format & (uint16_t) Format::MIMG;
+      return ((uint16_t) format & (uint16_t) Format::MTBUF) == (uint16_t) Format::MTBUF
+          || ((uint16_t) format & (uint16_t) Format::MUBUF) == (uint16_t) Format::MUBUF
+          || ((uint16_t) format & (uint16_t) Format::MIMG) == (uint16_t) Format::MIMG;
    }
    bool isDPP()
    {
@@ -467,6 +466,9 @@ struct SOPK_instruction : public Instruction {
 struct SOPP_instruction : public Instruction {
    uint32_t imm;
    Block *block;
+};
+
+struct SOP1_instruction : public Instruction {
 };
 
 struct VOP1_instruction : public Instruction {
@@ -584,6 +586,7 @@ private:
 
 std::unique_ptr<Program> select_program(struct nir_shader *nir);
 void register_allocation(Program *program);
+void eliminate_pseudo_instr(Program* program);
 void schedule(Program* program);
 void insert_wait_states(Program* program);
 }
