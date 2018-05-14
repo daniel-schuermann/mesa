@@ -5,10 +5,13 @@
 #include "aco_builder.h"
 #include "aco_interface.h"
 #include "nir/nir.h"
+#include "common/sid.h"
+//#include "vulkan/radv_shader.h"
 
 namespace aco {
 namespace {
 struct isel_context {
+   //const struct radv_nir_compiler_options *options;
    Program *program;
    Block *block;
    bool *uniform_vals;
@@ -89,13 +92,7 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
 
 void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 {
-   std::unique_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
-   exp->valid_mask = true;
-   exp->done = true;
-   exp->compressed = false;
-   exp->dest = 0;
-   exp->enabled_mask = 0xf;
-
+   Operand values[4];
    Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
    for (unsigned i = 0; i < 4; ++i) {
       Temp tmp{ctx->program->allocateId(), v1};
@@ -106,9 +103,91 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
       extract->getDefinition(0) = Definition(tmp);
 
       ctx->block->instructions.emplace_back(std::move(extract));
-
-      exp->getOperand(i) = Operand(tmp);
+      values[i] = Operand(tmp);
    }
+
+   unsigned index = nir_intrinsic_base(instr) / 4;
+   index = index - FRAG_RESULT_DATA0;
+   unsigned target = V_008DFC_SQ_EXP_MRT + index;
+   // FIXME
+   unsigned col_format = V_028714_SPI_SHADER_FP16_ABGR;//(ctx->options->key.fs.col_format >> (4 * index)) & 0xf;
+   //bool is_int8 = (ctx->options->key.fs.is_int8 >> index) & 1;
+   //bool is_int10 = (ctx->options->key.fs.is_int10 >> index) & 1;
+   unsigned enabled_channels;
+   aco_opcode compr_op;
+
+   switch (col_format)
+   {
+   case V_028714_SPI_SHADER_ZERO:
+      enabled_channels = 0; /* writemask */
+      target = V_008DFC_SQ_EXP_NULL;
+      break;
+
+   case V_028714_SPI_SHADER_32_R:
+      enabled_channels = 1;
+      break;
+
+   case V_028714_SPI_SHADER_32_GR:
+      enabled_channels = 0x3;
+      break;
+
+   case V_028714_SPI_SHADER_32_AR:
+      enabled_channels = 0x9;
+      break;
+
+   case V_028714_SPI_SHADER_FP16_ABGR:
+      enabled_channels = 0x5;
+      compr_op = aco_opcode::v_cvt_pkrtz_f16_f32;
+      break;
+
+   case V_028714_SPI_SHADER_UNORM16_ABGR:
+      enabled_channels = 0x5;
+      compr_op = aco_opcode::v_cvt_pknorm_u16_f32;
+      break;
+
+   case V_028714_SPI_SHADER_SNORM16_ABGR:
+      enabled_channels = 0x5;
+      compr_op = aco_opcode::v_cvt_pknorm_i16_f32;
+      break;
+
+   case V_028714_SPI_SHADER_UINT16_ABGR:
+      enabled_channels = 0x5;
+      compr_op = aco_opcode::v_cvt_pk_u16_u32;
+      break;
+
+   case V_028714_SPI_SHADER_SINT16_ABGR:
+      enabled_channels = 0x5;
+      compr_op = aco_opcode::v_cvt_pk_i16_i32;
+      break;
+
+   default:
+   case V_028714_SPI_SHADER_32_ABGR:
+      break;
+   }
+
+   if ((bool)compr_op)
+   {
+      for (int i = 0; i < 2; i++)
+      {
+         std::unique_ptr<VOP3A_instruction> compr{create_instruction<VOP3A_instruction>(compr_op, Format::VOP3A, 2, 1)};
+         Temp tmp{ctx->program->allocateId(), v1};
+         compr->getOperand(0) = values[i*2];
+         compr->getOperand(1) = values[i*2+1];
+         compr->getDefinition(0) = Definition(tmp);
+         values[2*i] = Operand(tmp);
+         values[2*i+1] = Operand();
+         ctx->block->instructions.emplace_back(std::move(compr));
+      }
+   }
+
+   std::unique_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
+   exp->valid_mask = true; // TODO
+   exp->done = true; // TODO
+   exp->compressed = (bool) compr_op;
+   exp->dest = target;
+   exp->enabled_mask = enabled_channels;
+   for (int i = 0; i < 4; i++)
+      exp->getOperand(i) = values[i];
 
    ctx->block->instructions.emplace_back(std::move(exp));
 }
