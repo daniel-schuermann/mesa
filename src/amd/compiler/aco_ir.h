@@ -478,6 +478,14 @@ struct VOP2_instruction : public Instruction {
 struct VOPC_instruction : public Instruction {
 };
 
+struct VOP3A_instruction : public Instruction {
+   bool abs[3];
+   bool opsel[3];
+   bool clamp;
+   unsigned omod;
+   bool neg[3];
+};
+
 struct Interp_instruction : public Instruction {
    unsigned attribute;
    unsigned component;
