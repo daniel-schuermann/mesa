@@ -83,7 +83,7 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
       mov->getOperand(0) = Operand{instr->value.u32[0]};
       ctx->block->instructions.emplace_back(std::move(mov));
    } else {
-      std::unique_ptr<Instruction> mov{create_instruction<Instruction>(aco_opcode::v_mov_b32, Format::SOP1, 1, 1)};
+      std::unique_ptr<Instruction> mov{create_instruction<Instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1)};
       mov->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->def));
       mov->getOperand(0) = Operand{instr->value.u32[0]};
       ctx->block->instructions.emplace_back(std::move(mov));
