@@ -31,9 +31,15 @@ void aco_compile_shader(struct nir_shader *shader)
       return;
    auto program = aco::select_program(shader);
    aco::register_allocation(program.get());
-   //program->print(std::cerr);
+   std::cerr << "After RA:\n";
+   program->print(std::cerr);
+   aco::eliminate_pseudo_instr(program.get());
+   std::cerr << "After Eliminate Pseudo Instr:\n";
+   program->print(std::cerr);
    aco::schedule(program.get());
-   //program->print(std::cerr);
+   std::cerr << "After PostRA Schedule\n";
+   program->print(std::cerr);
    aco::insert_wait_states(program.get());
+   std::cerr << "After Insert Wait-States\n";
    program->print(std::cerr);
 }
