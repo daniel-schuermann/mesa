@@ -589,6 +589,7 @@ void register_allocation(Program *program);
 void eliminate_pseudo_instr(Program* program);
 void schedule(Program* program);
 void insert_wait_states(Program* program);
+std::vector<uint32_t> emit_program(Program* program);
 }
 #endif /* __cplusplus */
 #endif /* ACO_IR_H */

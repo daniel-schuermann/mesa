@@ -42,4 +42,5 @@ void aco_compile_shader(struct nir_shader *shader)
    aco::insert_wait_states(program.get());
    std::cerr << "After Insert Wait-States\n";
    program->print(std::cerr);
+   std::vector<uint32_t> binary = aco::emit_program(program.get());
 }
