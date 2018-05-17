@@ -194,7 +194,7 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 
 void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr)
 {
-   unsigned base = nir_intrinsic_base(instr);
+   unsigned base = nir_intrinsic_base(instr) / 4;
    unsigned component = nir_intrinsic_component(instr);
    Temp coord1{ctx->program->allocateId(), v1};
    Temp coord2{ctx->program->allocateId(), v1};

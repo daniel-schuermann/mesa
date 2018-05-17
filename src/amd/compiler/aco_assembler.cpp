@@ -26,6 +26,7 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
       for (unsigned i = 0; i < instr->operandCount(); i++)
          encoding |= instr->getOperand(i).physReg().reg << (i * 9);
       out.push_back(encoding);
+      break;
    }
    case Format::SOP2: {
       uint32_t encoding = (0b10 << 30);
@@ -90,7 +91,7 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
    }
    case Format::VINTRP: {
       Interp_instruction* interp = static_cast<Interp_instruction*>(instr);
-      uint32_t encoding = (0b110010 << 26);
+      uint32_t encoding = (0b110101 << 26);
       encoding |= (0xFF & instr->getDefinition(0).physReg().reg) << 18;
       encoding |= opcode_infos[(int)instr->opcode].opcode << 16;
       encoding |= interp->attribute << 10;
@@ -120,6 +121,7 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
    default:
       unreachable("unimplemented instruction format");
    }
+
    /* append literal dword */
    if (instr->operandCount() && instr->getOperand(0).physReg().reg == 255)
    {
