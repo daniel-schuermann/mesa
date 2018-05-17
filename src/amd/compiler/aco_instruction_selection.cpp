@@ -487,9 +487,10 @@ void add_startpgm(struct isel_context *ctx)
 
 }
 
-std::unique_ptr<Program> select_program(struct nir_shader *nir)
+std::unique_ptr<Program> select_program(struct nir_shader *nir, ac_shader_config* config)
 {
    std::unique_ptr<Program> program{new Program};
+   program->config = config;
    isel_context ctx;
    ctx.program = program.get();
 

@@ -117,6 +117,8 @@ static unsigned reg_count(RegClass reg_class)
 
 void register_allocation(Program *program)
 {
+   unsigned num_accessed_sgpr = 0;
+   unsigned num_accessed_vgpr = 0;
    insert_copies(program);
    fix_ssa(program);
 
@@ -229,7 +231,13 @@ void register_allocation(Program *program)
          }
       }
       assignments[id] = {PhysReg{alloc_reg}, count};
+      if (def->getTemp().type() == RegType::vgpr)
+         num_accessed_vgpr = std::max(num_accessed_vgpr, alloc_reg - 256 + def->getTemp().size());
+      else
+         num_accessed_sgpr = std::max(num_accessed_sgpr, alloc_reg + def->getTemp().size());
    }
+   program->config->num_vgprs = num_accessed_vgpr;
+   program->config->num_sgprs = num_accessed_sgpr + 2;
 
    for(auto&& block : program->blocks) {
       for (auto&& insn : block->instructions) {
