@@ -198,6 +198,30 @@ public:
    {
       data_.i = v;
       control_[2] = 1; /* isConst */
+      if (v <= 64)
+         setFixed(PhysReg{128 + v});
+      else if (v >= 0xFFFFFFFFFFFFFFF0) /* [-16 .. -1] */
+         setFixed(PhysReg{192 - v});
+      else if (v == 0x3f000000) /* 0.5 */
+         setFixed(PhysReg{240});
+      else if (v == 0xbf000000) /* -0.5 */
+         setFixed(PhysReg{241});
+      else if (v == 0x3f800000) /* 1.0 */
+         setFixed(PhysReg{242});
+      else if (v == 0xbf800000) /* -1.0 */
+         setFixed(PhysReg{243});
+      else if (v == 0x40000000) /* 2.0 */
+         setFixed(PhysReg{244});
+      else if (v == 0xc0000000) /* -2.0 */
+         setFixed(PhysReg{245});
+      else if (v == 0x40800000) /* 4.0 */
+         setFixed(PhysReg{246});
+      else if (v == 0xc0800000) /* -4.0 */
+         setFixed(PhysReg{247});
+//      else if (v == 1/2PI ???)
+//         setFixed(PhysReg{248});
+      else /* Literal Constant */
+         setFixed(PhysReg{255});
    };
    explicit Operand(float v) noexcept
    {
