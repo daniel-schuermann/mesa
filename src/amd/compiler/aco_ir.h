@@ -31,6 +31,7 @@
 #include <ostream>
 
 #include "nir/nir.h"
+#include "common/ac_binary.h"
 #include "aco_opcodes.h"
 
 typedef enum {
@@ -558,6 +559,7 @@ struct Block {
 class Program final {
 public:
    std::vector<std::unique_ptr<Block>> blocks;
+   ac_shader_config* config;
 
    uint32_t allocateId()
    {
@@ -609,7 +611,7 @@ private:
    uint32_t allocationID = 1;
 };
 
-std::unique_ptr<Program> select_program(struct nir_shader *nir);
+std::unique_ptr<Program> select_program(struct nir_shader *nir, ac_shader_config* config);
 void register_allocation(Program *program);
 void eliminate_pseudo_instr(Program* program);
 void schedule(Program* program);
