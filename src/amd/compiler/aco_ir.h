@@ -602,6 +602,7 @@ public:
             out << "\t" << instr->to_string() << std::endl;
          }
       }
+      out << "\n";
    }
 
 private:
@@ -614,6 +615,7 @@ void eliminate_pseudo_instr(Program* program);
 void schedule(Program* program);
 void insert_wait_states(Program* program);
 std::vector<uint32_t> emit_program(Program* program);
+void print_asm(std::vector<uint32_t>& binary, char* llvm_mc, std::ostream& out);
 }
 #endif /* __cplusplus */
 #endif /* ACO_IR_H */
