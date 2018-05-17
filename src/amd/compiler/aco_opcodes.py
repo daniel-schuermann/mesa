@@ -389,39 +389,39 @@ SOPP_VCC = [
 for name in SOPP_VCC:
    opcode(name, 1, [], read_reg = VCC)
 
-SOPP_SPECIAL = [
-   "s_nop",
-   "s_endpgm",
-   "s_branch",
-   "s_wakeup",
-   "s_cbranch_execz",
-   "s_cbranch_execnz",
-   "s_barrier",
-   "s_setkill",
-   "s_waitcnt",
-   "s_sethalt",
-   "s_sleep",
-   "s_setprio",
-   "s_sendmsg",
-   "s_sendmsghalt",
-   "s_trap",
-   "s_icache_inv",
-   "s_incperflevel",
-   "s_decperflevel",
-   "s_ttracedata",
-   "s_cbranch_cdbgsys",
-   "s_cbranch_cdbguser",
-   "s_cbranch_cdbgsys_or_user",
-   "s_cbranch_cdbgsys_and_user",
-   "s_endpgm_saved",
-   "s_set_grp_idx_off",
-   "s_set_grp_idx_mode",
-   "s_endpgm_ordered_ps_done"
-]
-for name in SOPP_SPECIAL:
-   opcode(name, 0, [])
+SOPP_SPECIAL = {
+   (0, "s_nop"),
+   (1, "s_endpgm"),
+   (2, "s_branch"),
+   (3, "s_wakeup"),
+   (8, "s_cbranch_execz"),
+   (9, "s_cbranch_execnz"),
+   (10, "s_barrier"),
+   (11, "s_setkill"),
+   (12, "s_waitcnt"),
+   (13, "s_sethalt"),
+   (14, "s_sleep"),
+   (15, "s_setprio"),
+   (16, "s_sendmsg"),
+   (17, "s_sendmsghalt"),
+   (18, "s_trap"),
+   (19, "s_icache_inv"),
+   (20, "s_incperflevel"),
+   (21, "s_decperflevel"),
+   (22, "s_ttracedata"),
+   (23, "s_cbranch_cdbgsys"),
+   (24, "s_cbranch_cdbguser"),
+   (25, "s_cbranch_cdbgsys_or_user"),
+   (26, "s_cbranch_cdbgsys_and_user"),
+   (27, "s_endpgm_saved"),
+   (28, "s_set_grp_idx_off"),
+   (29, "s_set_grp_idx_mode"),
+   (30, "s_endpgm_ordered_ps_done")
+}
+for code, name in SOPP_SPECIAL:
+   opcode(name, 0, [], code)
 
-SOPP = SOPP_SCC + SOPP_VCC + SOPP_SPECIAL
+SOPP = SOPP_SCC + SOPP_VCC + dict(SOPP_SPECIAL).values()
 
 
 # SMEM instructions: sbase input (2 sgpr), potentially 2 offset inputs, 1 sdata input/output
@@ -634,73 +634,73 @@ VOP2 = VOP2_NOVCC + VOP2_LITERAL + VOP2_VCCOUT + VOP2_VCCINOUT + VOP2_SPECIAL
 
 
 # VOP1 instructions: instructions with 1 input and 1 output
-VOP1_32 = [
-   "v_mov_b32",
-   "v_readfirstlane_b32",
-   "v_cvt_i32_f64",
-   "v_cvt_f32_i32",
-   "v_cvt_f32_u32",
-   "v_cvt_u32_f32",
-   "v_cvt_i32_f32",
-   "v_cvt_f16_f32",
-   "v_cvt_f32_f16",
-   "v_cvt_rpi_i32_f32",
-   "v_cvt_flr_i32_f32",
-   "v_cvt_off_f32_i4",
-   "v_cvt_f32_f64",
-   "v_cvt_f32_ubyte0",
-   "v_cvt_f32_ubyte1",
-   "v_cvt_f32_ubyte2",
-   "v_cvt_f32_ubyte3",
-   "v_cvt_u32_f64",
-   "v_fract_f32",
-   "v_trunc_f32",
-   "v_ceil_f32",
-   "v_rndne_f32",
-   "v_floor_f32",
-   "v_exp_f32",
-   "v_log_f32",
-   "v_rcp_f32",
-   "v_rcp_iflag_f32",
-   "v_rsq_f32",
-   "v_sqrt_f32",
-   "v_sin_f32",
-   "v_cos_f32",
-   "v_not_b32",
-   "v_bfrev_b32",
-   "v_ffbh_u32",
-   "v_ffbl_b32",
-   "v_ffbh_i32",
-   "v_frexp_exp_i32_f64",
-   "v_frexp_exp_i32_f32",
-   "v_frexp_mant_f32",
-   "v_screen_partition_4se_b32",
-   "v_cvt_f16_u16",
-   "v_cvt_f16_i16",
-   "v_cvt_u16_f16",
-   "v_cvt_i16_f16",
-   "v_rcp_f16",
-   "v_sqrt_f16",
-   "v_rsq_f16",
-   "v_log_f16",
-   "v_exp_f16",
-   "v_frexp_mant_f16",
-   "v_frexp_exp_i16_f16",
-   "v_floor_f16",
-   "v_ceil_f16",
-   "v_trunc_f16",
-   "v_rndne_f16",
-   "v_fract_f16",
-   "v_sin_f16",
-   "v_cos_f16",
-   "v_exp_legacy_f32",
-   "v_log_legacy_f32",
-   "v_cvt_norm_i16_f16",
-   "v_cvt_norm_u16_f16",
-   "v_sat_pk_u8_i16"
-]
-for name in VOP1_32:
-   opcode(name, 1, [v1])
+VOP1_32 = {
+   (1, "v_mov_b32"),
+   (2, "v_readfirstlane_b32"),
+   (3, "v_cvt_i32_f64"),
+   (5, "v_cvt_f32_i32"),
+   (6, "v_cvt_f32_u32"),
+   (7, "v_cvt_u32_f32"),
+   (8, "v_cvt_i32_f32"),
+   (10, "v_cvt_f16_f32"),
+   (11, "v_cvt_f32_f16"),
+   (12, "v_cvt_rpi_i32_f32"),
+   (13, "v_cvt_flr_i32_f32"),
+   (14, "v_cvt_off_f32_i4"),
+   (15, "v_cvt_f32_f64"),
+   (17, "v_cvt_f32_ubyte0"),
+   (18, "v_cvt_f32_ubyte1"),
+   (19, "v_cvt_f32_ubyte2"),
+   (20, "v_cvt_f32_ubyte3"),
+   (21, "v_cvt_u32_f64"),
+   (27, "v_fract_f32"),
+   (28, "v_trunc_f32"),
+   (29, "v_ceil_f32"),
+   (30, "v_rndne_f32"),
+   (31, "v_floor_f32"),
+   (32, "v_exp_f32"),
+   (33, "v_log_f32"),
+   (34, "v_rcp_f32"),
+   (35, "v_rcp_iflag_f32"),
+   (36, "v_rsq_f32"),
+   (39, "v_sqrt_f32"),
+   (41, "v_sin_f32"),
+   (42, "v_cos_f32"),
+   (43, "v_not_b32"),
+   (44, "v_bfrev_b32"),
+   (45, "v_ffbh_u32"),
+   (46, "v_ffbl_b32"),
+   (47, "v_ffbh_i32"),
+   (48, "v_frexp_exp_i32_f64"),
+   (51, "v_frexp_exp_i32_f32"),
+   (52, "v_frexp_mant_f32"),
+   (55, "v_screen_partition_4se_b32"),
+   (57, "v_cvt_f16_u16"),
+   (58, "v_cvt_f16_i16"),
+   (59, "v_cvt_u16_f16"),
+   (60, "v_cvt_i16_f16"),
+   (61, "v_rcp_f16"),
+   (62, "v_sqrt_f16"),
+   (63, "v_rsq_f16"),
+   (64, "v_log_f16"),
+   (65, "v_exp_f16"),
+   (66, "v_frexp_mant_f16"),
+   (67, "v_frexp_exp_i16_f16"),
+   (68, "v_floor_f16"),
+   (69, "v_ceil_f16"),
+   (70, "v_trunc_f16"),
+   (71, "v_rndne_f16"),
+   (72, "v_fract_f16"),
+   (73, "v_sin_f16"),
+   (74, "v_cos_f16"),
+   (75, "v_exp_legacy_f32"),
+   (76, "v_log_legacy_f32"),
+   (77, "v_cvt_norm_i16_f16"),
+   (78, "v_cvt_norm_u16_f16"),
+   (79, "v_sat_pk_u8_i16")
+}
+for code, name in VOP1_32:
+   opcode(name, 1, [v1], code, Format.VOP1)
 
 VOP1_64 = [
    "v_cvt_f64_i32",
@@ -728,7 +728,7 @@ opcode("v_nop", 0, [])
 opcode("v_clrexcp", 0, [])
 opcode("v_swap_b32", 2, [v1,v1], kills_input = [1,1])
 
-VOP1 = VOP1_32 + VOP1_64 + VOP1_SPECIAL
+VOP1 = dict(VOP1_32).values() + VOP1_64 + VOP1_SPECIAL
 
 
 # VOPC instructions:
