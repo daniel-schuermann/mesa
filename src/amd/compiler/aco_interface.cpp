@@ -30,6 +30,8 @@ void aco_compile_shader(struct nir_shader *shader)
    if (shader->info.stage != MESA_SHADER_FRAGMENT)
       return;
    auto program = aco::select_program(shader);
+   std::cerr << "After Instruction Selection:\n";
+   program->print(std::cerr);
    aco::register_allocation(program.get());
    std::cerr << "After RA:\n";
    program->print(std::cerr);
@@ -37,10 +39,14 @@ void aco_compile_shader(struct nir_shader *shader)
    std::cerr << "After Eliminate Pseudo Instr:\n";
    program->print(std::cerr);
    aco::schedule(program.get());
-   std::cerr << "After PostRA Schedule\n";
+   std::cerr << "After PostRA Schedule:\n";
    program->print(std::cerr);
    aco::insert_wait_states(program.get());
-   std::cerr << "After Insert Wait-States\n";
+   std::cerr << "After Insert-Waitcnt:\n";
    program->print(std::cerr);
    std::vector<uint32_t> binary = aco::emit_program(program.get());
+   std::cerr << "After Assembly:\n";
+   char llvm_mc[] = "/usr/bin/llvm-mc-7";
+   aco::print_asm(binary, llvm_mc, std::cerr);
+
 }
