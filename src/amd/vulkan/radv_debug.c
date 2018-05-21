@@ -33,6 +33,7 @@
 #include "sid.h"
 #include "ac_debug.h"
 #include "radv_debug.h"
+#include "radv_private.h"
 #include "radv_shader.h"
 
 #define TRACE_BO_SIZE 4096
