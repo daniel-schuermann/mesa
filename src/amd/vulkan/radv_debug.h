@@ -24,7 +24,13 @@
 #ifndef RADV_DEBUG_H
 #define RADV_DEBUG_H
 
-#include "radv_private.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+
+struct radeon_winsys_cs;
+struct radv_device;
+struct radv_queue;
 
 enum {
 	RADV_DEBUG_NO_FAST_CLEARS    =   0x1,
