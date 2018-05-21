@@ -30,6 +30,7 @@
 #include "radv_debug.h"
 #include "ac_surface.h"
 #include "xf86drm.h"
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
