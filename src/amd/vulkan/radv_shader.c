@@ -82,6 +82,27 @@ static const struct nir_shader_compiler_options nir_options = {
 	.use_interpolated_input_intrinsics = true,
 };
 
+bool
+radv_can_dump_shader(struct radv_device *device,
+		     struct radv_shader_module *module,
+		     bool is_gs_copy_shader)
+{
+	if (!(device->instance->debug_flags & RADV_DEBUG_DUMP_SHADERS))
+		return false;
+
+	/* Only dump non-meta shaders, useful for debugging purposes. */
+	return (module && !module->nir) || is_gs_copy_shader;
+}
+
+bool
+radv_can_dump_shader_stats(struct radv_device *device,
+			   struct radv_shader_module *module)
+{
+	/* Only dump non-meta shader stats. */
+	return device->instance->debug_flags & RADV_DEBUG_DUMP_SHADER_STATS &&
+	       module && !module->nir;
+}
+
 VkResult radv_CreateShaderModule(
 	VkDevice                                    _device,
 	const VkShaderModuleCreateInfo*             pCreateInfo,

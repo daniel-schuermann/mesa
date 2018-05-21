@@ -28,8 +28,9 @@
 #ifndef RADV_SHADER_H
 #define RADV_SHADER_H
 
+#include "ac_binary.h"
 #include "radv_debug.h"
-#include "radv_private.h"
+#include "radv_descriptor_set.h"
 
 #include "nir/nir.h"
 
@@ -45,8 +46,11 @@
 
 // Match MAX_SETS from radv_descriptor_set.h
 #define RADV_UD_MAX_SETS MAX_SETS
+#define MAX_VERTEX_ATTRIBS 32
 
 #define RADV_NUM_PHYSICAL_VGPRS 256
+
+struct radv_physical_device;
 
 struct radv_shader_module {
 	struct nir_shader *nir;
@@ -430,48 +434,13 @@ radv_shader_dump_stats(struct radv_device *device,
 		       gl_shader_stage stage,
 		       FILE *file);
 
-static inline bool
+bool
 radv_can_dump_shader(struct radv_device *device,
 		     struct radv_shader_module *module,
-		     bool is_gs_copy_shader)
-{
-	if (!(device->instance->debug_flags & RADV_DEBUG_DUMP_SHADERS))
-		return false;
+		     bool is_gs_copy_shader);
 
-	/* Only dump non-meta shaders, useful for debugging purposes. */
-	return (module && !module->nir) || is_gs_copy_shader;
-}
-
-static inline bool
+bool
 radv_can_dump_shader_stats(struct radv_device *device,
-			   struct radv_shader_module *module)
-{
-	/* Only dump non-meta shader stats. */
-	return device->instance->debug_flags & RADV_DEBUG_DUMP_SHADER_STATS &&
-	       module && !module->nir;
-}
-
-static inline unsigned shader_io_get_unique_index(gl_varying_slot slot)
-{
-	/* handle patch indices separate */
-	if (slot == VARYING_SLOT_TESS_LEVEL_OUTER)
-		return 0;
-	if (slot == VARYING_SLOT_TESS_LEVEL_INNER)
-		return 1;
-	if (slot >= VARYING_SLOT_PATCH0 && slot <= VARYING_SLOT_TESS_MAX)
-		return 2 + (slot - VARYING_SLOT_PATCH0);
-	if (slot == VARYING_SLOT_POS)
-		return 0;
-	if (slot == VARYING_SLOT_PSIZ)
-		return 1;
-	if (slot == VARYING_SLOT_CLIP_DIST0)
-		return 2;
-	if (slot == VARYING_SLOT_CLIP_DIST1)
-		return 3;
-	/* 3 is reserved for clip dist as well */
-	if (slot >= VARYING_SLOT_VAR0 && slot <= VARYING_SLOT_VAR31)
-		return 4 + (slot - VARYING_SLOT_VAR0);
-	unreachable("illegal slot in get unique index\n");
-}
+			   struct radv_shader_module *module);
 
 #endif
