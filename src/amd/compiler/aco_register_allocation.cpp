@@ -125,6 +125,7 @@ void register_allocation(Program *program)
    fix_ssa(program);
 
    std::unordered_map<unsigned, std::pair<PhysReg, unsigned>> assignments;
+   std::unordered_map<unsigned, unsigned> temp_assignments;
    /* First assign fixed regs. */
    for(auto&& block : program->blocks) {
       for (auto&& insn : block->instructions) {
@@ -181,6 +182,9 @@ void register_allocation(Program *program)
             interfere.insert({operand.tempId(), definition.tempId()});
          }
 
+         if (insn->opcode == aco_opcode::v_interp_p2_f32)
+            temp_assignments[insn->getOperand(2).tempId()] = insn->getDefinition(0).tempId();
+
          for(unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp()) {
@@ -199,6 +203,10 @@ void register_allocation(Program *program)
       auto id = def->tempId();
       if (assignments.find(id) != assignments.end())
          continue;
+      if (temp_assignments.find(id) != temp_assignments.end()){
+         assignments[id] = assignments[temp_assignments.find(id)->second];
+         continue;
+      }
 
       unsigned count = reg_count(def->regClass());
       unsigned alignment = 1;
