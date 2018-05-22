@@ -38,19 +38,19 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
 
    auto program = aco::select_program(shader, config, info);
    std::cerr << "After Instruction Selection:\n";
-   program->print(std::cerr);
+   aco_print_program(program.get(), stderr);
    aco::register_allocation(program.get());
    std::cerr << "After RA:\n";
-   program->print(std::cerr);
+   aco_print_program(program.get(), stderr);
    aco::eliminate_pseudo_instr(program.get());
    std::cerr << "After Eliminate Pseudo Instr:\n";
-   program->print(std::cerr);
+   aco_print_program(program.get(), stderr);
    aco::schedule(program.get());
    std::cerr << "After PostRA Schedule:\n";
-   program->print(std::cerr);
+   aco_print_program(program.get(), stderr);
    aco::insert_wait_states(program.get());
    std::cerr << "After Insert-Waitcnt:\n";
-   program->print(std::cerr);
+   aco_print_program(program.get(), stderr);
    std::vector<uint32_t> code = aco::emit_program(program.get());
    std::cerr << "After Assembly:\n";
    std::cerr << "Num VGPRs: " << program->config->num_vgprs << "\n";
