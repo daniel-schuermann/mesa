@@ -551,52 +551,52 @@ SMEM = SMEM_LOAD + SMEM_STORE + SMEM_ATOMIC + SMEM_ATOMIC_64 + SMEM_SPECIAL
 
 
 # VOP2 instructions: 2 inputs, 1 output (+ optional vcc)
-VOP2_NOVCC = [
-   "v_add_f32",
-   "v_sub_f32",
-   "v_subrev_f32",
-   "v_mul_legacy_f32",
-   "v_mul_f32",
-   "v_mul_i32_i24",
-   "v_mul_hi_i32_i24",
-   "v_mul_u32_u24",
-   "v_mul_hi_u32_u24",
-   "v_min_f32",
-   "v_max_f32",
-   "v_min_i32",
-   "v_max_i32",
-   "v_min_u32",
-   "v_max_u32",
-   "v_lshrrev_b32",
-   "v_ashrrev_i32",
-   "v_lshlrev_b32",
-   "v_and_b32",
-   "v_or_b32",
-   "v_xor_b32",
-   "v_add_f16",
-   "v_sub_f16",
-   "v_subrev_f16",
-   "v_mul_f16",
-   "v_add_u16",
-   "v_sub_u16",
-   "v_subrev_u16",
-   "v_mul_lo_u16",
-   "v_lshlrev_b16",
-   "v_lshrrev_b16",
-   "v_ashrrev_b16",
-   "v_max_f16",
-   "v_min_f16",
-   "v_max_u16",
-   "v_min_u16",
-   "v_max_i16",
-   "v_min_i16",
-   "v_ldexp_f16",
-   "v_add_u32",
-   "v_sub_u32",
-   "v_subrev_u32"
-]
-for name in VOP2_NOVCC:
-   opcode(name, 2, [v1])
+VOP2_NOVCC = {
+   (1, "v_add_f32"),
+   (2, "v_sub_f32"),
+   (3, "v_subrev_f32"),
+   (4, "v_mul_legacy_f32"),
+   (5, "v_mul_f32"),
+   (6, "v_mul_i32_i24"),
+   (7, "v_mul_hi_i32_i24"),
+   (8, "v_mul_u32_u24"),
+   (9, "v_mul_hi_u32_u24"),
+   (10, "v_min_f32"),
+   (11, "v_max_f32"),
+   (12, "v_min_i32"),
+   (13, "v_max_i32"),
+   (14, "v_min_u32"),
+   (15, "v_max_u32"),
+   (16, "v_lshrrev_b32"),
+   (17, "v_ashrrev_i32"),
+   (18, "v_lshlrev_b32"),
+   (19, "v_and_b32"),
+   (20, "v_or_b32"),
+   (21, "v_xor_b32"),
+   (31, "v_add_f16"),
+   (32, "v_sub_f16"),
+   (33, "v_subrev_f16"),
+   (34, "v_mul_f16"),
+   (38, "v_add_u16"),
+   (39, "v_sub_u16"),
+   (40, "v_subrev_u16"),
+   (41, "v_mul_lo_u16"),
+   (42, "v_lshlrev_b16"),
+   (43, "v_lshrrev_b16"),
+   (44, "v_ashrrev_b16"),
+   (45, "v_max_f16"),
+   (46, "v_min_f16"),
+   (47, "v_max_u16"),
+   (48, "v_max_i16"),
+   (49, "v_min_u16"),
+   (50, "v_min_i16"),
+   (51, "v_ldexp_f16"),
+   (52, "v_add_u32"),
+   (53, "v_sub_u32"),
+   (54, "v_subrev_u32")
+}
+for code, name in VOP2_NOVCC:
+   opcode(name, 2, [v1], code)
 
 VOP2_LITERAL = [
    "v_madmk_f32",
@@ -630,7 +630,7 @@ VOP2_SPECIAL = [
 opcode("v_cndmask_b32", 3, [v1], read_reg = VCC)
 opcode("v_mac_f16", 3, [v1], kills_input = [0, 0, 1])
 
-VOP2 = VOP2_NOVCC + VOP2_LITERAL + VOP2_VCCOUT + VOP2_VCCINOUT + VOP2_SPECIAL
+VOP2 = dict(VOP2_NOVCC).values() + VOP2_LITERAL + VOP2_VCCOUT + VOP2_VCCINOUT + VOP2_SPECIAL
 
 
 # VOP1 instructions: instructions with 1 input and 1 output
