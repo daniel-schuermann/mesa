@@ -68,7 +68,7 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
       uint32_t encoding = 0;
       encoding |= opcode_infos[(int)instr->opcode].opcode << 25;
       encoding |= (0xFF & instr->getDefinition(0).physReg().reg) << 17;
-      encoding |= instr->getOperand(1).physReg().reg << 9;
+      encoding |= (0xFF & instr->getOperand(1).physReg().reg) << 9;
       encoding |= instr->getOperand(0).physReg().reg;
       out.push_back(encoding);
       break;

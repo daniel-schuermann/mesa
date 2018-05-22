@@ -499,6 +499,9 @@ struct SOPP_instruction : public Instruction {
 struct SOP1_instruction : public Instruction {
 };
 
+struct SOP2_instruction : public Instruction {
+};
+
 struct VOP1_instruction : public Instruction {
 };
 
