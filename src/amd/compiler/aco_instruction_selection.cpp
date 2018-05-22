@@ -6,7 +6,7 @@
 #include "aco_interface.h"
 #include "nir/nir.h"
 #include "common/sid.h"
-//#include "vulkan/radv_shader.h"
+#include "vulkan/radv_shader.h"
 
 namespace aco {
 namespace {
@@ -493,6 +493,16 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
 {
    std::unique_ptr<Program> program{new Program};
    program->config = config;
+   program->info = info;
+
+   program->info->num_user_sgprs = 2;
+   program->info->fs.num_interp = 1;
+   program->info->fs.input_mask = 1;
+   for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i)
+      program->info->user_sgprs_locs.descriptor_sets[i].sgpr_idx = -1;
+   for (unsigned i = 0; i < AC_UD_MAX_UD; ++i)
+      program->info->user_sgprs_locs.shader_data[i].sgpr_idx = -1;
+
    isel_context ctx;
    ctx.program = program.get();
 
