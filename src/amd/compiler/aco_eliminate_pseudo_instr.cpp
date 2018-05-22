@@ -26,7 +26,7 @@
  */
 
 #include <unordered_map>
-#include <algorithm>
+#include <deque>
 
 #include "aco_ir.h"
 
@@ -44,6 +44,83 @@ struct copy_operand {
    }
 };
 
+void insert_sorted(std::deque<copy_operand>& operands, struct copy_operand elem)
+{
+   for (std::deque<copy_operand>::iterator it = operands.begin(); it != operands.end(); it++)
+   {
+      if (elem < *it)
+      {
+         operands.insert(it, elem);
+         return;
+      }
+   }
+   operands.emplace_back(elem);
+}
+
+void handle_operands(std::deque<copy_operand>& operands, std::vector<std::unique_ptr<Instruction>>& new_instructions)
+{
+   std::unique_ptr<Instruction> mov;
+   for (unsigned i = 0; i < operands.size(); i++)
+   {
+      copy_operand cp = operands[i];
+      if (cp.def.physReg().reg == cp.op.physReg().reg)
+         continue;
+
+      for (unsigned j = i + 1; j < operands.size(); j++)
+      {
+         if (cp.def.physReg().reg == operands[j].op.physReg().reg)
+         {
+            if (cp.def.getTemp().type() == RegType::sgpr)
+            {
+               mov.reset(create_instruction<SOP2_instruction>(aco_opcode::s_xor_b32, Format::SOP2, 2, 1));
+               mov->getOperand(0) = cp.op;
+               mov->getOperand(1) = Operand(cp.def.physReg(), cp.def.regClass());
+               mov->getDefinition(0) = Definition(cp.op.physReg(), cp.op.regClass());
+               new_instructions.emplace_back(std::move(mov));
+               mov.reset(create_instruction<SOP2_instruction>(aco_opcode::s_xor_b32, Format::SOP2, 2, 1));
+               mov->getOperand(0) = cp.op;
+               mov->getOperand(1) = Operand(cp.def.physReg(), cp.def.regClass());
+               mov->getDefinition(0) = cp.def;
+               new_instructions.emplace_back(std::move(mov));
+               mov.reset(create_instruction<SOP2_instruction>(aco_opcode::s_xor_b32, Format::SOP2, 2, 1));
+               mov->getOperand(0) = cp.op;
+               mov->getOperand(1) = Operand(cp.def.physReg(), cp.def.regClass());
+               mov->getDefinition(0) = Definition(cp.op.physReg(), cp.op.regClass());
+            } else {
+               mov.reset(create_instruction<VOP2_instruction>(aco_opcode::v_xor_b32, Format::VOP2, 2, 1));
+               mov->getOperand(0) = cp.op;
+               mov->getOperand(1) = Operand(cp.def.physReg(), cp.def.regClass());
+               mov->getDefinition(0) = Definition(cp.op.physReg(), cp.op.regClass());
+               new_instructions.emplace_back(std::move(mov));
+               mov.reset(create_instruction<VOP2_instruction>(aco_opcode::v_xor_b32, Format::VOP2, 2, 1));
+               mov->getOperand(0) = cp.op;
+               mov->getOperand(1) = Operand(cp.def.physReg(), cp.def.regClass());
+               mov->getDefinition(0) = cp.def;
+               new_instructions.emplace_back(std::move(mov));
+               mov.reset(create_instruction<VOP2_instruction>(aco_opcode::v_xor_b32, Format::VOP2, 2, 1));
+               mov->getOperand(0) = cp.op;
+               mov->getOperand(1) = Operand(cp.def.physReg(), cp.def.regClass());
+               mov->getDefinition(0) = Definition(cp.op.physReg(), cp.op.regClass());
+            }
+            operands[j].op.setFixed(cp.op.physReg());
+            break;
+         }
+      }
+      if (!mov)
+      {
+         if (cp.def.getTemp().type() == RegType::sgpr)
+         {
+            mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+         } else {
+            mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+         }
+         mov->getOperand(0) = cp.op;
+         mov->getDefinition(0) = cp.def;
+      }
+      new_instructions.emplace_back(std::move(mov));
+   }
+}
+
 void eliminate_pseudo_instr(Program* program)
 {
    for (auto&& block : program->blocks)
@@ -56,10 +133,15 @@ void eliminate_pseudo_instr(Program* program)
             new_instructions.emplace_back(std::move(instr));
             continue;
          }
-         std::unique_ptr<Instruction> mov;
          switch (instr->opcode)
          {
          case aco_opcode::p_extract_vector:
+         {
+            unsigned reg = instr->getOperand(0).physReg().reg + instr->getOperand(1).constantValue();
+            if (reg == instr->getDefinition(0).physReg().reg)
+               break;
+
+            std::unique_ptr<Instruction> mov;
             if (instr->getDefinition(0).getTemp().type() == RegType::sgpr)
             {
                assert(instr->getOperand(0).getTemp().type() == RegType::sgpr);
@@ -67,57 +149,29 @@ void eliminate_pseudo_instr(Program* program)
             } else {
                mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
             }
-               mov->getOperand(0) = instr->getOperand(0);
-               mov->getOperand(0).setFixed(PhysReg{mov->getOperand(0).physReg().reg + instr->getOperand(1).constantValue()});
-               mov->getDefinition(0) = instr->getDefinition(0);
-               if (mov->getOperand(0).physReg().reg != mov->getDefinition(0).physReg().reg)
-                  new_instructions.emplace_back(std::move(mov));
+            mov->getOperand(0) = instr->getOperand(0);
+            mov->getOperand(0).setFixed(PhysReg{reg});
+            mov->getDefinition(0) = instr->getDefinition(0);
+            new_instructions.emplace_back(std::move(mov));
             break;
-
+         }
          case aco_opcode::p_create_vector:
          {
-            if (instr->getDefinition(0).getTemp().type() == RegType::sgpr)
-            {
-               // TODO
-               assert(instr->getOperand(0).getTemp().type() == RegType::sgpr);
-               new_instructions.emplace_back(std::move(instr));
-               break;
-            }
-
-            unsigned def_reg = instr->getDefinition(0).physReg().reg;
+            std::deque<copy_operand> operands;
             for (unsigned i = 0; i < instr->num_operands; i++)
             {
-               /* check if we need to swap: If any other operand has our target reg, we swap */
-               for (unsigned j = i + 1; j < instr->num_operands; j++)
-               {
-                  if (instr->getDefinition(0).physReg().reg + i == instr->getOperand(j).physReg().reg)
-                  {
-                     mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_swap_b32, Format::VOP1, 2, 2));
-                     mov->getOperand(0) = instr->getOperand(i);
-                     mov->getOperand(1) = instr->getOperand(j);
-                     mov->getDefinition(0) = instr->getDefinition(0);
-                     mov->getDefinition(0).setFixed(PhysReg{def_reg + j});
-                     mov->getDefinition(1) = instr->getDefinition(0);
-                     mov->getDefinition(1).setFixed(PhysReg{def_reg + i});
-                     instr->getOperand(j) = instr->getOperand(i);
-                     break;
-                  }
-               }
-               if (!mov)
-               {
-                  mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
-                  mov->getOperand(0) = instr->getOperand(i);
-                  mov->getDefinition(0) = instr->getDefinition(0);
-                  mov->getDefinition(0).setFixed(PhysReg{def_reg + i});
-               }
-               if (mov->getOperand(0).physReg().reg != mov->getDefinition(0).physReg().reg)
-                  new_instructions.emplace_back(std::move(mov));
+               Operand op = instr->getOperand(i);
+               op.setFixed(PhysReg{op.physReg().reg});
+               Definition def = instr->getDefinition(0);
+               def.setFixed(PhysReg{def.physReg().reg + i});
+               insert_sorted(operands, copy_operand{op, def});
             }
+            handle_operands(operands, new_instructions);
             break;
          }
          case aco_opcode::p_parallelcopy:
          {
-            std::vector<copy_operand> operands;
+            std::deque<copy_operand> operands;
             for (unsigned i = 0; i < instr->num_operands; i++)
             {
                for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
@@ -126,65 +180,10 @@ void eliminate_pseudo_instr(Program* program)
                   op.setFixed(PhysReg{op.physReg().reg + j});
                   Definition def = instr->getDefinition(i);
                   def.setFixed(PhysReg{def.physReg().reg + j});
-                  operands.emplace_back(copy_operand{op, def});
+                  insert_sorted(operands, copy_operand{op, def});
                }
             }
-            std::sort(operands.begin(), operands.end());
-            for (unsigned i = 0; i < operands.size(); i++)//copy_operand cp : operands)
-            {
-               copy_operand cp = operands[i];
-               if (cp.def.physReg().reg == cp.op.physReg().reg)
-                  continue;
-               if (i < operands.size() - 1 && (cp.def.physReg().reg == operands[i+1].op.physReg().reg))
-               {
-                  if (cp.def.getTemp().type() == RegType::sgpr)
-                  {
-                     mov.reset(create_instruction<SOP2_instruction>(aco_opcode::s_xor_b32, Format::SOP2, 2, 1));
-                     mov->getOperand(0) = cp.op;
-                     mov->getOperand(1) = Operand(cp.def.physReg(), cp.def.regClass());
-                     mov->getDefinition(0) = Definition(cp.op.physReg(), cp.op.regClass());
-                     new_instructions.emplace_back(std::move(mov));
-                     mov.reset(create_instruction<SOP2_instruction>(aco_opcode::s_xor_b32, Format::SOP2, 2, 1));
-                     mov->getOperand(0) = cp.op;
-                     mov->getOperand(1) = Operand(cp.def.physReg(), cp.def.regClass());
-                     mov->getDefinition(0) = cp.def;
-                     new_instructions.emplace_back(std::move(mov));
-                     mov.reset(create_instruction<SOP2_instruction>(aco_opcode::s_xor_b32, Format::SOP2, 2, 1));
-                     mov->getOperand(0) = cp.op;
-                     mov->getOperand(1) = Operand(cp.def.physReg(), cp.def.regClass());
-                     mov->getDefinition(0) = Definition(cp.op.physReg(), cp.op.regClass());
-                     new_instructions.emplace_back(std::move(mov));
-                  } else {
-                     mov.reset(create_instruction<VOP2_instruction>(aco_opcode::v_xor_b32, Format::VOP2, 2, 1));
-                     mov->getOperand(0) = cp.op;
-                     mov->getOperand(1) = Operand(cp.def.physReg(), cp.def.regClass());
-                     mov->getDefinition(0) = Definition(cp.op.physReg(), cp.op.regClass());
-                     new_instructions.emplace_back(std::move(mov));
-                     mov.reset(create_instruction<VOP2_instruction>(aco_opcode::v_xor_b32, Format::VOP2, 2, 1));
-                     mov->getOperand(0) = cp.op;
-                     mov->getOperand(1) = Operand(cp.def.physReg(), cp.def.regClass());
-                     mov->getDefinition(0) = cp.def;
-                     new_instructions.emplace_back(std::move(mov));
-                     mov.reset(create_instruction<VOP2_instruction>(aco_opcode::v_xor_b32, Format::VOP2, 2, 1));
-                     mov->getOperand(0) = cp.op;
-                     mov->getOperand(1) = Operand(cp.def.physReg(), cp.def.regClass());
-                     mov->getDefinition(0) = Definition(cp.op.physReg(), cp.op.regClass());
-                     new_instructions.emplace_back(std::move(mov));
-                  }
-                  i++;
-               } else {
-                  if (cp.def.getTemp().type() == RegType::sgpr)
-                  {
-                     mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
-                  } else {
-                     mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
-                  }
-                  mov->getOperand(0) = cp.op;
-                  mov->getDefinition(0) = cp.def;
-                  new_instructions.emplace_back(std::move(mov));
-               }
-            }
-
+            handle_operands(operands, new_instructions);
             break;
          }
          default:
