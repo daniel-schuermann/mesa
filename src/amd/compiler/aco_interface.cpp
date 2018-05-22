@@ -24,12 +24,19 @@
 #include "aco_interface.h"
 #include "aco_ir.h"
 
+#include "../vulkan/radv_shader.h"
+
 #include <iostream>
-void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* config, struct ac_shader_binary* binary)
+void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* config,
+                        struct ac_shader_binary* binary, struct radv_shader_variant_info *info)
 {
    if (shader->info.stage != MESA_SHADER_FRAGMENT)
       return;
-   auto program = aco::select_program(shader, config);
+
+   memset(info, 0, sizeof(*info));
+   memset(config, 0, sizeof(*info));
+
+   auto program = aco::select_program(shader, config, info);
    std::cerr << "After Instruction Selection:\n";
    program->print(std::cerr);
    aco::register_allocation(program.get());

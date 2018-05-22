@@ -34,6 +34,9 @@
 #include "common/ac_binary.h"
 #include "aco_opcodes.h"
 
+
+struct radv_shader_variant_info;
+
 typedef enum {
    b = 0,
    s1 = 1,
@@ -560,6 +563,7 @@ class Program final {
 public:
    std::vector<std::unique_ptr<Block>> blocks;
    ac_shader_config* config;
+   struct radv_shader_variant_info *info;
 
    uint32_t allocateId()
    {
@@ -611,7 +615,9 @@ private:
    uint32_t allocationID = 1;
 };
 
-std::unique_ptr<Program> select_program(struct nir_shader *nir, ac_shader_config* config);
+std::unique_ptr<Program> select_program(struct nir_shader *nir,
+                                        ac_shader_config* config,
+                                        struct radv_shader_variant_info *info);
 void register_allocation(Program *program);
 void eliminate_pseudo_instr(Program* program);
 void schedule(Program* program);
