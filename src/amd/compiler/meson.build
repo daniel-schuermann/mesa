@@ -65,6 +65,7 @@ libaco_files = files(
   'aco_register_allocation.cpp',
   'aco_eliminate_pseudo_instr.cpp',
   'aco_print_asm.cpp',
+  'aco_print_ir.cpp',
 )
 
 libaco = static_library(
