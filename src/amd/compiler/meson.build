@@ -71,7 +71,7 @@ libaco = static_library(
   'aco',
   [libaco_files, aco_opcodes_c, aco_opcodes_h, aco_builder_instr_defs],
   include_directories : [
-   inc_common, inc_compiler, inc_mesa, inc_mapi, inc_amd
+   inc_common, inc_compiler, inc_mesa, inc_mapi, inc_amd, inc_amd_common,
   ],
   dependencies : [
     dep_thread, dep_elf, dep_libdrm_amdgpu, dep_valgrind,
