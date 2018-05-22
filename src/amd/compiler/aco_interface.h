@@ -25,14 +25,17 @@
 #define ACO_INTERFACE_H
 
 #include "nir/nir.h"
-#include "common/ac_binary.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+struct ac_shader_config;
+struct radv_shader_variant_info;
 
-void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* config, struct ac_shader_binary* binary);
+
+void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* config,
+                        struct ac_shader_binary* binary, struct radv_shader_variant_info *info);
 
 #ifdef __cplusplus
 }
