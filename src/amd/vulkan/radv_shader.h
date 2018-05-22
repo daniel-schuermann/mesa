@@ -28,7 +28,7 @@
 #ifndef RADV_SHADER_H
 #define RADV_SHADER_H
 
-#include "ac_binary.h"
+#include "amd_family.h"
 #include "radv_debug.h"
 #include "radv_descriptor_set.h"
 
