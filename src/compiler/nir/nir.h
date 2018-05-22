@@ -3920,6 +3920,8 @@ void nir_to_lcssa(nir_shader *shader);
  */
 bool nir_convert_from_ssa(nir_shader *shader, bool phi_webs_only);
 
+bool* nir_divergence_analysis(nir_shader *shader);
+
 bool nir_lower_phis_to_regs_block(nir_block *block);
 bool nir_lower_ssa_defs_to_regs_block(nir_block *block);
 bool nir_rematerialize_derefs_in_use_blocks_impl(nir_function_impl *impl);

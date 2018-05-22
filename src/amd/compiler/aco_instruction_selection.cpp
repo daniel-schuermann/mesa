@@ -15,7 +15,7 @@ struct isel_context {
    struct radv_nir_compiler_options *options;
    Program *program;
    Block *block;
-   bool *uniform_vals;
+   bool *divergent_vals;
    std::unique_ptr<RegClass[]> reg_class;
    std::unordered_map<unsigned, unsigned> allocated;
 
@@ -1326,7 +1326,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
    nir_index_ssa_defs(func->impl);
-   ctx.uniform_vals = nir_uniform_analysis(nir);
+   ctx.divergent_vals = nir_divergence_analysis(nir);
    ctx.reg_class = init_reg_class(func->impl);
 
    nir_print_shader(nir, stderr);
