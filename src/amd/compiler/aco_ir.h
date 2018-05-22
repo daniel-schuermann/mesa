@@ -304,20 +304,6 @@ public:
       return control_[3];
    }
 
-   std::string to_string()
-   {
-      if (isConstant())
-         return std::to_string(data_.i);
-
-      std::string s = "%" + std::to_string(data_.temp.id());
-
-      if (isFixed()) {
-         int reg = reg_.reg - (data_.temp.type() == vgpr ? 256 : 0);
-         return s + ":" +  (data_.temp.type() == vgpr ? "v[" : "s[") + std::to_string(reg) + "]";
-      }
-      return s;
-   }
-
 private:
    union {
       uint32_t i;
@@ -403,16 +389,6 @@ public:
       control_[1] = v;
    }
 
-   std::string to_string()
-   {
-      std::string s = "%" + std::to_string(temp.id());
-
-      if (isFixed()) {
-         int reg = reg_.reg - (temp.type() == vgpr ? 256 : 0);
-         return s + ":" +  (temp.type() == vgpr ? "v[" : "s[") + std::to_string(reg) + "]";
-      }
-      return s;
-   }
 private:
    Temp temp;
    std::bitset<8> control_;
@@ -436,27 +412,6 @@ struct Instruction {
    uint32_t operandCount() const { return num_operands; }
    Operand& getOperand(int index) { return operands[index]; }
    Definition& getDefinition(int index) { return definitions[index]; }
-
-   std::string to_string()
-   {
-      std::string s = opcode_infos[(int)opcode].name;
-      if (definitionCount()) {
-         s = " = " + s;
-         for (int i = definitionCount() - 1; i >= 0; --i) {
-            if (i < (int) definitionCount() - 1)
-               s = ", " + s;
-            s = getDefinition(i).to_string() + s;
-         }
-      }
-      if (operandCount()) {
-         for (int i = 0; i < (int) operandCount(); ++i) {
-            if (i)
-               s += ',';
-            s += " " + getOperand(i).to_string();
-         }
-      }
-      return s;
-   }
 
    bool isVALU()
    {
@@ -600,20 +555,6 @@ public:
       return b;
    }
 
-   void print(std::ostream& out)
-   {
-      int BB = 0;
-      for (auto const& block : blocks)
-      {
-         out << "BB" << BB << ":" << std::endl;
-         for (auto const& instr : block->instructions)
-         {
-            out << "\t" << instr->to_string() << std::endl;
-         }
-      }
-      out << "\n";
-   }
-
 private:
    uint32_t allocationID = 1;
 };
@@ -627,6 +568,10 @@ void schedule(Program* program);
 void insert_wait_states(Program* program);
 std::vector<uint32_t> emit_program(Program* program);
 void print_asm(std::vector<uint32_t>& binary, char* llvm_mc, std::ostream& out);
+
+void aco_print_instr(Instruction *instr, FILE *output);
+void aco_print_program(Program *program, FILE *output);
+
 }
 #endif /* __cplusplus */
 #endif /* ACO_IR_H */
