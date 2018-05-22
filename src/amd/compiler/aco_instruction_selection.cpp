@@ -495,7 +495,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    program->config = config;
    program->info = info;
 
-   program->info->num_user_sgprs = 2;
+   program->info->num_user_sgprs = 0;
    program->info->fs.num_interp = 1;
    program->info->fs.input_mask = 1;
    for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i)
