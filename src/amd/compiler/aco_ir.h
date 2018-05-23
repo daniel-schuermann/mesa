@@ -494,6 +494,14 @@ struct Interp_instruction : public Instruction {
    unsigned component;
 };
 
+/**
+ * Vector Memory Image Instructions
+ * Operand(0): VADDR - Address source. Can carry an offset or an index.
+ * Operand(1): SRSRC - Scalar GPR that specifies the resource constant.
+ * Operand(2): SSAMP - Scalar GPR that specifies sampler constant.
+ * Definition(0): VDATA - Vector GPR for write result.
+ *
+ */
 struct MIMG_instruction : public Instruction {
    unsigned dmask; /* Data VGPR enable mask */
    bool unrm; /* Force address to be un-normalized */
