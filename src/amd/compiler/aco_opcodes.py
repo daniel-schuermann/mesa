@@ -250,69 +250,69 @@ SOPK = dict(SOPK_SCC).values() + dict(SOPK_SPECIAL).values()
 
 
 # SOP1 instructions: 1 input, 1 output (+optional SCC)
-SOP1_NOSCC = [
-   "s_mov_b32",
-   "s_brev_b32",
-   "s_ff0_i32_b32",
-   "s_ff0_i32_b64",
-   "s_ff1_i32_b32",
-   "s_ff1_i32_b64",
-   "s_flbit_i32_b32",
-   "s_flbit_i32_b64",
-   "s_flbit_i32",
-   "s_flbit_i32_i64"
-   "s_sext_i32_i8",
-   "s_sext_i32_i16",
-   "s_bitset0_b32",
-   "s_bitset1_b32",
-   "s_movrels_b32",
-   "s_movreld_b32",
-]
-for name in SOP1_NOSCC:
-   opcode(name, 1, [s1])
+SOP1_NOSCC = {
+   (0, "s_mov_b32"),
+   (8, "s_brev_b32"),
+   (14, "s_ff0_i32_b32"),
+   (15, "s_ff0_i32_b64"),
+   (16, "s_ff1_i32_b32"),
+   (17, "s_ff1_i32_b64"),
+   (18, "s_flbit_i32_b32"),
+   (19, "s_flbit_i32_b64"),
+   (20, "s_flbit_i32"),
+   (21, "s_flbit_i32_i64"),
+   (22, "s_sext_i32_i8"),
+   (23, "s_sext_i32_i16"),
+   (24, "s_bitset0_b32"),
+   (26, "s_bitset1_b32"),
+   (42, "s_movrels_b32"),
+   (44, "s_movreld_b32"),
+}
+for code, name in SOP1_NOSCC:
+   opcode(name, 1, [s1], code, Format.SOP1)
 
-SOP1_NOSCC_64 = [
-   "s_mov_b64",
-   "s_brev_b64",
-   "s_bitset0_b64",
-   "s_bitset1_b64",
-   "s_swappc_b64",
-   "s_movrels_b64",
-   "s_movreld_b64"
-]
-for name in SOP1_NOSCC_64:
-   opcode(name, 1, [s2])
+SOP1_NOSCC_64 = {
+   (1, "s_mov_b64"),
+   (9, "s_brev_b64"),
+   (25, "s_bitset0_b64"),
+   (27, "s_bitset1_b64"),
+   (30, "s_swappc_b64"),
+   (43, "s_movrels_b64"),
+   (45, "s_movreld_b64")
+}
+for code, name in SOP1_NOSCC_64:
+   opcode(name, 1, [s2], code, Format.SOP1)
 
-SOP1_SCC = [
-   "s_not_b32",
-   "s_wqm_b32",
-   "s_bcnt0_i32_b32",
-   "s_bcnt1_i32_b32",
-   "s_quadmask_b32",
-   "s_abs_i32"
-]
-for name in SOP1_SCC:
-   opcode(name, 1, [s1,b], write_reg = SCC)
+SOP1_SCC = {
+   (4, "s_not_b32"),
+   (6, "s_wqm_b32"),
+   (10, "s_bcnt0_i32_b32"),
+   (12, "s_bcnt1_i32_b32"),
+   (40, "s_quadmask_b32"),
+   (48, "s_abs_i32")
+}
+for code, name in SOP1_SCC:
+   opcode(name, 1, [s1,b], code, Format.SOP1, write_reg = SCC)
 
-SOP1_SCC_64 = [
-   "s_not_b64",
-   "s_wqm_b64",
-   "s_and_saveexec_b64",
-   "s_or_saveexec_b64",
-   "s_xor_saveexec_b64",
-   "s_andn2_saveexec_b64",
-   "s_orn2_saveexec_b64",
-   "s_nand_saveexec_b64",
-   "s_nor_saveexec_b64",
-   "s_xnor_saveexec_b64",
-   "s_quadmask_b64",
-   "s_andn1_saveexec_b64",
-   "s_orn1_saveexec_b64",
-   "s_andn1_wrexec_b64",
-   "s_andn2_wrexec_b64",
-]
-for name in SOP1_SCC_64:
-   opcode(name, 1, [s2,b], write_reg = SCC + ", EXEC" if 'exec' in name else "")
+SOP1_SCC_64 = {
+   (5, "s_not_b64"),
+   (7, "s_wqm_b64"),
+   (32, "s_and_saveexec_b64"),
+   (33, "s_or_saveexec_b64"),
+   (34, "s_xor_saveexec_b64"),
+   (35, "s_andn2_saveexec_b64"),
+   (36, "s_orn2_saveexec_b64"),
+   (37, "s_nand_saveexec_b64"),
+   (38, "s_nor_saveexec_b64"),
+   (39, "s_xnor_saveexec_b64"),
+   (41, "s_quadmask_b64"),
+   (51, "s_andn1_saveexec_b64"),
+   (52, "s_orn1_saveexec_b64"),
+   (53, "s_andn1_wrexec_b64"),
+   (54, "s_andn2_wrexec_b64"),
+}
+for code, name in SOP1_SCC_64:
+   opcode(name, 1, [s2,b], code, Format.SOP1, write_reg = SCC + "), EXEC" if 'exec' in name else "")
 
 SOP1_SPECIAL = [
    "s_cmov_b32",
@@ -326,18 +326,18 @@ SOP1_SPECIAL = [
    "s_set_gpr_idx_idx",
    "s_bitreplicate_b64_b32"
 ]
-opcode("s_cmov_b32", 2, [s1], read_reg = SCC)
-opcode("s_cmov_b64", 2, [s2], read_reg = SCC)
-opcode("s_bcnt0_i32_b64", 1, [s1,b], write_reg = SCC)
-opcode("s_bcnt1_i32_b64", 1, [s1,b], write_reg = SCC)
-opcode("s_getpc_b64", 0, [s2])
-opcode("s_setpc_b64", 1, [])
-opcode("s_rfe_b64", 1, [])
-opcode("s_cbranch_join", 1, [])
-opcode("s_set_gpr_idx_idx", 1, [])
-opcode("s_bitreplicate_b64_b32", 1, [s2])
+opcode("s_cmov_b32", 2, [s1], 2, Format.SOP1, read_reg = SCC)
+opcode("s_cmov_b64", 2, [s2], 3, read_reg = SCC)
+opcode("s_bcnt0_i32_b64", 1, [s1,b], 11, Format.SOP1, write_reg = SCC)
+opcode("s_bcnt1_i32_b64", 1, [s1,b], 13, Format.SOP1, write_reg = SCC)
+opcode("s_getpc_b64", 0, [s2], 28, Format.SOP1)
+opcode("s_setpc_b64", 1, [], 29, Format.SOP1)
+opcode("s_rfe_b64", 1, [], 31, Format.SOP1)
+opcode("s_cbranch_join", 1, [], 46, Format.SOP1)
+opcode("s_set_gpr_idx_idx", 1, [], 50, Format.SOP1)
+opcode("s_bitreplicate_b64_b32", 1, [s2], 55, Format.SOP1)
 
-SOP1 = SOP1_NOSCC + SOP1_NOSCC_64 + SOP1_SCC + SOP1_SCC_64 + SOP1_SPECIAL
+SOP1 = dict(SOP1_NOSCC).values() + dict(SOP1_NOSCC_64).values() + dict(SOP1_SCC).values() + dict(SOP1_SCC_64).values() + SOP1_SPECIAL
 
 
 # SOPC instructions: 2 inputs and 0 outputs (+SCC)
@@ -419,29 +419,29 @@ SOPP_SPECIAL = {
    (30, "s_endpgm_ordered_ps_done")
 }
 for code, name in SOPP_SPECIAL:
-   opcode(name, 0, [], code)
+   opcode(name, 0, [], code, Format.SOPP)
 
 SOPP = SOPP_SCC + SOPP_VCC + dict(SOPP_SPECIAL).values()
 
 
 # SMEM instructions: sbase input (2 sgpr), potentially 2 offset inputs, 1 sdata input/output
 SMEM_LOAD = [
-   ("s_load_dword", s1),
-   ("s_load_dwordx2", s2),
-   ("s_load_dwordx4", s4),
-   ("s_load_dwordx8", s8),
-   ("s_load_dwordx16", s16),
-   ("s_scratch_load_dword", s1),
-   ("s_scratch_load_dwordx2", s2),
-   ("s_scratch_load_dwordx4", s4),
-   ("s_buffer_load_dword", s1),
-   ("s_buffer_load_dwordx2", s2),
-   ("s_buffer_load_dwordx4", s4),
-   ("s_buffer_load_dwordx8", s8),
-   ("s_buffer_load_dwordx16", s16)
+   (0, "s_load_dword", s1),
+   (1, "s_load_dwordx2", s2),
+   (2, "s_load_dwordx4", s4),
+   (3, "s_load_dwordx8", s8),
+   (4, "s_load_dwordx16", s16),
+   (5, "s_scratch_load_dword", s1),
+   (6, "s_scratch_load_dwordx2", s2),
+   (7, "s_scratch_load_dwordx4", s4),
+   (8, "s_buffer_load_dword", s1),
+   (9, "s_buffer_load_dwordx2", s2),
+   (10, "s_buffer_load_dwordx4", s4),
+   (11, "s_buffer_load_dwordx8", s8),
+   (12, "s_buffer_load_dwordx16", s16)
 ]
-for (name, size) in SMEM_LOAD:
-   opcode(name, 3, [size])
+for (code, name, size) in SMEM_LOAD:
+   opcode(name, 3, [size], code, Format.SMEM)
 
 SMEM_STORE = [
    ("s_store_dword", 1),
@@ -1217,99 +1217,101 @@ MUBUF_ATOMIC = [
 ]
 
 MIMG = [
-   "image_load",
-   "image_load_mip",
-   "image_load_pck",
-   "image_load_pck_sgn",
-   "image_load_mip_pck",
-   "image_load_mip_pck_sgn",
-   "image_store",
-   "image_store_mip",
-   "image_store_pck",
-   "image_store_mip_pck",
-   "image_get_resinfo",
-   "image_atomic_swap",
-   "image_atomic_cmpswap",
-   "image_atomic_add",
-   "image_atomic_sub",
-   "image_atomic_smin",
-   "image_atomic_umin",
-   "image_atomic_smax",
-   "image_atomic_umax",
-   "image_atomic_and",
-   "image_atomic_or",
-   "image_atomic_xor",
-   "image_atomic_inc",
-   "image_atomic_dec",
-   "image_sample",
-   "image_sample_cl",
-   "image_sample_d",
-   "image_sample_d_cl",
-   "image_sample_l",
-   "image_sample_b",
-   "image_sample_b_cl",
-   "image_sample_lz",
-   "image_sample_c",
-   "image_sample_c_cl",
-   "image_sample_c_d",
-   "image_sample_c_d_cl",
-   "image_sample_c_l",
-   "image_sample_c_b",
-   "image_sample_c_b_cl",
-   "image_sample_c_lz",
-   "image_sample_o",
-   "image_sample_cl_o",
-   "image_sample_d_o",
-   "image_sample_d_cl_o",
-   "image_sample_l_o",
-   "image_sample_b_o",
-   "image_sample_b_cl_o",
-   "image_sample_lz_o",
-   "image_sample_c_o",
-   "image_sample_c_cl_o",
-   "image_sample_c_d_o",
-   "image_sample_c_d_cl_o",
-   "image_sample_c_l_o",
-   "image_sample_c_b_o",
-   "image_sample_c_b_cl_o"
-   "image_sample_c_lz_o",
-   "image_gather4",
-   "image_gather4_cl",
-   "image_gather4h",
-   "image_gather4_l",
-   "image_gather4_b",
-   "image_gather4_b_cl",
-   "image_gather4_lz",
-   "image_gather4_c",
-   "image_gather4_c_cl",
-   "image_gather4h_pck",
-   "image_gather8h_pck",
-   "image_gather4_c_l",
-   "image_gather4_c_b",
-   "image_gather4_c_b_cl",
-   "image_gather4_c_lz",
-   "image_gather4_o",
-   "image_gather4_cl_o",
-   "image_gather4_l_o",
-   "image_gather4_b_o",
-   "image_gather4_b_cl_o",
-   "image_gather4_lz_o",
-   "image_gather4_c_o",
-   "image_gather4_c_cl_o",
-   "image_gather4_c_l_o",
-   "image_gather4_c_b_o",
-   "image_gather4_c_b_cl_o",
-   "image_gather4_c_lz_o",
-   "image_get_lod",
-   "image_sample_cd",
-   "image_sample_cd_cl",
-   "image_sample_c_cd",
-   "image_sample_c_cd_cl",
-   "image_sample_cd_o",
-   "image_sample_cd_cl_o",
-   "image_sample_c_cd_o",
-   "image_sample_c_cd_cl_o"
+   (0, "image_load"),
+   (1, "image_load_mip"),
+   (2, "image_load_pck"),
+   (3, "image_load_pck_sgn"),
+   (4, "image_load_mip_pck"),
+   (5, "image_load_mip_pck_sgn"),
+   (8, "image_store"),
+   (9, "image_store_mip"),
+   (10, "image_store_pck"),
+   (11, "image_store_mip_pck"),
+   (14, "image_get_resinfo"),
+   (16, "image_atomic_swap"),
+   (17, "image_atomic_cmpswap"),
+   (18, "image_atomic_add"),
+   (19, "image_atomic_sub"),
+   (20, "image_atomic_smin"),
+   (21, "image_atomic_umin"),
+   (22, "image_atomic_smax"),
+   (23, "image_atomic_umax"),
+   (24, "image_atomic_and"),
+   (25, "image_atomic_or"),
+   (26, "image_atomic_xor"),
+   (27, "image_atomic_inc"),
+   (28, "image_atomic_dec"),
+   (32, "image_sample"),
+   (33, "image_sample_cl"),
+   (34, "image_sample_d"),
+   (35, "image_sample_d_cl"),
+   (36, "image_sample_l"),
+   (37, "image_sample_b"),
+   (38, "image_sample_b_cl"),
+   (39, "image_sample_lz"),
+   (40, "image_sample_c"),
+   (41, "image_sample_c_cl"),
+   (42, "image_sample_c_d"),
+   (43, "image_sample_c_d_cl"),
+   (44, "image_sample_c_l"),
+   (45, "image_sample_c_b"),
+   (46, "image_sample_c_b_cl"),
+   (47, "image_sample_c_lz"),
+   (48, "image_sample_o"),
+   (49, "image_sample_cl_o"),
+   (50, "image_sample_d_o"),
+   (51, "image_sample_d_cl_o"),
+   (52, "image_sample_l_o"),
+   (53, "image_sample_b_o"),
+   (54, "image_sample_b_cl_o"),
+   (55, "image_sample_lz_o"),
+   (56, "image_sample_c_o"),
+   (57, "image_sample_c_cl_o"),
+   (58, "image_sample_c_d_o"),
+   (59, "image_sample_c_d_cl_o"),
+   (60, "image_sample_c_l_o"),
+   (61, "image_sample_c_b_o"),
+   (62, "image_sample_c_b_cl_o"),
+   (63, "image_sample_c_lz_o"),
+   (64, "image_gather4"),
+   (65, "image_gather4_cl"),
+   (66, "image_gather4h"),
+   (68, "image_gather4_l"),
+   (69, "image_gather4_b"),
+   (70, "image_gather4_b_cl"),
+   (71, "image_gather4_lz"),
+   (72, "image_gather4_c"),
+   (73, "image_gather4_c_cl"),
+   (74, "image_gather4h_pck"),
+   (75, "image_gather8h_pck"),
+   (76, "image_gather4_c_l"),
+   (77, "image_gather4_c_b"),
+   (78, "image_gather4_c_b_cl"),
+   (79, "image_gather4_c_lz"),
+   (80, "image_gather4_o"),
+   (81, "image_gather4_cl_o"),
+   (84, "image_gather4_l_o"),
+   (85, "image_gather4_b_o"),
+   (86, "image_gather4_b_cl_o"),
+   (87, "image_gather4_lz_o"),
+   (88, "image_gather4_c_o"),
+   (89, "image_gather4_c_cl_o"),
+   (92, "image_gather4_c_l_o"),
+   (93, "image_gather4_c_b_o"),
+   (94, "image_gather4_c_b_cl_o"),
+   (95, "image_gather4_c_lz_o"),
+   (96, "image_get_lod"),
+   (104, "image_sample_cd"),
+   (105, "image_sample_cd_cl"),
+   (106, "image_sample_c_cd"),
+   (107, "image_sample_c_cd_cl"),
+   (108, "image_sample_cd_o"),
+   (109, "image_sample_cd_cl_o"),
+   (110, "image_sample_c_cd_o"),
+   (111, "image_sample_c_cd_cl_o"),
 ]
+for code, name in MIMG:
+    opcode(name, 0, [], code, Format.MIMG)
 
 NOT_DPP = [
    "v_madmk_f32",
