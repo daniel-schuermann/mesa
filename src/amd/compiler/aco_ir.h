@@ -457,6 +457,20 @@ struct SOP1_instruction : public Instruction {
 struct SOP2_instruction : public Instruction {
 };
 
+/**
+ * Scalar Memory Format:
+ * For s_(buffer_)load_dword*:
+ * Operand(0): SBASE - SGPR-pair which provides base address
+ * Operand(1): Offset - immediate (un)signed offset or SGPR
+ * Operand(2): SOffset - SGPR offset (Vega only)
+ * Definition(0): SDATA - SGPR which accepts return data
+ *
+ */
+struct SMEM_instruction : public Instruction {
+   bool glc; /* VI+: globally coherent */
+   bool nv; /* VEGA only: Non-volatile */
+};
+
 struct VOP1_instruction : public Instruction {
 };
 
@@ -477,6 +491,21 @@ struct VOP3A_instruction : public Instruction {
 struct Interp_instruction : public Instruction {
    unsigned attribute;
    unsigned component;
+};
+
+struct MIMG_instruction : public Instruction {
+   unsigned dmask; /* Data VGPR enable mask */
+   bool unrm; /* Force address to be un-normalized */
+   bool glc; /* globally coherent */
+   bool slc; /* system level coherent */
+   bool tfe; /* texture fail enable */
+   bool da; /* declare an array */
+   bool lwe; /* Force data to be un-normalized */
+   union {
+      bool r128; /* Texture resource size */
+      bool a16; /* VEGA: Address components are 16-bits */
+   };
+   bool d16; /* Convert 32-bit data to 16-bit data */
 };
 
 struct Export_instruction : public Instruction {
