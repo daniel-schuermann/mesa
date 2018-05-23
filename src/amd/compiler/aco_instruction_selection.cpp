@@ -273,6 +273,44 @@ enum aco_descriptor_type {
    ACO_DESC_BUFFER,
 };
 
+enum aco_image_dim {
+	aco_image_1d,
+	aco_image_2d,
+	aco_image_3d,
+	aco_image_cube, // includes cube arrays
+	aco_image_1darray,
+	aco_image_2darray,
+	aco_image_2dmsaa,
+	aco_image_2darraymsaa,
+};
+
+static enum aco_image_dim
+get_sampler_dim(isel_context *ctx, enum glsl_sampler_dim dim, bool is_array)
+{
+   switch (dim) {
+   case GLSL_SAMPLER_DIM_1D:
+      if (ctx->options->chip_class >= GFX9)
+         return is_array ? aco_image_2darray : aco_image_2d;
+      return is_array ? aco_image_1darray : aco_image_1d;
+   case GLSL_SAMPLER_DIM_2D:
+   case GLSL_SAMPLER_DIM_RECT:
+   case GLSL_SAMPLER_DIM_EXTERNAL:
+      return is_array ? aco_image_2darray : aco_image_2d;
+   case GLSL_SAMPLER_DIM_3D:
+      return aco_image_3d;
+   case GLSL_SAMPLER_DIM_CUBE:
+      return aco_image_cube;
+   case GLSL_SAMPLER_DIM_MS:
+      return is_array ? aco_image_2darraymsaa : aco_image_2dmsaa;
+   case GLSL_SAMPLER_DIM_SUBPASS:
+      return aco_image_2darray;
+   case GLSL_SAMPLER_DIM_SUBPASS_MS:
+      return aco_image_2darraymsaa;
+   default:
+      unreachable("bad sampler dim");
+   }
+}
+
 Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
                       enum aco_descriptor_type desc_type,
                       const nir_tex_instr *tex_instr, bool image, bool write)
@@ -334,15 +372,9 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
          base_index = deref->var->data.binding;
       }
    }
-/*	return ctx->abi->load_sampler_desc(ctx->abi,
-					  descriptor_set,
-					  base_index,
-					  constant_index, index,
-					  desc_type, image, write, bindless);
-*/
-	//struct radv_shader_context *ctx = radv_shader_context_from_abi(abi);
-	//LLVMValueRef list = ctx->descriptor_sets[descriptor_set];
-   // FIXME:
+
+   //LLVMValueRef list = ctx->descriptor_sets[descriptor_set];
+   // FIXME: TODO
    Temp list;
 
    struct radv_descriptor_set_layout *layout = ctx->options->layout->set[descriptor_set].layout;
@@ -393,7 +425,7 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
 
       const uint32_t *samplers = radv_immutable_samplers(layout, binding);
 
-      // TODO FIXME!
+      // TODO!
 /*		LLVMValueRef constants[] = {
 			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 0], 0),
 			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 1], 0),
@@ -462,7 +494,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    for (unsigned i = 0; i < instr->num_srcs; i++) {
       switch (instr->src[i].src_type) {
       case nir_tex_src_coord: {
-         for (unsigned chan = 0; chan < instr->coord_components; ++chan)
+/*         for (unsigned chan = 0; chan < instr->coord_components; ++chan)
          {
             coord_components[chan] = {ctx->program->allocateId(), v1};
             std::unique_ptr<Instruction> coord_extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
@@ -470,7 +502,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
             coord_extract->getOperand(1) = Operand((uint32_t)chan);
             coord_extract->getDefinition(0) = Definition{coord_components[chan]};
             ctx->block->instructions.emplace_back(std::move(coord_extract));
-         }
+         }*/
          break;
       }
       case nir_tex_src_texture_offset:
@@ -479,7 +511,59 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          break;
       }
    }
+// TODO: all other cases: structure taken from ac_nir_to_llvm.c
+   if (instr->op == nir_texop_txs && instr->sampler_dim == GLSL_SAMPLER_DIM_BUF)
+      fprintf(stderr, "Unimplemented tex instr type: ");
 
+   if (instr->op == nir_texop_texture_samples)
+      fprintf(stderr, "Unimplemented tex instr type: ");
+
+   if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && coord_components[0].id())
+      fprintf(stderr, "Unimplemented tex instr type: ");
+
+   if (instr->coord_components > 1 &&
+       instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
+       instr->is_array &&
+       instr->op != nir_texop_txf)
+      fprintf(stderr, "Unimplemented tex instr type: ");
+
+   if (instr->coord_components > 2 &&
+      (instr->sampler_dim == GLSL_SAMPLER_DIM_2D ||
+       instr->sampler_dim == GLSL_SAMPLER_DIM_MS ||
+       instr->sampler_dim == GLSL_SAMPLER_DIM_SUBPASS ||
+       instr->sampler_dim == GLSL_SAMPLER_DIM_SUBPASS_MS) &&
+       instr->is_array &&
+       instr->op != nir_texop_txf && instr->op != nir_texop_txf_ms)
+   fprintf(stderr, "Unimplemented tex instr type: ");
+
+   if (ctx->options->chip_class >= GFX9 &&
+       instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
+       instr->op != nir_texop_lod)
+   fprintf(stderr, "Unimplemented tex instr type: ");
+
+   if (instr->op == nir_texop_samples_identical)
+      fprintf(stderr, "Unimplemented tex instr type: ");
+
+   if (instr->sampler_dim == GLSL_SAMPLER_DIM_MS &&
+       instr->op != nir_texop_txs)
+   fprintf(stderr, "Unimplemented tex instr type: ");
+
+
+   unsigned dmask = 0xf;
+   if (instr->op == nir_texop_tg4)
+      fprintf(stderr, "Unimplemented tex instr type: ");
+
+   if (instr->sampler_dim != GLSL_SAMPLER_DIM_BUF)
+      aco_image_dim dim = get_sampler_dim(ctx, instr->sampler_dim, instr->is_array);
+
+   std::unique_ptr<MIMG_instruction> tex;
+   tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample, Format::MIMG, 3, 1));
+   tex->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].src.ssa)};
+   tex->getOperand(1) = Operand(resource);
+   tex->getOperand(2) = Operand(sampler);
+   tex->dmask = dmask;
+   tex->getDefinition(0) = get_ssa_temp(ctx, &instr->dest.ssa);
+   ctx->block->instructions.emplace_back(std::move(tex));
 
 }
 
