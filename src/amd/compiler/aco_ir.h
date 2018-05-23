@@ -36,6 +36,7 @@
 
 
 struct radv_shader_variant_info;
+struct radv_nir_compiler_options;
 
 typedef enum {
    b = 0,
@@ -590,7 +591,8 @@ private:
 
 std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         ac_shader_config* config,
-                                        struct radv_shader_variant_info *info);
+                                        struct radv_shader_variant_info *info,
+                                        struct radv_nir_compiler_options *options);
 void register_allocation(Program *program);
 void eliminate_pseudo_instr(Program* program);
 void schedule(Program* program);

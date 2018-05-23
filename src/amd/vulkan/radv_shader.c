@@ -1190,7 +1190,7 @@ shader_variant_compile(struct radv_device *device,
 					shaders, shader_count, options);
 		if (!module->nir)
 			aco_compile_shader(shaders[0], &variant->config,
-			                   &binary, &variant->info);
+			                   &binary, &variant->info, options);
 	}
 	binary->variant_info = variant_info;
 
