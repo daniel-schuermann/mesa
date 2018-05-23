@@ -28,7 +28,8 @@
 
 #include <iostream>
 void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* config,
-                        struct ac_shader_binary* binary, struct radv_shader_variant_info *info)
+                        struct ac_shader_binary* binary, struct radv_shader_variant_info *info,
+                        struct radv_nir_compiler_options *options)
 {
    if (shader->info.stage != MESA_SHADER_FRAGMENT)
       return;
@@ -36,7 +37,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    memset(info, 0, sizeof(*info));
    memset(config, 0, sizeof(*info));
 
-   auto program = aco::select_program(shader, config, info);
+   auto program = aco::select_program(shader, config, info, options);
    std::cerr << "After Instruction Selection:\n";
    aco_print_program(program.get(), stderr);
    aco::register_allocation(program.get());
