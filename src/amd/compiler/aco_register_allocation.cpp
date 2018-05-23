@@ -117,6 +117,26 @@ static unsigned reg_count(RegClass reg_class)
    }
 }
 
+bool can_allocate_register(const std::set<std::pair<unsigned, unsigned>> *interfere,
+                           const std::unordered_map<unsigned, std::pair<PhysReg, unsigned>> *assignments,
+                           unsigned id, unsigned reg, unsigned count)
+{
+   for (auto it = interfere->lower_bound({id, 0}); it != interfere->end() && it->first == id; ++it) {
+      unsigned other_id = it->second;
+      auto other_it = assignments->find(other_id);
+      if (other_it == assignments->end())
+         continue;
+
+      unsigned other_count = other_it->second.second;
+      unsigned other_reg = other_it->second.first.reg;
+      if (other_reg + other_count <= reg || reg + count <= other_reg)
+         continue;
+
+      return false;
+   }
+   return true;
+}
+
 void register_allocation(Program *program)
 {
    unsigned num_accessed_sgpr = 0;
@@ -183,7 +203,7 @@ void register_allocation(Program *program)
          }
 
          if (insn->opcode == aco_opcode::v_interp_p2_f32)
-            temp_assignments[insn->getOperand(2).tempId()] = insn->getDefinition(0).tempId();
+            temp_assignments[insn->getDefinition(0).tempId()] = insn->getOperand(2).tempId();
 
          for(unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
@@ -199,53 +219,60 @@ void register_allocation(Program *program)
    }
 
    /* Finish the assignment */
-   for (auto def : simplicial_order) {
-      auto id = def->tempId();
-      if (assignments.find(id) != assignments.end())
-         continue;
-      if (temp_assignments.find(id) != temp_assignments.end()){
-         assignments[id] = assignments[temp_assignments.find(id)->second];
-         continue;
-      }
+   for(auto b_it = program->blocks.rbegin(); b_it != program->blocks.rend(); ++b_it) {
+      std::set<unsigned> live;
+      for(auto i_it = (*b_it)->instructions.begin(); i_it != (*b_it)->instructions.end(); ++i_it) {
+         auto& insn = *i_it;
+         for (unsigned i = 0; i < insn->definitionCount(); ++i) {
+            auto& definition = insn->getDefinition(i);
+            if (definition.isTemp()) {
+               auto id = definition.tempId();
+               if (assignments.find(id) != assignments.end())
+                  continue;
+               if (temp_assignments.find(id) != temp_assignments.end()){
+                  assignments[id] = assignments[temp_assignments.find(id)->second];
+                  continue;
+               }
 
-      unsigned count = reg_count(def->regClass());
-      unsigned alignment = 1;
-      unsigned start = 0;
-      unsigned end = 256;
-      unsigned alloc_reg = 0;
+               unsigned count = reg_count(definition.regClass());
+               unsigned alignment = 1;
+               unsigned start = 0;
+               unsigned end = 256;
+               unsigned alloc_reg = 0;
+               bool allocated = false;
 
-      if (def->getTemp().type() == RegType::vgpr) {
-         start = 256;
-         end = 512;
-      }
+               if (definition.getTemp().type() == RegType::vgpr) {
+                  start = 256;
+                  end = 512;
+               }
 
-      for(unsigned reg = start; reg + count <= end; reg += alignment) {
-         bool can_alloc = true;
-         for (auto it = interfere.lower_bound({id, 0}); it != interfere.end() && it->first == id; ++it) {
-            unsigned other_id = it->second;
-            auto other_it = assignments.find(other_id);
-            if (other_it == assignments.end())
-               continue;
+               if (insn->opcode == aco_opcode::p_parallelcopy) {
+                  unsigned preferred_reg = assignments.find(insn->getOperand(i).tempId())->second.first.reg;
+                  if (can_allocate_register(&interfere, &assignments, id, preferred_reg, count)) {
+                     alloc_reg = preferred_reg;
+                     allocated = true;
+                  }
+               }
 
-            unsigned other_count = other_it->second.second;
-            unsigned other_reg = other_it->second.first.reg;
-            if (other_reg + other_count <= reg || reg + count <= other_reg)
-               continue;
+               if (!allocated) {
+                  for(unsigned reg = start; reg + count <= end; reg += alignment) {
+                     if (can_allocate_register(&interfere, &assignments, id, reg, count)) {
+                        alloc_reg = reg;
+                        break;
+                     }
+                  }
+               }
 
-            can_alloc = false;
-            break;
+               assignments[id] = {PhysReg{alloc_reg}, count};
+               if (definition.getTemp().type() == RegType::vgpr)
+                  num_accessed_vgpr = std::max(num_accessed_vgpr, alloc_reg - 256 + definition.getTemp().size());
+               else
+                  num_accessed_sgpr = std::max(num_accessed_sgpr, alloc_reg + definition.getTemp().size());
+            }
          }
-         if (can_alloc) {
-            alloc_reg = reg;
-            break;
-         }
       }
-      assignments[id] = {PhysReg{alloc_reg}, count};
-      if (def->getTemp().type() == RegType::vgpr)
-         num_accessed_vgpr = std::max(num_accessed_vgpr, alloc_reg - 256 + def->getTemp().size());
-      else
-         num_accessed_sgpr = std::max(num_accessed_sgpr, alloc_reg + def->getTemp().size());
    }
+
    program->config->num_vgprs = num_accessed_vgpr;
    program->config->num_sgprs = num_accessed_sgpr + 2;
    program->config->spi_ps_input_addr = S_0286CC_PERSP_CENTER_ENA(1);
