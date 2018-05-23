@@ -11,7 +11,7 @@
 namespace aco {
 namespace {
 struct isel_context {
-   //const struct radv_nir_compiler_options *options;
+   struct radv_nir_compiler_options *options;
    Program *program;
    Block *block;
    bool *uniform_vals;
@@ -62,6 +62,21 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       vec->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
       ctx->block->instructions.emplace_back(std::move(vec));
+      break;
+   }
+   case nir_op_fmul: {
+      if (instr->dest.dest.ssa.bit_size == 32)
+      {
+         std::unique_ptr<VOP2_instruction> mul{create_instruction<VOP2_instruction>(aco_opcode::v_mul_f32, Format::VOP2, 2, 1)};
+         mul->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].src.ssa)};
+         mul->getOperand(1) = Operand{get_ssa_temp(ctx, instr->src[1].src.ssa)};
+         mul->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
+         ctx->block->instructions.emplace_back(std::move(mul));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
       break;
    }
    default:
@@ -251,6 +266,223 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    }
 }
 
+enum aco_descriptor_type {
+   ACO_DESC_IMAGE,
+   ACO_DESC_FMASK,
+   ACO_DESC_SAMPLER,
+   ACO_DESC_BUFFER,
+};
+
+Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
+                      enum aco_descriptor_type desc_type,
+                      const nir_tex_instr *tex_instr, bool image, bool write)
+{
+   Temp index;
+   bool index_set = false;
+   unsigned constant_index = 0;
+   unsigned descriptor_set;
+   unsigned base_index;
+   bool bindless = false;
+
+   if (!deref) {
+      assert(tex_instr && !image);
+      descriptor_set = 0;
+      base_index = tex_instr->sampler_index;
+   } else {
+      const nir_deref *tail = &deref->deref;
+      while (tail->child) {
+         const nir_deref_array *child = nir_deref_as_array(tail->child);
+         unsigned array_size = glsl_get_aoa_size(tail->child->type);
+
+         if (!array_size)
+            array_size = 1;
+
+         assert(child->deref_array_type != nir_deref_array_type_wildcard);
+
+         if (child->deref_array_type == nir_deref_array_type_indirect) {
+            std::unique_ptr<Instruction> indirect;
+            indirect.reset(create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1));
+            indirect->getDefinition(0) = Definition{ctx->program->allocateId(), s1};
+            indirect->getOperand(0) = Operand(array_size);
+            indirect->getOperand(1) = Operand{get_ssa_temp(ctx, child->indirect.ssa)};
+            ctx->block->instructions.emplace_back(std::move(indirect));
+
+            if (!index_set) {
+               index = indirect->getDefinition(0).getTemp();
+               index_set = true;
+            } else {
+               std::unique_ptr<Instruction> add;
+               add.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1));
+               add->getDefinition(0) = Definition{ctx->program->allocateId(), s1};
+               add->getOperand(0) = Operand(index);
+               add->getOperand(1) = Operand(indirect->getDefinition(0).getTemp());
+
+               ctx->block->instructions.emplace_back(std::move(add));
+               index = add->getDefinition(0).getTemp();
+            }
+         }
+
+         constant_index += child->base_offset * array_size;
+         tail = &child->deref;
+      }
+      descriptor_set = deref->var->data.descriptor_set;
+
+      if (deref->var->data.bindless) {
+         bindless = deref->var->data.bindless;
+         base_index = deref->var->data.driver_location;
+      } else {
+         base_index = deref->var->data.binding;
+      }
+   }
+/*	return ctx->abi->load_sampler_desc(ctx->abi,
+					  descriptor_set,
+					  base_index,
+					  constant_index, index,
+					  desc_type, image, write, bindless);
+*/
+	//struct radv_shader_context *ctx = radv_shader_context_from_abi(abi);
+	//LLVMValueRef list = ctx->descriptor_sets[descriptor_set];
+   // FIXME:
+   Temp list;
+
+   struct radv_descriptor_set_layout *layout = ctx->options->layout->set[descriptor_set].layout;
+   struct radv_descriptor_set_binding_layout *binding = layout->binding + base_index;
+   unsigned offset = binding->offset;
+   unsigned stride = binding->size;
+   unsigned type_size;
+   aco_opcode opcode;
+   RegClass type;
+
+   assert(base_index < layout->binding_count);
+
+   switch (desc_type) {
+   case ACO_DESC_IMAGE:
+      type = s8;
+      opcode = aco_opcode::s_load_dwordx8;
+      type_size = 32;
+      break;
+   case ACO_DESC_FMASK:
+      type = s8;
+      opcode = aco_opcode::s_load_dwordx8;
+      offset += 32;
+      type_size = 32;
+      break;
+   case ACO_DESC_SAMPLER:
+      type = s4;
+      opcode = aco_opcode::s_load_dwordx4;
+      if (binding->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+         offset += 64;
+
+      type_size = 16;
+      break;
+   case ACO_DESC_BUFFER:
+      type = s4;
+      opcode = aco_opcode::s_load_dwordx4;
+      type_size = 16;
+      break;
+   default:
+      unreachable("invalid desc_type\n");
+   }
+
+   offset += constant_index * stride;
+
+   if (desc_type == ACO_DESC_SAMPLER && binding->immutable_samplers_offset &&
+      (!index_set || binding->immutable_samplers_equal)) {
+      if (binding->immutable_samplers_equal)
+         constant_index = 0;
+
+      const uint32_t *samplers = radv_immutable_samplers(layout, binding);
+
+      // TODO FIXME!
+/*		LLVMValueRef constants[] = {
+			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 0], 0),
+			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 1], 0),
+			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 2], 0),
+			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 3], 0),
+		};
+		return ac_build_gather_values(&ctx->ac, constants, 4);*/
+   }
+
+   assert(stride % type_size == 0);
+   Operand off;
+   if (!index_set) {
+      off = Operand(offset);
+   } else {
+      std::unique_ptr<SOP2_instruction> mul{create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1)};
+      mul->getOperand(0) = Operand(stride / type_size);
+      mul->getOperand(1) = Operand(index);
+      Temp t = {ctx->program->allocateId(), s1};
+      mul->getDefinition(0) = Definition(t);
+      ctx->block->instructions.emplace_back(std::move(mul));
+      std::unique_ptr<SOP2_instruction> add{create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1)};
+      add->getOperand(0) = Operand(offset);
+      add->getOperand(1) = Operand(t);
+      t = {ctx->program->allocateId(), s1};
+      add->getDefinition(0) = Definition(t);
+      ctx->block->instructions.emplace_back(std::move(add));
+      off = Operand(t);
+   }
+
+   std::unique_ptr<Instruction> load;
+   load.reset(create_instruction<SMEM_instruction>(opcode, Format::SMEM, 2, 1));
+   load->getOperand(0) = Operand(list);
+   load->getOperand(1) = off;
+   Temp t = {ctx->program->allocateId(), type};
+   load->getDefinition(0) = Definition(t);
+   ctx->block->instructions.emplace_back(std::move(load));
+   return t;
+}
+
+void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
+                           Temp *res_ptr, Temp *samp_ptr, Temp *fmask_ptr)
+{
+   if (instr->sampler_dim  == GLSL_SAMPLER_DIM_BUF)
+      *res_ptr = get_sampler_desc(ctx, instr->texture, ACO_DESC_BUFFER, instr, false, false);
+   else
+      *res_ptr = get_sampler_desc(ctx, instr->texture, ACO_DESC_IMAGE, instr, false, false);
+   if (samp_ptr) {
+      if (instr->sampler)
+         *samp_ptr = get_sampler_desc(ctx, instr->sampler, ACO_DESC_SAMPLER, instr, false, false);
+      else
+         *samp_ptr = get_sampler_desc(ctx, instr->texture, ACO_DESC_SAMPLER, instr, false, false);
+      //if (instr->sampler_dim < GLSL_SAMPLER_DIM_RECT)
+      //   *samp_ptr = sici_fix_sampler_aniso(ctx, *res_ptr, *samp_ptr);
+   }
+   if (fmask_ptr && !instr->sampler && (instr->op == nir_texop_txf_ms ||
+                                        instr->op == nir_texop_samples_identical))
+      *fmask_ptr = get_sampler_desc(ctx, instr->texture, ACO_DESC_FMASK, instr, false, false);
+}
+
+void visit_tex(isel_context *ctx, nir_tex_instr *instr)
+{
+   Temp coord_components[4];
+   Temp resource, sampler, fmask_ptr;
+   tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
+
+   for (unsigned i = 0; i < instr->num_srcs; i++) {
+      switch (instr->src[i].src_type) {
+      case nir_tex_src_coord: {
+         for (unsigned chan = 0; chan < instr->coord_components; ++chan)
+         {
+            coord_components[chan] = {ctx->program->allocateId(), v1};
+            std::unique_ptr<Instruction> coord_extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
+            coord_extract->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[i].src.ssa)};
+            coord_extract->getOperand(1) = Operand((uint32_t)chan);
+            coord_extract->getDefinition(0) = Definition{coord_components[chan]};
+            ctx->block->instructions.emplace_back(std::move(coord_extract));
+         }
+         break;
+      }
+      case nir_tex_src_texture_offset:
+      case nir_tex_src_sampler_offset:
+      default:
+         break;
+      }
+   }
+
+
+}
+
 void visit_block(isel_context *ctx, nir_block *block)
 {
    nir_foreach_instr(instr, block) {
@@ -263,6 +495,9 @@ void visit_block(isel_context *ctx, nir_block *block)
          break;
       case nir_instr_type_intrinsic:
          visit_intrinsic(ctx, nir_instr_as_intrinsic(instr));
+         break;
+      case nir_instr_type_tex:
+         visit_tex(ctx, nir_instr_as_tex(instr));
          break;
       default:
          fprintf(stderr, "Unknown NIR instr type: ");
@@ -489,7 +724,8 @@ void add_startpgm(struct isel_context *ctx)
 
 std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         ac_shader_config* config,
-                                        struct radv_shader_variant_info *info)
+                                        struct radv_shader_variant_info *info,
+                                        struct radv_nir_compiler_options *options)
 {
    std::unique_ptr<Program> program{new Program};
    program->config = config;
@@ -505,7 +741,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
 
    isel_context ctx;
    ctx.program = program.get();
-
+   ctx.options = options;
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
    nir_index_ssa_defs(func->impl);
