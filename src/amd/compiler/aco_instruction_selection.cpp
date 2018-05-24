@@ -22,6 +22,8 @@ struct isel_context {
    Temp barycentric_coords;
    Temp prim_mask;
    Temp descriptor_sets[RADV_UD_MAX_SETS];
+
+   uint32_t input_mask;
 };
 
 static void visit_cf_list(struct isel_context *ctx,
@@ -304,6 +306,8 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
    unsigned component = nir_intrinsic_component(instr);
    Temp coord1{ctx->program->allocateId(), v1};
    Temp coord2{ctx->program->allocateId(), v1};
+
+   ctx->input_mask |= 1u << base;
 
    std::unique_ptr<Instruction> coord1_extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
    coord1_extract->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].ssa)};
@@ -929,14 +933,13 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    program->config = config;
    program->info = info;
 
-   program->info->fs.num_interp = 1;
-   program->info->fs.input_mask = 1;
+
    for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i)
       program->info->user_sgprs_locs.descriptor_sets[i].sgpr_idx = -1;
    for (unsigned i = 0; i < AC_UD_MAX_UD; ++i)
       program->info->user_sgprs_locs.shader_data[i].sgpr_idx = -1;
 
-   isel_context ctx;
+   isel_context ctx = {};
    ctx.program = program.get();
    ctx.options = options;
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
@@ -957,6 +960,9 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
 
    ctx.block->instructions.push_back(std::unique_ptr<SOPP_instruction>(create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)));
 
+   program->info->fs.num_interp = util_bitcount(ctx.input_mask);
+   program->info->fs.input_mask = ctx.input_mask;
+   fprintf(stderr, "%d %x\n", program->info->fs.num_interp, program->info->fs.input_mask);
    return program;
 }
 }
