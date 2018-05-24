@@ -918,7 +918,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
       program->info->user_sgprs_locs.descriptor_sets[i].sgpr_idx = -1;
    for (unsigned i = 0; i < AC_UD_MAX_UD; ++i)
       program->info->user_sgprs_locs.shader_data[i].sgpr_idx = -1;
-   program->info->user_sgprs_locs.descriptor_sets[0].sgpr_idx = 0;
+   program->info->user_sgprs_locs.descriptor_sets[0].sgpr_idx = 2;
    program->info->user_sgprs_locs.descriptor_sets[0].num_sgprs = 2;
 
    isel_context ctx;
