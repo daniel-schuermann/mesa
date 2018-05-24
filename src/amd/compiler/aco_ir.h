@@ -245,7 +245,7 @@ public:
    }
 
    void setTemp(Temp t) {
-      assert(control_[0]);
+      assert(!control_[2]);
       data_.temp = t;
    }
 
