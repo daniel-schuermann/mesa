@@ -174,7 +174,7 @@ void eliminate_pseudo_instr(Program* program)
             std::deque<copy_operand> operands;
             for (unsigned i = 0; i < instr->num_operands; i++)
             {
-               RegClass rc = (RegClass) (((int) v1 & (int) instr->getDefinition(0).regClass()) | 1);
+               RegClass rc = (RegClass) (((int) v1 & (int) instr->getDefinition(i).regClass()) | 1);
                for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                {
                   Operand op = Operand(PhysReg{instr->getOperand(i).physReg().reg + j}, rc);
