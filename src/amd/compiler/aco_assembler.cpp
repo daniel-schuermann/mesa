@@ -75,6 +75,7 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
       out.push_back(encoding);
       encoding = instr->getOperand(1).isConstant() ? instr->getOperand(1).constantValue() : instr->getOperand(1).physReg().reg;
       out.push_back(encoding);
+      break;
    }
    case Format::VOP2: {
       uint32_t encoding = 0;
@@ -109,6 +110,27 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
       encoding |= interp->attribute << 10;
       encoding |= interp->component << 8;
       encoding |= (0xFF & instr->getOperand(0).physReg().reg);
+      out.push_back(encoding);
+      break;
+   }
+   case Format::MIMG: {
+      MIMG_instruction* mimg = static_cast<MIMG_instruction*>(instr);
+      uint32_t encoding = (0b111100 << 26);
+      encoding |= mimg->slc ? 1 << 25 : 0;
+      encoding |= opcode_infos[(int)instr->opcode].opcode << 18;
+      encoding |= mimg->lwe ? 1 << 17 : 0;
+      encoding |= mimg->tfe ? 1 << 16 : 0;
+      encoding |= mimg->r128 ? 1 << 16 : 0;
+      encoding |= mimg->da ? 1 << 14 : 0;
+      encoding |= mimg->glc ? 1 << 13 : 0;
+      encoding |= mimg->unrm ? 1 << 12 : 0;
+      encoding |= (0xF & mimg->dmask) << 8;
+      out.push_back(encoding);
+      encoding = (0xFF & instr->getOperand(0).physReg().reg);
+      encoding |= (0xFF & instr->getDefinition(0).physReg().reg) << 8;
+      encoding |= (0x1F & (instr->getOperand(1).physReg().reg >> 2)) << 16;
+      encoding |= (0x1F & (instr->getOperand(2).physReg().reg >> 2)) << 21;
+      // TODO VEGA: D16
       out.push_back(encoding);
       break;
    }
