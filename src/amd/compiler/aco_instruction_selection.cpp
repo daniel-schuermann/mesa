@@ -47,6 +47,15 @@ Temp get_ssa_temp(struct isel_context *ctx, nir_ssa_def *def)
    return Temp{id, rc};
 }
 
+void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op)
+{
+   std::unique_ptr<VOP2_instruction> vop2{create_instruction<VOP2_instruction>(op, Format::VOP2, 2, 1)};
+   vop2->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].src.ssa)};
+   vop2->getOperand(1) = Operand{get_ssa_temp(ctx, instr->src[1].src.ssa)};
+   vop2->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
+   ctx->block->instructions.emplace_back(std::move(vop2));
+}
+
 void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
 {
    if (!instr->dest.dest.is_ssa)
@@ -66,13 +75,18 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_fmul: {
-      if (instr->dest.dest.ssa.bit_size == 32)
-      {
-         std::unique_ptr<VOP2_instruction> mul{create_instruction<VOP2_instruction>(aco_opcode::v_mul_f32, Format::VOP2, 2, 1)};
-         mul->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].src.ssa)};
-         mul->getOperand(1) = Operand{get_ssa_temp(ctx, instr->src[1].src.ssa)};
-         mul->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
-         ctx->block->instructions.emplace_back(std::move(mul));
+      if (instr->dest.dest.ssa.bit_size == 32) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_mul_f32);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_fadd: {
+      if (instr->dest.dest.ssa.bit_size == 32) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_add_f32);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
