@@ -775,6 +775,9 @@ std::unique_ptr<bool[]> init_reg_type(nir_function_impl *impl)
             }
             break;
          }
+         case nir_instr_type_tex:
+            use_vgpr[nir_instr_as_tex(instr)->dest.ssa.index] = true;
+	    break;
          default:
             break;
          }
