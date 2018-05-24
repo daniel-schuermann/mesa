@@ -8,6 +8,7 @@
 #include "common/sid.h"
 #include "vulkan/radv_shader.h"
 
+#include "gallium/auxiliary/util/u_math.h"
 namespace aco {
 namespace {
 struct isel_context {
@@ -20,7 +21,7 @@ struct isel_context {
 
    Temp barycentric_coords;
    Temp prim_mask;
-   Temp descriptor_sets[1];
+   Temp descriptor_sets[RADV_UD_MAX_SETS];
 };
 
 static void visit_cf_list(struct isel_context *ctx,
@@ -464,7 +465,6 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
    }
 
    //LLVMValueRef list = ctx->descriptor_sets[descriptor_set];
-   assert(descriptor_set < 1);
    Temp list = ctx->descriptor_sets[descriptor_set];
 
    struct radv_descriptor_set_layout *layout = ctx->options->layout->set[descriptor_set].layout;
@@ -883,19 +883,37 @@ type_size(const struct glsl_type *type)
 
 void add_startpgm(struct isel_context *ctx)
 {
-   std::unique_ptr<Instruction> startpgm{create_instruction<Instruction>(aco_opcode::p_startpgm, Format::PSEUDO, 0, 3)};
+   unsigned num_descriptor_sets = util_bitcount(ctx->program->info->info.desc_set_used_mask);
+   std::unique_ptr<Instruction> startpgm{create_instruction<Instruction>(aco_opcode::p_startpgm, Format::PSEUDO, 0, 2 + num_descriptor_sets)};
 
    ctx->barycentric_coords = Temp{ctx->program->allocateId(), v2};
-   ctx->prim_mask = Temp{ctx->program->allocateId(), s1};
-   ctx->descriptor_sets[0] = Temp{ctx->program->allocateId(), s2};
 
    startpgm->getDefinition(0) = Definition{ctx->barycentric_coords};
    startpgm->getDefinition(0).setFixed(fixed_vgpr(0));
 
-   startpgm->getDefinition(1) = Definition{ctx->descriptor_sets[0]};
-   startpgm->getDefinition(1).setFixed(fixed_sgpr(2));
-   startpgm->getDefinition(2) = Definition{ctx->prim_mask};
-   startpgm->getDefinition(2).setFixed(fixed_sgpr(4));
+   unsigned user_sgpr = 2;
+   unsigned descriptor_set_cnt = 0;
+   for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i) {
+      if (!((1u << i) & ctx->program->info->info.desc_set_used_mask))
+         continue;
+
+      ctx->descriptor_sets[i] = Temp{ctx->program->allocateId(), s2};
+
+      startpgm->getDefinition(1 + descriptor_set_cnt) = Definition{ctx->descriptor_sets[i]};
+      startpgm->getDefinition(1 + descriptor_set_cnt).setFixed(fixed_sgpr(user_sgpr));
+
+      ctx->program->info->user_sgprs_locs.descriptor_sets[0].sgpr_idx = user_sgpr;
+      ctx->program->info->user_sgprs_locs.descriptor_sets[0].num_sgprs = 2;
+
+      ++descriptor_set_cnt;
+      user_sgpr += 2;
+   }
+
+   ctx-> program->info->num_user_sgprs = user_sgpr;
+
+   ctx->prim_mask = Temp{ctx->program->allocateId(), s1};
+   startpgm->getDefinition(1 + num_descriptor_sets) = Definition{ctx->prim_mask};
+   startpgm->getDefinition(1 + num_descriptor_sets).setFixed(fixed_sgpr(user_sgpr));
 
    ctx->block->instructions.push_back(std::move(startpgm));
 }
@@ -911,15 +929,12 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    program->config = config;
    program->info = info;
 
-   program->info->num_user_sgprs = 4;
    program->info->fs.num_interp = 1;
    program->info->fs.input_mask = 1;
    for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i)
       program->info->user_sgprs_locs.descriptor_sets[i].sgpr_idx = -1;
    for (unsigned i = 0; i < AC_UD_MAX_UD; ++i)
       program->info->user_sgprs_locs.shader_data[i].sgpr_idx = -1;
-   program->info->user_sgprs_locs.descriptor_sets[0].sgpr_idx = 2;
-   program->info->user_sgprs_locs.descriptor_sets[0].num_sgprs = 2;
 
    isel_context ctx;
    ctx.program = program.get();
