@@ -244,6 +244,9 @@ void register_allocation(Program *program)
                if (definition.getTemp().type() == RegType::vgpr) {
                   start = 256;
                   end = 512;
+               } else {
+                  if ((count - 1) & count)
+                     alignment = count;
                }
 
                if (insn->opcode == aco_opcode::p_parallelcopy) {
