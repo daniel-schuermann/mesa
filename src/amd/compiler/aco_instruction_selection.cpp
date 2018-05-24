@@ -47,11 +47,26 @@ Temp get_ssa_temp(struct isel_context *ctx, nir_ssa_def *def)
    return Temp{id, rc};
 }
 
+Temp get_alu_src(struct isel_context *ctx, nir_alu_src src)
+{
+   if (src.src.ssa->num_components == 1 || src.swizzle[0] == 0)
+      return get_ssa_temp(ctx, src.src.ssa);
+
+   Temp tmp{ctx->program->allocateId(), v1};
+   std::unique_ptr<Instruction> extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
+   extract->getOperand(0) = Operand(get_ssa_temp(ctx, src.src.ssa));
+   extract->getOperand(1) = Operand((uint32_t) src.swizzle[0]);
+   extract->getDefinition(0) = Definition(tmp);
+   ctx->block->instructions.emplace_back(std::move(extract));
+   return tmp;
+}
+
+
 void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op)
 {
    std::unique_ptr<VOP2_instruction> vop2{create_instruction<VOP2_instruction>(op, Format::VOP2, 2, 1)};
-   vop2->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].src.ssa)};
-   vop2->getOperand(1) = Operand{get_ssa_temp(ctx, instr->src[1].src.ssa)};
+   vop2->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
+   vop2->getOperand(1) = Operand{get_alu_src(ctx, instr->src[1])};
    vop2->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
    ctx->block->instructions.emplace_back(std::move(vop2));
 }
@@ -59,7 +74,7 @@ void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
 void emit_vop1_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op)
 {
    std::unique_ptr<VOP1_instruction> vop1{create_instruction<VOP1_instruction>(op, Format::VOP1, 1, 1)};
-   vop1->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].src.ssa)};
+   vop1->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
    vop1->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
    ctx->block->instructions.emplace_back(std::move(vop1));
 }
@@ -74,9 +89,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_vec4: {
       std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->dest.dest.ssa.num_components, 1)};
       for (unsigned i = 0; i < instr->dest.dest.ssa.num_components; ++i) {
-         if (instr->src[i].swizzle[0])
-            abort();
-          vec->getOperand(i) = Operand{get_ssa_temp(ctx, instr->src[i].src.ssa)};
+         vec->getOperand(i) = Operand{get_alu_src(ctx, instr->src[i])};
       }
       vec->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
       ctx->block->instructions.emplace_back(std::move(vec));
@@ -126,7 +139,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (instr->dest.dest.ssa.bit_size == 32) {
          std::unique_ptr<VOP2_instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_sub_f32, Format::VOP2, 2, 1)};
          vop2->getOperand(0) = Operand((uint32_t) 0);
-         vop2->getOperand(1) = Operand{get_ssa_temp(ctx, instr->src[0].src.ssa)};
+         vop2->getOperand(1) = Operand{get_alu_src(ctx, instr->src[0])};
          vop2->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
          ctx->block->instructions.emplace_back(std::move(vop2));
       } else {
