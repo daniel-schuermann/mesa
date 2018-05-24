@@ -267,54 +267,96 @@ uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
    }
 }
 
-uint16_t uses_sgpr(Instruction* instr, wait_ctx& ctx)
+uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
 {
-   bool reads_sgpr = false;
+   bool needs_waitcnt = false;
    uint16_t new_lgkm_cnt = max_lgkm_cnt;
+   uint16_t new_vm_cnt = max_vm_cnt;
    for (unsigned i = 0; i < instr->operandCount(); i++)
    {
-      if (instr->getOperand(i).getTemp().type() != RegType::sgpr)
-         continue;
+      if (instr->getOperand(i).getTemp().type() == RegType::sgpr) {
 
-      /* check consecutively read sgprs */
-      for (unsigned j = 0; j < instr->getOperand(i).getTemp().size(); j++)
-      {
-         uint8_t reg = (uint8_t) instr->getOperand(i).physReg().reg + j;
-
-         std::unordered_map<uint8_t,wait_entry>::iterator it;
-         it = ctx.sgpr_map.find(reg);
-         if (it == ctx.sgpr_map.end())
-            continue;
-
-         reads_sgpr = true;
-         wait_entry entry = it->second;
-
-         /* remove all sgprs with higher counter from map */
-         it = ctx.sgpr_map.begin();
-         while (it != ctx.sgpr_map.end())
+         /* check consecutively read sgprs */
+         for (unsigned j = 0; j < instr->getOperand(i).getTemp().size(); j++)
          {
-            if (entry.type & it->second.type) {
-               if ((entry.type & lgkm_type) && entry.lgkm_cnt <= it->second.lgkm_cnt)
-               {
-                  it->second.lgkm_cnt = max_lgkm_cnt;
-                  it->second.type = it->second.type &= ~lgkm_type;
-               }
-               if (it->second.type == done)
-                  it = ctx.sgpr_map.erase(it);
-               else
+            uint8_t reg = (uint8_t) instr->getOperand(i).physReg().reg + j;
+
+            std::unordered_map<uint8_t,wait_entry>::iterator it;
+            it = ctx.sgpr_map.find(reg);
+            if (it == ctx.sgpr_map.end())
+               continue;
+
+            needs_waitcnt = true;
+            wait_entry entry = it->second;
+
+            /* remove all sgprs with higher counter from map */
+            it = ctx.sgpr_map.begin();
+            while (it != ctx.sgpr_map.end())
+            {
+               if (entry.type & it->second.type) {
+                  if ((entry.type & lgkm_type) && entry.lgkm_cnt <= it->second.lgkm_cnt)
+                  {
+                     it->second.lgkm_cnt = max_lgkm_cnt;
+                     it->second.type = it->second.type &= ~lgkm_type;
+                  }
+                  if (it->second.type == done)
+                     it = ctx.sgpr_map.erase(it);
+                  else
+                     it++;
+               } else {
                   it++;
-            } else {
-               it++;
+               }
             }
+            new_lgkm_cnt = std::min(new_lgkm_cnt, entry.lgkm_cnt);
          }
-         new_lgkm_cnt = std::min(new_lgkm_cnt, entry.lgkm_cnt);
+      } else {
+         /* check consecutively read vgprs */
+         for (unsigned j = 0; j < instr->getOperand(i).getTemp().size(); j++)
+         {
+            uint8_t reg = (uint8_t) instr->getOperand(i).physReg().reg + j;
+
+            std::unordered_map<uint8_t,wait_entry>::iterator it;
+            it = ctx.vgpr_map.find(reg);
+            if (it == ctx.vgpr_map.end())
+               continue;
+
+            needs_waitcnt = true;
+            wait_entry entry = it->second;
+
+            /* remove all vgprs with higher counter from map */
+            it = ctx.vgpr_map.begin();
+            while (it != ctx.vgpr_map.end())
+            {
+               if (entry.type & it->second.type) {
+                  if ((entry.type & vm_type) && entry.vm_cnt <= it->second.vm_cnt)
+                  {
+                     it->second.vm_cnt = max_vm_cnt;
+                     it->second.type = it->second.type &= ~vm_type;
+                  }
+                  if ((entry.type & lgkm_type) && entry.lgkm_cnt <= it->second.lgkm_cnt)
+                  {
+                     it->second.lgkm_cnt = max_lgkm_cnt;
+                     it->second.type = it->second.type &= ~lgkm_type;
+                  }
+                  if (it->second.type == done)
+                     it = ctx.vgpr_map.erase(it);
+                  else
+                     it++;
+               } else {
+                  it++;
+               }
+            }
+            new_vm_cnt = std::min(new_vm_cnt, entry.vm_cnt);
+            new_lgkm_cnt = std::min(new_lgkm_cnt, entry.lgkm_cnt);
+         }
       }
    }
-   if (reads_sgpr)
+   if (needs_waitcnt)
    {
       /* reset counter */
+      ctx.vm_cnt = std::min(ctx.vm_cnt, new_vm_cnt);
       ctx.lgkm_cnt = std::min(ctx.lgkm_cnt, new_lgkm_cnt);
-      return create_waitcnt_imm(max_vm_cnt, max_exp_cnt, new_lgkm_cnt);
+      return create_waitcnt_imm(new_vm_cnt, max_exp_cnt, new_lgkm_cnt);
    } else {
       return -1;
    }
@@ -331,7 +373,7 @@ Instruction* kill(Instruction* instr, wait_ctx& ctx)
    if (ctx.exp_cnt || ctx.vm_cnt || ctx.lgkm_cnt)
    {
       imm &= writes_vgpr(instr, ctx);
-      imm &= uses_sgpr(instr, ctx);
+      imm &= uses_gpr(instr, ctx);
    }
    if (imm != 0xFFFF)
       return create_waitcnt(imm);
@@ -380,6 +422,23 @@ bool gen(Instruction* instr, wait_ctx& ctx)
             wait_entry(lgkm_type, max_vm_cnt, max_exp_cnt, 0));
          }
          ctx.lgkm_cnt++;
+         return true;
+      }
+   }
+   case Format::MIMG: {
+      if (instr->num_definitions) {
+         /* increase counter for all entries of same wait_type */
+         for (std::pair<uint8_t,wait_entry> e : ctx.vgpr_map)
+         {
+            if (e.second.type == vm_type)
+               e.second.vm_cnt++;
+         }
+         for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
+         {
+            ctx.vgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
+            wait_entry(vm_type, 0, max_exp_cnt, max_lgkm_cnt));
+         }
+         ctx.vm_cnt++;
          return true;
       }
    }
