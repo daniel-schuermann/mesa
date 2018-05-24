@@ -71,7 +71,7 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
       encoding |= instr->getOperand(1).isConstant() ? 1 << 17 : 0;
       encoding |= smem->glc ? 1 << 16 : 0;
       encoding |= instr->definitionCount() ? instr->getDefinition(0).physReg().reg << 6 : 0;
-      encoding |= instr->getOperand(0).physReg().reg;
+      encoding |= instr->getOperand(0).physReg().reg >> 1;
       out.push_back(encoding);
       encoding = instr->getOperand(1).isConstant() ? instr->getOperand(1).constantValue() : instr->getOperand(1).physReg().reg;
       out.push_back(encoding);

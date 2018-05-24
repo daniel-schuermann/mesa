@@ -15,7 +15,11 @@ void aco_print_operand(const Operand *operand, FILE *output)
    if (operand->isFixed()) {
       bool is_vgpr = operand->physReg().reg / 256;
       int reg = operand->physReg().reg  % 256;
-      fprintf(output, ":%c[%d]", is_vgpr ? 'v' : 's', reg);
+      fprintf(output, ":%c[%d", is_vgpr ? 'v' : 's', reg);
+      if (operand->size() > 1)
+         fprintf(output, "-%d]", reg + operand->size() -1);
+      else
+         fprintf(output, "]");
    }
 }
 
@@ -27,7 +31,11 @@ void aco_print_definition(const Definition *definition, FILE *output)
    if (definition->isFixed()) {
       bool is_vgpr = definition->physReg().reg / 256;
       int reg = definition->physReg().reg  % 256;
-      fprintf(output, ":%c[%d]", is_vgpr ? 'v' : 's', reg);
+      fprintf(output, ":%c[%d", is_vgpr ? 'v' : 's', reg);
+      if (definition->size() > 1)
+         fprintf(output, "-%d]", reg + definition->size() -1);
+      else
+         fprintf(output, "]");
    }
 }
 
