@@ -245,7 +245,7 @@ void register_allocation(Program *program)
                   start = 256;
                   end = 512;
                } else {
-                  if ((count - 1) & count)
+                  if (!((count - 1) & count))
                      alignment = count;
                }
 
