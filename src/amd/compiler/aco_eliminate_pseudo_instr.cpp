@@ -138,6 +138,7 @@ void eliminate_pseudo_instr(Program* program)
          case aco_opcode::p_extract_vector:
          {
             unsigned reg = instr->getOperand(0).physReg().reg + instr->getOperand(1).constantValue();
+            RegClass rc = instr->getDefinition(0).regClass();
             if (reg == instr->getDefinition(0).physReg().reg)
                break;
 
@@ -149,8 +150,7 @@ void eliminate_pseudo_instr(Program* program)
             } else {
                mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
             }
-            mov->getOperand(0) = instr->getOperand(0);
-            mov->getOperand(0).setFixed(PhysReg{reg});
+            mov->getOperand(0) = Operand(PhysReg{reg}, rc);
             mov->getDefinition(0) = instr->getDefinition(0);
             new_instructions.emplace_back(std::move(mov));
             break;
@@ -158,12 +158,12 @@ void eliminate_pseudo_instr(Program* program)
          case aco_opcode::p_create_vector:
          {
             std::deque<copy_operand> operands;
+            RegClass rc = (RegClass) (((int) v1 & (int) instr->getDefinition(0).regClass()) | 1);
             for (unsigned i = 0; i < instr->num_operands; i++)
             {
                Operand op = instr->getOperand(i);
                op.setFixed(PhysReg{op.physReg().reg});
-               Definition def = instr->getDefinition(0);
-               def.setFixed(PhysReg{def.physReg().reg + i});
+               Definition def = Definition(PhysReg{instr->getDefinition(0).physReg().reg + i}, rc);
                insert_sorted(operands, copy_operand{op, def});
             }
             handle_operands(operands, new_instructions);
@@ -174,12 +174,11 @@ void eliminate_pseudo_instr(Program* program)
             std::deque<copy_operand> operands;
             for (unsigned i = 0; i < instr->num_operands; i++)
             {
+               RegClass rc = (RegClass) (((int) v1 & (int) instr->getDefinition(0).regClass()) | 1);
                for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                {
-                  Operand op = instr->getOperand(i);
-                  op.setFixed(PhysReg{op.physReg().reg + j});
-                  Definition def = instr->getDefinition(i);
-                  def.setFixed(PhysReg{def.physReg().reg + j});
+                  Operand op = Operand(PhysReg{instr->getOperand(i).physReg().reg + j}, rc);
+                  Definition def = Definition(PhysReg{instr->getDefinition(i).physReg().reg + j}, rc);
                   insert_sorted(operands, copy_operand{op, def});
                }
             }
