@@ -51,7 +51,14 @@ void aco_print_instr(struct Instruction *instr, FILE *output)
 
          aco_print_operand(&instr->getOperand(i), output);
        }
-    }
+   }
+   if (instr->opcode == aco_opcode::s_waitcnt) {
+      SOPP_instruction* waitcnt = static_cast<SOPP_instruction*>(instr);
+      uint16_t imm = waitcnt->imm;
+      if ((imm & 0xF) < 0xF) fprintf(output, " vmcnt(%d)", imm & 0xF);
+      if (((imm >> 4) & 0x7) < 0x7) fprintf(output, " expcnt(%d)", (imm >> 4) & 0x7);
+      if (((imm >> 7) & 0x1F) < 0x1F) fprintf(output, " lgkmcnt(%d)", (imm >> 7) & 0x1F);
+   }
 }
 
 void aco_print_program(Program *program, FILE *output)
