@@ -369,14 +369,14 @@ enum aco_descriptor_type {
 };
 
 enum aco_image_dim {
-	aco_image_1d,
-	aco_image_2d,
-	aco_image_3d,
-	aco_image_cube, // includes cube arrays
-	aco_image_1darray,
-	aco_image_2darray,
-	aco_image_2dmsaa,
-	aco_image_2darraymsaa,
+   aco_image_1d,
+   aco_image_2d,
+   aco_image_3d,
+   aco_image_cube, // includes cube arrays
+   aco_image_1darray,
+   aco_image_2darray,
+   aco_image_2dmsaa,
+   aco_image_2darraymsaa,
 };
 
 static enum aco_image_dim
@@ -571,8 +571,9 @@ void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
          *samp_ptr = get_sampler_desc(ctx, instr->sampler, ACO_DESC_SAMPLER, instr, false, false);
       else
          *samp_ptr = get_sampler_desc(ctx, instr->texture, ACO_DESC_SAMPLER, instr, false, false);
-      //if (instr->sampler_dim < GLSL_SAMPLER_DIM_RECT)
-      //   *samp_ptr = sici_fix_sampler_aniso(ctx, *res_ptr, *samp_ptr);
+      if (instr->sampler_dim < GLSL_SAMPLER_DIM_RECT && ctx->options->chip_class < VI) {
+         // TODO: build samp_ptr = and(samp_ptr, res_ptr)
+      }
    }
    if (fmask_ptr && !instr->sampler && (instr->op == nir_texop_txf_ms ||
                                         instr->op == nir_texop_samples_identical))
@@ -582,23 +583,21 @@ void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
 void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
    Temp coord_components[4];
-   Temp resource, sampler, fmask_ptr;
+   bool has_bias = false;
+   Temp resource, sampler, fmask_ptr, bias, coords;
    tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
 
    for (unsigned i = 0; i < instr->num_srcs; i++) {
       switch (instr->src[i].src_type) {
-      case nir_tex_src_coord: {
-/*         for (unsigned chan = 0; chan < instr->coord_components; ++chan)
-         {
-            coord_components[chan] = {ctx->program->allocateId(), v1};
-            std::unique_ptr<Instruction> coord_extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-            coord_extract->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[i].src.ssa)};
-            coord_extract->getOperand(1) = Operand((uint32_t)chan);
-            coord_extract->getDefinition(0) = Definition{coord_components[chan]};
-            ctx->block->instructions.emplace_back(std::move(coord_extract));
-         }*/
+      case nir_tex_src_coord:
+         coords = get_ssa_temp(ctx, instr->src[i].src.ssa);
          break;
-      }
+      case nir_tex_src_bias:
+         if (instr->op == nir_texop_txb) {
+            bias = get_ssa_temp(ctx, instr->src[i].src.ssa);
+            has_bias = true;
+         }
+         break;
       case nir_tex_src_texture_offset:
       case nir_tex_src_sampler_offset:
       default:
@@ -647,15 +646,37 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (instr->op == nir_texop_tg4)
       fprintf(stderr, "Unimplemented tex instr type: ");
 
-   if (instr->sampler_dim != GLSL_SAMPLER_DIM_BUF)
+   bool da = false;
+   if (instr->sampler_dim != GLSL_SAMPLER_DIM_BUF) {
       aco_image_dim dim = get_sampler_dim(ctx, instr->sampler_dim, instr->is_array);
 
+      da = dim == aco_image_cube ||
+           dim == aco_image_1darray ||
+           dim == aco_image_2darray ||
+           dim == aco_image_2darraymsaa;
+   }
+
+   Temp arg = get_ssa_temp(ctx, instr->src[0].src.ssa);
+
+   if (has_bias) {
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      vec->getOperand(0) = Operand(bias);
+      vec->getOperand(1) = Operand(coords);
+      RegClass rc = (RegClass) ((int) bias.regClass() + coords.size());
+      arg = Temp{ctx->program->allocateId(), rc};
+      vec->getDefinition(0) = Definition(arg);
+      ctx->block->instructions.emplace_back(std::move(vec));
+   }
    std::unique_ptr<MIMG_instruction> tex;
-   tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample, Format::MIMG, 3, 1));
-   tex->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].src.ssa)};
+   if (instr->op == nir_texop_txb)
+      tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample_b, Format::MIMG, 3, 1));
+   else
+      tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample, Format::MIMG, 3, 1));
+   tex->getOperand(0) = Operand{arg};
    tex->getOperand(1) = Operand(resource);
    tex->getOperand(2) = Operand(sampler);
    tex->dmask = dmask;
+   tex->da = da;
    tex->getDefinition(0) = get_ssa_temp(ctx, &instr->dest.ssa);
    ctx->block->instructions.emplace_back(std::move(tex));
 
