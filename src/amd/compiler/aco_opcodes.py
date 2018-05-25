@@ -625,10 +625,12 @@ for name in VOP2_VCCINOUT:
    
 VOP2_SPECIAL = [
    "v_cndmask_b32",
+   "v_mac_f32",
    "v_mac_f16"
 ]
-opcode("v_cndmask_b32", 3, [v1], read_reg = VCC)
-opcode("v_mac_f16", 3, [v1], kills_input = [0, 0, 1])
+opcode("v_cndmask_b32", 3, [v1], 0, read_reg = VCC)
+opcode("v_mac_f32", 3, [v1], 22, kills_input = [0, 0, 1])
+opcode("v_mac_f16", 3, [v1], 35, kills_input = [0, 0, 1])
 
 VOP2 = dict(VOP2_NOVCC).values() + VOP2_LITERAL + VOP2_VCCOUT + VOP2_VCCINOUT + VOP2_SPECIAL
 

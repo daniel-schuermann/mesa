@@ -602,7 +602,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         struct radv_shader_variant_info *info,
                                         struct radv_nir_compiler_options *options);
 void register_allocation(Program *program);
-void eliminate_pseudo_instr(Program* program);
+void lower_to_hw_instr(Program* program);
 void schedule(Program* program);
 void insert_wait_states(Program* program);
 std::vector<uint32_t> emit_program(Program* program);

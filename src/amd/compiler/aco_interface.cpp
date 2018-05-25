@@ -43,7 +43,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    aco::register_allocation(program.get());
    std::cerr << "After RA:\n";
    aco_print_program(program.get(), stderr);
-   aco::eliminate_pseudo_instr(program.get());
+   aco::lower_to_hw_instr(program.get());
    std::cerr << "After Eliminate Pseudo Instr:\n";
    aco_print_program(program.get(), stderr);
    aco::schedule(program.get());
