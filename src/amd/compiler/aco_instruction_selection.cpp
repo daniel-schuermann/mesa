@@ -303,11 +303,11 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    unsigned base = nir_intrinsic_base(instr) / 4 - VARYING_SLOT_VAR0;
+   unsigned idx = util_bitcount(ctx->input_mask & ((1u << base) - 1));
+
    unsigned component = nir_intrinsic_component(instr);
    Temp coord1{ctx->program->allocateId(), v1};
    Temp coord2{ctx->program->allocateId(), v1};
-
-   ctx->input_mask |= 1u << base;
 
    std::unique_ptr<Instruction> coord1_extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
    coord1_extract->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].ssa)};
@@ -329,7 +329,7 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
    p1->getOperand(1) = Operand(ctx->prim_mask);
    p1->getOperand(1).setFixed(m0);
    p1->getDefinition(0) = Definition(tmp);
-   p1->attribute = base;
+   p1->attribute = idx;
    p1->component = component;
    std::unique_ptr<Interp_instruction> p2{create_instruction<Interp_instruction>(aco_opcode::v_interp_p2_f32, Format::VINTRP, 3, 1)};
    p2->getOperand(0) = Operand(coord2);
@@ -337,7 +337,7 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
    p2->getOperand(1).setFixed(m0);
    p2->getOperand(2) = Operand(tmp);
    p2->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
-   p2->attribute = base;
+   p2->attribute = idx;
    p2->component = component;
 
    ctx->block->instructions.emplace_back(std::move(p1));
@@ -415,7 +415,6 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
    unsigned constant_index = 0;
    unsigned descriptor_set;
    unsigned base_index;
-   bool bindless = false;
 
    if (!deref) {
       assert(tex_instr && !image);
@@ -461,7 +460,6 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
       descriptor_set = deref->var->data.descriptor_set;
 
       if (deref->var->data.bindless) {
-         bindless = deref->var->data.bindless;
          base_index = deref->var->data.driver_location;
       } else {
          base_index = deref->var->data.binding;
@@ -516,11 +514,11 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
       (!index_set || binding->immutable_samplers_equal)) {
       if (binding->immutable_samplers_equal)
          constant_index = 0;
-
+/*
       const uint32_t *samplers = radv_immutable_samplers(layout, binding);
 
       // TODO!
-/*		LLVMValueRef constants[] = {
+		LLVMValueRef constants[] = {
 			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 0], 0),
 			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 1], 0),
 			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 2], 0),
@@ -582,9 +580,8 @@ void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
 
 void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
-   Temp coord_components[4];
    bool has_bias = false;
-   Temp resource, sampler, fmask_ptr, bias, coords;
+   Temp resource, sampler, fmask_ptr, bias, coords = Temp();
    tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
 
    for (unsigned i = 0; i < instr->num_srcs; i++) {
@@ -611,7 +608,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (instr->op == nir_texop_texture_samples)
       fprintf(stderr, "Unimplemented tex instr type: ");
 
-   if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && coord_components[0].id())
+   if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && coords.id())
       fprintf(stderr, "Unimplemented tex instr type: ");
 
    if (instr->coord_components > 1 &&
@@ -891,7 +888,7 @@ std::unique_ptr<bool[]> init_reg_type(nir_function_impl *impl)
          }
          case nir_instr_type_tex:
             use_vgpr[nir_instr_as_tex(instr)->dest.ssa.index] = true;
-	    break;
+            break;
          default:
             break;
          }
@@ -975,6 +972,12 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    ctx.block = ctx.program->blocks.back().get();
    ctx.block->index = 0;
 
+   nir_foreach_variable(variable, &nir->inputs)
+   {
+      int idx = variable->data.location - VARYING_SLOT_VAR0;
+      ctx.input_mask |= 1ull << idx;
+   }
+
    add_startpgm(&ctx);
 
    visit_cf_list(&ctx, &func->impl->body);
@@ -983,7 +986,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
 
    program->info->fs.num_interp = util_bitcount(ctx.input_mask);
    program->info->fs.input_mask = ctx.input_mask;
-   fprintf(stderr, "%d %x\n", program->info->fs.num_interp, program->info->fs.input_mask);
+
    return program;
 }
 }
