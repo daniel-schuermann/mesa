@@ -34,8 +34,14 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    if (shader->info.stage != MESA_SHADER_FRAGMENT)
       return;
 
+   struct radv_shader_info pre_info = info->info;
+
    memset(info, 0, sizeof(*info));
    memset(config, 0, sizeof(*info));
+
+   /* This is actually form a pass done by radv and w ewant to keep it, just need to clear all the
+    * nir_to_llvm stuff. */
+   info->info = pre_info;
 
    auto program = aco::select_program(shader, config, info, options);
    std::cerr << "After Instruction Selection:\n";
