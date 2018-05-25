@@ -63,7 +63,7 @@ libaco_files = files(
   'aco_insert_waitcnt.cpp',
   'aco_scheduler_postRA.cpp',
   'aco_register_allocation.cpp',
-  'aco_eliminate_pseudo_instr.cpp',
+  'aco_lower_to_hw_instr.cpp',
   'aco_print_asm.cpp',
   'aco_print_ir.cpp',
 )
