@@ -154,13 +154,16 @@ void lower_to_hw_instr(Program* program)
             case aco_opcode::p_create_vector:
             {
                std::deque<copy_operand> operands;
-               RegClass rc = (RegClass) (((int) v1 & (int) instr->getDefinition(0).regClass()) | 1);
+               RegClass rc_def = (RegClass) (((int) v1 & (int) instr->getDefinition(0).regClass()) | 1);
                for (unsigned i = 0; i < instr->num_operands; i++)
                {
-                  Operand op = instr->getOperand(i);
-                  op.setFixed(PhysReg{op.physReg().reg});
-                  Definition def = Definition(PhysReg{instr->getDefinition(0).physReg().reg + i}, rc);
-                  insert_sorted(operands, copy_operand{op, def});
+                  RegClass rc_op = (RegClass) (((int) v1 & (int) instr->getOperand(i).regClass()) | 1);
+                  for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
+                  {
+                     Operand op = Operand(PhysReg{instr->getOperand(i).physReg().reg + j}, rc_op);
+                     Definition def = Definition(PhysReg{instr->getDefinition(0).physReg().reg + i + j}, rc_def);
+                     insert_sorted(operands, copy_operand{op, def});
+                  }
                }
                handle_operands(operands, new_instructions);
                break;
