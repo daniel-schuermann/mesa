@@ -598,14 +598,14 @@ VOP2_NOVCC = {
 for code, name in VOP2_NOVCC:
    opcode(name, 2, [v1], code)
 
-VOP2_LITERAL = [
-   "v_madmk_f32",
-   "v_madak_f32",
-   "v_madmk_f16",
-   "v_madak_f16"
-]
-for name in VOP2_LITERAL:
-   opcode(name, 3, [v1])
+VOP2_LITERAL = {
+   (23, "v_madmk_f32"),
+   (24, "v_madak_f32"),
+   (36, "v_madmk_f16"),
+   (37, "v_madak_f16")
+}
+for code, name in VOP2_LITERAL:
+   opcode(name, 3, [v1], code)
 
 VOP2_VCCOUT = [
    "v_add_co_u32",
@@ -632,7 +632,7 @@ opcode("v_cndmask_b32", 3, [v1], 0, read_reg = VCC)
 opcode("v_mac_f32", 3, [v1], 22, kills_input = [0, 0, 1])
 opcode("v_mac_f16", 3, [v1], 35, kills_input = [0, 0, 1])
 
-VOP2 = dict(VOP2_NOVCC).values() + VOP2_LITERAL + VOP2_VCCOUT + VOP2_VCCINOUT + VOP2_SPECIAL
+VOP2 = dict(VOP2_NOVCC).values() + dict(VOP2_LITERAL).values() + VOP2_VCCOUT + VOP2_VCCINOUT + VOP2_SPECIAL
 
 
 # VOP1 instructions: instructions with 1 input and 1 output
