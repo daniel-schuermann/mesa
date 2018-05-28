@@ -603,6 +603,79 @@ void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
       *fmask_ptr = get_sampler_desc(ctx, instr->texture, ACO_DESC_FMASK, instr, false, false);
 }
 
+void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is_array, bool is_lod)
+{
+
+   if (is_array && !is_lod)
+      fprintf(stderr, "Unimplemented tex instr type: ");
+
+   Temp coord_args[3], ma, tc, sc, id;
+   std::unique_ptr<Instruction> tmp;
+   for (unsigned i = 0; i < 3; i++) {
+      tmp.reset(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
+      tmp->getOperand(0) = Operand(*coords);
+      tmp->getOperand(1) = Operand(i);
+      coord_args[i] = {ctx->program->allocateId(), v1};
+      tmp->getDefinition(0) = Definition(coord_args[i]);
+      ctx->block->instructions.emplace_back(std::move(tmp));
+   }
+   tmp.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cubema_f32, Format::VOP3A, 3, 1));
+   for (unsigned i = 0; i < 3; i++)
+      tmp->getOperand(i) = Operand(coord_args[i]);
+   ma = {ctx->program->allocateId(), v1};
+   tmp->getDefinition(0) = Definition(ma);
+   ctx->block->instructions.emplace_back(std::move(tmp));
+   std::unique_ptr<VOP3A_instruction> vop3a{create_instruction<VOP3A_instruction>(aco_opcode::v_rcp_f32, (Format) ((uint16_t) Format::VOP3A | (uint16_t) Format::VOP1), 1, 1)};
+   vop3a->getOperand(0) = Operand(ma);
+   vop3a->abs[0] = true;
+   ma = {ctx->program->allocateId(), v1};
+   vop3a->getDefinition(0) = Definition(ma);
+   ctx->block->instructions.emplace_back(std::move(vop3a));
+   tmp.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cubesc_f32, Format::VOP3A, 3, 1));
+   for (unsigned i = 0; i < 3; i++)
+      tmp->getOperand(i) = Operand(coord_args[i]);
+   sc = {ctx->program->allocateId(), v1};
+   tmp->getDefinition(0) = Definition(sc);
+   ctx->block->instructions.emplace_back(std::move(tmp));
+   tmp.reset(create_instruction<VOP2_instruction>(aco_opcode::v_madak_f32, Format::VOP2, 3, 1));
+   tmp->getOperand(0) = Operand(sc);
+   tmp->getOperand(1) = Operand(ma);
+   tmp->getOperand(2) = Operand((uint32_t) 0x3fc00000); /* 1.5 */
+   sc = {ctx->program->allocateId(), v1};
+   tmp->getDefinition(0) = Definition(sc);
+   ctx->block->instructions.emplace_back(std::move(tmp));
+   tmp.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cubetc_f32, Format::VOP3A, 3, 1));
+   for (unsigned i = 0; i < 3; i++)
+      tmp->getOperand(i) = Operand(coord_args[i]);
+   tc = {ctx->program->allocateId(), v1};
+   tmp->getDefinition(0) = Definition(tc);
+   ctx->block->instructions.emplace_back(std::move(tmp));
+   tmp.reset(create_instruction<VOP2_instruction>(aco_opcode::v_madak_f32, Format::VOP2, 3, 1));
+   tmp->getOperand(0) = Operand(tc);
+   tmp->getOperand(1) = Operand(ma);
+   tmp->getOperand(2) = Operand((uint32_t) 0x3fc00000); /* 1.5 */
+   tc = {ctx->program->allocateId(), v1};
+   tmp->getDefinition(0) = Definition(tc);
+   ctx->block->instructions.emplace_back(std::move(tmp));
+   tmp.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cubeid_f32, Format::VOP3A, 3, 1));
+   for (unsigned i = 0; i < 3; i++)
+      tmp->getOperand(i) = Operand(coord_args[i]);
+   id = {ctx->program->allocateId(), v1};
+   tmp->getDefinition(0) = Definition(id);
+   ctx->block->instructions.emplace_back(std::move(tmp));
+   tmp.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1));
+   tmp->getOperand(0) = Operand(sc);
+   tmp->getOperand(1) = Operand(tc);
+   tmp->getOperand(2) = Operand(id);
+   *coords = {ctx->program->allocateId(), v3};
+   tmp->getDefinition(0) = Definition(*coords);
+   ctx->block->instructions.emplace_back(std::move(tmp));
+
+   if (is_deriv)
+      fprintf(stderr, "Unimplemented tex instr type: ");
+
+}
+
 void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
    bool has_bias = false;
@@ -633,8 +706,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (instr->op == nir_texop_texture_samples)
       fprintf(stderr, "Unimplemented tex instr type: ");
 
-   if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && coords.id())
-      fprintf(stderr, "Unimplemented tex instr type: ");
+   if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && instr->coord_components)
+      prepare_cube_coords(ctx, &coords, instr->op == nir_texop_txd, instr->is_array, instr->op == nir_texop_lod);
 
    if (instr->coord_components > 1 &&
        instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
@@ -678,7 +751,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
            dim == aco_image_2darraymsaa;
    }
 
-   Temp arg = get_ssa_temp(ctx, instr->src[0].src.ssa);
+   Temp arg = coords;
 
    if (has_bias) {
       std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
