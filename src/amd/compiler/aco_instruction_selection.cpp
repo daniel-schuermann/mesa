@@ -386,6 +386,23 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
    }
 }
 
+void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   unsigned base = nir_intrinsic_base(instr) / 4 - VARYING_SLOT_VAR0;
+   unsigned idx = util_bitcount(ctx->input_mask & ((1u << base) - 1));
+   unsigned component = nir_intrinsic_component(instr);
+
+   std::unique_ptr<Interp_instruction> mov{create_instruction<Interp_instruction>(aco_opcode::v_interp_mov_f32, Format::VINTRP, 2, 1)};
+   mov->getOperand(0) = Operand();
+   mov->getOperand(0).setFixed(PhysReg{2});
+   mov->getOperand(1) = Operand(ctx->prim_mask);
+   mov->getOperand(1).setFixed(m0);
+   mov->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+   mov->attribute = idx;
+   mov->component = component;
+   ctx->block->instructions.emplace_back(std::move(mov));
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
@@ -398,7 +415,15 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_store_output:
       visit_store_output(ctx, instr);
       break;
+   case nir_intrinsic_load_input:
+      visit_load_input(ctx, instr);
+      break;
    default:
+      fprintf(stderr, "Unimplemented intrinsic instr: ");
+      nir_print_instr(&instr->instr, stderr);
+      fprintf(stderr, "\n");
+      abort();
+
       break;
    }
 }
@@ -474,22 +499,33 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
          assert(child->deref_array_type != nir_deref_array_type_wildcard);
 
          if (child->deref_array_type == nir_deref_array_type_indirect) {
-            std::unique_ptr<Instruction> indirect;
-            indirect.reset(create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1));
-            indirect->getDefinition(0) = Definition{ctx->program->allocateId(), s1};
-            indirect->getOperand(0) = Operand(array_size);
-            indirect->getOperand(1) = Operand{get_ssa_temp(ctx, child->indirect.ssa)};
-            ctx->block->instructions.emplace_back(std::move(indirect));
-
+            /* check if index is in sgpr */
+            Temp indirect_tmp = get_ssa_temp(ctx, child->indirect.ssa);
+            if (indirect_tmp.type() == vgpr) {
+               std::unique_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+               readlane->getOperand(0) = Operand(indirect_tmp);
+               indirect_tmp = {ctx->program->allocateId(), s1};
+               readlane->getDefinition(0) = Definition(indirect_tmp);
+               ctx->block->instructions.emplace_back(std::move(readlane));
+            }
+            if (array_size != 1) {
+               std::unique_ptr<Instruction> indirect;
+               indirect.reset(create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1));
+               indirect_tmp = {ctx->program->allocateId(), s1};
+               indirect->getDefinition(0) = Definition(indirect_tmp);
+               indirect->getOperand(0) = Operand(array_size);
+               indirect->getOperand(1) = Operand(indirect_tmp);
+               ctx->block->instructions.emplace_back(std::move(indirect));
+            }
             if (!index_set) {
-               index = indirect->getDefinition(0).getTemp();
+               index = indirect_tmp;
                index_set = true;
             } else {
                std::unique_ptr<Instruction> add;
                add.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1));
                add->getDefinition(0) = Definition{ctx->program->allocateId(), s1};
                add->getOperand(0) = Operand(index);
-               add->getOperand(1) = Operand(indirect->getDefinition(0).getTemp());
+               add->getOperand(1) = Operand(indirect_tmp);
 
                ctx->block->instructions.emplace_back(std::move(add));
                index = add->getDefinition(0).getTemp();
@@ -508,14 +544,12 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
       }
    }
 
-   //LLVMValueRef list = ctx->descriptor_sets[descriptor_set];
    Temp list = ctx->descriptor_sets[descriptor_set];
 
    struct radv_descriptor_set_layout *layout = ctx->options->layout->set[descriptor_set].layout;
    struct radv_descriptor_set_binding_layout *binding = layout->binding + base_index;
    unsigned offset = binding->offset;
    unsigned stride = binding->size;
-   unsigned type_size;
    aco_opcode opcode;
    RegClass type;
 
@@ -525,26 +559,21 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
    case ACO_DESC_IMAGE:
       type = s8;
       opcode = aco_opcode::s_load_dwordx8;
-      type_size = 32;
       break;
    case ACO_DESC_FMASK:
       type = s8;
       opcode = aco_opcode::s_load_dwordx8;
       offset += 32;
-      type_size = 32;
       break;
    case ACO_DESC_SAMPLER:
       type = s4;
       opcode = aco_opcode::s_load_dwordx4;
       if (binding->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
          offset += 64;
-
-      type_size = 16;
       break;
    case ACO_DESC_BUFFER:
       type = s4;
       opcode = aco_opcode::s_load_dwordx4;
-      type_size = 16;
       break;
    default:
       unreachable("invalid desc_type\n");
@@ -569,13 +598,12 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
 		return ac_build_gather_values(&ctx->ac, constants, 4);*/
    }
 
-   assert(stride % type_size == 0);
    Operand off;
    if (!index_set) {
       off = Operand(offset);
    } else {
       std::unique_ptr<SOP2_instruction> mul{create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1)};
-      mul->getOperand(0) = Operand(stride / type_size);
+      mul->getOperand(0) = Operand(stride);
       mul->getOperand(1) = Operand(index);
       Temp t = {ctx->program->allocateId(), s1};
       mul->getDefinition(0) = Definition(t);
@@ -791,7 +819,6 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    tex->da = da;
    tex->getDefinition(0) = get_ssa_temp(ctx, &instr->dest.ssa);
    ctx->block->instructions.emplace_back(std::move(tex));
-
 }
 
 void visit_block(isel_context *ctx, nir_block *block)
