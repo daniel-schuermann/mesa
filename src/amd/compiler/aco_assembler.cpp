@@ -13,21 +13,6 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
 {
    switch (instr->format)
    {
-   // ideally, we don't want to check the number of operands or definitions
-   // but only bitwise_or them, if a field can be def or op
-   case Format::VOP3A: {
-      uint32_t encoding = (0b110100 << 26);
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 16;
-      // TODO: clmp, abs, op_sel
-      encoding |= (0xFF & instr->getDefinition(0).physReg().reg);
-      out.push_back(encoding);
-      // TODO: omod, neg
-      encoding = 0;
-      for (unsigned i = 0; i < instr->operandCount(); i++)
-         encoding |= instr->getOperand(i).physReg().reg << (i * 9);
-      out.push_back(encoding);
-      break;
-   }
    case Format::SOP2: {
       uint32_t encoding = (0b10 << 30);
       encoding |= opcode_infos[(int)instr->opcode].opcode << 23;
@@ -84,6 +69,11 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
       encoding |= (0xFF & instr->getOperand(1).physReg().reg) << 9;
       encoding |= instr->getOperand(0).physReg().reg;
       out.push_back(encoding);
+      if (instr->opcode == aco_opcode::v_madak_f32 ||
+          instr->opcode == aco_opcode::v_madmk_f32 ||
+          instr->opcode == aco_opcode::v_madak_f16 ||
+          instr->opcode == aco_opcode::v_madmk_f16)
+         out.push_back(instr->getOperand(2).constantValue());
       break;
    }
    case Format::VOP1: {
@@ -153,7 +143,34 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
    case Format::PSEUDO:
       break;
    default:
-      unreachable("unimplemented instruction format");
+      if ((uint16_t) instr->format & (uint16_t) Format::VOP3A) {
+         VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr);
+         uint32_t encoding = (0b110100 << 26);
+         if (((uint16_t) instr->format & (uint16_t) Format::VOP2) == (uint16_t) Format::VOP2) {
+            encoding |= (opcode_infos[(int)instr->opcode].opcode + 0x100) << 16;
+         } else if (((uint16_t) instr->format & (uint16_t) Format::VOP2) == (uint16_t) Format::VOP1) {
+            encoding |= (opcode_infos[(int)instr->opcode].opcode + 0x140) << 16;
+         } else if (((uint16_t) instr->format & (uint16_t) Format::VOPC) == (uint16_t) Format::VOP1) {
+            encoding |= (opcode_infos[(int)instr->opcode].opcode + 0x0) << 16;
+         } else if (((uint16_t) instr->format & (uint16_t) Format::VINTRP) == (uint16_t) Format::VOP1) {
+            encoding |= (opcode_infos[(int)instr->opcode].opcode + 0x270) << 16;
+         } else {
+            encoding |= (opcode_infos[(int)instr->opcode].opcode) << 16;
+         }
+         // TODO: clmp, abs, op_sel
+         for (unsigned i = 0; i < 3; i++)
+            encoding |= vop3->abs[i] << (8+i);
+         encoding |= (0xFF & instr->getDefinition(0).physReg().reg);
+         out.push_back(encoding);
+         // TODO: omod, neg
+         encoding = 0;
+         for (unsigned i = 0; i < instr->operandCount(); i++)
+            encoding |= instr->getOperand(i).physReg().reg << (i * 9);
+         out.push_back(encoding);
+         return;
+      } else {
+         unreachable("unimplemented instruction format");
+      }
    }
 
    /* append literal dword */
