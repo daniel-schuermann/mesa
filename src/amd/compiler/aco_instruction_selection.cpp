@@ -31,8 +31,10 @@ static void visit_cf_list(struct isel_context *ctx,
 
 RegClass get_ssa_reg_class(struct isel_context *ctx, nir_ssa_def *def)
 {
-   if (def->bit_size != 32)
+   if (def->bit_size != 32) {
+      fprintf(stderr, "Unsupported bit size for ssa-def %d: has %d bit\n", def->index, def->bit_size);
       abort();
+   }
    unsigned v = def->num_components;
    if (ctx->use_vgpr[def->index])
       v |= 1 << 5;
@@ -181,20 +183,43 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
 
 void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
 {
-   if (instr->def.bit_size != 32)
+   if (instr->def.bit_size != 32) {
+      fprintf(stderr, "Unsupported load_const instr: ");
+      nir_print_instr(&instr->instr, stderr);
+      fprintf(stderr, "\n");
       abort();
-   if (instr->def.num_components != 1)
-      abort();
-   if (ctx->use_vgpr[instr->def.index]) {
-      std::unique_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
+   }
+
+   std::unique_ptr<Instruction> mov;
+   if (instr->def.num_components == 1)
+   {
+      if (ctx->use_vgpr[instr->def.index]) {
+         mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+      } else {
+         mov.reset(create_instruction<Instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+      }
       mov->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->def));
       mov->getOperand(0) = Operand{instr->value.u32[0]};
       ctx->block->instructions.emplace_back(std::move(mov));
    } else {
-      std::unique_ptr<Instruction> mov{create_instruction<Instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1)};
-      mov->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->def));
-      mov->getOperand(0) = Operand{instr->value.u32[0]};
-      ctx->block->instructions.emplace_back(std::move(mov));
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->def.num_components, 1)};
+      Temp t;
+      for (unsigned i = 0; i < instr->def.num_components; i++)
+      {
+         if (ctx->use_vgpr[instr->def.index]) {
+            mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+            t = Temp(ctx->program->allocateId(), v1);
+         } else {
+            mov.reset(create_instruction<Instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+            t = Temp(ctx->program->allocateId(), s1);
+         }
+         mov->getDefinition(0) = Definition(t);
+         mov->getOperand(0) = Operand{instr->value.u32[0]};
+         ctx->block->instructions.emplace_back(std::move(mov));
+         vec->getOperand(i) = Operand(t);
+      }
+      vec->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->def));
+      ctx->block->instructions.emplace_back(std::move(vec));
    }
 }
 
