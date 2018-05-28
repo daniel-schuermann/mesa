@@ -325,24 +325,19 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    ctx->block->instructions.emplace_back(std::move(exp));
 }
 
-void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr)
+void emit_interp_instr(isel_context *ctx, unsigned idx, unsigned component, Temp src, Temp dst)
 {
-   unsigned base = nir_intrinsic_base(instr) / 4 - VARYING_SLOT_VAR0;
-   unsigned idx = util_bitcount(ctx->input_mask & ((1u << base) - 1));
-
-   unsigned component = nir_intrinsic_component(instr);
    Temp coord1{ctx->program->allocateId(), v1};
    Temp coord2{ctx->program->allocateId(), v1};
 
    std::unique_ptr<Instruction> coord1_extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-   coord1_extract->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].ssa)};
+   coord1_extract->getOperand(0) = Operand{src};
    coord1_extract->getOperand(1) = Operand((uint32_t)0);
-
    coord1_extract->getDefinition(0) = Definition{coord1};
-   std::unique_ptr<Instruction> coord2_extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-   coord2_extract->getOperand(0) = Operand{get_ssa_temp(ctx, instr->src[0].ssa)};
-   coord2_extract->getOperand(1) = Operand((uint32_t)1);
 
+   std::unique_ptr<Instruction> coord2_extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
+   coord2_extract->getOperand(0) = Operand{src};
+   coord2_extract->getOperand(1) = Operand((uint32_t)1);
    coord2_extract->getDefinition(0) = Definition{coord2};
 
    ctx->block->instructions.emplace_back(std::move(coord1_extract));
@@ -361,12 +356,34 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
    p2->getOperand(1) = Operand(ctx->prim_mask);
    p2->getOperand(1).setFixed(m0);
    p2->getOperand(2) = Operand(tmp);
-   p2->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+   p2->getDefinition(0) = Definition(dst);
    p2->attribute = idx;
    p2->component = component;
 
    ctx->block->instructions.emplace_back(std::move(p1));
    ctx->block->instructions.emplace_back(std::move(p2));
+}
+
+void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   unsigned base = nir_intrinsic_base(instr) / 4 - VARYING_SLOT_VAR0;
+   unsigned idx = util_bitcount(ctx->input_mask & ((1u << base) - 1));
+
+   unsigned component = nir_intrinsic_component(instr);
+
+   if (instr->dest.ssa.num_components == 1) {
+      emit_interp_instr(ctx, idx, component, get_ssa_temp(ctx, instr->src[0].ssa), get_ssa_temp(ctx, &instr->dest.ssa));
+   } else {
+      std::unique_ptr<Instruction> vec(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->dest.ssa.num_components, 1));
+      for (unsigned i = 0; i < instr->dest.ssa.num_components; i++)
+      {
+         Temp tmp = {ctx->program->allocateId(), v1};
+         emit_interp_instr(ctx, idx, component+i, get_ssa_temp(ctx, instr->src[0].ssa), tmp);
+         vec->getOperand(i) = Operand(tmp);
+      }
+      vec->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      ctx->block->instructions.emplace_back(std::move(vec));
+   }
 }
 
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
