@@ -54,7 +54,7 @@ Temp get_ssa_temp(struct isel_context *ctx, nir_ssa_def *def)
 
 Temp get_alu_src(struct isel_context *ctx, nir_alu_src src)
 {
-   if (src.src.ssa->num_components == 1 || src.swizzle[0] == 0)
+   if (src.src.ssa->num_components == 1 && src.swizzle[0] == 0)
       return get_ssa_temp(ctx, src.src.ssa);
 
    Temp tmp{ctx->program->allocateId(), v1};
@@ -130,6 +130,16 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_fmin: {
+      if (instr->dest.dest.ssa.bit_size == 32) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_min_f32);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_frsq: {
       if (instr->dest.dest.ssa.bit_size == 32) {
          emit_vop1_instruction(ctx, instr, aco_opcode::v_rsq_f32);
@@ -164,6 +174,16 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_frcp: {
+      if (instr->dest.dest.ssa.bit_size == 32)
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_rcp_f32);
+      else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_fexp2: {
       if (instr->dest.dest.ssa.bit_size == 32) {
          emit_vop1_instruction(ctx, instr, aco_opcode::v_exp_f32);
@@ -172,6 +192,21 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          nir_print_instr(&instr->instr, stderr);
          fprintf(stderr, "\n");
       }
+      break;
+   }
+   case nir_op_fsqrt: {
+      if (instr->dest.dest.ssa.bit_size == 32) {
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_sqrt_f32);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_i2f32: {
+      assert(instr->src[0].src.ssa->bit_size == 32);
+      emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f32_i32);
       break;
    }
    default:
