@@ -438,6 +438,54 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
    ctx->block->instructions.emplace_back(std::move(mov));
 }
 
+void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   Temp index = get_ssa_temp(ctx, instr->src[0].ssa);
+   unsigned desc_set = nir_intrinsic_desc_set(instr);
+   unsigned binding = nir_intrinsic_binding(instr);
+
+   Temp desc_ptr = ctx->descriptor_sets[desc_set];
+   radv_pipeline_layout *pipeline_layout = ctx->options->layout;
+   radv_descriptor_set_layout *layout = pipeline_layout->set[desc_set].layout;
+   unsigned offset = layout->binding[binding].offset;
+   unsigned stride;
+   if (layout->binding[binding].type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC ||
+       layout->binding[binding].type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC) {
+      unsigned idx = pipeline_layout->set[desc_set].dynamic_offset_start + layout->binding[binding].dynamic_offset_offset;
+		//TODO desc_ptr = ctx->abi.push_constants;
+      offset = pipeline_layout->push_constant_size + 16 * idx;
+      stride = 16;
+   } else
+      stride = layout->binding[binding].size;
+
+   if (stride != 1) {
+      std::unique_ptr<Instruction> tmp;
+      tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1));
+      tmp->getOperand(0) = Operand(stride);
+      tmp->getOperand(1) = Operand(index);
+      index = {ctx->program->allocateId(), index.regClass()};
+      tmp->getDefinition(0) = Definition(index);
+      ctx->block->instructions.emplace_back(std::move(tmp));
+   }
+   if (offset) {
+      std::unique_ptr<Instruction> tmp;
+      tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1));
+      tmp->getOperand(0) = Operand(offset);
+      tmp->getOperand(1) = Operand(index);
+      index = {ctx->program->allocateId(), index.regClass()};
+      tmp->getDefinition(0) = Definition(index);
+      ctx->block->instructions.emplace_back(std::move(tmp));
+   }
+
+   std::unique_ptr<Instruction> tmp;
+   tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1));
+   tmp->getOperand(0) = Operand(index);
+   tmp->getOperand(1) = Operand(desc_ptr);
+   tmp->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+   ctx->block->instructions.emplace_back(std::move(tmp));
+
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
@@ -452,6 +500,12 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_load_input:
       visit_load_input(ctx, instr);
+      break;
+   case nir_intrinsic_vulkan_resource_index:
+      fprintf(stderr, "Untested implementation: ");
+      nir_print_instr(&instr->instr, stderr);
+      fprintf(stderr, "\n");
+      visit_load_resource(ctx, instr);
       break;
    default:
       fprintf(stderr, "Unimplemented intrinsic instr: ");
