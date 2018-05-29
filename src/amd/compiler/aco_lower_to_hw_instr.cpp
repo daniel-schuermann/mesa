@@ -155,14 +155,23 @@ void lower_to_hw_instr(Program* program)
             {
                std::deque<copy_operand> operands;
                RegClass rc_def = (RegClass) (((int) v1 & (int) instr->getDefinition(0).regClass()) | 1);
+               unsigned reg_idx = 0;
                for (unsigned i = 0; i < instr->num_operands; i++)
                {
+                  if (instr->getOperand(i).isConstant()) {
+                     Definition def = Definition(PhysReg{instr->getDefinition(0).physReg().reg + reg_idx}, rc_def);
+                     insert_sorted(operands, copy_operand{instr->getOperand(i), def});
+                     reg_idx++;
+                     continue;
+                  }
+
                   RegClass rc_op = (RegClass) (((int) v1 & (int) instr->getOperand(i).regClass()) | 1);
                   for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                   {
                      Operand op = Operand(PhysReg{instr->getOperand(i).physReg().reg + j}, rc_op);
-                     Definition def = Definition(PhysReg{instr->getDefinition(0).physReg().reg + i + j}, rc_def);
+                     Definition def = Definition(PhysReg{instr->getDefinition(0).physReg().reg + reg_idx}, rc_def);
                      insert_sorted(operands, copy_operand{op, def});
+                     reg_idx++;
                   }
                }
                handle_operands(operands, new_instructions);
@@ -173,6 +182,7 @@ void lower_to_hw_instr(Program* program)
                std::deque<copy_operand> operands;
                for (unsigned i = 0; i < instr->num_operands; i++)
                {
+                  assert(!instr->getOperand(i).isConstant());
                   RegClass rc = (RegClass) (((int) v1 & (int) instr->getDefinition(i).regClass()) | 1);
                   for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                   {
