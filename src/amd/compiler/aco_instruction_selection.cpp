@@ -634,6 +634,14 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
    }
 
    Temp list = ctx->descriptor_sets[descriptor_set];
+   if (list.size() == 1) {
+      std::unique_ptr<Instruction> tmp{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      tmp->getOperand(0) = Operand(list);
+      tmp->getOperand(1) = Operand((unsigned)0);
+      list = {ctx->program->allocateId(), s2};
+      tmp->getDefinition(0) = Definition(list);
+      ctx->block->instructions.emplace_back(std::move(tmp));
+   }
 
    struct radv_descriptor_set_layout *layout = ctx->options->layout->set[descriptor_set].layout;
    struct radv_descriptor_set_binding_layout *binding = layout->binding + base_index;
@@ -1150,16 +1158,16 @@ void add_startpgm(struct isel_context *ctx)
       if (!((1u << i) & ctx->program->info->info.desc_set_used_mask))
          continue;
 
-      ctx->descriptor_sets[i] = Temp{ctx->program->allocateId(), s2};
+      ctx->descriptor_sets[i] = Temp{ctx->program->allocateId(), s1};
 
       startpgm->getDefinition(1 + descriptor_set_cnt) = Definition{ctx->descriptor_sets[i]};
       startpgm->getDefinition(1 + descriptor_set_cnt).setFixed(fixed_sgpr(user_sgpr));
 
       ctx->program->info->user_sgprs_locs.descriptor_sets[0].sgpr_idx = user_sgpr;
-      ctx->program->info->user_sgprs_locs.descriptor_sets[0].num_sgprs = 2;
+      ctx->program->info->user_sgprs_locs.descriptor_sets[0].num_sgprs = 1;
 
       ++descriptor_set_cnt;
-      user_sgpr += 2;
+      user_sgpr += 1;
    }
 
    ctx-> program->info->num_user_sgprs = user_sgpr;
