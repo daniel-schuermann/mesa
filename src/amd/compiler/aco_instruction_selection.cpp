@@ -16,7 +16,7 @@ struct isel_context {
    Program *program;
    Block *block;
    bool *uniform_vals;
-   std::unique_ptr<bool[]> use_vgpr;
+   std::unique_ptr<RegClass[]> reg_class;
    std::unordered_map<unsigned, unsigned> allocated;
 
    Temp barycentric_coords;
@@ -29,21 +29,9 @@ struct isel_context {
 static void visit_cf_list(struct isel_context *ctx,
                           struct exec_list *list);
 
-RegClass get_ssa_reg_class(struct isel_context *ctx, nir_ssa_def *def)
-{
-   if (def->bit_size != 32) {
-      fprintf(stderr, "Unsupported bit size for ssa-def %d: has %d bit\n", def->index, def->bit_size);
-      abort();
-   }
-   unsigned v = def->num_components;
-   if (ctx->use_vgpr[def->index])
-      v |= 1 << 5;
-   return (RegClass)v;
-}
-
 Temp get_ssa_temp(struct isel_context *ctx, nir_ssa_def *def)
 {
-   RegClass rc = get_ssa_reg_class(ctx, def);
+   RegClass rc = ctx->reg_class[def->index];
    auto it = ctx->allocated.find(def->index);
    if (it != ctx->allocated.end())
       return Temp{it->second, rc};
@@ -263,7 +251,8 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
    std::unique_ptr<Instruction> mov;
    if (instr->def.num_components == 1)
    {
-      if (ctx->use_vgpr[instr->def.index]) {
+      //if (ctx->use_vgpr[instr->def.index]) {
+      if (typeOf(ctx->reg_class[instr->def.index]) == vgpr) {
          mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
       } else {
          mov.reset(create_instruction<Instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
@@ -276,7 +265,8 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
       Temp t;
       for (unsigned i = 0; i < instr->def.num_components; i++)
       {
-         if (ctx->use_vgpr[instr->def.index]) {
+         //if (ctx->use_vgpr[instr->def.index]) {
+         if (typeOf(ctx->reg_class[instr->def.index]) == vgpr) {
             mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
             t = Temp(ctx->program->allocateId(), v1);
          } else {
@@ -1107,68 +1097,96 @@ static void visit_cf_list(isel_context *ctx,
 }
 
 
-std::unique_ptr<bool[]> init_reg_type(nir_function_impl *impl)
+std::unique_ptr<RegClass[]> init_reg_class(nir_function_impl *impl)
 {
-   std::unique_ptr<bool[]> use_vgpr{new bool[impl->ssa_alloc]};
-   for(unsigned i = 0; i < impl->ssa_alloc; ++i)
-      use_vgpr[i] = false;
+   std::unique_ptr<RegClass[]> reg_class{new RegClass[impl->ssa_alloc]};
 
    nir_foreach_block(block, impl) {
       nir_foreach_instr(instr, block) {
          switch(instr->type) {
          case nir_instr_type_alu: {
             nir_alu_instr *alu_instr = nir_instr_as_alu(instr);
-            bool emit_vgpr = false;
+            unsigned size =  alu_instr->dest.dest.ssa.num_components;
+            if (alu_instr->dest.dest.ssa.bit_size == 64)
+               size *= 2;
+            RegType type = sgpr;
             switch(alu_instr->op) {
                case nir_op_fmul:
                case nir_op_fadd:
                case nir_op_fsub:
+               case nir_op_fmax:
+               case nir_op_fmin:
                case nir_op_fneg:
                case nir_op_fabs:
-                  emit_vgpr = true;
+               case nir_op_frcp:
+               case nir_op_frsq:
+               case nir_op_fsqrt:
+               case nir_op_fexp2:
+               case nir_op_flog2:
+                  type = vgpr;
+                  break;
+               case nir_op_flt:
+               case nir_op_fge:
+               case nir_op_feq:
+               case nir_op_fne:
+                  type = sgpr;
+                  size = 2;
                   break;
                default:
                   for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
-                     if (use_vgpr[alu_instr->src[i].src.ssa->index])
-                        emit_vgpr = true;
+                     if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr)
+                        type = vgpr;
                   }
                   break;
             }
-            use_vgpr[alu_instr->dest.dest.ssa.index] = emit_vgpr;
+            reg_class[alu_instr->dest.dest.ssa.index] = getRegClass(type, size);
+            break;
+         }
+         case nir_instr_type_load_const: {
+            unsigned size = nir_instr_as_load_const(instr)->def.num_components;
+            if (nir_instr_as_load_const(instr)->def.bit_size == 64)
+               size *= 2;
+            reg_class[nir_instr_as_load_const(instr)->def.index] = getRegClass(sgpr, size);
             break;
          }
          case nir_instr_type_intrinsic: {
             nir_intrinsic_instr *intrinsic = nir_instr_as_intrinsic(instr);
-            bool emit_vgpr = false;
+            unsigned size =  intrinsic->dest.ssa.num_components;
+            if (intrinsic->dest.ssa.bit_size == 64)
+               size *= 2;
+            RegType type = sgpr;
             switch(intrinsic->intrinsic) {
                case nir_intrinsic_load_input:
                case nir_intrinsic_load_vertex_id:
                case nir_intrinsic_load_vertex_id_zero_base:
                case nir_intrinsic_load_barycentric_pixel:
                case nir_intrinsic_load_interpolated_input:
-                  emit_vgpr = true;
+                  type = vgpr;
                   break;
                default:
                   for (unsigned i = 0; i < nir_intrinsic_infos[intrinsic->intrinsic].num_srcs; i++) {
-                     if (use_vgpr[intrinsic->src[i].ssa->index])
-                        emit_vgpr = true;
+                     if (typeOf(reg_class[intrinsic->src[i].ssa->index]) == vgpr)
+                        type = vgpr;
                   }
                   break;
             }
-            if (nir_intrinsic_infos[intrinsic->intrinsic].has_dest) {
-               use_vgpr[intrinsic->dest.ssa.index] = emit_vgpr;
-            }
+            if (nir_intrinsic_infos[intrinsic->intrinsic].has_dest)
+               reg_class[intrinsic->dest.ssa.index] = getRegClass(type, size);
             break;
          }
-         case nir_instr_type_tex:
-            use_vgpr[nir_instr_as_tex(instr)->dest.ssa.index] = true;
+         case nir_instr_type_tex: {
+            unsigned size = nir_instr_as_tex(instr)->dest.ssa.num_components;
+            if (nir_instr_as_tex(instr)->dest.ssa.bit_size == 64)
+               size *= 2;
+            reg_class[nir_instr_as_tex(instr)->dest.ssa.index] = getRegClass(vgpr, size);
             break;
+         }
          default:
             break;
          }
       }
    }
-   return use_vgpr;
+   return reg_class;
 }
 
 int
@@ -1238,7 +1256,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
    nir_index_ssa_defs(func->impl);
    ctx.uniform_vals = nir_uniform_analysis(nir);
-   ctx.use_vgpr = init_reg_type(func->impl);
+   ctx.reg_class = init_reg_class(func->impl);
 
    nir_print_shader(nir, stderr);
 
