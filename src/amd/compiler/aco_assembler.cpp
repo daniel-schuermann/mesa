@@ -145,19 +145,22 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
    default:
       if ((uint16_t) instr->format & (uint16_t) Format::VOP3A) {
          VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr);
-         uint32_t encoding = (0b110100 << 26);
-         if (((uint16_t) instr->format & (uint16_t) Format::VOP2) == (uint16_t) Format::VOP2) {
-            encoding |= (opcode_infos[(int)instr->opcode].opcode + 0x100) << 16;
-         } else if (((uint16_t) instr->format & (uint16_t) Format::VOP2) == (uint16_t) Format::VOP1) {
-            encoding |= (opcode_infos[(int)instr->opcode].opcode + 0x140) << 16;
-         } else if (((uint16_t) instr->format & (uint16_t) Format::VOPC) == (uint16_t) Format::VOP1) {
-            encoding |= (opcode_infos[(int)instr->opcode].opcode + 0x0) << 16;
-         } else if (((uint16_t) instr->format & (uint16_t) Format::VINTRP) == (uint16_t) Format::VOP1) {
-            encoding |= (opcode_infos[(int)instr->opcode].opcode + 0x270) << 16;
-         } else {
-            encoding |= (opcode_infos[(int)instr->opcode].opcode) << 16;
-         }
+
+         uint32_t opcode;
+         if ((uint16_t) instr->format & (uint16_t) Format::VOP2)
+            opcode = opcode_infos[(int)instr->opcode].opcode + 0x100;
+         else if ((uint16_t) instr->format & (uint16_t) Format::VOP1)
+            opcode = opcode_infos[(int)instr->opcode].opcode + 0x140;
+         else if ((uint16_t) instr->format & (uint16_t) Format::VOPC)
+            opcode = opcode_infos[(int)instr->opcode].opcode + 0x0;
+         else if ((uint16_t) instr->format & (uint16_t) Format::VINTRP)
+            opcode = opcode_infos[(int)instr->opcode].opcode + 0x270;
+         else
+            opcode = opcode_infos[(int)instr->opcode].opcode;
+
          // TODO: clmp, abs, op_sel
+         uint32_t encoding = (0b110100 << 26);
+         encoding |= opcode << 16;
          for (unsigned i = 0; i < 3; i++)
             encoding |= vop3->abs[i] << (8+i);
          encoding |= (0xFF & instr->getDefinition(0).physReg().reg);
