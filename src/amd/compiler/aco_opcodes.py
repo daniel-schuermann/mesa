@@ -735,23 +735,50 @@ VOP1 = dict(VOP1_32).values() + VOP1_64 + VOP1_SPECIAL
 
 # VOPC instructions:
 
-COMPF = ["class", "f", "lt", "eq", "le", "gt", "lg", "ge", "o", "u", "nge", "nlg", "ngt", "nle", "neq", "nlt", "tru"]
-COMPI = ["f", "lt", "eq", "le", "gt", "lg", "ge", "tru"]
+VOPC_CLASS = {
+   (16, "v_cmp_class_f32"),
+   (17, "v_cmpx_class_f32"),
+   (18, "v_cmp_class_f64"),
+   (19, "v_cmpx_class_f64"),
+   (20, "v_cmp_class_f16"),
+   (21, "v_cmpx_class_f16"),
+}
+for code, name in VOPC_CLASS:
+    opcode(name, 2, [s2], code, Format.VOPC)
 
 PREFIX = ["v_cmp_", "v_cmpx_"]
-SUFFIX_F32 = ["_f16", "_f32"]
+
+COMPF = ["f", "lt", "eq", "le", "gt", "lg", "ge", "o", "u", "nge", "nlg", "ngt", "nle", "neq", "nlt", "tru"]
+SUFFIX_F = ["_f16", "_f32", "_f64"]
+
+code = 32
+for post in SUFFIX_F:
+   for pre in PREFIX:
+      for comp in COMPF:
+         opcode(pre+comp+post, 2, [s2], code, Format.VOPC)
+         code = code + 1
+assert(code == 128)
+
+COMPI = ["f", "lt", "eq", "le", "gt", "lg", "ge", "tru"]
+SIGNED = ["_i", "_u"]
+BITSIZE = ["16", "32", "64"]
+
+code = 160
+for bits in BITSIZE:
+   for pre in PREFIX:
+      for s in SIGNED:
+         for cmp in COMPI:
+            opcode(pre+cmp+s+bits, 2, [s2], code, Format.VOPC)
+            code = code + 1
+assert(code == 256)
+
 SUFFIX_U32 = ["_i16", "_u16", "_i32", "_u32"]
 SUFFIX_U64 = ["_i64", "_u64"]
 
-VOPC_32 = [pre+mid+post for pre in PREFIX for mid in COMPF for post in SUFFIX_F32]+[pre+mid+post for pre in PREFIX for mid in COMPI for post in SUFFIX_U32]
-for name in VOPC_32:
-   opcode(name, 2, [s2], write_reg = VCC + ", EXEC" if 'x' in name else "")
-
-VOPC_64 = [pre+mid+"_f64" for pre in PREFIX for mid in COMPF]+[pre+mid+post for pre in PREFIX for mid in COMPI for post in SUFFIX_U64]
-for name in VOPC_64:
-   opcode(name, 2, [s2], write_reg = VCC + ", EXEC" if 'x' in name else "")
-
-VOPC = VOPC_32 + VOPC_64
+VOPC_F = [pre+mid+post for pre in PREFIX for mid in COMPF for post in SUFFIX_F]
+VOPC_32 = [pre+mid+post for pre in PREFIX for mid in COMPI for post in SUFFIX_U32]
+VOPC_64 = [pre+mid+post for pre in PREFIX for mid in COMPI for post in SUFFIX_U64]
+VOPC = dict(VOPC_CLASS).values() + VOPC_F + VOPC_32 + VOPC_64
 
 
 # VOPP instructions: packed 16bit instructions - 1 or 2 inputs and 1 output
