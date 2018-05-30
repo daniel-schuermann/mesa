@@ -258,10 +258,16 @@ void register_allocation(Program *program)
                }
 
                if (!allocated) {
-                  for(unsigned reg = start; reg + count <= end; reg += alignment) {
-                     if (can_allocate_register(&interfere, &assignments, id, reg, count)) {
-                        alloc_reg = reg;
-                        break;
+                  /* try hint first if available */
+                  if (definition.hasHint() && can_allocate_register(&interfere, &assignments, id, definition.physReg().reg, count)) {
+                     alloc_reg = definition.physReg().reg;
+
+                  } else {
+                     for(unsigned reg = start; reg + count <= end; reg += alignment) {
+                        if (can_allocate_register(&interfere, &assignments, id, reg, count)) {
+                           alloc_reg = reg;
+                           break;
+                        }
                      }
                   }
                }
