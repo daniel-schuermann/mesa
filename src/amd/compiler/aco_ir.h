@@ -110,14 +110,14 @@ enum class Format : std::uint16_t {
    GLOBAL = 14,
    SCRATCH = 15,
    /* Vector ALU Formats */
-   VOP1 = 16,
-   VOP2 = 17,
-   VOPC = 18,
-   VOP3B = 19,
-   VOP3P = 20,
-   VOP3A = 1 << 8,
-   DPP = 1 << 9,
-   SDWA = 1 << 10,
+   VOP1 = 1 << 4,
+   VOP2 = 1 << 5,
+   VOPC = 1 << 6,
+   VOP3B = 1 <<7,
+   VOP3P = 1 << 8,
+   VOP3A = 1 << 9,
+   DPP = 1 << 10,
+   SDWA = 1 << 11,
 };
 
 enum RegType {
