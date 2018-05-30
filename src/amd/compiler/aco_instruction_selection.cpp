@@ -298,7 +298,6 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
    std::unique_ptr<Instruction> mov;
    if (instr->def.num_components == 1)
    {
-      //if (ctx->use_vgpr[instr->def.index]) {
       if (typeOf(ctx->reg_class[instr->def.index]) == vgpr) {
          mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
       } else {
@@ -312,7 +311,6 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
       Temp t;
       for (unsigned i = 0; i < instr->def.num_components; i++)
       {
-         //if (ctx->use_vgpr[instr->def.index]) {
          if (typeOf(ctx->reg_class[instr->def.index]) == vgpr) {
             mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
             t = Temp(ctx->program->allocateId(), v1);
@@ -321,7 +319,7 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
             t = Temp(ctx->program->allocateId(), s1);
          }
          mov->getDefinition(0) = Definition(t);
-         mov->getOperand(0) = Operand{instr->value.u32[0]};
+         mov->getOperand(0) = Operand{instr->value.u32[i]};
          ctx->block->instructions.emplace_back(std::move(mov));
          vec->getOperand(i) = Operand(t);
       }
@@ -990,6 +988,22 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    ctx->block->instructions.emplace_back(std::move(tex));
 }
 
+void visit_undef(isel_context *ctx, nir_ssa_undef_instr *instr)
+{
+   Temp dst = get_ssa_temp(ctx, &instr->def);
+   std::unique_ptr<Instruction> undef;
+
+   if (dst.size() == 1) {
+      undef.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+   } else {
+      undef.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size(), 1));
+   }
+   for (unsigned i = 0; i < dst.size(); i++)
+      undef->getOperand(i) = Operand((unsigned) 0);
+   undef->getDefinition(0) = Definition(dst);
+   ctx->block->instructions.emplace_back(std::move(undef));
+}
+
 void visit_block(isel_context *ctx, nir_block *block)
 {
    nir_foreach_instr(instr, block) {
@@ -1005,6 +1019,9 @@ void visit_block(isel_context *ctx, nir_block *block)
          break;
       case nir_instr_type_tex:
          visit_tex(ctx, nir_instr_as_tex(instr));
+         break;
+      case nir_instr_type_ssa_undef:
+         visit_undef(ctx, nir_instr_as_ssa_undef(instr));
          break;
       default:
          fprintf(stderr, "Unknown NIR instr type: ");
@@ -1226,6 +1243,13 @@ std::unique_ptr<RegClass[]> init_reg_class(nir_function_impl *impl)
             if (nir_instr_as_tex(instr)->dest.ssa.bit_size == 64)
                size *= 2;
             reg_class[nir_instr_as_tex(instr)->dest.ssa.index] = getRegClass(vgpr, size);
+            break;
+         }
+         case nir_instr_type_ssa_undef: {
+            unsigned size = nir_instr_as_ssa_undef(instr)->def.num_components;
+            if (nir_instr_as_ssa_undef(instr)->def.bit_size == 64)
+               size *= 2;
+            reg_class[nir_instr_as_ssa_undef(instr)->def.index] = getRegClass(sgpr, size);
             break;
          }
          default:
