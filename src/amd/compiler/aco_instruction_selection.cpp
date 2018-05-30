@@ -55,29 +55,75 @@ Temp get_alu_src(struct isel_context *ctx, nir_alu_src src)
 }
 
 
-void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op)
+void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst, bool commutative)
 {
-   std::unique_ptr<VOP2_instruction> vop2{create_instruction<VOP2_instruction>(op, Format::VOP2, 2, 1)};
-   vop2->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-   vop2->getOperand(1) = Operand{get_alu_src(ctx, instr->src[1])};
-   vop2->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
+   Temp src0 = get_alu_src(ctx, instr->src[0]);
+   Temp src1 = get_alu_src(ctx, instr->src[1]);
+   std::unique_ptr<Instruction> vop2{create_instruction<VOP2_instruction>(op, Format::VOP2, 2, 1)};
+   if (src1.type() == sgpr) {
+      if (commutative && src0.type() == vgpr) {
+         Temp t = src0;
+         src0 = src1;
+         src1 = t;
+      } else {
+         /* If the instruction is not commutative or both srcs are in sgprs, we emit a VOP3A instruction */
+         if (op != aco_opcode::v_madmk_f32 &&
+             op != aco_opcode::v_madak_f32 &&
+             op != aco_opcode::v_madmk_f16 &&
+             op != aco_opcode::v_madak_f16) {
+            Format format = (Format) ((int) Format::VOP2 | (int) Format::VOP3A);
+            vop2.reset(create_instruction<VOP3A_instruction>(op, format, 2, 1));
+         } else {
+            std::unique_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
+            mov->getOperand(0) = Operand(src1);
+            src1 = Temp(ctx->program->allocateId(), getRegClass(vgpr, src1.size()));
+            mov->getDefinition(0) = Definition(src1);
+            ctx->block->instructions.emplace_back(std::move(mov));
+         }
+      }
+   }
+   vop2->getOperand(0) = Operand{src0};
+   vop2->getOperand(1) = Operand{src1};
+   vop2->getDefinition(0) = Definition(dst);
    ctx->block->instructions.emplace_back(std::move(vop2));
 }
 
-void emit_vop1_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op)
+void emit_vop1_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst)
 {
    std::unique_ptr<VOP1_instruction> vop1{create_instruction<VOP1_instruction>(op, Format::VOP1, 1, 1)};
    vop1->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-   vop1->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
+   vop1->getDefinition(0) = Definition(dst);
    ctx->block->instructions.emplace_back(std::move(vop1));
 }
 
-void emit_vopc_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op)
+void emit_vopc_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst)
 {
-   std::unique_ptr<VOPC_instruction> vopc{create_instruction<VOPC_instruction>(op, Format::VOPC, 2, 1)};
-   vopc->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-   vopc->getOperand(1) = Operand{get_alu_src(ctx, instr->src[1])};
-   vopc->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
+   Temp src0 = get_alu_src(ctx, instr->src[0]);
+   Temp src1 = get_alu_src(ctx, instr->src[1]);
+      std::unique_ptr<Instruction> vopc{create_instruction<VOPC_instruction>(op, Format::VOPC, 2, 1)};
+   if (src1.type() == sgpr) {
+      if (src0.type() == vgpr) {
+         /* to swap the operands, we might also have to change the opcode */
+         switch (op) {
+            case aco_opcode::v_cmp_lt_f32:
+               op = aco_opcode::v_cmp_gt_f32;
+               break;
+            case aco_opcode::v_cmp_ge_f32:
+               op = aco_opcode::v_cmp_le_f32;
+            default: /* eq and ne are commutative */
+               break;
+         }
+         Temp t = src0;
+         src0 = src1;
+         src1 = t;
+      } else {
+         Format format = (Format) ((int) Format::VOPC | (int) Format::VOP3A);
+         vopc.reset(create_instruction<VOP3A_instruction>(op, format, 2, 1));
+      }
+   }
+   vopc->getOperand(0) = Operand(src0);
+   vopc->getOperand(1) = Operand(src1);
+   vopc->getDefinition(0) = Definition(dst);
    vopc->getDefinition(0).setHint(vcc);
    ctx->block->instructions.emplace_back(std::move(vopc));
 }
@@ -86,6 +132,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
 {
    if (!instr->dest.dest.is_ssa)
       abort();
+   Temp dst = get_ssa_temp(ctx, &instr->dest.dest.ssa);
    switch(instr->op) {
    case nir_op_vec2:
    case nir_op_vec3:
@@ -94,13 +141,13 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       for (unsigned i = 0; i < instr->dest.dest.ssa.num_components; ++i) {
          vec->getOperand(i) = Operand{get_alu_src(ctx, instr->src[i])};
       }
-      vec->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
+      vec->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(vec));
       break;
    }
    case nir_op_fmul: {
-      if (instr->dest.dest.ssa.bit_size == 32) {
-         emit_vop2_instruction(ctx, instr, aco_opcode::v_mul_f32);
+      if (dst.size() == 1) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_mul_f32, dst, true);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -109,8 +156,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_fadd: {
-      if (instr->dest.dest.ssa.bit_size == 32) {
-         emit_vop2_instruction(ctx, instr, aco_opcode::v_add_f32);
+      if (dst.size() == 1) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_add_f32, dst, true);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -119,8 +166,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_fmax: {
-      if (instr->dest.dest.ssa.bit_size == 32) {
-         emit_vop2_instruction(ctx, instr, aco_opcode::v_max_f32);
+      if (dst.size() == 1) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_max_f32, dst, true);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -129,8 +176,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_fmin: {
-      if (instr->dest.dest.ssa.bit_size == 32) {
-         emit_vop2_instruction(ctx, instr, aco_opcode::v_min_f32);
+      if (dst.size() == 1) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_min_f32, dst, true);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -139,12 +186,12 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_bcsel: {
-      if (instr->dest.dest.ssa.bit_size == 32) {
+      if (dst.size() == 1) {
          std::unique_ptr<VOP2_instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1)};
          vop2->getOperand(0) = Operand{get_alu_src(ctx, instr->src[1])};
          vop2->getOperand(1) = Operand{get_alu_src(ctx, instr->src[2])};
          vop2->getOperand(2) = Operand{get_alu_src(ctx, instr->src[0])};
-         vop2->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
+         vop2->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(vop2));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
@@ -154,8 +201,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_frsq: {
-      if (instr->dest.dest.ssa.bit_size == 32) {
-         emit_vop1_instruction(ctx, instr, aco_opcode::v_rsq_f32);
+      if (dst.size() == 1) {
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_rsq_f32, dst);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -164,11 +211,11 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_fneg: {
-      if (instr->dest.dest.ssa.bit_size == 32) {
+      if (dst.size() == 1) {
          std::unique_ptr<VOP2_instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_sub_f32, Format::VOP2, 2, 1)};
          vop2->getOperand(0) = Operand((uint32_t) 0);
          vop2->getOperand(1) = Operand{get_alu_src(ctx, instr->src[0])};
-         vop2->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.dest.ssa));
+         vop2->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(vop2));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
@@ -178,8 +225,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_flog2: {
-      if (instr->dest.dest.ssa.bit_size == 32) {
-         emit_vop1_instruction(ctx, instr, aco_opcode::v_log_f32);
+      if (dst.size() == 1) {
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_log_f32, dst);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -188,8 +235,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_frcp: {
-      if (instr->dest.dest.ssa.bit_size == 32)
-         emit_vop1_instruction(ctx, instr, aco_opcode::v_rcp_f32);
+      if (dst.size() == 1)
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_rcp_f32, dst);
       else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -198,8 +245,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_fexp2: {
-      if (instr->dest.dest.ssa.bit_size == 32) {
-         emit_vop1_instruction(ctx, instr, aco_opcode::v_exp_f32);
+      if (dst.size() == 1) {
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_exp_f32, dst);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -208,8 +255,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_fsqrt: {
-      if (instr->dest.dest.ssa.bit_size == 32) {
-         emit_vop1_instruction(ctx, instr, aco_opcode::v_sqrt_f32);
+      if (dst.size() == 1) {
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_sqrt_f32, dst);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -218,13 +265,13 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_i2f32: {
-      assert(instr->src[0].src.ssa->bit_size == 32);
-      emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f32_i32);
+      assert(dst.size() == 1);
+      emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f32_i32, dst);
       break;
    }
    case nir_op_flt: {
-      if (instr->dest.dest.ssa.bit_size == 32) {
-         emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_lt_f32);
+      if (instr->src[0].src.ssa->bit_size == 32) {
+         emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_lt_f32, dst);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
