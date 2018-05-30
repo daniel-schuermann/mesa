@@ -255,15 +255,28 @@ void lower_to_hw_instr(Program* program)
                   }
                   }
                }
-               /* TODO: propagate to VOP3 if possible */
-               fprintf(stderr, "Unimplemented feature: convert VOP2 -> VOP3a\n");
-               aco::aco_print_instr(instr.get(), stderr);
-               assert(false);
-
+               /* propagate to VOP3 if both operands are not vgprs */
+               Format format = (Format) ((int) Format::VOP2 | (int) Format::VOP3A);
+               std::unique_ptr<VOP3A_instruction> vop3{create_instruction<VOP3A_instruction>(instr->opcode, format, instr->num_operands, instr->num_definitions)};
+               for (unsigned i = 0; i < instr->num_operands; i++)
+                  vop3->getOperand(i) = instr->getOperand(i);
+               for (unsigned i = 0; i < instr->num_definitions; i++)
+                  vop3->getDefinition(i) = instr->getDefinition(i);
+               new_instructions.emplace_back(std::move(vop3));
             } else {
                new_instructions.emplace_back(std::move(instr));
             }
-
+         } else if (instr->format == Format::VOPC) {
+            if (instr->getOperand(0).getTemp().type() != vgpr || instr->getOperand(1).getTemp().type() != vgpr) {
+               Format format = (Format) ((int) Format::VOPC | (int) Format::VOP3A);
+               std::unique_ptr<VOP3A_instruction> vop3{create_instruction<VOP3A_instruction>(instr->opcode, format, 2, 1)};
+               vop3->getOperand(0) = instr->getOperand(0);
+               vop3->getOperand(1) = instr->getOperand(1);
+               vop3->getDefinition(0) = instr->getDefinition(0);
+               new_instructions.emplace_back(std::move(vop3));
+            } else {
+               new_instructions.emplace_back(std::move(instr));
+            }
          } else {
             new_instructions.emplace_back(std::move(instr));
          }
