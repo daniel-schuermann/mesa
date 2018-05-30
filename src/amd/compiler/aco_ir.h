@@ -181,6 +181,7 @@ static inline PhysReg fixed_sgpr(unsigned idx)
 }
 
 static constexpr PhysReg m0{124};
+static constexpr PhysReg vcc{106};
 
 /**
  * Operand Class
@@ -223,8 +224,8 @@ public:
          setFixed(PhysReg{246});
       else if (v == 0xc0800000) /* -4.0 */
          setFixed(PhysReg{247});
-//      else if (v == 1/2PI ???)
-//         setFixed(PhysReg{248});
+      else if (v == 0x3e22f983) /* 1/(2*PI) */
+         setFixed(PhysReg{248});
       else /* Literal Constant */
          setFixed(PhysReg{255});
    };
@@ -388,6 +389,17 @@ public:
    void setReuseInput(bool v) noexcept
    {
       control_[1] = v;
+   }
+
+   void setHint(PhysReg reg) noexcept
+   {
+      control_[2] = 1;
+      reg_ = reg;
+   }
+
+   bool hasHint() const noexcept
+   {
+      return control_[2];
    }
 
 private:
