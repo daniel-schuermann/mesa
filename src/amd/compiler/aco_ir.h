@@ -126,6 +126,23 @@ enum RegType {
    vgpr,
 };
 
+static inline RegType typeOf(RegClass rc)
+{
+   if (rc == RegClass::b) return RegType::scc;
+   if (rc <= RegClass::s16) return RegType::sgpr;
+   else return RegType::vgpr;
+}
+
+static inline unsigned sizeOf(RegClass rc)
+{
+   return (unsigned) rc & 0x1F;
+}
+
+static inline RegClass getRegClass(RegType type, unsigned size)
+{
+   return type == scc ? b : (RegClass) ((type == vgpr ? 1 << 5 : 0) | size);
+}
+
 /**
  * Temp Class
  * Each temporary virtual register has a
@@ -145,14 +162,12 @@ public:
 
    unsigned size() const noexcept
    {
-      return (unsigned) reg_class & 0x1F;
+      return sizeOf(reg_class);
    }
 
    RegType type()
    {
-      if (reg_class == RegClass::b) return RegType::scc;
-      if (reg_class <= RegClass::s16) return RegType::sgpr;
-      else return RegType::vgpr;
+      return typeOf(reg_class);
    }
 
    RegClass regClass() const noexcept
