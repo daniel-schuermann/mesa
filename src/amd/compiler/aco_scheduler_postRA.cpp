@@ -118,6 +118,15 @@ unsigned detect_raw_hazard(Instruction* first, Instruction* second, unsigned op_
        second->opcode == aco_opcode::v_writelane_b32))
       return 4;
 
+   if ((first->format == Format::VOPC) && // TODO: more general - everything that writes vcc implicitly and reads explicitly
+       ((int) second->format & (int) Format::VOP3A)) {
+      for (unsigned i = 0; i < second->num_operands; i++)
+      {
+         if (second->getOperand(i).physReg() == vcc)
+            return 1;
+      }
+   }
+
    return 0;
 
    // TODO: SALU writes M0 / gds, s_sendmsg, s_ttrace_data, lds, s_moverel
@@ -221,8 +230,8 @@ void build_dag(Block* block, sched_ctx& ctx)
                   if (use == node)
                      continue;
                   use->successors.insert(node);
-                  int nops = detect_war_hazard(block->instructions[it->second->index].get(), instr);
-                  node->predecessors.emplace_back(std::make_pair(it->second, nops));
+                  int nops = detect_war_hazard(block->instructions[use->index].get(), instr);
+                  node->predecessors.emplace_back(std::make_pair(use, nops));
                }
                /* add previous write as predecessor */
                it->second->successors.insert(node);
@@ -254,9 +263,9 @@ void schedule(Program* program)
             nop->imm = next_instr->nops;
             new_instructions.emplace_back(std::unique_ptr<Instruction>(nop));
          }
-         next_instr->index = new_instructions.size();
          ctx.current_index = new_instructions.size();
          new_instructions.emplace_back(std::move(block->instructions[next_instr->index]));
+         next_instr->index = ctx.current_index;
       }
       block->instructions.swap(new_instructions);
    }
