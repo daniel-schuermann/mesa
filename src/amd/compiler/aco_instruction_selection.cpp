@@ -100,7 +100,7 @@ void emit_vopc_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
 {
    Temp src0 = get_alu_src(ctx, instr->src[0]);
    Temp src1 = get_alu_src(ctx, instr->src[1]);
-      std::unique_ptr<Instruction> vopc{create_instruction<VOPC_instruction>(op, Format::VOPC, 2, 1)};
+   std::unique_ptr<Instruction> vopc;
    if (src1.type() == sgpr) {
       if (src0.type() == vgpr) {
          /* to swap the operands, we might also have to change the opcode */
@@ -116,16 +116,59 @@ void emit_vopc_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
          Temp t = src0;
          src0 = src1;
          src1 = t;
+         vopc.reset(create_instruction<VOPC_instruction>(op, Format::VOPC, 2, 1));
       } else {
          Format format = (Format) ((int) Format::VOPC | (int) Format::VOP3A);
          vopc.reset(create_instruction<VOP3A_instruction>(op, format, 2, 1));
       }
+   } else {
+      vopc.reset(create_instruction<VOPC_instruction>(op, Format::VOPC, 2, 1));
    }
    vopc->getOperand(0) = Operand(src0);
    vopc->getOperand(1) = Operand(src1);
    vopc->getDefinition(0) = Definition(dst);
    vopc->getDefinition(0).setHint(vcc);
    ctx->block->instructions.emplace_back(std::move(vopc));
+}
+
+void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
+{
+   Temp cond = get_alu_src(ctx, instr->src[0]);
+   Temp then = get_alu_src(ctx, instr->src[1]);
+   Temp els = get_alu_src(ctx, instr->src[2]);
+   if (dst.type() == vgpr) {
+      if (dst.size() == 1) {
+         std::unique_ptr<Instruction> bcsel;
+         if (els.type() != vgpr) {
+            std::unique_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
+            mov->getOperand(0) = Operand(els);
+            els = Temp(ctx->program->allocateId(), getRegClass(vgpr, els.size()));
+            mov->getDefinition(0) = Definition(els);
+            ctx->block->instructions.emplace_back(std::move(mov));
+         }
+         if (then.type() != vgpr) {
+            std::unique_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
+            mov->getOperand(0) = Operand(then);
+            then = Temp(ctx->program->allocateId(), getRegClass(vgpr, then.size()));
+            mov->getDefinition(0) = Definition(then);
+            ctx->block->instructions.emplace_back(std::move(mov));
+         }
+         bcsel.reset(create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
+         bcsel->getOperand(0) = Operand{els};
+         bcsel->getOperand(1) = Operand{then};
+         bcsel->getOperand(2) = Operand{cond};
+         bcsel->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(bcsel));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+   } else {
+      fprintf(stderr, "Unimplemented uniform bcsel: ");
+      nir_print_instr(&instr->instr, stderr);
+      fprintf(stderr, "\n");
+   }
 }
 
 void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
@@ -186,18 +229,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_bcsel: {
-      if (dst.size() == 1) {
-         std::unique_ptr<VOP2_instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1)};
-         vop2->getOperand(0) = Operand{get_alu_src(ctx, instr->src[1])};
-         vop2->getOperand(1) = Operand{get_alu_src(ctx, instr->src[2])};
-         vop2->getOperand(2) = Operand{get_alu_src(ctx, instr->src[0])};
-         vop2->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(vop2));
-      } else {
-         fprintf(stderr, "Unimplemented NIR instr bit size: ");
-         nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
-      }
+      emit_bcsel(ctx, instr, dst);
       break;
    }
    case nir_op_frsq: {
@@ -1161,7 +1193,7 @@ static void visit_cf_list(isel_context *ctx,
 }
 
 
-std::unique_ptr<RegClass[]> init_reg_class(nir_function_impl *impl)
+std::unique_ptr<RegClass[]> init_reg_class(isel_context *ctx, nir_function_impl *impl)
 {
    std::unique_ptr<RegClass[]> reg_class{new RegClass[impl->ssa_alloc]};
 
@@ -1195,6 +1227,29 @@ std::unique_ptr<RegClass[]> init_reg_class(nir_function_impl *impl)
                case nir_op_fne:
                   type = sgpr;
                   size = 2;
+                  break;
+               case nir_op_ilt:
+               case nir_op_ige:
+               case nir_op_ieq:
+               case nir_op_ine:
+               case nir_op_ult:
+               case nir_op_uge:
+                  if ((typeOf(reg_class[alu_instr->src[0].src.ssa->index]) == vgpr) ||
+                      (typeOf(reg_class[alu_instr->src[1].src.ssa->index]) == vgpr)) {
+                     size = 2;
+                     type = sgpr;
+                  } else {
+                     type = scc;
+                  }
+                  break;
+               case nir_op_bcsel:
+                  if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ||
+                     (typeOf(reg_class[alu_instr->src[1].src.ssa->index]) == vgpr) ||
+                     (typeOf(reg_class[alu_instr->src[2].src.ssa->index]) == vgpr)) {
+                     type = vgpr;
+                  } else {
+                     type = sgpr;
+                  }
                   break;
                default:
                   for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
@@ -1245,11 +1300,30 @@ std::unique_ptr<RegClass[]> init_reg_class(nir_function_impl *impl)
             reg_class[nir_instr_as_tex(instr)->dest.ssa.index] = getRegClass(vgpr, size);
             break;
          }
+         case nir_instr_type_parallel_copy: {
+            nir_foreach_parallel_copy_entry(entry, nir_instr_as_parallel_copy(instr)) {
+               reg_class[entry->dest.ssa.index] = reg_class[entry->src.ssa->index];
+            }
+            break;
+         }
          case nir_instr_type_ssa_undef: {
             unsigned size = nir_instr_as_ssa_undef(instr)->def.num_components;
             if (nir_instr_as_ssa_undef(instr)->def.bit_size == 64)
                size *= 2;
             reg_class[nir_instr_as_ssa_undef(instr)->def.index] = getRegClass(sgpr, size);
+            break;
+         }
+         case nir_instr_type_phi: {
+            nir_phi_instr* phi = nir_instr_as_phi(instr);
+            RegType type;
+            if (ctx->divergent_vals[phi->dest.ssa.index])
+               type = vgpr;
+            else
+               type = sgpr;
+            unsigned size = phi->dest.ssa.num_components;
+            if (phi->dest.ssa.bit_size == 64)
+               size *= 2;
+            reg_class[phi->dest.ssa.index] = getRegClass(type, size);
             break;
          }
          default:
@@ -1327,7 +1401,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
    nir_index_ssa_defs(func->impl);
    ctx.divergent_vals = nir_divergence_analysis(nir);
-   ctx.reg_class = init_reg_class(func->impl);
+   ctx.reg_class = init_reg_class(&ctx, func->impl);
 
    nir_print_shader(nir, stderr);
 
