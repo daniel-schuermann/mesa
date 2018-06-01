@@ -588,6 +588,65 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
 
 }
 
+void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+   Temp rsrc = get_ssa_temp(ctx, instr->src[0].ssa);
+   Temp offset = get_ssa_temp(ctx, instr->src[1].ssa);
+
+   if (dst.type() == sgpr) {
+      if (rsrc.size() == 1) {
+         std::unique_ptr<Instruction> tmp{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+         tmp->getOperand(0) = Operand(rsrc);
+         tmp->getOperand(1) = Operand((unsigned)0);
+         rsrc = {ctx->program->allocateId(), s2};
+         tmp->getDefinition(0) = Definition(rsrc);
+         ctx->block->instructions.emplace_back(std::move(tmp));
+      }
+      std::unique_ptr<Instruction> load;
+      load.reset(create_instruction<SMEM_instruction>(aco_opcode::s_load_dwordx4, Format::SMEM, 2, 1));
+      load->getOperand(0) = Operand(rsrc);
+      load->getOperand(1) = Operand((uint32_t) 0);
+      rsrc = {ctx->program->allocateId(), s4};
+      load->getDefinition(0) = Definition(rsrc);
+      ctx->block->instructions.emplace_back(std::move(load));
+
+      aco_opcode op;
+      switch(dst.size()) {
+      case 1:
+         op = aco_opcode::s_buffer_load_dword;
+         break;
+      case 2:
+         op = aco_opcode::s_buffer_load_dwordx2;
+         break;
+      case 3:
+      case 4:
+         op = aco_opcode::s_buffer_load_dwordx4;
+         break;
+      case 8:
+         op = aco_opcode::s_buffer_load_dwordx8;
+         break;
+      case 16:
+         op = aco_opcode::s_buffer_load_dwordx16;
+         break;
+      default:
+         unreachable("Forbidden regclass in load_ubo instruction.");
+      }
+      load.reset(create_instruction<SMEM_instruction>(op, Format::SMEM, 2, 1));
+      load->getOperand(0) = Operand(rsrc);
+      load->getOperand(1) = Operand(offset);
+      load->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(load));
+
+   } else {
+      fprintf(stderr, "Unsupported: ubo vector load: ");
+      nir_print_instr(&instr->instr, stderr);
+      fprintf(stderr, "\n");
+      abort();
+   }
+
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
@@ -602,6 +661,9 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_load_input:
       visit_load_input(ctx, instr);
+      break;
+   case nir_intrinsic_load_ubo:
+      visit_load_ubo(ctx, instr);
       break;
    case nir_intrinsic_vulkan_resource_index:
       fprintf(stderr, "Untested implementation: ");
@@ -743,6 +805,7 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
       list = {ctx->program->allocateId(), s2};
       tmp->getDefinition(0) = Definition(list);
       ctx->block->instructions.emplace_back(std::move(tmp));
+      //ctx->descriptor_sets[descriptor_set] = list;
    }
 
    struct radv_descriptor_set_layout *layout = ctx->options->layout->set[descriptor_set].layout;
@@ -922,8 +985,8 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
 
 void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
-   bool has_bias = false;
-   Temp resource, sampler, fmask_ptr, bias, coords = Temp();
+   bool has_bias = false, has_lod = false;// level_zero = false;
+   Temp resource, sampler, fmask_ptr, bias, coords, lod = Temp();
    tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
 
    for (unsigned i = 0; i < instr->num_srcs; i++) {
@@ -937,6 +1000,17 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
             has_bias = true;
          }
          break;
+      case nir_tex_src_lod: {
+         nir_const_value *val = nir_src_as_const_value(instr->src[i].src);
+
+         if (val && val->i32[0] == 0) {
+            //level_zero = true;
+         } else {
+            lod = get_ssa_temp(ctx, instr->src[i].src.ssa);
+            has_lod = true;
+         }
+         break;
+      }
       case nir_tex_src_texture_offset:
       case nir_tex_src_sampler_offset:
       default:
@@ -996,6 +1070,23 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    }
 
    Temp arg = coords;
+   std::unique_ptr<MIMG_instruction> tex;
+   if (instr->op == nir_texop_txs) {
+      if (!has_lod) {
+         std::unique_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
+         mov->getOperand(0) = Operand((uint32_t) 0);
+         lod = Temp{ctx->program->allocateId(), v1};
+         mov->getDefinition(0) = Definition(lod);
+         ctx->block->instructions.emplace_back(std::move(mov));
+      }
+      tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_get_resinfo, Format::MIMG, 2, 1));
+      tex->getOperand(0) = Operand(lod);
+      tex->getOperand(1) = Operand(resource);
+      tex->dmask = dmask;
+      tex->getDefinition(0) = get_ssa_temp(ctx, &instr->dest.ssa);
+      ctx->block->instructions.emplace_back(std::move(tex));
+      return;
+   }
 
    if (has_bias) {
       std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
@@ -1006,7 +1097,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       vec->getDefinition(0) = Definition(arg);
       ctx->block->instructions.emplace_back(std::move(vec));
    }
-   std::unique_ptr<MIMG_instruction> tex;
+
    if (instr->op == nir_texop_txb)
       tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample_b, Format::MIMG, 3, 1));
    else
@@ -1281,6 +1372,12 @@ std::unique_ptr<RegClass[]> init_reg_class(isel_context *ctx, nir_function_impl 
                case nir_intrinsic_load_barycentric_pixel:
                case nir_intrinsic_load_interpolated_input:
                   type = vgpr;
+                  break;
+               case nir_intrinsic_vulkan_resource_index:
+                  type = sgpr;
+                  break;
+               case nir_intrinsic_load_ubo:
+                  type = ctx->divergent_vals[intrinsic->src[0].ssa->index] ? vgpr : sgpr;
                   break;
                default:
                   for (unsigned i = 0; i < nir_intrinsic_infos[intrinsic->intrinsic].num_srcs; i++) {

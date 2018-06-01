@@ -119,7 +119,7 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
       encoding = (0xFF & instr->getOperand(0).physReg().reg);
       encoding |= (0xFF & instr->getDefinition(0).physReg().reg) << 8;
       encoding |= (0x1F & (instr->getOperand(1).physReg().reg >> 2)) << 16;
-      encoding |= (0x1F & (instr->getOperand(2).physReg().reg >> 2)) << 21;
+      encoding |= instr->num_operands > 2 ? (0x1F & (instr->getOperand(2).physReg().reg >> 2)) << 21 : 0;
       // TODO VEGA: D16
       out.push_back(encoding);
       break;
