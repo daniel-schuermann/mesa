@@ -54,6 +54,13 @@ Temp get_alu_src(struct isel_context *ctx, nir_alu_src src)
    return tmp;
 }
 
+void emit_v_mov(isel_context *ctx, Temp src, Temp dst)
+{
+   std::unique_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
+   mov->getOperand(0) = Operand(src);
+   mov->getDefinition(0) = Definition(dst);
+   ctx->block->instructions.emplace_back(std::move(mov));
+}
 
 void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst, bool commutative)
 {
@@ -74,11 +81,9 @@ void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
             Format format = (Format) ((int) Format::VOP2 | (int) Format::VOP3A);
             vop2.reset(create_instruction<VOP3A_instruction>(op, format, 2, 1));
          } else {
-            std::unique_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
-            mov->getOperand(0) = Operand(src1);
-            src1 = Temp(ctx->program->allocateId(), getRegClass(vgpr, src1.size()));
-            mov->getDefinition(0) = Definition(src1);
-            ctx->block->instructions.emplace_back(std::move(mov));
+            Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, src1.size()));
+            emit_v_mov(ctx, src1, mov_dst);
+            src1 = mov_dst;
          }
       }
    }
@@ -138,22 +143,17 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
    Temp els = get_alu_src(ctx, instr->src[2]);
    if (dst.type() == vgpr) {
       if (dst.size() == 1) {
-         std::unique_ptr<Instruction> bcsel;
-         if (els.type() != vgpr) {
-            std::unique_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
-            mov->getOperand(0) = Operand(els);
-            els = Temp(ctx->program->allocateId(), getRegClass(vgpr, els.size()));
-            mov->getDefinition(0) = Definition(els);
-            ctx->block->instructions.emplace_back(std::move(mov));
-         }
          if (then.type() != vgpr) {
-            std::unique_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
-            mov->getOperand(0) = Operand(then);
-            then = Temp(ctx->program->allocateId(), getRegClass(vgpr, then.size()));
-            mov->getDefinition(0) = Definition(then);
-            ctx->block->instructions.emplace_back(std::move(mov));
+            Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, then.size()));
+            emit_v_mov(ctx, then, mov_dst);
+            then = mov_dst;
          }
-         bcsel.reset(create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
+         if (els.type() != vgpr) {
+            Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, els.size()));
+            emit_v_mov(ctx, els, mov_dst);
+            els = mov_dst;
+         }
+         std::unique_ptr<Instruction> bcsel{create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1)};
          bcsel->getOperand(0) = Operand{els};
          bcsel->getOperand(1) = Operand{then};
          bcsel->getOperand(2) = Operand{cond};
