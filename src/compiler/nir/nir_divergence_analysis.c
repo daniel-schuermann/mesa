@@ -79,35 +79,53 @@ static void visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    if (!nir_intrinsic_infos[instr->intrinsic].has_dest)
       return;
 
-   bool is_divergent;
+   bool is_divergent = false;
    switch (instr->intrinsic) {
-      /* TODO: load_ubo (if index&buffer uniform) */
-      /*       load_shared_var */
-      /*       load_uniform etc.*/
-
-      case nir_intrinsic_shader_clock:
-      case nir_intrinsic_ballot:
-      case nir_intrinsic_read_invocation:
-      case nir_intrinsic_read_first_invocation:
-      case nir_intrinsic_vote_any:
-      case nir_intrinsic_vote_all:
-      case nir_intrinsic_vote_feq:
-      case nir_intrinsic_vote_ieq:
-      case nir_intrinsic_reduce:
-      case nir_intrinsic_load_push_constant:
-         is_divergent = false;
-         break;
-      default:
-         is_divergent = true;
-         break;
+   /* TODO: load_shared_var */
+   /*       load_uniform etc.*/
+   case nir_intrinsic_shader_clock:
+   case nir_intrinsic_ballot:
+   case nir_intrinsic_read_invocation:
+   case nir_intrinsic_read_first_invocation:
+   case nir_intrinsic_vote_any:
+   case nir_intrinsic_vote_all:
+   case nir_intrinsic_vote_feq:
+   case nir_intrinsic_vote_ieq:
+   case nir_intrinsic_reduce:
+   case nir_intrinsic_load_push_constant:
+   case nir_intrinsic_vulkan_resource_index:
+      is_divergent = false;
+      break;
+   case nir_intrinsic_load_ubo:
+      for (unsigned i = 0; i < nir_intrinsic_infos[instr->intrinsic].num_srcs; i++) {
+         if (divergent[instr->src[i].ssa->index]) {
+            is_divergent = true;
+            break;
+         }
+      }
+      break;
+   case nir_intrinsic_load_interpolated_input:
+   case nir_intrinsic_load_barycentric_pixel:
+   default:
+      is_divergent = true;
+      break;
    }
    divergent[instr->dest.ssa.index] = is_divergent;
 }
 
 static void visit_tex(bool *divergent, nir_tex_instr *instr)
 {
-   /* TODO: */
-   divergent[instr->dest.ssa.index] = true;
+   bool is_divergent = false;
+   for (unsigned i = 0; i < instr->num_srcs; i++) {
+      switch (instr->src[i].src_type) {
+      case nir_tex_src_coord:
+         is_divergent |= divergent[instr->src[i].src.ssa->index];
+         break;
+      default:
+         break;
+      }
+   }
+   divergent[instr->dest.ssa.index] = is_divergent;
 }
 
 
