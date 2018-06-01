@@ -311,6 +311,16 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_fge: {
+      if (instr->src[0].src.ssa->bit_size == 32) {
+         emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_ge_f32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    default:
       fprintf(stderr, "Unknown NIR instr type: ");
       nir_print_instr(&instr->instr, stderr);
