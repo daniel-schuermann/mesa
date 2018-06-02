@@ -50,6 +50,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
 
    /* Optimization */
    aco::combine_fw(program.get());
+   aco::combine_bw(program.get());
    std::cerr << "After Opt:\n";
    aco_print_program(program.get(), stderr);
 
