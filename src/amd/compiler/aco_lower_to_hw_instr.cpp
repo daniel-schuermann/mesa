@@ -130,6 +130,8 @@ void lower_to_hw_instr(Program* program)
       {
          std::unique_ptr<Instruction> mov;
          if (instr->format == Format::PSEUDO) {
+            if (instr->num_definitions == 0)
+               continue;
             switch (instr->opcode)
             {
             case aco_opcode::p_extract_vector:
