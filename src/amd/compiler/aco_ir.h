@@ -633,6 +633,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         struct radv_shader_variant_info *info,
                                         struct radv_nir_compiler_options *options);
 void combine_fw(Program* program);
+void combine_bw(Program* program);
 void register_allocation(Program *program);
 void lower_to_hw_instr(Program* program);
 void schedule(Program* program);
