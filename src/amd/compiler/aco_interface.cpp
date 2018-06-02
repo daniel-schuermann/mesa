@@ -43,21 +43,37 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
     * nir_to_llvm stuff. */
    info->info = pre_info;
 
+   /* Instruction Selection */
    auto program = aco::select_program(shader, config, info, options);
    std::cerr << "After Instruction Selection:\n";
    aco_print_program(program.get(), stderr);
+
+   /* Optimization */
+   aco::combine_fw(program.get());
+   std::cerr << "After Opt:\n";
+   aco_print_program(program.get(), stderr);
+
+   /* Register Allocation */
    aco::register_allocation(program.get());
    std::cerr << "After RA:\n";
    aco_print_program(program.get(), stderr);
+
+   /* Lower to HW Instructions */
    aco::lower_to_hw_instr(program.get());
-   std::cerr << "After Eliminate Pseudo Instr:\n";
-   aco_print_program(program.get(), stderr);
+   //std::cerr << "After Eliminate Pseudo Instr:\n";
+   //aco_print_program(program.get(), stderr);
+
+   /* Scheduling / Insert NOPs */
    aco::schedule(program.get());
-   std::cerr << "After PostRA Schedule:\n";
-   aco_print_program(program.get(), stderr);
+   //std::cerr << "After PostRA Schedule:\n";
+   //aco_print_program(program.get(), stderr);
+
+   /* Insert Waitcnt */
    aco::insert_wait_states(program.get());
    std::cerr << "After Insert-Waitcnt:\n";
    aco_print_program(program.get(), stderr);
+
+   /* Assembly */
    std::vector<uint32_t> code = aco::emit_program(program.get());
    std::cerr << "After Assembly:\n";
    std::cerr << "Num VGPRs: " << program->config->num_vgprs << "\n";
