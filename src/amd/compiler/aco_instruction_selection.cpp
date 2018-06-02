@@ -454,8 +454,7 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
          compr->getOperand(0) = values[i*2];
          compr->getOperand(1) = values[i*2+1];
          compr->getDefinition(0) = Definition(tmp);
-         values[2*i] = Operand(tmp);
-         values[2*i+1] = Operand();
+         values[i] = Operand(tmp);
          ctx->block->instructions.emplace_back(std::move(compr));
       }
    }
