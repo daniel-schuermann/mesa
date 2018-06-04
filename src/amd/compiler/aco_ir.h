@@ -456,17 +456,17 @@ struct Instruction {
    }
    bool isSALU()
    {
-      return ((uint16_t) format & (uint16_t) Format::SOP1) == (uint16_t) Format::SOP1
-          || ((uint16_t) format & (uint16_t) Format::SOP2) == (uint16_t) Format::SOP1
-          || ((uint16_t) format & (uint16_t) Format::SOPC) == (uint16_t) Format::SOP1
-          || ((uint16_t) format & (uint16_t) Format::SOPK) == (uint16_t) Format::SOP1
-          || ((uint16_t) format & (uint16_t) Format::SOPP) == (uint16_t) Format::SOPP;
+      return format == Format::SOP1 ||
+             format == Format::SOP2 ||
+             format == Format::SOPC ||
+             format == Format::SOPK ||
+             format == Format::SOPP;
    }
    bool isVMEM()
    {
-      return ((uint16_t) format & (uint16_t) Format::MTBUF) == (uint16_t) Format::MTBUF
-          || ((uint16_t) format & (uint16_t) Format::MUBUF) == (uint16_t) Format::MUBUF
-          || ((uint16_t) format & (uint16_t) Format::MIMG) == (uint16_t) Format::MIMG;
+      return format == Format::MTBUF ||
+             format == Format::MUBUF ||
+             format == Format::MIMG;
    }
    bool isDPP()
    {
