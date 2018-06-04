@@ -60,7 +60,7 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
       out.push_back(encoding);
       encoding = instr->getOperand(1).isConstant() ? instr->getOperand(1).constantValue() : instr->getOperand(1).physReg().reg;
       out.push_back(encoding);
-      break;
+      return;
    }
    case Format::VOP2: {
       uint32_t encoding = 0;
@@ -69,11 +69,6 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
       encoding |= (0xFF & instr->getOperand(1).physReg().reg) << 9;
       encoding |= instr->getOperand(0).physReg().reg;
       out.push_back(encoding);
-      if (instr->opcode == aco_opcode::v_madak_f32 ||
-          instr->opcode == aco_opcode::v_madmk_f32 ||
-          instr->opcode == aco_opcode::v_madak_f16 ||
-          instr->opcode == aco_opcode::v_madmk_f16)
-         out.push_back(instr->getOperand(2).constantValue());
       break;
    }
    case Format::VOP1: {
@@ -158,17 +153,19 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
          else
             opcode = opcode_infos[(int)instr->opcode].opcode;
 
-         // TODO: clmp, abs, op_sel
+         // TODO: clmp, op_sel
          uint32_t encoding = (0b110100 << 26);
          encoding |= opcode << 16;
          for (unsigned i = 0; i < 3; i++)
             encoding |= vop3->abs[i] << (8+i);
          encoding |= (0xFF & instr->getDefinition(0).physReg().reg);
          out.push_back(encoding);
-         // TODO: omod, neg
+         // TODO: omod
          encoding = 0;
          for (unsigned i = 0; i < instr->operandCount(); i++)
             encoding |= instr->getOperand(i).physReg().reg << (i * 9);
+         for (unsigned i = 0; i < 3; i++)
+            encoding |= vop3->neg[i] << (29+i);
          out.push_back(encoding);
          return;
       } else {
@@ -177,18 +174,21 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
    }
 
    /* append literal dword */
-   if (instr->operandCount() && instr->getOperand(0).physReg().reg == 255)
+   for (unsigned i = 0; i < instr->num_operands; i++)
    {
-      uint32_t literal = instr->getOperand(0).constantValue();
-      out.push_back(literal);
+      if (instr->getOperand(i).isConstant() && instr->getOperand(i).physReg().reg == 255)
+      {
+         uint32_t literal = instr->getOperand(i).constantValue();
+         out.push_back(literal);
+         break;
+      }
    }
 }
 
 void emit_block(asm_context ctx, std::vector<uint32_t>& out, Block* block)
 {
    // TODO: emit offsets on previous branches to this block
-   //std::iostream::pos_type current = out.tellp();
-   
+
    for (auto const& instr : block->instructions)
       emit_instruction(ctx, out, instr.get());
 }
