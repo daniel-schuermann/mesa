@@ -275,7 +275,7 @@ void register_allocation(Program *program)
                assignments[id] = {PhysReg{alloc_reg}, count};
                if (definition.getTemp().type() == RegType::vgpr)
                   num_accessed_vgpr = std::max(num_accessed_vgpr, alloc_reg - 256 + definition.getTemp().size());
-               else
+               else if (alloc_reg <= 102)
                   num_accessed_sgpr = std::max(num_accessed_sgpr, alloc_reg + definition.getTemp().size());
             }
          }
