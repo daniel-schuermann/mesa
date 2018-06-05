@@ -56,10 +56,19 @@ Temp get_alu_src(struct isel_context *ctx, nir_alu_src src)
 
 void emit_v_mov(isel_context *ctx, Temp src, Temp dst)
 {
-   std::unique_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
-   mov->getOperand(0) = Operand(src);
-   mov->getDefinition(0) = Definition(dst);
-   ctx->block->instructions.emplace_back(std::move(mov));
+   std::unique_ptr<Instruction> mov;
+   if (dst.size() == 1)
+   {
+      mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+      mov->getDefinition(0) = Definition(dst);
+      mov->getOperand(0) = Operand(src);
+      ctx->block->instructions.emplace_back(std::move(mov));
+   } else {
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 1, 1)};
+      vec->getOperand(0) = Operand(src);
+      vec->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(vec));
+   }
 }
 
 void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst, bool commutative)
@@ -72,19 +81,18 @@ void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
          Temp t = src0;
          src0 = src1;
          src1 = t;
+      } else if (src0.type() == vgpr &&
+                 op != aco_opcode::v_madmk_f32 &&
+                 op != aco_opcode::v_madak_f32 &&
+                 op != aco_opcode::v_madmk_f16 &&
+                 op != aco_opcode::v_madak_f16) {
+         /* If the instruction is not commutative, we emit a VOP3A instruction */
+         Format format = (Format) ((int) Format::VOP2 | (int) Format::VOP3A);
+         vop2.reset(create_instruction<VOP3A_instruction>(op, format, 2, 1));
       } else {
-         /* If the instruction is not commutative or both srcs are in sgprs, we emit a VOP3A instruction */
-         if (op != aco_opcode::v_madmk_f32 &&
-             op != aco_opcode::v_madak_f32 &&
-             op != aco_opcode::v_madmk_f16 &&
-             op != aco_opcode::v_madak_f16) {
-            Format format = (Format) ((int) Format::VOP2 | (int) Format::VOP3A);
-            vop2.reset(create_instruction<VOP3A_instruction>(op, format, 2, 1));
-         } else {
-            Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, src1.size()));
-            emit_v_mov(ctx, src1, mov_dst);
-            src1 = mov_dst;
-         }
+         Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, src1.size()));
+         emit_v_mov(ctx, src1, mov_dst);
+         src1 = mov_dst;
       }
    }
    vop2->getOperand(0) = Operand{src0};
@@ -141,28 +149,56 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
    Temp cond = get_alu_src(ctx, instr->src[0]);
    Temp then = get_alu_src(ctx, instr->src[1]);
    Temp els = get_alu_src(ctx, instr->src[2]);
-   if (dst.type() == vgpr) {
-      if (dst.size() == 1) {
-         if (then.type() != vgpr) {
-            Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, then.size()));
-            emit_v_mov(ctx, then, mov_dst);
-            then = mov_dst;
+   if (ctx->divergent_vals[instr->dest.dest.ssa.index]) {
+      if (dst.type() == vgpr) {
+         if (dst.size() == 1) {
+            if (then.type() != vgpr) {
+               Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, then.size()));
+               emit_v_mov(ctx, then, mov_dst);
+               then = mov_dst;
+            }
+            if (els.type() != vgpr) {
+               Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, els.size()));
+               emit_v_mov(ctx, els, mov_dst);
+               els = mov_dst;
+            }
+            std::unique_ptr<Instruction> bcsel{create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1)};
+            bcsel->getOperand(0) = Operand{els};
+            bcsel->getOperand(1) = Operand{then};
+            bcsel->getOperand(2) = Operand{cond};
+            bcsel->getDefinition(0) = Definition(dst);
+            ctx->block->instructions.emplace_back(std::move(bcsel));
+         } else {
+            fprintf(stderr, "Unimplemented NIR instr bit size: ");
+            nir_print_instr(&instr->instr, stderr);
+            fprintf(stderr, "\n");
          }
-         if (els.type() != vgpr) {
-            Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, els.size()));
-            emit_v_mov(ctx, els, mov_dst);
-            els = mov_dst;
-         }
-         std::unique_ptr<Instruction> bcsel{create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1)};
-         bcsel->getOperand(0) = Operand{els};
-         bcsel->getOperand(1) = Operand{then};
-         bcsel->getOperand(2) = Operand{cond};
-         bcsel->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(bcsel));
-      } else {
-         fprintf(stderr, "Unimplemented NIR instr bit size: ");
-         nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
+      } else { /* dst.type() == sgpr */
+         /* this implements bcsel on bools: dst = s0 ? s1 : s2
+          * are going to be: dst = (s0 & s1) | (~s0 & s2) */
+         assert(cond.regClass() == s2 && then.regClass() == s2 && els.regClass() == s2);
+
+         std::unique_ptr<SOP2_instruction> sop2;
+         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_and_b64, Format::SOP2, 2, 1));
+         sop2->getOperand(0) = Operand(cond);
+         sop2->getOperand(1) = Operand(then);
+         then = Temp(ctx->program->allocateId(), s2);
+         sop2->getDefinition(0) = Definition(then);
+         ctx->block->instructions.emplace_back(std::move(sop2));
+
+         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 1));
+         sop2->getOperand(0) = Operand(els);
+         sop2->getOperand(1) = Operand(cond);
+         els = Temp(ctx->program->allocateId(), s2);
+         sop2->getDefinition(0) = Definition(els);
+         ctx->block->instructions.emplace_back(std::move(sop2));
+
+         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
+         sop2->getOperand(0) = Operand(then);
+         sop2->getOperand(1) = Operand(els);
+         then = Temp(ctx->program->allocateId(), s2);
+         sop2->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(sop2));
       }
    } else {
       fprintf(stderr, "Unimplemented uniform bcsel: ");
@@ -350,21 +386,8 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
       ctx->block->instructions.emplace_back(std::move(mov));
    } else {
       std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->def.num_components, 1)};
-      Temp t;
       for (unsigned i = 0; i < instr->def.num_components; i++)
-      {
-         if (typeOf(ctx->reg_class[instr->def.index]) == vgpr) {
-            mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
-            t = Temp(ctx->program->allocateId(), v1);
-         } else {
-            mov.reset(create_instruction<Instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
-            t = Temp(ctx->program->allocateId(), s1);
-         }
-         mov->getDefinition(0) = Definition(t);
-         mov->getOperand(0) = Operand{instr->value.u32[i]};
-         ctx->block->instructions.emplace_back(std::move(mov));
-         vec->getOperand(i) = Operand(t);
-      }
+         vec->getOperand(i) = Operand{instr->value.u32[i]};
       vec->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->def));
       ctx->block->instructions.emplace_back(std::move(vec));
    }
@@ -457,6 +480,8 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
          values[i] = Operand(tmp);
          ctx->block->instructions.emplace_back(std::move(compr));
       }
+      values[2] = Operand();
+      values[3] = Operand();
    }
 
    std::unique_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
@@ -1343,9 +1368,16 @@ std::unique_ptr<RegClass[]> init_reg_class(isel_context *ctx, nir_function_impl 
                   }
                   break;
                case nir_op_bcsel:
-                  if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ||
-                     (typeOf(reg_class[alu_instr->src[1].src.ssa->index]) == vgpr) ||
-                     (typeOf(reg_class[alu_instr->src[2].src.ssa->index]) == vgpr)) {
+                  if ((typeOf(reg_class[alu_instr->src[1].src.ssa->index]) == vgpr) ||
+                      (typeOf(reg_class[alu_instr->src[2].src.ssa->index]) == vgpr)) {
+                     type = vgpr;
+                  /* if the arguments are not vgpr, but divergent, it must be bools */
+                  } else if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index] &&
+                             ctx->divergent_vals[alu_instr->src[1].src.ssa->index] &&
+                             ctx->divergent_vals[alu_instr->src[2].src.ssa->index]) {
+                     type = sgpr;
+                     size = 2;
+                  } else if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index]){
                      type = vgpr;
                   } else {
                      type = sgpr;
