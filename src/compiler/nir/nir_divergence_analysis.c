@@ -161,10 +161,13 @@ static void visit_phi(bool *divergent, nir_phi_instr *instr)
    /* mu: if no predecessor node exists, the phi must be at a loop header */
    if (!prev) {
       /* find the two unconditional ssa-defs (the incoming value and the back-edge) */
+      nir_loop *loop = nir_cf_node_as_loop(instr->instr.block->cf_node.parent);
+      prev = nir_cf_node_prev(instr->instr.block->cf_node.parent);
       unsigned unconditional[2];
       unsigned idx = 0;
       nir_foreach_phi_src(src, instr) {
-         if (src->pred->cf_node.parent->type != nir_cf_node_if)
+         if (src->pred == nir_loop_last_block(loop) ||
+             src->pred == nir_cf_node_as_block(prev))
             unconditional[idx++] = src->src.ssa->index;
       }
       assert(idx == 2);
