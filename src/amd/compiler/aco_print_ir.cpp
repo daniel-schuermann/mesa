@@ -73,13 +73,33 @@ void aco_print_instr(struct Instruction *instr, FILE *output)
    }
    fprintf(output, "%s", opcode_infos[(int)instr->opcode].name);
    if (instr->operandCount()) {
+      bool abs[instr->num_operands];
+      bool neg[instr->num_operands];
+      if ((int)instr->format & (int)Format::VOP3A) {
+         VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr);
+         for (unsigned i = 0; i < instr->operandCount(); ++i) {
+            abs[i] = vop3->abs[i];
+            neg[i] = vop3->neg[i];
+         }
+      } else {
+         for (unsigned i = 0; i < instr->operandCount(); ++i) {
+            abs[i] = false;
+            neg[i] = false;
+         }
+      }
       for (unsigned i = 0; i < instr->operandCount(); ++i) {
          if (i)
             fprintf(output, ", ");
          else
             fprintf(output, " ");
 
+         if (neg[i])
+            fprintf(output, "-");
+         if (abs[i])
+            fprintf(output, "|");
          aco_print_operand(&instr->getOperand(i), output);
+         if (abs[i])
+            fprintf(output, "|");
        }
    }
    if (instr->opcode == aco_opcode::s_waitcnt) {
