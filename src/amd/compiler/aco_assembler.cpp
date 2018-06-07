@@ -193,9 +193,22 @@ void emit_block(asm_context ctx, std::vector<uint32_t>& out, Block* block)
       emit_instruction(ctx, out, instr.get());
 }
 
-void emit_elf_header(asm_context ctx, std::vector<uint32_t>& out, Program* program)
+void fix_exports(asm_context ctx, std::vector<uint32_t>& out, Program* program)
 {
    // TODO
+   for (std::vector<std::unique_ptr<Block>>::reverse_iterator block_it = program->blocks.rbegin(); block_it != program->blocks.rend(); ++block_it)
+   {
+      Block* block = block_it->get();
+      for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
+         {
+            if ((*it)->format == Format::EXP) {
+               Export_instruction* exp = static_cast<Export_instruction*>((*it).get());
+               exp->done = true;
+               exp->valid_mask = true;
+               return;
+            }
+         }
+   }
 }
 
 std::vector<uint32_t> emit_program(Program* program)
@@ -203,7 +216,7 @@ std::vector<uint32_t> emit_program(Program* program)
    // TODO: initialize context
    asm_context ctx;
    std::vector<uint32_t> out;
-   emit_elf_header(ctx, out, program);
+   fix_exports(ctx, out, program);
    for (auto const& block : program->blocks)
       emit_block(ctx, out, block.get());
    // footer?
