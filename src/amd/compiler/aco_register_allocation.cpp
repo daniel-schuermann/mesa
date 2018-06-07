@@ -202,7 +202,8 @@ void register_allocation(Program *program)
             interfere.insert({operand.tempId(), definition.tempId()});
          }
 
-         if (insn->opcode == aco_opcode::v_interp_p2_f32)
+         if (insn->opcode == aco_opcode::v_interp_p2_f32 ||
+             insn->opcode == aco_opcode::v_mac_f32)
             temp_assignments[insn->getDefinition(0).tempId()] = insn->getOperand(2).tempId();
 
          for(unsigned i = 0; i < insn->operandCount(); ++i) {

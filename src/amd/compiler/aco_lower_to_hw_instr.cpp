@@ -225,7 +225,7 @@ void lower_to_hw_instr(Program* program)
             new_instructions.emplace_back(std::move(instr));
          } else if (instr->format == Format::VOP2) {
             // TODO: what about literals?!
-            if (instr->num_operands == 3 && !(instr->getOperand(2).physReg() == vcc || instr->getOperand(2).physReg().reg == 255)) {
+            if (instr->num_operands == 3 && !(instr->getOperand(2).physReg() == vcc || instr->getOperand(2).physReg().reg == 255 || instr->opcode == aco_opcode::v_mac_f32)) {
                /* change the instruction to VOP3 to enable an arbitrary register pair as dst */
                std::unique_ptr<Instruction> tmp = std::move(instr);
                Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
