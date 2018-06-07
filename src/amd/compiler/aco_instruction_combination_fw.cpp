@@ -117,14 +117,14 @@ void handle_instruction(combinator_ctx_fw& ctx, std::unique_ptr<Instruction>& in
                if (i == 0 && !((int) instr->format & (int) Format::VOP3A)) {
                   uses_sgpr = uses_sgpr && instr->getOperand(i).getTemp().type() == sgpr ? false : uses_sgpr;
                   instr->getOperand(i) = it->second;
-               } else {
+               } else if ((int) instr->format & (int) Format::VOP3A) {
                   uses_sgpr = true;
                   instr->getOperand(i) = Operand(rematerializeLiteral(ctx, it->second.constantValue()));
                }
             }
 
             /* easy case: propagate vgprs */
-            if (it->second.isTemp() && it->second.getTemp().type() == vgpr) {
+            else if (it->second.isTemp() && it->second.getTemp().type() == vgpr) {
                instr->getOperand(i) = it->second;
 
             } else if (it->second.isTemp() && it->second.getTemp().type() == sgpr && !uses_sgpr) {
@@ -160,6 +160,8 @@ void handle_instruction(combinator_ctx_fw& ctx, std::unique_ptr<Instruction>& in
       if (instr->opcode == aco_opcode::v_add_f32) {
          for (unsigned i = 0; i < instr->num_operands; i++)
          {
+            if (!instr->getOperand(i).isTemp())
+               continue;
             std::map<uint32_t, Instruction*>::iterator mul_it = ctx.mul.find(instr->getOperand(i).tempId());
             if (mul_it == ctx.mul.end())
                continue;
@@ -235,8 +237,8 @@ void handle_instruction(combinator_ctx_fw& ctx, std::unique_ptr<Instruction>& in
                   num_sgpr += mad->getOperand(i).isTemp() && mad->getOperand(i).getTemp().type() == sgpr ? 1 : 0;
                if (num_sgpr <= 1)
                   instr.reset(mad.release());
-               break;
             }
+            break;
          }
       }
 
