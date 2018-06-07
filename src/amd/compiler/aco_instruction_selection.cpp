@@ -123,6 +123,10 @@ void emit_vopc_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
                break;
             case aco_opcode::v_cmp_ge_f32:
                op = aco_opcode::v_cmp_le_f32;
+               break;
+            case aco_opcode::v_cmp_lt_i32:
+               op = aco_opcode::v_cmp_gt_i32;
+               break;
             default: /* eq and ne are commutative */
                break;
          }
@@ -332,9 +336,23 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_ffract: {
+      if (dst.size() == 1) {
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_fract_f32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_i2f32: {
       assert(dst.size() == 1);
       emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f32_i32, dst);
+      break;
+   }
+   case nir_op_f2i32: {
+      emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_i32_f32, dst);
       break;
    }
    case nir_op_flt: {
@@ -356,6 +374,15 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          fprintf(stderr, "\n");
       }
       break;
+   }
+   case nir_op_ilt: {
+      if (dst.regClass() == s2) {
+         emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_lt_i32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented: scalar cmp instr: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
    }
    default:
       fprintf(stderr, "Unknown NIR instr type: ");
@@ -412,12 +439,11 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    unsigned index = nir_intrinsic_base(instr) / 4;
    index = index - FRAG_RESULT_DATA0;
    unsigned target = V_008DFC_SQ_EXP_MRT + index;
-   // FIXME
-   unsigned col_format = V_028714_SPI_SHADER_FP16_ABGR;//(ctx->options->key.fs.col_format >> (4 * index)) & 0xf;
+   unsigned col_format = (ctx->options->key.fs.col_format >> (4 * index)) & 0xf;
    //bool is_int8 = (ctx->options->key.fs.is_int8 >> index) & 1;
    //bool is_int10 = (ctx->options->key.fs.is_int10 >> index) & 1;
-   unsigned enabled_channels;
-   aco_opcode compr_op;
+   unsigned enabled_channels = 0xF;
+   aco_opcode compr_op = (aco_opcode)0;
 
    switch (col_format)
    {
@@ -485,8 +511,8 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    }
 
    std::unique_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
-   exp->valid_mask = true; // TODO
-   exp->done = true; // TODO
+   exp->valid_mask = false; // TODO
+   exp->done = false; // TODO
    exp->compressed = (bool) compr_op;
    exp->dest = target;
    exp->enabled_mask = enabled_channels;
@@ -1344,6 +1370,7 @@ std::unique_ptr<RegClass[]> init_reg_class(isel_context *ctx, nir_function_impl 
                case nir_op_fsqrt:
                case nir_op_fexp2:
                case nir_op_flog2:
+               case nir_op_ffract:
                   type = vgpr;
                   break;
                case nir_op_flt:
