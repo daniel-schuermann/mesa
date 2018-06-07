@@ -37,6 +37,7 @@ struct combinator_ctx_fw {
    std::map<uint32_t, std::array<Operand,4>> vectors;
    std::map<uint64_t, Temp> vector_extracts;
    std::map<uint32_t, Operand> neg;
+   std::map<uint32_t, Operand> abs;
    std::map<uint32_t, Instruction*> mul;
    std::pair<uint32_t,Temp> last_literal;
 };
@@ -153,6 +154,15 @@ void handle_instruction(combinator_ctx_fw& ctx, std::unique_ptr<Instruction>& in
             VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr.get());
             vop3->getOperand(i) = it->second;
             vop3->neg[i] = !vop3->neg[i];
+         }
+
+         /* propagate abs flag */
+         it = ctx.abs.find(instr->getOperand(i).tempId());
+         if (it != ctx.abs.end() && canUseVOP3(instr)) {
+            toVOP3(ctx, instr);
+            VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr.get());
+            vop3->getOperand(i) = it->second;
+            vop3->abs[i] = true;
          }
       }
 
@@ -291,9 +301,16 @@ void handle_instruction(combinator_ctx_fw& ctx, std::unique_ptr<Instruction>& in
               instr->getOperand(0).constantValue() == 0 &&
               instr->format == Format::VOP2) {
       /* negation */
+      // TODO: we should be able to handle double negations and -abs(value)
       ctx.neg.insert({instr->getDefinition(0).tempId(), instr->getOperand(1)});
    } else if (instr->opcode == aco_opcode::v_mul_f32) {
       ctx.mul.insert({instr->getDefinition(0).tempId(), instr.get()});
+   } else if (instr->opcode == aco_opcode::v_and_b32 &&
+              instr->getOperand(0).isConstant() &&
+              instr->getOperand(0).constantValue() == 0x7FFFFFFF &&
+              instr->format == Format::VOP2) {
+      /* abs */
+      ctx.abs.insert({instr->getDefinition(0).tempId(), instr->getOperand(1)});
    }
    ctx.instructions.emplace_back(std::move(instr));
 }
