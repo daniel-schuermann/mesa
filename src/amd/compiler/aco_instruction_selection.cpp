@@ -296,6 +296,20 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_fabs: {
+      if (dst.size() == 1) {
+         std::unique_ptr<VOP2_instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_and_b32, Format::VOP2, 2, 1)};
+         vop2->getOperand(0) = Operand((uint32_t) 0x7FFFFFFF);
+         vop2->getOperand(1) = Operand{get_alu_src(ctx, instr->src[0])};
+         vop2->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vop2));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_flog2: {
       if (dst.size() == 1) {
          emit_vop1_instruction(ctx, instr, aco_opcode::v_log_f32, dst);
@@ -349,6 +363,11 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_i2f32: {
       assert(dst.size() == 1);
       emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f32_i32, dst);
+      break;
+   }
+   case nir_op_u2f32: {
+      assert(dst.size() == 1);
+      emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f32_u32, dst);
       break;
    }
    case nir_op_f2i32: {
@@ -1371,6 +1390,8 @@ std::unique_ptr<RegClass[]> init_reg_class(isel_context *ctx, nir_function_impl 
                case nir_op_fexp2:
                case nir_op_flog2:
                case nir_op_ffract:
+               case nir_op_u2f32:
+               case nir_op_i2f32:
                   type = vgpr;
                   break;
                case nir_op_flt:
