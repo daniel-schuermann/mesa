@@ -893,7 +893,7 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
    if (list.size() == 1) {
       std::unique_ptr<Instruction> tmp{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
       tmp->getOperand(0) = Operand(list);
-      tmp->getOperand(1) = Operand((unsigned)0);
+      tmp->getOperand(1) = Operand((unsigned)0xffff8000);
       list = {ctx->program->allocateId(), s2};
       tmp->getDefinition(0) = Definition(list);
       ctx->block->instructions.emplace_back(std::move(tmp));
