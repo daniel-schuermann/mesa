@@ -37,7 +37,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    struct radv_shader_info pre_info = info->info;
 
    memset(info, 0, sizeof(*info));
-   memset(config, 0, sizeof(*info));
+   memset(config, 0, sizeof(*config));
 
    /* This is actually form a pass done by radv and w ewant to keep it, just need to clear all the
     * nir_to_llvm stuff. */
