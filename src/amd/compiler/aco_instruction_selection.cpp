@@ -22,6 +22,19 @@ struct isel_context {
    Temp barycentric_coords;
    Temp prim_mask;
    Temp descriptor_sets[RADV_UD_MAX_SETS];
+   Temp push_constants;
+   Temp ring_offsets;
+   Temp sample_pos_offset;
+   Temp persp_sample;
+   Temp persp_center;
+   Temp persp_centroid;
+   Temp linear_sample;
+   Temp linear_center;
+   Temp linear_centroid;
+   Temp frag_pos[4];
+   Temp front_face;
+   Temp ancillary;
+   Temp sample_coverage;
 
    uint32_t input_mask;
 };
@@ -1520,49 +1533,253 @@ std::unique_ptr<RegClass[]> init_reg_class(isel_context *ctx, nir_function_impl 
    return reg_class;
 }
 
-int
-type_size(const struct glsl_type *type)
+struct user_sgpr_info {
+   uint8_t num_sgpr;
+   uint8_t user_sgpr_idx;
+   bool need_ring_offsets;
+   bool indirect_all_descriptor_sets;
+};
+
+static void allocate_user_sgprs(isel_context *ctx, gl_shader_stage stage,
+                                /* TODO bool has_previous_stage, gl_shader_stage previous_stage, */
+                                bool needs_view_index, user_sgpr_info& user_sgpr_info)
 {
-        return glsl_count_attribute_slots(type, false);
-}
+   memset(&user_sgpr_info, 0, sizeof(struct user_sgpr_info));
+   uint32_t user_sgpr_count = 0;
+#if 0
+   /* until we sort out scratch/global buffers always assign ring offsets for gs/vs/es */
+   if (stage == MESA_SHADER_GEOMETRY ||
+       stage == MESA_SHADER_VERTEX ||
+       stage == MESA_SHADER_TESS_CTRL ||
+       stage == MESA_SHADER_TESS_EVAL ||
+       ctx->is_gs_copy_shader)
+      user_sgpr_info->need_ring_offsets = true;
+#endif
+   if (stage == MESA_SHADER_FRAGMENT &&
+       ctx->program->info->info.ps.needs_sample_positions)
+      user_sgpr_info.need_ring_offsets = true;
 
-void add_startpgm(struct isel_context *ctx)
-{
-   unsigned num_descriptor_sets = util_bitcount(ctx->program->info->info.desc_set_used_mask);
-   std::unique_ptr<Instruction> startpgm{create_instruction<Instruction>(aco_opcode::p_startpgm, Format::PSEUDO, 0, 2 + num_descriptor_sets)};
-
-   ctx->barycentric_coords = Temp{ctx->program->allocateId(), v2};
-
-   startpgm->getDefinition(0) = Definition{ctx->barycentric_coords};
-   startpgm->getDefinition(0).setFixed(fixed_vgpr(0));
-
-   unsigned user_sgpr = 2;
-   unsigned descriptor_set_cnt = 0;
-   for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i) {
-      if (!((1u << i) & ctx->program->info->info.desc_set_used_mask))
-         continue;
-
-      ctx->descriptor_sets[i] = Temp{ctx->program->allocateId(), s1};
-
-      startpgm->getDefinition(1 + descriptor_set_cnt) = Definition{ctx->descriptor_sets[i]};
-      startpgm->getDefinition(1 + descriptor_set_cnt).setFixed(fixed_sgpr(user_sgpr));
-
-      ctx->program->info->user_sgprs_locs.descriptor_sets[0].sgpr_idx = user_sgpr;
-      ctx->program->info->user_sgprs_locs.descriptor_sets[0].num_sgprs = 1;
-
-      ++descriptor_set_cnt;
-      user_sgpr += 1;
+   /* 2 user sgprs will nearly always be allocated for scratch/rings */
+   if (ctx->options->supports_spill || user_sgpr_info.need_ring_offsets) {
+      user_sgpr_count += 2;
    }
 
-   ctx-> program->info->num_user_sgprs = user_sgpr;
+   switch (stage) {
+   case MESA_SHADER_FRAGMENT:
+      user_sgpr_count += ctx->program->info->info.ps.needs_sample_positions;
+      break;
+   default:
+      unreachable("Shader stage not implemented");
+   }
 
-   ctx->prim_mask = Temp{ctx->program->allocateId(), s1};
-   startpgm->getDefinition(1 + num_descriptor_sets) = Definition{ctx->prim_mask};
-   startpgm->getDefinition(1 + num_descriptor_sets).setFixed(fixed_sgpr(user_sgpr));
+   if (needs_view_index)
+      user_sgpr_count++;
+
+   if (ctx->program->info->info.loads_push_constants)
+      user_sgpr_count += 1; /* we use 32bit pointers */
+
+   uint32_t available_sgprs = ctx->options->chip_class >= GFX9 ? 32 : 16;
+   uint32_t num_desc_set = util_bitcount(ctx->program->info->info.desc_set_used_mask);
+   user_sgpr_info.num_sgpr = user_sgpr_count + num_desc_set;
+
+   if (available_sgprs < user_sgpr_info.num_sgpr)
+      user_sgpr_info.indirect_all_descriptor_sets = true;
+}
+
+#define MAX_ARGS 23
+struct arg_info {
+   RegClass types[MAX_ARGS];
+   Temp *assign[MAX_ARGS];
+   PhysReg reg[MAX_ARGS];
+   unsigned array_params_mask;
+   uint8_t count;
+   uint8_t sgpr_count;
+   uint8_t num_sgprs_used;
+   uint8_t num_vgprs_used;
+};
+
+static void
+add_arg(arg_info *info, RegClass type, Temp *param_ptr, unsigned reg)
+{
+   assert(info->count < MAX_ARGS);
+
+   info->assign[info->count] = param_ptr;
+   info->types[info->count] = type;
+
+   if (typeOf(type) == sgpr) {
+      info->num_sgprs_used += sizeOf(type);
+      info->sgpr_count++;
+      info->reg[info->count] = fixed_sgpr(reg);
+   } else {
+      assert(typeOf(type) == vgpr);
+      info->num_vgprs_used += sizeOf(type);
+      info->reg[info->count] = fixed_vgpr(reg);
+   }
+   info->count++;
+}
+
+static inline void
+add_array_arg(arg_info *info, RegClass type, Temp *param_ptr, unsigned reg)
+{
+   info->array_params_mask |= (1 << info->count);
+   add_arg(info, type, param_ptr, reg);
+}
+
+static void
+set_loc(struct radv_userdata_info *ud_info, uint8_t *sgpr_idx, uint8_t num_sgprs,
+        int32_t indirect_offset)
+{
+   ud_info->sgpr_idx = *sgpr_idx;
+   ud_info->num_sgprs = num_sgprs;
+   ud_info->indirect = indirect_offset > 0;
+   ud_info->indirect_offset = indirect_offset;
+   *sgpr_idx += num_sgprs;
+}
+
+static void
+set_loc_shader(isel_context *ctx, int idx, uint8_t *sgpr_idx,
+               uint8_t num_sgprs)
+{
+   struct radv_userdata_info *ud_info = &ctx->program->info->user_sgprs_locs.shader_data[idx];
+   assert(ud_info);
+
+   set_loc(ud_info, sgpr_idx, num_sgprs, 0);
+}
+
+static void
+set_loc_shader_ptr(isel_context *ctx, int idx, uint8_t *sgpr_idx)
+{
+   bool use_32bit_pointers = idx != AC_UD_SCRATCH_RING_OFFSETS;
+
+   set_loc_shader(ctx, idx, sgpr_idx, use_32bit_pointers ? 1 : 2);
+}
+
+static void
+set_loc_desc(isel_context *ctx, int idx,  uint8_t *sgpr_idx,
+             uint32_t indirect_offset)
+{
+   struct radv_userdata_info *ud_info =
+      &ctx->program->info->user_sgprs_locs.descriptor_sets[idx];
+   assert(ud_info);
+
+   set_loc(ud_info, sgpr_idx, 1, indirect_offset);
+}
+
+static void
+declare_global_input_sgprs(isel_context *ctx, gl_shader_stage stage,
+                           /* bool has_previous_stage, gl_shader_stage previous_stage, */
+                           user_sgpr_info *user_sgpr_info,
+                           struct arg_info *args,
+                           Temp *desc_sets)
+{
+   unsigned num_sets = ctx->options->layout ? ctx->options->layout->num_sets : 0;
+   unsigned stage_mask = 1 << stage;
+
+   //if (has_previous_stage)
+   //   stage_mask |= 1 << previous_stage;
+
+   /* 1 for each descriptor set */
+   if (!user_sgpr_info->indirect_all_descriptor_sets) {
+      for (unsigned i = 0; i < num_sets; ++i) {
+         if ((ctx->program->info->info.desc_set_used_mask & (1 << i)) &&
+             ctx->options->layout->set[i].layout->shader_stages & stage_mask) {
+            add_array_arg(args, s1, &desc_sets[i], user_sgpr_info->user_sgpr_idx);
+            set_loc_desc(ctx, i, &user_sgpr_info->user_sgpr_idx, 0);
+         }
+      }
+   } else {
+      add_array_arg(args, s1, desc_sets, user_sgpr_info->user_sgpr_idx);
+      set_loc_shader_ptr(ctx, AC_UD_INDIRECT_DESCRIPTOR_SETS, &user_sgpr_info->user_sgpr_idx);
+      for (unsigned i = 0; i < num_sets; ++i) {
+         if ((ctx->program->info->info.desc_set_used_mask & (1 << i)) &&
+             ctx->options->layout->set[i].layout->shader_stages & stage_mask)
+            set_loc_desc(ctx, i, &user_sgpr_info->user_sgpr_idx, i * 8);
+      }
+      ctx->program->info->need_indirect_descriptor_sets = true;
+   }
+
+   if (ctx->program->info->info.loads_push_constants) {
+      /* 1 for push constants and dynamic descriptors */
+      add_array_arg(args, s1, &ctx->push_constants, user_sgpr_info->user_sgpr_idx);
+      set_loc_shader_ptr(ctx, AC_UD_PUSH_CONSTANTS, &user_sgpr_info->user_sgpr_idx);
+   }
+}
+
+void add_startpgm(struct isel_context *ctx, gl_shader_stage stage)
+{
+   user_sgpr_info user_sgpr_info;
+   allocate_user_sgprs(ctx, stage, false, user_sgpr_info);
+
+   assert(!user_sgpr_info.indirect_all_descriptor_sets && "Not yet implemented.");
+   arg_info args = {};
+
+   if (user_sgpr_info.need_ring_offsets && !ctx->options->supports_spill)
+      add_arg(&args, s2, &ctx->ring_offsets, 0);
+
+   if (ctx->options->supports_spill || user_sgpr_info.need_ring_offsets) {
+      set_loc_shader_ptr(ctx, AC_UD_SCRATCH_RING_OFFSETS, &user_sgpr_info.user_sgpr_idx);
+   }
+
+   switch (stage) {
+   case MESA_SHADER_FRAGMENT:
+      declare_global_input_sgprs(ctx, stage, &user_sgpr_info, &args, ctx->descriptor_sets);
+
+      if (ctx->program->info->info.ps.needs_sample_positions) {
+         add_arg(&args, s1, &ctx->sample_pos_offset, user_sgpr_info.user_sgpr_idx);
+         set_loc_shader(ctx, AC_UD_PS_SAMPLE_POS_OFFSET, &user_sgpr_info.user_sgpr_idx, 1);
+      }
+      assert(user_sgpr_info.user_sgpr_idx == user_sgpr_info.num_sgpr);
+      add_arg(&args, s1, &ctx->prim_mask, user_sgpr_info.user_sgpr_idx);
+      add_arg(&args, v2, &ctx->barycentric_coords, 0);
+      #if 0
+      add_arg(&args, v2, &ctx->persp_sample);
+      add_arg(&args, v2, &ctx->persp_center);
+      add_arg(&args, v2, &ctx->persp_centroid);
+      add_arg(&args, v3, NULL); /* persp pull model */
+      add_arg(&args, v2, &ctx->linear_sample);
+      add_arg(&args, v2, &ctx->linear_center);
+      add_arg(&args, v2, &ctx->linear_centroid);
+      add_arg(&args, v1, NULL);  /* line stipple tex */
+      add_arg(&args, v1, &ctx->frag_pos[0]);
+      add_arg(&args, v1, &ctx->frag_pos[1]);
+      add_arg(&args, v1, &ctx->frag_pos[2]);
+      add_arg(&args, v1, &ctx->frag_pos[3]);
+      add_arg(&args, v1, &ctx->front_face);
+      add_arg(&args, v1, &ctx->ancillary);
+      add_arg(&args, v1, &ctx->sample_coverage);
+      add_arg(&args, v1, NULL);  /* fixed pt */
+      #endif
+      break;
+   default:
+      unreachable("Shader stage not implemented");
+   }
+
+   ctx->program->info->num_input_vgprs = 0;
+   ctx->program->info->num_input_sgprs = ctx->options->supports_spill ? 2 : 0;
+   ctx->program->info->num_input_sgprs += args.num_sgprs_used;
+   ctx->program->info->num_user_sgprs = user_sgpr_info.num_sgpr;
+
+   if (stage != MESA_SHADER_FRAGMENT)
+      ctx->program->info->num_input_vgprs = args.num_vgprs_used;
+
+   std::unique_ptr<Instruction> startpgm{create_instruction<Instruction>(aco_opcode::p_startpgm, Format::PSEUDO, 0, args.count)};
+   for (unsigned i = 0; i < args.count; i++) {
+      if (args.assign[i]) {
+         *args.assign[i] = Temp{ctx->program->allocateId(), args.types[i]};
+         startpgm->getDefinition(i) = *args.assign[i];
+         startpgm->getDefinition(i).setFixed(args.reg[i]);
+      }
+   }
 
    ctx->block->instructions.push_back(std::move(startpgm));
 }
 
+}
+
+int
+type_size(const struct glsl_type *type)
+{
+   return glsl_count_attribute_slots(type, false);
 }
 
 std::unique_ptr<Program> select_program(struct nir_shader *nir,
@@ -1601,7 +1818,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
       ctx.input_mask |= 1ull << idx;
    }
 
-   add_startpgm(&ctx);
+   add_startpgm(&ctx, nir->info.stage);
 
    visit_cf_list(&ctx, &func->impl->body);
 
