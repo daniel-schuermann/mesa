@@ -148,8 +148,8 @@ void emit_vopc_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
          src1 = t;
          vopc.reset(create_instruction<VOPC_instruction>(op, Format::VOPC, 2, 1));
       } else {
-         Format format = (Format) ((int) Format::VOPC | (int) Format::VOP3A);
-         vopc.reset(create_instruction<VOP3A_instruction>(op, format, 2, 1));
+         // TODO: Handle both cases SGPR.
+         abort();
       }
    } else {
       vopc.reset(create_instruction<VOPC_instruction>(op, Format::VOPC, 2, 1));
