@@ -35,17 +35,25 @@ struct combinator_ctx {
 
 void handle_instruction(combinator_ctx& ctx, std::unique_ptr<Instruction>& instr)
 {
-#if 0
-   for (unsigned i = 0; i < instr->num_definitions; i++)
-   {
-      if (ctx.uses[instr->getDefinition(i).tempId()] == 0) {
+   /* Dead Code Elimination:
+    * We remove instructions if they define temporaries which all are unused */
+   if (instr->num_definitions) {
+      bool is_used = false;
+      for (unsigned i = 0; i < instr->num_definitions; i++)
+      {
+         if (ctx.uses[instr->getDefinition(i).tempId()] || instr->getDefinition(i).isFixed()) {
+            is_used = true;
+            break;
+         }
+      }
+      if (!is_used) {
          instr->format = Format::PSEUDO;
+         instr->opcode = aco_opcode::s_nop;
          instr->num_operands = 0;
          instr->num_definitions = 0;
          return;
       }
    }
-#endif
 
    if (instr->opcode == aco_opcode::v_mad_f32 &&
       (!instr->getOperand(2).isTemp() ||
