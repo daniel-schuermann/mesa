@@ -1811,6 +1811,11 @@ void add_startpgm(struct isel_context *ctx, gl_shader_stage stage)
    }
 
    ctx->block->instructions.push_back(std::move(startpgm));
+
+   std::unique_ptr<Instruction> wqm{create_instruction<Instruction>(aco_opcode::s_wqm_b64, Format::SOP1, 1, 1)};
+   wqm->getOperand(0) = Operand(PhysReg{126}, s2);
+   wqm->getDefinition(0) = Definition(PhysReg{126}, s2);
+   ctx->block->instructions.push_back(std::move(wqm));
 }
 
 }
