@@ -137,7 +137,7 @@ void lower_to_hw_instr(Program* program)
             case aco_opcode::p_extract_vector:
             {
                unsigned reg = instr->getOperand(0).physReg().reg + instr->getOperand(1).constantValue();
-               RegClass rc = instr->getDefinition(0).regClass();
+               RegClass rc = (RegClass) (((int) v1 & (int) instr->getOperand(0).regClass()) | 1);
                if (reg == instr->getDefinition(0).physReg().reg)
                   break;
 
