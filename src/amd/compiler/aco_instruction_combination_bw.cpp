@@ -74,8 +74,7 @@ void handle_instruction(combinator_ctx& ctx, std::unique_ptr<Instruction>& instr
 void combine_bw(Program* program)
 {
    uint32_t uses[program->peekAllocationId()];
-   for (unsigned i = 0; i < program->peekAllocationId(); i++)
-      uses[i] = 0;
+   memset(&uses, 0, sizeof(uint32_t) * program->peekAllocationId());
    combinator_ctx ctx;
    ctx.uses = uses;
    for (auto&& block : program->blocks)
