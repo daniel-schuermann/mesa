@@ -35,6 +35,7 @@ struct combinator_ctx {
 
 void handle_instruction(combinator_ctx& ctx, std::unique_ptr<Instruction>& instr)
 {
+#if 0
    for (unsigned i = 0; i < instr->num_definitions; i++)
    {
       if (ctx.uses[instr->getDefinition(i).tempId()] == 0) {
@@ -44,6 +45,7 @@ void handle_instruction(combinator_ctx& ctx, std::unique_ptr<Instruction>& instr
          return;
       }
    }
+#endif
 
    if (instr->opcode == aco_opcode::v_mad_f32 &&
       (!instr->getOperand(2).isTemp() ||
