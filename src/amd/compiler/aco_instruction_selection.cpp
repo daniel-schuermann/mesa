@@ -657,7 +657,7 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
    if (layout->binding[binding].type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC ||
        layout->binding[binding].type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC) {
       unsigned idx = pipeline_layout->set[desc_set].dynamic_offset_start + layout->binding[binding].dynamic_offset_offset;
-		//TODO desc_ptr = ctx->abi.push_constants;
+      desc_ptr = ctx->push_constants;
       offset = pipeline_layout->push_constant_size + 16 * idx;
       stride = 16;
    } else
@@ -745,6 +745,44 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
 
 }
 
+void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   Temp index = get_ssa_temp(ctx, instr->src[0].ssa);
+   unsigned offset = nir_intrinsic_base(instr);
+   if (offset != 0) { // TODO check if index != 0 as well
+      std::unique_ptr<SOP2_instruction> add{create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1)};
+      add->getOperand(0) = Operand(offset);
+      add->getOperand(1) = Operand(index);
+      index = {ctx->program->allocateId(), s1};
+      add->getDefinition(0) = Definition(index);
+      ctx->block->instructions.emplace_back(std::move(add));
+   }
+   Temp ptr = ctx->push_constants;
+   if (ptr.size() == 1)
+      ptr = convert_pointer_to_64_bit(ctx, ptr);
+
+   unsigned range = nir_intrinsic_range(instr);
+   aco_opcode op;
+   switch (range) {
+   case 4:
+      op = aco_opcode::s_load_dword;
+      break;
+   case 8:
+      op = aco_opcode::s_load_dwordx2;
+      break;
+   case 16:
+      op = aco_opcode::s_load_dwordx4;
+      break;
+   default:
+      unreachable("unimplemented or forbidden load_push_constant.");
+   }
+   std::unique_ptr<SMEM_instruction> load{create_instruction<SMEM_instruction>(op, Format::SMEM, 2, 1)};
+   load->getOperand(0) = Operand(ptr);
+   load->getOperand(1) = Operand(index);
+   load->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+   ctx->block->instructions.emplace_back(std::move(load));
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
@@ -763,10 +801,10 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_load_ubo:
       visit_load_ubo(ctx, instr);
       break;
+   case nir_intrinsic_load_push_constant:
+      visit_load_push_constant(ctx, instr);
+      break;
    case nir_intrinsic_vulkan_resource_index:
-      fprintf(stderr, "Untested implementation: ");
-      nir_print_instr(&instr->instr, stderr);
-      fprintf(stderr, "\n");
       visit_load_resource(ctx, instr);
       break;
    default:
