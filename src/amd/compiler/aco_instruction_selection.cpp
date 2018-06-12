@@ -84,6 +84,17 @@ void emit_v_mov(isel_context *ctx, Temp src, Temp dst)
    }
 }
 
+Temp convert_pointer_to_64_bit(isel_context *ctx, Temp ptr)
+{
+      std::unique_ptr<Instruction> tmp{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      tmp->getOperand(0) = Operand(ptr);
+      tmp->getOperand(1) = Operand((unsigned)ctx->options->address32_hi);
+      Temp ptr64 = {ctx->program->allocateId(), s2};
+      tmp->getDefinition(0) = Definition(ptr64);
+      ctx->block->instructions.emplace_back(std::move(tmp));
+      return ptr64;
+}
+
 void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst, bool commutative)
 {
    Temp src0 = get_alu_src(ctx, instr->src[0]);
@@ -687,14 +698,9 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp offset = get_ssa_temp(ctx, instr->src[1].ssa);
 
    if (dst.type() == sgpr) {
-      if (rsrc.size() == 1) {
-         std::unique_ptr<Instruction> tmp{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-         tmp->getOperand(0) = Operand(rsrc);
-         tmp->getOperand(1) = Operand((unsigned)0);
-         rsrc = {ctx->program->allocateId(), s2};
-         tmp->getDefinition(0) = Definition(rsrc);
-         ctx->block->instructions.emplace_back(std::move(tmp));
-      }
+      if (rsrc.size() == 1)
+         rsrc = convert_pointer_to_64_bit(ctx, rsrc);
+
       std::unique_ptr<Instruction> load;
       load.reset(create_instruction<SMEM_instruction>(aco_opcode::s_load_dwordx4, Format::SMEM, 2, 1));
       load->getOperand(0) = Operand(rsrc);
@@ -891,12 +897,7 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
 
    Temp list = ctx->descriptor_sets[descriptor_set];
    if (list.size() == 1) {
-      std::unique_ptr<Instruction> tmp{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-      tmp->getOperand(0) = Operand(list);
-      tmp->getOperand(1) = Operand((unsigned)ctx->options->address32_hi);
-      list = {ctx->program->allocateId(), s2};
-      tmp->getDefinition(0) = Definition(list);
-      ctx->block->instructions.emplace_back(std::move(tmp));
+      list = convert_pointer_to_64_bit(ctx, list);
       //ctx->descriptor_sets[descriptor_set] = list;
    }
 
