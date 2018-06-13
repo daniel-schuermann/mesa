@@ -819,6 +819,18 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
    ctx->block->instructions.emplace_back(std::move(load));
 }
 
+void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   // TODO: goto endpgm
+   Temp cond = get_ssa_temp(ctx, instr->src[0].ssa);
+   std::unique_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 1)};
+   sop2->getOperand(0) = Operand(exec, s2);
+   sop2->getOperand(1) = Operand(cond);
+
+   sop2->getDefinition(0) = Definition(exec, s2);
+   ctx->block->instructions.emplace_back(std::move(sop2));
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
@@ -842,6 +854,9 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_vulkan_resource_index:
       visit_load_resource(ctx, instr);
+      break;
+   case nir_intrinsic_discard_if:
+      visit_discard_if(ctx, instr);
       break;
    default:
       fprintf(stderr, "Unimplemented intrinsic instr: ");
