@@ -1014,17 +1014,17 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
       (!index_set || binding->immutable_samplers_equal)) {
       if (binding->immutable_samplers_equal)
          constant_index = 0;
-/*
-      const uint32_t *samplers = radv_immutable_samplers(layout, binding);
 
-      // TODO!
-		LLVMValueRef constants[] = {
-			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 0], 0),
-			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 1], 0),
-			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 2], 0),
-			LLVMConstInt(ctx->ac.i32, samplers[constant_index * 4 + 3], 0),
-		};
-		return ac_build_gather_values(&ctx->ac, constants, 4);*/
+      const uint32_t *samplers = radv_immutable_samplers(layout, binding);
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 4, 1)};
+      vec->getOperand(0) = Operand(samplers[constant_index * 4 + 0]);
+      vec->getOperand(1) = Operand(samplers[constant_index * 4 + 1]);
+      vec->getOperand(2) = Operand(samplers[constant_index * 4 + 2]);
+      vec->getOperand(3) = Operand(samplers[constant_index * 4 + 3]);
+      Temp res = {ctx->program->allocateId(), s4};
+      vec->getDefinition(0) = Definition(res);
+      ctx->block->instructions.emplace_back(std::move(vec));
+      return res;
    }
 
    Operand off;
