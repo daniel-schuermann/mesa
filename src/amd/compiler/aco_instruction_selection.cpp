@@ -1150,10 +1150,38 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
 
 }
 
+Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
+{
+   Temp coord_vec[3];
+   for (unsigned i = 0; i < 3; i++)
+   {
+      std::unique_ptr<Instruction> extract{create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1)};
+      extract->getOperand(0) = Operand(coords);
+      extract->getOperand(1) = Operand(i);
+      coord_vec[i] = {ctx->program->allocateId(), v1};
+      extract->getDefinition(0) = Definition(coord_vec[i]);
+      ctx->block->instructions.emplace_back(std::move(extract));
+   }
+
+   std::unique_ptr<VOP1_instruction> rne{create_instruction<VOP1_instruction>(aco_opcode::v_rndne_f32, Format::VOP1, 1, 1)};
+   rne->getOperand(0) = Operand(coord_vec[idx]);
+   coord_vec[idx] = {ctx->program->allocateId(), v1};
+   rne->getDefinition(0) = Definition(coord_vec[idx]);
+   ctx->block->instructions.emplace_back(std::move(rne));
+
+   std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1)};
+   for (unsigned i = 0; i < 3; i++)
+      vec->getOperand(i) = Operand(coord_vec[i]);
+   Temp res = {ctx->program->allocateId(), v3};
+   vec->getDefinition(0) = Definition(res);
+   ctx->block->instructions.emplace_back(std::move(vec));
+   return res;
+}
+
 void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
-   bool has_bias = false, has_lod = false;// level_zero = false;
-   Temp resource, sampler, fmask_ptr, bias, coords, lod = Temp();
+   bool has_bias = false, has_lod = false, level_zero = false, has_compare = false;
+   Temp resource, sampler, fmask_ptr, bias, coords, lod, compare = Temp();
    tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
 
    for (unsigned i = 0; i < instr->num_srcs; i++) {
@@ -1171,13 +1199,19 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          nir_const_value *val = nir_src_as_const_value(instr->src[i].src);
 
          if (val && val->i32[0] == 0) {
-            //level_zero = true;
+            level_zero = true;
          } else {
             lod = get_ssa_temp(ctx, instr->src[i].src.ssa);
             has_lod = true;
          }
          break;
       }
+      case nir_tex_src_comparator:
+         if (instr->is_shadow) {
+            compare = get_ssa_temp(ctx, instr->src[i].src.ssa);
+            has_compare = true;
+         }
+         break;
       case nir_tex_src_texture_offset:
       case nir_tex_src_sampler_offset:
       default:
@@ -1190,6 +1224,18 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
    if (instr->op == nir_texop_texture_samples)
       fprintf(stderr, "Unimplemented tex instr type: ");
+
+
+   /* TC-compatible HTILE on radeonsi promotes Z16 and Z24 to Z32_FLOAT,
+    * so the depth comparison value isn't clamped for Z16 and
+    * Z24 anymore. Do it manually here.
+    *
+    * It's unnecessary if the original texture format was
+    * Z32_FLOAT, but we don't know that here.
+    */
+   //if (has_compare && ctx->options->chip_class == VI && ctx->abi->clamp_shadow_reference)
+      // TODO
+      //args.compare = ac_build_clamp(&ctx->ac, ac_to_float(&ctx->ac, args.compare));
 
    if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && instr->coord_components)
       prepare_cube_coords(ctx, &coords, instr->op == nir_texop_txd, instr->is_array, instr->op == nir_texop_lod);
@@ -1207,7 +1253,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
        instr->sampler_dim == GLSL_SAMPLER_DIM_SUBPASS_MS) &&
        instr->is_array &&
        instr->op != nir_texop_txf && instr->op != nir_texop_txf_ms)
-   fprintf(stderr, "Unimplemented tex instr type: ");
+      coords = apply_round_slice(ctx, coords, 2);
 
    if (ctx->options->chip_class >= GFX9 &&
        instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
@@ -1255,11 +1301,21 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       return;
    }
 
+   if (has_compare) {
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      vec->getOperand(0) = Operand(compare);
+      vec->getOperand(1) = Operand(arg);
+      RegClass rc = (RegClass) ((int) compare.regClass() + arg.size());
+      arg = Temp{ctx->program->allocateId(), rc};
+      vec->getDefinition(0) = Definition(arg);
+      ctx->block->instructions.emplace_back(std::move(vec));
+   }
+
    if (has_bias) {
       std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
       vec->getOperand(0) = Operand(bias);
-      vec->getOperand(1) = Operand(coords);
-      RegClass rc = (RegClass) ((int) bias.regClass() + coords.size());
+      vec->getOperand(1) = Operand(arg);
+      RegClass rc = (RegClass) ((int) bias.regClass() + arg.size());
       arg = Temp{ctx->program->allocateId(), rc};
       vec->getDefinition(0) = Definition(arg);
       ctx->block->instructions.emplace_back(std::move(vec));
@@ -1267,6 +1323,10 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
    if (instr->op == nir_texop_txb)
       tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample_b, Format::MIMG, 3, 1));
+   else if (level_zero && has_compare)
+      tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample_c_lz, Format::MIMG, 3, 1));
+   else if (level_zero)
+      tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample_lz, Format::MIMG, 3, 1));
    else
       tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample, Format::MIMG, 3, 1));
    tex->getOperand(0) = Operand{arg};
