@@ -190,12 +190,9 @@ void handle_instruction(combinator_ctx_fw& ctx, std::unique_ptr<Instruction>& in
                instr.reset(mad.release());
 
             /* check if we can use madak */
-            } else if (!uses_sgpr && mul->format == Format::VOP2 && add_lit) {
+            } else if (!uses_sgpr && mul->format == Format::VOP2 && add_lit && !mul_lit) {
                mad.reset(create_instruction<VOP2_instruction>(aco_opcode::v_madak_f32, Format::VOP2, 3, 1));
-               if (mul_lit)
-                  mad->getOperand(0) = Operand(rematerializeLiteral(ctx, mul->getOperand(0).constantValue()));
-               else
-                  mad->getOperand(0) = mul->getOperand(0);
+               mad->getOperand(0) = mul->getOperand(0);
                mad->getOperand(1) = mul->getOperand(1);
                mad->getOperand(2) = instr->getOperand(0); /* the literal */
                mad->getDefinition(0) = instr->getDefinition(0);
