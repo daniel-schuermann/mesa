@@ -201,6 +201,7 @@ static inline PhysReg fixed_sgpr(unsigned idx)
 
 static constexpr PhysReg m0{124};
 static constexpr PhysReg vcc{106};
+static constexpr PhysReg exec{126};
 
 /**
  * Operand Class
