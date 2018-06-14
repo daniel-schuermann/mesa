@@ -200,14 +200,26 @@ void fix_exports(asm_context ctx, std::vector<uint32_t>& out, Program* program)
    {
       Block* block = block_it->get();
       for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
-         {
-            if ((*it)->format == Format::EXP) {
-               Export_instruction* exp = static_cast<Export_instruction*>((*it).get());
-               exp->done = true;
-               exp->valid_mask = true;
-               return;
-            }
-         }
+      {
+         if ((*it)->format == Format::EXP) {
+            Export_instruction* exp = static_cast<Export_instruction*>((*it).get());
+            exp->done = true;
+            exp->valid_mask = true;
+            return;
+         } else if ((*it)->num_definitions && (*it)->getDefinition(0).physReg() == exec)
+            break;
+      }
+      /* we didn't find an Export instruction and have to insert a null export */
+      std::unique_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
+      for (unsigned i = 0; i < 4; i++)
+         exp->getOperand(i) = Operand();
+      exp->enabled_mask = 0;
+      exp->compressed = false;
+      exp->done = true;
+      exp->valid_mask = true;
+      exp->dest = 9; /* NULL */
+      /* insert the null export 1 instruction before endpgm */
+      block->instructions.insert(block->instructions.end() - 1, std::move(exp));
    }
 }
 
