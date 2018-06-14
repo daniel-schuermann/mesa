@@ -285,8 +285,6 @@ void register_allocation(Program *program)
 
    program->config->num_vgprs = num_accessed_vgpr;
    program->config->num_sgprs = num_accessed_sgpr + 2;
-   program->config->spi_ps_input_addr = S_0286CC_PERSP_CENTER_ENA(1);
-   program->config->spi_ps_input_ena = S_0286CC_PERSP_CENTER_ENA(1);
 
    for(auto&& block : program->blocks) {
       for (auto&& insn : block->instructions) {
