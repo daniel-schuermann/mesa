@@ -107,6 +107,15 @@ Temp convert_pointer_to_64_bit(isel_context *ctx, Temp ptr)
       return ptr64;
 }
 
+void emit_sop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst)
+{
+   std::unique_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(op, Format::SOP2, 2, 1)};
+   sop2->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
+   sop2->getOperand(1) = Operand(get_alu_src(ctx, instr->src[1]));
+   sop2->getDefinition(0) = Definition(dst);
+   ctx->block->instructions.emplace_back(std::move(sop2));
+}
+
 void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst, bool commutative)
 {
    Temp src0 = get_alu_src(ctx, instr->src[0]);
@@ -169,14 +178,13 @@ void emit_vopc_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
          Temp t = src0;
          src0 = src1;
          src1 = t;
-         vopc.reset(create_instruction<VOPC_instruction>(op, Format::VOPC, 2, 1));
       } else {
-         // TODO: Handle both cases SGPR.
-         abort();
+         Temp vgpr_src = {ctx->program->allocateId(), getRegClass(vgpr, src1.size())};
+         emit_v_mov(ctx, src1, vgpr_src);
+         src1 = vgpr_src;
       }
-   } else {
-      vopc.reset(create_instruction<VOPC_instruction>(op, Format::VOPC, 2, 1));
    }
+   vopc.reset(create_instruction<VOPC_instruction>(op, Format::VOPC, 2, 1));
    vopc->getOperand(0) = Operand(src0);
    vopc->getOperand(1) = Operand(src1);
    vopc->getDefinition(0) = Definition(dst);
@@ -240,17 +248,47 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
          sop2->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(sop2));
       }
-   } else {
-      fprintf(stderr, "Unimplemented uniform bcsel: ");
-      nir_print_instr(&instr->instr, stderr);
-      fprintf(stderr, "\n");
+   } else { /* condition is uniform */
+      if (cond.regClass() == s2) {
+         std::unique_ptr<Instruction> extract{create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1)};
+         extract->getOperand(0) = Operand(cond);
+         extract->getOperand(1) = Operand((uint32_t) 0);
+         cond = {ctx->program->allocateId(), s1};
+         extract->getDefinition(0) = Definition(cond);
+         ctx->block->instructions.emplace_back(std::move(extract));
+         std::unique_ptr<SOPK_instruction> sopk{create_instruction<SOPK_instruction>(aco_opcode::s_cmpk_lg_u32, Format::SOPK, 1, 1)};
+         sopk->getOperand(0) = Operand(cond);
+         sopk->imm = 0;
+         cond = {ctx->program->allocateId(), b};
+         sopk->getDefinition(0) = Definition(cond);
+         sopk->getDefinition(0).setFixed(PhysReg{253}); /* scc */
+         ctx->block->instructions.emplace_back(std::move(sopk));
+      }
+      assert(cond.regClass() == b);
+      if (dst.size() == 1) {
+         assert(then.regClass() == s1 && els.regClass() == s1);
+         std::unique_ptr<SOP2_instruction> select{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
+         select->getOperand(0) = Operand(then);
+         select->getOperand(1) = Operand(els);
+         select->getOperand(2) = Operand(cond);
+         select->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(select));
+      } else {
+         fprintf(stderr, "Unimplemented uniform bcsel bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
    }
 }
 
 void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
 {
-   if (!instr->dest.dest.is_ssa)
+   if (!instr->dest.dest.is_ssa) {
+      fprintf(stderr, "nir alu dst not in ssa: ");
+      nir_print_instr(&instr->instr, stderr);
+      fprintf(stderr, "\n");
       abort();
+   }
    Temp dst = get_ssa_temp(ctx, &instr->dest.dest.ssa);
    switch(instr->op) {
    case nir_op_vec2:
@@ -262,6 +300,30 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       vec->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(vec));
+      break;
+   }
+   case nir_op_ior: {
+      if (dst.regClass() == v1) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_or_b32, dst, true);
+      } else if (dst.regClass() == s1) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_or_b32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_iand: {
+      if (dst.regClass() == v1) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_and_b32, dst, true);
+      } else if (dst.regClass() == s1) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_and_b32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
       break;
    }
    case nir_op_fmul: {
@@ -396,6 +458,16 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_ffloor: {
+      if (dst.size() == 1) {
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_floor_f32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_fsign: {
       Temp src = get_alu_src(ctx, instr->src[0]);
       assert(src.type() == vgpr);
@@ -444,6 +516,33 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_f2i32: {
       emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_i32_f32, dst);
+      break;
+   }
+   case nir_op_b2f: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      assert(src.regClass() == s2);
+      if (dst.size() == 1) {
+         std::unique_ptr<VOP3A_instruction> cndmask{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, (Format) ((int) Format::VOP3A | (int) Format::VOP2), 3, 1)};
+         cndmask->getOperand(0) = Operand((uint32_t) 0);
+         cndmask->getOperand(1) = Operand((uint32_t) 0x3f800000); /* 1.0 */
+         cndmask->getOperand(2) = Operand(src);
+         cndmask->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(cndmask));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_feq: {
+      if (instr->src[0].src.ssa->bit_size == 32) {
+         emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_eq_f32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
       break;
    }
    case nir_op_flt: {
@@ -1576,8 +1675,10 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                case nir_op_fexp2:
                case nir_op_flog2:
                case nir_op_ffract:
+               case nir_op_ffloor:
                case nir_op_u2f32:
                case nir_op_i2f32:
+               case nir_op_b2f:
                   type = vgpr;
                   break;
                case nir_op_flt:
