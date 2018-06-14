@@ -11,6 +11,27 @@
 #include "gallium/auxiliary/util/u_math.h"
 namespace aco {
 namespace {
+
+enum fs_input {
+   persp_sample,
+   persp_center,
+   persp_centroid,
+   persp_pull_model,
+   linear_sample,
+   linear_center,
+   linear_centroid,
+   line_stipple,
+   frag_pos_0,
+   frag_pos_1,
+   frag_pos_2,
+   frag_pos_3,
+   front_face,
+   ancillary,
+   sample_coverage,
+   fixed_pt,
+   max_inputs,
+};
+
 struct isel_context {
    struct radv_nir_compiler_options *options;
    Program *program;
@@ -19,22 +40,13 @@ struct isel_context {
    std::unique_ptr<RegClass[]> reg_class;
    std::unordered_map<unsigned, unsigned> allocated;
 
-   Temp barycentric_coords;
+   bool fs_vgpr_args[fs_input::max_inputs];
+   Temp fs_inputs[fs_input::max_inputs];
    Temp prim_mask;
    Temp descriptor_sets[RADV_UD_MAX_SETS];
    Temp push_constants;
    Temp ring_offsets;
    Temp sample_pos_offset;
-   Temp persp_sample;
-   Temp persp_center;
-   Temp persp_centroid;
-   Temp linear_sample;
-   Temp linear_center;
-   Temp linear_centroid;
-   Temp frag_pos[4];
-   Temp front_face;
-   Temp ancillary;
-   Temp sample_coverage;
 
    uint32_t input_mask;
 };
@@ -835,8 +847,17 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
    case nir_intrinsic_load_barycentric_pixel:
-      ctx->allocated[instr->dest.ssa.index] = ctx->barycentric_coords.id();
+      ctx->allocated[instr->dest.ssa.index] = ctx->fs_inputs[fs_input::persp_center].id();
       break;
+   case nir_intrinsic_load_front_face: {
+      std::unique_ptr<VOPC_instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_lg_u32, Format::VOPC, 2, 1)};
+      cmp->getOperand(0) = Operand((uint32_t) 0);
+      cmp->getOperand(1) = Operand(ctx->fs_inputs[fs_input::front_face]);
+      cmp->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      cmp->getDefinition(0).setHint(vcc);
+      ctx->block->instructions.emplace_back(std::move(cmp));
+      break;
+   }
    case nir_intrinsic_load_interpolated_input:
       visit_load_interpolated_input(ctx, instr);
       break;
@@ -1526,9 +1547,10 @@ static void visit_cf_list(isel_context *ctx,
 }
 
 
-std::unique_ptr<RegClass[]> init_reg_class(isel_context *ctx, nir_function_impl *impl)
+void init_context(isel_context *ctx, nir_function_impl *impl)
 {
    std::unique_ptr<RegClass[]> reg_class{new RegClass[impl->ssa_alloc]};
+   memset(&ctx->fs_vgpr_args, false, sizeof(ctx->fs_vgpr_args));
 
    nir_foreach_block(block, impl) {
       nir_foreach_instr(instr, block) {
@@ -1619,6 +1641,10 @@ std::unique_ptr<RegClass[]> init_reg_class(isel_context *ctx, nir_function_impl 
                size *= 2;
             RegType type = sgpr;
             switch(intrinsic->intrinsic) {
+               case nir_intrinsic_load_front_face:
+                  type = sgpr;
+                  size = 2;
+                  break;
                case nir_intrinsic_load_input:
                case nir_intrinsic_load_vertex_id:
                case nir_intrinsic_load_vertex_id_zero_base:
@@ -1641,6 +1667,18 @@ std::unique_ptr<RegClass[]> init_reg_class(isel_context *ctx, nir_function_impl 
             }
             if (nir_intrinsic_infos[intrinsic->intrinsic].has_dest)
                reg_class[intrinsic->dest.ssa.index] = getRegClass(type, size);
+
+            switch(intrinsic->intrinsic) {
+               case nir_intrinsic_load_barycentric_pixel:
+                  ctx->fs_vgpr_args[fs_input::persp_center] = true;
+                  break;
+               case nir_intrinsic_load_front_face:
+                  ctx->fs_vgpr_args[fs_input::front_face] = true;
+                  break;
+               default:
+                  break;
+            }
+
             break;
          }
          case nir_instr_type_tex: {
@@ -1681,7 +1719,7 @@ std::unique_ptr<RegClass[]> init_reg_class(isel_context *ctx, nir_function_impl 
          }
       }
    }
-   return reg_class;
+   ctx->reg_class.reset(reg_class.release());
 }
 
 struct user_sgpr_info {
@@ -1872,7 +1910,7 @@ void add_startpgm(struct isel_context *ctx, gl_shader_stage stage)
    }
 
    switch (stage) {
-   case MESA_SHADER_FRAGMENT:
+   case MESA_SHADER_FRAGMENT: {
       declare_global_input_sgprs(ctx, stage, &user_sgpr_info, &args, ctx->descriptor_sets);
 
       if (ctx->program->info->info.ps.needs_sample_positions) {
@@ -1881,26 +1919,99 @@ void add_startpgm(struct isel_context *ctx, gl_shader_stage stage)
       }
       assert(user_sgpr_info.user_sgpr_idx == user_sgpr_info.num_sgpr);
       add_arg(&args, s1, &ctx->prim_mask, user_sgpr_info.user_sgpr_idx);
-      add_arg(&args, v2, &ctx->barycentric_coords, 0);
-      #if 0
-      add_arg(&args, v2, &ctx->persp_sample);
-      add_arg(&args, v2, &ctx->persp_center);
-      add_arg(&args, v2, &ctx->persp_centroid);
-      add_arg(&args, v3, NULL); /* persp pull model */
-      add_arg(&args, v2, &ctx->linear_sample);
-      add_arg(&args, v2, &ctx->linear_center);
-      add_arg(&args, v2, &ctx->linear_centroid);
-      add_arg(&args, v1, NULL);  /* line stipple tex */
-      add_arg(&args, v1, &ctx->frag_pos[0]);
-      add_arg(&args, v1, &ctx->frag_pos[1]);
-      add_arg(&args, v1, &ctx->frag_pos[2]);
-      add_arg(&args, v1, &ctx->frag_pos[3]);
-      add_arg(&args, v1, &ctx->front_face);
-      add_arg(&args, v1, &ctx->ancillary);
-      add_arg(&args, v1, &ctx->sample_coverage);
-      add_arg(&args, v1, NULL);  /* fixed pt */
-      #endif
+
+      unsigned vgpr_idx = 0;
+      ctx->program->config->spi_ps_input_addr = 0;
+      ctx->program->config->spi_ps_input_ena = 0;
+      if (ctx->fs_vgpr_args[fs_input::persp_sample]) {
+         add_arg(&args, v2, &ctx->fs_inputs[fs_input::persp_sample], vgpr_idx);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_PERSP_SAMPLE_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_SAMPLE_ENA(1);
+         vgpr_idx += 2;
+      }
+      if (ctx->fs_vgpr_args[fs_input::persp_center]) {
+         add_arg(&args, v2, &ctx->fs_inputs[fs_input::persp_center], vgpr_idx);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_PERSP_CENTER_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_CENTER_ENA(1);
+         vgpr_idx += 2;
+      }
+      if (ctx->fs_vgpr_args[fs_input::persp_centroid]) {
+         add_arg(&args, v2, &ctx->fs_inputs[fs_input::persp_centroid], vgpr_idx);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_PERSP_CENTROID_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_CENTROID_ENA(1);
+         vgpr_idx += 2;
+      }
+      if (ctx->fs_vgpr_args[fs_input::persp_pull_model]) {
+         add_arg(&args, v3, &ctx->fs_inputs[fs_input::persp_pull_model], vgpr_idx);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_PERSP_PULL_MODEL_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_PULL_MODEL_ENA(1);
+         vgpr_idx += 3;
+      }
+      if (ctx->fs_vgpr_args[fs_input::linear_sample]) {
+         add_arg(&args, v2, &ctx->fs_inputs[fs_input::linear_sample], vgpr_idx);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_LINEAR_SAMPLE_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_LINEAR_SAMPLE_ENA(1);
+         vgpr_idx += 2;
+      }
+      if (ctx->fs_vgpr_args[fs_input::linear_center]) {
+         add_arg(&args, v2, &ctx->fs_inputs[fs_input::linear_center], vgpr_idx);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_LINEAR_CENTER_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_LINEAR_CENTER_ENA(1);
+         vgpr_idx += 2;
+      }
+      if (ctx->fs_vgpr_args[fs_input::linear_centroid]) {
+         add_arg(&args, v2, &ctx->fs_inputs[fs_input::linear_centroid], vgpr_idx);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_LINEAR_CENTROID_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_LINEAR_CENTROID_ENA(1);
+         vgpr_idx += 2;
+      }
+      if (ctx->fs_vgpr_args[fs_input::line_stipple]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::line_stipple], vgpr_idx++);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_LINE_STIPPLE_TEX_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_LINE_STIPPLE_TEX_ENA(1);
+      }
+      if (ctx->fs_vgpr_args[fs_input::frag_pos_0]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::frag_pos_0], vgpr_idx++);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_POS_X_FLOAT_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_POS_X_FLOAT_ENA(1);
+      }
+      if (ctx->fs_vgpr_args[fs_input::frag_pos_1]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::frag_pos_1], vgpr_idx++);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_POS_Y_FLOAT_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_POS_Y_FLOAT_ENA(1);
+      }
+      if (ctx->fs_vgpr_args[fs_input::frag_pos_2]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::frag_pos_2], vgpr_idx++);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_POS_Z_FLOAT_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_POS_Z_FLOAT_ENA(1);
+      }
+      if (ctx->fs_vgpr_args[fs_input::frag_pos_3]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::frag_pos_3], vgpr_idx++);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_POS_W_FLOAT_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_POS_W_FLOAT_ENA(1);
+      }
+      if (ctx->fs_vgpr_args[fs_input::front_face]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::front_face], vgpr_idx++);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_FRONT_FACE_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_FRONT_FACE_ENA(1);
+      }
+      if (ctx->fs_vgpr_args[fs_input::ancillary]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::ancillary], vgpr_idx++);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_ANCILLARY_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_ANCILLARY_ENA(1);
+      }
+      if (ctx->fs_vgpr_args[fs_input::sample_coverage]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::sample_coverage], vgpr_idx++);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_SAMPLE_COVERAGE_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_SAMPLE_COVERAGE_ENA(1);
+      }
+      if (ctx->fs_vgpr_args[fs_input::fixed_pt]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::fixed_pt], vgpr_idx++);
+         ctx->program->config->spi_ps_input_addr |= S_0286CC_POS_FIXED_PT_ENA(1);
+         ctx->program->config->spi_ps_input_ena |= S_0286CC_POS_FIXED_PT_ENA(1);
+      }
       break;
+   }
    default:
       unreachable("Shader stage not implemented");
    }
@@ -1960,7 +2071,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
    nir_index_ssa_defs(func->impl);
    ctx.divergent_vals = nir_divergence_analysis(nir);
-   ctx.reg_class = init_reg_class(&ctx, func->impl);
+   init_context(&ctx, func->impl);
 
    nir_print_shader(nir, stderr);
 
