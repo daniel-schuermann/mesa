@@ -932,14 +932,38 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
 
 void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
 {
-   // TODO: goto endpgm
+   /**
+    * s_andn2_b64 exec, exec, vcc
+    * s_cbranch_execnz Label
+    * exp null off, off, off, off done vm
+    * s_endpgm
+    * Label
+    */
+   ctx->program->info->fs.can_discard = true;
    Temp cond = get_ssa_temp(ctx, instr->src[0].ssa);
    std::unique_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 1)};
    sop2->getOperand(0) = Operand(exec, s2);
    sop2->getOperand(1) = Operand(cond);
-
    sop2->getDefinition(0) = Definition(exec, s2);
    ctx->block->instructions.emplace_back(std::move(sop2));
+
+   std::unique_ptr<SOPP_instruction> branch{create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_execnz, Format::SOPP, 1, 0)};
+   branch->getOperand(0) = Operand(exec, s2);
+   branch->imm = 3; /* (8 + 4 dwords) / 4 */
+   ctx->block->instructions.emplace_back(std::move(branch));
+
+   std::unique_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
+   for (unsigned i = 0; i < 4; i++)
+      exp->getOperand(i) = Operand();
+   exp->enabled_mask = 0;
+   exp->compressed = false;
+   exp->done = true;
+   exp->valid_mask = true;
+   exp->dest = 9; /* NULL */
+   ctx->block->instructions.emplace_back(std::move(exp));
+
+   std::unique_ptr<SOPP_instruction> endpgm{create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)};
+   ctx->block->instructions.emplace_back(std::move(endpgm));
 }
 
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
