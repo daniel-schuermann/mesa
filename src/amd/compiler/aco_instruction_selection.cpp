@@ -1348,7 +1348,7 @@ Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
 
 void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
-   bool has_bias = false, has_lod = false, level_zero = false, has_compare = false;
+   bool has_bias = false, has_lod = false, level_zero = false, has_compare = false, has_offset = false;
    Temp resource, sampler, fmask_ptr, bias, coords, lod, compare = Temp();
    tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
 
@@ -1380,6 +1380,11 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
             has_compare = true;
          }
          break;
+      case nir_tex_src_offset:
+      case nir_tex_src_ms_index:
+      case nir_tex_src_ddx:
+      case nir_tex_src_ddy:
+         assert(false && "Unimplemented tex instr type\n");
       case nir_tex_src_texture_offset:
       case nir_tex_src_sampler_offset:
       default:
@@ -1388,22 +1393,13 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    }
 // TODO: all other cases: structure taken from ac_nir_to_llvm.c
    if (instr->op == nir_texop_txs && instr->sampler_dim == GLSL_SAMPLER_DIM_BUF)
-      fprintf(stderr, "Unimplemented tex instr type: ");
+      assert(false && "Unimplemented tex instr type\n");
 
    if (instr->op == nir_texop_texture_samples)
-      fprintf(stderr, "Unimplemented tex instr type: ");
+      assert(false && "Unimplemented tex instr type\n");
 
-
-   /* TC-compatible HTILE on radeonsi promotes Z16 and Z24 to Z32_FLOAT,
-    * so the depth comparison value isn't clamped for Z16 and
-    * Z24 anymore. Do it manually here.
-    *
-    * It's unnecessary if the original texture format was
-    * Z32_FLOAT, but we don't know that here.
-    */
-   //if (has_compare && ctx->options->chip_class == VI && ctx->abi->clamp_shadow_reference)
-      // TODO
-      //args.compare = ac_build_clamp(&ctx->ac, ac_to_float(&ctx->ac, args.compare));
+   if (has_offset && instr->op != nir_texop_txf)
+      assert(false && "Unimplemented tex instr type\n");
 
    if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && instr->coord_components)
       prepare_cube_coords(ctx, &coords, instr->op == nir_texop_txd, instr->is_array, instr->op == nir_texop_lod);
@@ -1412,7 +1408,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
        instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
        instr->is_array &&
        instr->op != nir_texop_txf)
-      fprintf(stderr, "Unimplemented tex instr type: ");
+      assert(false && "Unimplemented tex instr type\n");
 
    if (instr->coord_components > 2 &&
       (instr->sampler_dim == GLSL_SAMPLER_DIM_2D ||
@@ -1426,19 +1422,20 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (ctx->options->chip_class >= GFX9 &&
        instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
        instr->op != nir_texop_lod)
-   fprintf(stderr, "Unimplemented tex instr type: ");
+      assert(false && "Unimplemented tex instr type\n");
 
    if (instr->op == nir_texop_samples_identical)
-      fprintf(stderr, "Unimplemented tex instr type: ");
+      assert(false && "Unimplemented tex instr type\n");
 
    if (instr->sampler_dim == GLSL_SAMPLER_DIM_MS &&
        instr->op != nir_texop_txs)
-   fprintf(stderr, "Unimplemented tex instr type: ");
+      assert(false && "Unimplemented tex instr type\n");
 
-
-   unsigned dmask = 0xf;
    if (instr->op == nir_texop_tg4)
-      fprintf(stderr, "Unimplemented tex instr type: ");
+      assert(false && "Unimplemented tex instr type\n");
+
+   if (has_offset && instr->op == nir_texop_txf)
+      assert(false && "Unimplemented tex instr type\n");
 
    bool da = false;
    if (instr->sampler_dim != GLSL_SAMPLER_DIM_BUF) {
@@ -1450,6 +1447,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
            dim == aco_image_2darraymsaa;
    }
 
+   /* Build tex instruction */
+   unsigned dmask = (1 << instr->dest.ssa.num_components) - 1;//0xf;
    Temp arg = coords;
    std::unique_ptr<MIMG_instruction> tex;
    if (instr->op == nir_texop_txs) {
@@ -1502,8 +1501,21 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    tex->getOperand(2) = Operand(sampler);
    tex->dmask = dmask;
    tex->da = da;
-   tex->getDefinition(0) = get_ssa_temp(ctx, &instr->dest.ssa);
+   tex->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
    ctx->block->instructions.emplace_back(std::move(tex));
+
+   if (instr->op == nir_texop_query_levels)
+      assert(false && "Unimplemented tex instr type\n");
+   else if (instr->op == nir_texop_txs &&
+            instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE &&
+            instr->is_array)
+      assert(false && "Unimplemented tex instr type\n");
+   else if (ctx->options->chip_class >= GFX9 &&
+            instr->op == nir_texop_txs &&
+            instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
+            instr->is_array)
+      assert(false && "Unimplemented tex instr type\n");
+
 }
 
 void visit_undef(isel_context *ctx, nir_ssa_undef_instr *instr)
