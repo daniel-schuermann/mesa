@@ -753,6 +753,15 @@ void emit_interp_instr(isel_context *ctx, unsigned idx, unsigned component, Temp
 
 void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr)
 {
+   if (nir_intrinsic_base(instr) == VARYING_SLOT_POS) {
+      std::unique_ptr<Instruction> vec(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->dest.ssa.num_components, 1));
+      for (unsigned i = 0; i < instr->dest.ssa.num_components; i++)
+         vec->getOperand(i) = Operand(ctx->fs_inputs[fs_input::frag_pos_0 + i]);
+      vec->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      ctx->block->instructions.emplace_back(std::move(vec));
+      return;
+   }
+
    unsigned base = nir_intrinsic_base(instr) / 4 - VARYING_SLOT_VAR0;
    unsigned idx = util_bitcount(ctx->input_mask & ((1u << base) - 1));
 
@@ -1799,6 +1808,12 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   break;
                case nir_intrinsic_load_front_face:
                   ctx->fs_vgpr_args[fs_input::front_face] = true;
+                  break;
+               case nir_intrinsic_load_interpolated_input:
+                  if (nir_intrinsic_base(intrinsic) == VARYING_SLOT_POS) {
+                     for (unsigned i = 0; i < intrinsic->dest.ssa.num_components; i++)
+                        ctx->fs_vgpr_args[fs_input::frag_pos_0 + i] = true;
+                  }
                   break;
                default:
                   break;
