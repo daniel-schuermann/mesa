@@ -408,10 +408,14 @@ bool gen(Instruction* instr, wait_ctx& ctx)
       }
 
       /* insert new entries for exported vgprs */
+      unsigned idx = 0;
       for (unsigned i = 0; i < exp_instr->num_operands; i++)
       {
-         ctx.vgpr_map.emplace(exp_instr->getOperand(i).physReg().reg,
-                 wait_entry(t, max_vm_cnt, 0, max_lgkm_cnt));
+         if (exp_instr->enabled_mask & (1 << i)) {
+            ctx.vgpr_map.emplace(exp_instr->getOperand(idx++).physReg().reg,
+                                 wait_entry(t, max_vm_cnt, 0, max_lgkm_cnt));
+
+         }
       }
       ctx.exp_cnt++;
       return true;
