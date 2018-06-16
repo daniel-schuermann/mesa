@@ -45,7 +45,7 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
    case Format::SOPP: {
       uint32_t encoding = (0b101111111 << 23);
       encoding |= opcode_infos[(int)instr->opcode].opcode << 16;
-      encoding |= static_cast<SOPP_instruction*>(instr)->imm;
+      encoding |= (uint16_t) static_cast<SOPP_instruction*>(instr)->imm;
       out.push_back(encoding);
       break;
    }
@@ -199,7 +199,9 @@ void fix_exports(asm_context ctx, std::vector<uint32_t>& out, Program* program)
    for (std::vector<std::unique_ptr<Block>>::reverse_iterator block_it = program->blocks.rbegin(); block_it != program->blocks.rend(); ++block_it)
    {
       Block* block = block_it->get();
-      for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
+      std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin();
+      ++it;
+      while ( it != block->instructions.rend())
       {
          if ((*it)->format == Format::EXP) {
             Export_instruction* exp = static_cast<Export_instruction*>((*it).get());
@@ -208,6 +210,9 @@ void fix_exports(asm_context ctx, std::vector<uint32_t>& out, Program* program)
             return;
          } else if ((*it)->num_definitions && (*it)->getDefinition(0).physReg() == exec)
             break;
+         else if ((*it)->opcode == aco_opcode::s_endpgm)
+            break;
+         ++it;
       }
       /* we didn't find an Export instruction and have to insert a null export */
       std::unique_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
