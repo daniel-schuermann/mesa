@@ -226,7 +226,7 @@ public:
       control_[2] = 1; /* isConst */
       if (v <= 64)
          setFixed(PhysReg{128 + v});
-      else if (v >= 0xFFFFFFFFFFFFFFF0) /* [-16 .. -1] */
+      else if (v >= 0xFFFFFFF0) /* [-16 .. -1] */
          setFixed(PhysReg{192 - v});
       else if (v == 0x3f000000) /* 0.5 */
          setFixed(PhysReg{240});
@@ -249,11 +249,13 @@ public:
       else /* Literal Constant */
          setFixed(PhysReg{255});
    };
+#if 0
    explicit Operand(float v) noexcept
    {
       data_.f = v;
       control_[2] = 1; /* isConst */
    };
+#endif
    explicit Operand(PhysReg reg, RegClass type) noexcept
    {
       data_.temp = Temp(0, type);
@@ -287,7 +289,10 @@ public:
 
    unsigned size() const noexcept
    {
-      return data_.temp.size();
+      if (isConstant())
+         return 1;
+      else
+         return data_.temp.size();
    }
 
    bool isFixed() const noexcept
@@ -309,6 +314,11 @@ public:
    bool isConstant() const noexcept
    {
       return control_[2];
+   }
+
+   bool isLiteral() const noexcept
+   {
+      return isConstant() && reg_.reg == 255;
    }
 
    uint32_t constantValue() const noexcept
