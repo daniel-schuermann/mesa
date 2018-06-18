@@ -114,11 +114,12 @@ void handle_instruction(combinator_ctx_fw& ctx, std::unique_ptr<Instruction>& in
          std::map<uint32_t, Operand>::iterator it = ctx.values.find(instr->getOperand(i).tempId());
          if (it != ctx.values.end()) {
             /* apply literals */
-            if (it->second.isConstant() && it->second.physReg().reg == 255) {
-               if (i == 0 && !((int) instr->format & (int) Format::VOP3A)) {
-                  uses_sgpr = uses_sgpr && instr->getOperand(i).getTemp().type() == sgpr ? false : uses_sgpr;
+            if (it->second.isLiteral()) {
+               /* we can apply literals on src0, if not an sgpr is taken implicitly */
+               if (i == 0 && !((int) instr->format & (int) Format::VOP3A) && instr->num_operands < 3) {
+                  uses_sgpr = true;
                   instr->getOperand(i) = it->second;
-               } else if ((int) instr->format & (int) Format::VOP3A) {
+               } else if (!uses_sgpr && (int) instr->format & (int) Format::VOP3A) {
                   uses_sgpr = true;
                   instr->getOperand(i) = Operand(rematerializeLiteral(ctx, it->second.constantValue()));
                }
@@ -137,7 +138,7 @@ void handle_instruction(combinator_ctx_fw& ctx, std::unique_ptr<Instruction>& in
                   toVOP3(ctx, instr);
                   instr->getOperand(i) = it->second;
                }
-            } else { /* is constant non-literal */
+            } else if (it->second.isConstant() && !it->second.isLiteral()) { /* is constant non-literal */
                if (i == 0) {
                   instr->getOperand(i) = it->second;
                } else if (canUseVOP3(instr)) {
@@ -279,7 +280,7 @@ void handle_instruction(combinator_ctx_fw& ctx, std::unique_ptr<Instruction>& in
          std::map<uint32_t, std::array<Operand,4>>::iterator it = ctx.vectors.find(instr->getOperand(0).tempId());
          if (it != ctx.vectors.end()) {
             Operand op = it->second[instr->getOperand(1).constantValue()];
-            bool is_vgpr = instr->getDefinition(0).getTemp().type();
+            bool is_vgpr = instr->getDefinition(0).getTemp().type() == vgpr;
             aco_opcode opcode = is_vgpr ? aco_opcode::v_mov_b32 : aco_opcode::s_mov_b32;
             Format format = is_vgpr ? Format::VOP1 : Format::SOP1;
             instr->opcode = opcode;
