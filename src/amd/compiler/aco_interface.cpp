@@ -52,12 +52,14 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    auto program = aco::select_program(shader, config, info, options);
    std::cerr << "After Instruction Selection:\n";
    aco_print_program(program.get(), stderr);
+   aco::validate(program.get());
 
    /* Optimization */
    aco::combine_fw(program.get());
    aco::combine_bw(program.get());
    std::cerr << "After Opt:\n";
    aco_print_program(program.get(), stderr);
+   aco::validate(program.get());
 
    /* Register Allocation */
    aco::register_allocation(program.get());

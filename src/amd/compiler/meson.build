@@ -68,6 +68,7 @@ libaco_files = files(
   'aco_lower_to_hw_instr.cpp',
   'aco_print_asm.cpp',
   'aco_print_ir.cpp',
+  'aco_validate.cpp',
 )
 
 libaco = static_library(

@@ -651,6 +651,7 @@ void schedule(Program* program);
 void insert_wait_states(Program* program);
 std::vector<uint32_t> emit_program(Program* program);
 void print_asm(std::vector<uint32_t>& binary, char* llvm_mc, std::ostream& out);
+void validate(Program* program);
 
 void aco_print_instr(Instruction *instr, FILE *output);
 void aco_print_program(Program *program, FILE *output);
