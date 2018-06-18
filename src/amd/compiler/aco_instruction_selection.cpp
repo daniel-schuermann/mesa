@@ -612,18 +612,22 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
 
 void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 {
+   unsigned write_mask = nir_intrinsic_write_mask(instr);
    Operand values[4];
    Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
    for (unsigned i = 0; i < 4; ++i) {
-      Temp tmp{ctx->program->allocateId(), v1};
-      std::unique_ptr<Instruction> extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
+      if (write_mask & (1 << i)) {
+         Temp tmp{ctx->program->allocateId(), v1};
+         std::unique_ptr<Instruction> extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
+         extract->getOperand(0) = Operand(src);
+         extract->getOperand(1) = Operand(i);
+         extract->getDefinition(0) = Definition(tmp);
 
-      extract->getOperand(0) = Operand(src);
-      extract->getOperand(1) = Operand(i);
-      extract->getDefinition(0) = Definition(tmp);
-
-      ctx->block->instructions.emplace_back(std::move(extract));
-      values[i] = Operand(tmp);
+         ctx->block->instructions.emplace_back(std::move(extract));
+         values[i] = Operand(tmp);
+      } else {
+         values[i] = Operand((uint32_t) 0);
+      }
    }
 
    unsigned index = nir_intrinsic_base(instr) / 4;
@@ -655,7 +659,7 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
 
    case V_028714_SPI_SHADER_FP16_ABGR:
-      enabled_channels = 0x5;
+      enabled_channels = 0;//0x5;
       compr_op = aco_opcode::v_cvt_pkrtz_f16_f32;
       break;
 
@@ -688,13 +692,20 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    {
       for (int i = 0; i < 2; i++)
       {
-         std::unique_ptr<VOP3A_instruction> compr{create_instruction<VOP3A_instruction>(compr_op, Format::VOP3A, 2, 1)};
-         Temp tmp{ctx->program->allocateId(), v1};
-         compr->getOperand(0) = values[i*2];
-         compr->getOperand(1) = values[i*2+1];
-         compr->getDefinition(0) = Definition(tmp);
-         values[i] = Operand(tmp);
-         ctx->block->instructions.emplace_back(std::move(compr));
+         /* check if at least one of the values to be compressed is enabled */
+         unsigned enabled = (write_mask >> (i*2) | write_mask >> (i*2+1)) & 0x1;
+         if (enabled) {
+            enabled_channels |= enabled << (i*2);
+            std::unique_ptr<VOP3A_instruction> compr{create_instruction<VOP3A_instruction>(compr_op, Format::VOP3A, 2, 1)};
+            Temp tmp{ctx->program->allocateId(), v1};
+            compr->getOperand(0) = values[i*2];
+            compr->getOperand(1) = values[i*2+1];
+            compr->getDefinition(0) = Definition(tmp);
+            values[i] = Operand(tmp);
+            ctx->block->instructions.emplace_back(std::move(compr));
+         } else {
+            values[i] = Operand();
+         }
       }
       values[2] = Operand();
       values[3] = Operand();
