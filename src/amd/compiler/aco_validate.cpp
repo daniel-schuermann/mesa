@@ -67,13 +67,10 @@ void validate(Program* program)
                assert(num_sgpr + num_literals <= 1);
             }
 
-            if (instr->isSALU()) {
-               assert(instr->num_definitions == 0 || instr->getDefinition(0).getTemp().type() == sgpr);
+            if (instr->format == Format::SOP1 || instr->format == Format::SOP2) {
+               assert(instr->getDefinition(0).getTemp().type() == sgpr);
                for (unsigned i = 0; i < instr->num_operands; i++)
-               {
                  assert(instr->getOperand(i).isConstant() || instr->getOperand(i).getTemp().type() <= sgpr);
-               }
-
             }
          }
 
@@ -103,13 +100,10 @@ void validate(Program* program)
             for (unsigned i = 0; i < 4; i++)
                assert(!instr->getOperand(i).isTemp() || instr->getOperand(i).getTemp().type() == vgpr);
             break;
-
          }
          default:
             break;
-
          }
-
       }
    }
 }
