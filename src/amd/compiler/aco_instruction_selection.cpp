@@ -914,7 +914,30 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       load->getOperand(0) = Operand(rsrc);
       load->getOperand(1) = Operand(offset);
       load->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(load));
+
+      if (dst.size() == 3) {
+      /* trim vector */
+         Temp vec = {ctx->program->allocateId(), s4};
+         load->getDefinition(0) = Definition(vec);
+         ctx->block->instructions.emplace_back(std::move(load));
+
+         std::unique_ptr<Instruction> trimmed{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1)};
+         std::unique_ptr<Instruction> extract;
+         Temp tmp;
+         for (unsigned i = 0; i < 3; i++) {
+            extract.reset(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
+            extract->getOperand(0) = Operand(vec);
+            extract->getOperand(1) = Operand((uint32_t) i);
+            tmp = {ctx->program->allocateId(), s1};
+            extract->getDefinition(0) = Definition(tmp);
+            ctx->block->instructions.emplace_back(std::move(extract));
+            trimmed->getOperand(i) = Operand(tmp);
+         }
+         trimmed->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(trimmed));
+      } else {
+         ctx->block->instructions.emplace_back(std::move(load));
+      }
 
    } else {
       fprintf(stderr, "Unsupported: ubo vector load: ");
