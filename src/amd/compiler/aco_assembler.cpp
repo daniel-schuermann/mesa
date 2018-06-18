@@ -42,6 +42,14 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
       out.push_back(encoding);
       break;
    }
+   case Format::SOPC: {
+      uint32_t encoding = (0b101111110 << 23);
+      encoding |= opcode_infos[(int)instr->opcode].opcode << 16;
+      encoding |= instr->operandCount() == 2 ? instr->getOperand(1).physReg().reg << 8 : 0;
+      encoding |= instr->operandCount() ? instr->getOperand(0).physReg().reg : 0;
+      out.push_back(encoding);
+      break;
+   }
    case Format::SOPP: {
       uint32_t encoding = (0b101111111 << 23);
       encoding |= opcode_infos[(int)instr->opcode].opcode << 16;

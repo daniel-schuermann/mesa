@@ -494,6 +494,9 @@ struct SOPP_instruction : public Instruction {
    Block *block;
 };
 
+struct SOPC_instruction : public Instruction {
+};
+
 struct SOP1_instruction : public Instruction {
 };
 
