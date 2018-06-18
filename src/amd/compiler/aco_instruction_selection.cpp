@@ -1396,7 +1396,7 @@ Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
 void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
    bool has_bias = false, has_lod = false, level_zero = false, has_compare = false, has_offset = false;
-   Temp resource, sampler, fmask_ptr, bias, coords, lod, compare = Temp();
+   Temp resource, sampler, fmask_ptr, bias, coords, lod, compare, offset = Temp();
    tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
 
    for (unsigned i = 0; i < instr->num_srcs; i++) {
@@ -1428,9 +1428,13 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          }
          break;
       case nir_tex_src_offset:
-      case nir_tex_src_ms_index:
+         offset = get_ssa_temp(ctx, instr->src[i].src.ssa);
+         //offset_src = i;
+         has_offset = true;
+         break;
       case nir_tex_src_ddx:
       case nir_tex_src_ddy:
+      case nir_tex_src_ms_index:
          assert(false && "Unimplemented tex instr type\n");
       case nir_tex_src_texture_offset:
       case nir_tex_src_sampler_offset:
@@ -1445,8 +1449,44 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (instr->op == nir_texop_texture_samples)
       assert(false && "Unimplemented tex instr type\n");
 
-   if (has_offset && instr->op != nir_texop_txf)
-      assert(false && "Unimplemented tex instr type\n");
+   if (has_offset && instr->op != nir_texop_txf) {
+      std::unique_ptr<Instruction> tmp_instr;
+      Temp pack, acc;
+      for (unsigned i = 0; i < offset.size(); i++) {
+         tmp_instr.reset(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
+         tmp_instr->getOperand(0) = Operand(offset);
+         tmp_instr->getOperand(1) = Operand((uint32_t) i);
+         acc = {ctx->program->allocateId(), s1};
+         tmp_instr->getDefinition(0) = Definition(acc);
+         ctx->block->instructions.emplace_back(std::move(tmp_instr));
+
+         tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_and_b32, Format::SOP2, 2, 1));
+         tmp_instr->getOperand(0) = Operand(acc);
+         tmp_instr->getOperand(1) = Operand((uint32_t) 0x3F);
+         acc = {ctx->program->allocateId(), s1};
+         tmp_instr->getDefinition(0) = Definition(acc);
+         ctx->block->instructions.emplace_back(std::move(tmp_instr));
+
+         if (i == 0) {
+            pack = acc;
+         } else {
+            tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_lshl_b32, Format::SOP2, 2, 1));
+            tmp_instr->getOperand(0) = Operand(pack);
+            tmp_instr->getOperand(1) = Operand((uint32_t) 8 * i);
+            acc = {ctx->program->allocateId(), s1};
+            tmp_instr->getDefinition(0) = Definition(acc);
+            ctx->block->instructions.emplace_back(std::move(tmp_instr));
+
+            tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b32, Format::SOP2, 2, 1));
+            tmp_instr->getOperand(0) = Operand(pack);
+            tmp_instr->getOperand(1) = Operand(acc);
+            pack = {ctx->program->allocateId(), s1};
+            tmp_instr->getDefinition(0) = Definition(pack);
+            ctx->block->instructions.emplace_back(std::move(tmp_instr));
+         }
+      }
+      offset = pack;
+   }
 
    if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && instr->coord_components)
       prepare_cube_coords(ctx, &coords, instr->op == nir_texop_txd, instr->is_array, instr->op == nir_texop_lod);
@@ -1535,14 +1575,57 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       ctx->block->instructions.emplace_back(std::move(vec));
    }
 
-   if (instr->op == nir_texop_txb)
-      tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample_b, Format::MIMG, 3, 1));
-   else if (level_zero && has_compare)
-      tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample_c_lz, Format::MIMG, 3, 1));
-   else if (level_zero)
-      tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample_lz, Format::MIMG, 3, 1));
-   else
-      tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_sample, Format::MIMG, 3, 1));
+   if (has_offset) {
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      vec->getOperand(0) = Operand(offset);
+      vec->getOperand(1) = Operand(arg);
+      RegClass rc = (RegClass) ((int) arg.regClass() + offset.size());
+      arg = Temp{ctx->program->allocateId(), rc};
+      vec->getDefinition(0) = Definition(arg);
+      ctx->block->instructions.emplace_back(std::move(vec));
+   }
+
+   // TODO: would be better to do this by adding offsets, but needs the opcodes ordered.
+   aco_opcode opcode = aco_opcode::image_sample;
+   if (has_offset) { /* image_sample_*_o */
+      if (has_compare) {
+         opcode = aco_opcode::image_sample_c_o;
+         if (has_bias)
+            opcode = aco_opcode::image_sample_c_b_o;
+         if (level_zero)
+            opcode = aco_opcode::image_sample_c_lz_o;
+         if (has_lod)
+            opcode = aco_opcode::image_sample_c_l_o;
+      } else {
+         opcode = aco_opcode::image_sample_o;
+         if (has_bias)
+            opcode = aco_opcode::image_sample_b_o;
+         if (level_zero)
+            opcode = aco_opcode::image_sample_lz_o;
+         if (has_lod)
+            opcode = aco_opcode::image_sample_l_o;
+      }
+   } else { /* no offset */
+      if (has_compare) {
+         opcode = aco_opcode::image_sample_c;
+         if (has_bias)
+            opcode = aco_opcode::image_sample_c_b;
+         if (level_zero)
+            opcode = aco_opcode::image_sample_c_lz;
+         if (has_lod)
+            opcode = aco_opcode::image_sample_c_l;
+      } else {
+         opcode = aco_opcode::image_sample;
+         if (has_bias)
+            opcode = aco_opcode::image_sample_b;
+         if (level_zero)
+            opcode = aco_opcode::image_sample_lz;
+         if (has_lod)
+            opcode = aco_opcode::image_sample_l;
+      }
+   }
+
+   tex.reset(create_instruction<MIMG_instruction>(opcode, Format::MIMG, 3, 1));
    tex->getOperand(0) = Operand{arg};
    tex->getOperand(1) = Operand(resource);
    tex->getOperand(2) = Operand(sampler);
