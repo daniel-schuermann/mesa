@@ -28,8 +28,19 @@
 #include "aco_ir.h"
 
 namespace aco {
-void validate(Program* program)
+
+void validate(Program* program, FILE * output)
 {
+   bool is_valid = true;
+   auto check = [&output, &is_valid](bool check, const char * msg, aco::Instruction * instr) -> void {
+      if (!check) {
+         fprintf(output, "%s: ", msg);
+         aco_print_instr(instr, output);
+         fprintf(output, "\n");
+         is_valid = false;
+      }
+   };
+
    for (auto&& block : program->blocks)
    {
       for (auto&& instr : block->instructions)
@@ -40,21 +51,24 @@ void validate(Program* program)
             for (unsigned i = 0; i < instr->num_operands; i++)
             {
                if (instr->getOperand(i).isLiteral()) {
-                  assert(instr->format == Format::SOP1 ||
-                         instr->format == Format::SOP2 ||
-                         instr->format == Format::SOPC ||
-                         instr->format == Format::VOP1 ||
-                         instr->format == Format::VOP2 ||
-                         instr->format == Format::VOPC);
+                  check(instr->format == Format::SOP1 ||
+                        instr->format == Format::SOP2 ||
+                        instr->format == Format::SOPC ||
+                        instr->format == Format::VOP1 ||
+                        instr->format == Format::VOP2 ||
+                        instr->format == Format::VOPC,
+                        "Literal applied on wrong instruction format", instr.get());
+
                   num_literals++;
-                  assert(!instr->isVALU() || i == 0 || i == 2);
+                  check(!instr->isVALU() || i == 0 || i == 2, "Wrong source position for Literal argument", instr.get());
                }
             }
-            assert(num_literals <= 1);
+            check(num_literals <= 1, "Only 1 Literal allowed", instr.get());
 
             /* check num sgprs for VALU */
             if (instr->isVALU()) {
-               assert(instr->getDefinition(0).getTemp().type() == vgpr || (int) instr->format & (int) Format::VOPC);
+               check(instr->getDefinition(0).getTemp().type() == vgpr || (int) instr->format & (int) Format::VOPC,
+                     "Wrong Definition type for VALU instruction", instr.get());
                unsigned num_sgpr = 0;
                for (unsigned i = 0; i < instr->num_operands; i++)
                {
@@ -62,15 +76,16 @@ void validate(Program* program)
                      num_sgpr++;
 
                   if (instr->getOperand(i).isConstant() && !instr->getOperand(i).isLiteral())
-                     assert(i == 0 || (int) instr->format & (int) Format::VOP3A);
+                     check(i == 0 || (int) instr->format & (int) Format::VOP3A, "Wrong source position for SGPR argument", instr.get());
                }
-               assert(num_sgpr + num_literals <= 1);
+               check(num_sgpr + num_literals <= 1, "Only 1 Literal OR 1 SGPR allowed", instr.get());
             }
 
             if (instr->format == Format::SOP1 || instr->format == Format::SOP2) {
-               assert(instr->getDefinition(0).getTemp().type() == sgpr);
+               check(instr->getDefinition(0).getTemp().type() == sgpr, "Wrong Definition type for SALU instruction", instr.get());
                for (unsigned i = 0; i < instr->num_operands; i++)
-                 assert(instr->getOperand(i).isConstant() || instr->getOperand(i).getTemp().type() <= sgpr);
+                 check(instr->getOperand(i).isConstant() || instr->getOperand(i).getTemp().type() <= sgpr,
+                       "Wrong Operand type for SALU instruction", instr.get());
             }
          }
 
@@ -80,25 +95,29 @@ void validate(Program* program)
                unsigned size = 0;
                for (unsigned i = 0; i < instr->num_operands; i++)
                   size += instr->getOperand(i).size();
-               assert(size == instr->getDefinition(0).size());
+               check(size == instr->getDefinition(0).size(), "Definition size does not match operand sizes", instr.get());
                if (instr->getDefinition(0).getTemp().type() == sgpr)
                   for (unsigned i = 0; i < instr->num_operands; i++)
-                     assert(instr->getOperand(i).isConstant() || instr->getOperand(i).getTemp().type() == sgpr);
+                     check(instr->getOperand(i).isConstant() || instr->getOperand(i).getTemp().type() == sgpr,
+                           "Wrong Operand type for scalar vector", instr.get());
             } else if (instr->opcode == aco_opcode::p_extract_vector) {
-               assert(instr->getOperand(0).isTemp() && instr->getOperand(1).isConstant());
-               assert(instr->getOperand(1).constantValue() <= instr->getOperand(0).size());
-               assert(instr->getDefinition(0).size() == 1);
-               assert(instr->getDefinition(0).getTemp().type() == vgpr || instr->getOperand(0).getTemp().type() == sgpr);
+               check(instr->getOperand(0).isTemp() && instr->getOperand(1).isConstant(), "Wrong Operand types", instr.get());
+               check(instr->getOperand(1).constantValue() <= instr->getOperand(0).size(), "Index out of range", instr.get());
+               check(instr->getDefinition(0).size() == 1, "Definition size must be 1", instr.get());
+               check(instr->getDefinition(0).getTemp().type() == vgpr || instr->getOperand(0).getTemp().type() == sgpr,
+                     "Cannot extract SGPR value from VGPR vector", instr.get());
             } else if (instr->opcode == aco_opcode::p_parallelcopy) {
-               assert(instr->num_definitions == instr->num_operands);
+               check(instr->num_definitions == instr->num_operands, "Number of Operands does not match number of Definitions", instr.get());
                for (unsigned i = 0; i < instr->num_operands; i++)
-                  assert(instr->getDefinition(i).getTemp().type() == instr->getOperand(i).getTemp().type());
+                  check(instr->getDefinition(i).getTemp().type() == instr->getOperand(i).getTemp().type(),
+                        "Operand and Definition types do not match", instr.get());
             }
             break;
          }
          case Format::EXP: {
             for (unsigned i = 0; i < 4; i++)
-               assert(!instr->getOperand(i).isTemp() || instr->getOperand(i).getTemp().type() == vgpr);
+               check((!instr->getOperand(i).isConstant() && !instr->getOperand(i).isTemp()) || instr->getOperand(i).getTemp().type() == vgpr,
+                     "Only VGPRs are valid Export arguments", instr.get());
             break;
          }
          default:
@@ -106,5 +125,6 @@ void validate(Program* program)
          }
       }
    }
+   assert(is_valid);
 }
 }
