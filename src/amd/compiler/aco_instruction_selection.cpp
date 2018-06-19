@@ -39,6 +39,7 @@ struct isel_context {
    bool *divergent_vals;
    std::unique_ptr<RegClass[]> reg_class;
    std::unordered_map<unsigned, unsigned> allocated;
+   gl_shader_stage stage;
 
    /* FS inputs */
    bool fs_vgpr_args[fs_input::max_inputs];
@@ -2054,7 +2055,7 @@ struct user_sgpr_info {
    bool indirect_all_descriptor_sets;
 };
 
-static void allocate_user_sgprs(isel_context *ctx, gl_shader_stage stage,
+static void allocate_user_sgprs(isel_context *ctx,
                                 /* TODO bool has_previous_stage, gl_shader_stage previous_stage, */
                                 bool needs_view_index, user_sgpr_info& user_sgpr_info)
 {
@@ -2062,14 +2063,14 @@ static void allocate_user_sgprs(isel_context *ctx, gl_shader_stage stage,
    uint32_t user_sgpr_count = 0;
 
    /* until we sort out scratch/global buffers always assign ring offsets for gs/vs/es */
-   if (stage == MESA_SHADER_GEOMETRY ||
-       stage == MESA_SHADER_VERTEX ||
-       stage == MESA_SHADER_TESS_CTRL ||
-       stage == MESA_SHADER_TESS_EVAL
+   if (ctx->stage == MESA_SHADER_GEOMETRY ||
+       ctx->stage == MESA_SHADER_VERTEX ||
+       ctx->stage == MESA_SHADER_TESS_CTRL ||
+       ctx->stage == MESA_SHADER_TESS_EVAL
        /*|| ctx->is_gs_copy_shader */)
       user_sgpr_info.need_ring_offsets = true;
 
-   if (stage == MESA_SHADER_FRAGMENT &&
+   if (ctx->stage == MESA_SHADER_FRAGMENT &&
        ctx->program->info->info.ps.needs_sample_positions)
       user_sgpr_info.need_ring_offsets = true;
 
@@ -2078,7 +2079,7 @@ static void allocate_user_sgprs(isel_context *ctx, gl_shader_stage stage,
       user_sgpr_count += 2;
    }
 
-   switch (stage) {
+   switch (ctx->stage) {
    case MESA_SHADER_VERTEX:
    /* if (!ctx->is_gs_copy_shader) */ {
          if (ctx->program->info->info.vs.has_vertex_buffers)
@@ -2187,14 +2188,14 @@ set_loc_desc(isel_context *ctx, int idx,  uint8_t *sgpr_idx,
 }
 
 static void
-declare_global_input_sgprs(isel_context *ctx, gl_shader_stage stage,
+declare_global_input_sgprs(isel_context *ctx,
                            /* bool has_previous_stage, gl_shader_stage previous_stage, */
                            user_sgpr_info *user_sgpr_info,
                            struct arg_info *args,
                            Temp *desc_sets)
 {
    unsigned num_sets = ctx->options->layout ? ctx->options->layout->num_sets : 0;
-   unsigned stage_mask = 1 << stage;
+   unsigned stage_mask = 1 << ctx->stage;
 
    //if (has_previous_stage)
    //   stage_mask |= 1 << previous_stage;
@@ -2243,9 +2244,9 @@ declare_vs_input_vgprs(isel_context *ctx, struct arg_info *args)
    }
 }
 
-static bool needs_view_index_sgpr(isel_context *ctx, gl_shader_stage stage)
+static bool needs_view_index_sgpr(isel_context *ctx)
 {
-   switch (stage) {
+   switch (ctx->stage) {
    case MESA_SHADER_VERTEX:
       if (ctx->program->info->info.needs_multiview_view_index ||
           (!ctx->options->key.vs.as_es && !ctx->options->key.vs.as_ls && ctx->options->key.has_multiview_view_index))
@@ -2266,11 +2267,11 @@ static bool needs_view_index_sgpr(isel_context *ctx, gl_shader_stage stage)
    return false;
 }
 
-void add_startpgm(struct isel_context *ctx, gl_shader_stage stage)
+void add_startpgm(struct isel_context *ctx)
 {
    user_sgpr_info user_sgpr_info;
-   bool needs_view_index = needs_view_index_sgpr(ctx, stage);
-   allocate_user_sgprs(ctx, stage, needs_view_index, user_sgpr_info);
+   bool needs_view_index = needs_view_index_sgpr(ctx);
+   allocate_user_sgprs(ctx, needs_view_index, user_sgpr_info);
 
    assert(!user_sgpr_info.indirect_all_descriptor_sets && "Not yet implemented.");
    arg_info args = {};
@@ -2283,9 +2284,9 @@ void add_startpgm(struct isel_context *ctx, gl_shader_stage stage)
    }
 
    unsigned vgpr_idx = 0;
-   switch (stage) {
+   switch (ctx->stage) {
    case MESA_SHADER_VERTEX: {
-      declare_global_input_sgprs(ctx, stage, &user_sgpr_info, &args, ctx->descriptor_sets);
+      declare_global_input_sgprs(ctx, &user_sgpr_info, &args, ctx->descriptor_sets);
 
       if (ctx->program->info->info.vs.has_vertex_buffers) {
          add_arg(&args, s1, &ctx->vertex_buffers, user_sgpr_info.user_sgpr_idx);
@@ -2310,7 +2311,7 @@ void add_startpgm(struct isel_context *ctx, gl_shader_stage stage)
       break;
    }
    case MESA_SHADER_FRAGMENT: {
-      declare_global_input_sgprs(ctx, stage, &user_sgpr_info, &args, ctx->descriptor_sets);
+      declare_global_input_sgprs(ctx, &user_sgpr_info, &args, ctx->descriptor_sets);
 
       if (ctx->program->info->info.ps.needs_sample_positions) {
          add_arg(&args, s1, &ctx->sample_pos_offset, user_sgpr_info.user_sgpr_idx);
@@ -2419,7 +2420,7 @@ void add_startpgm(struct isel_context *ctx, gl_shader_stage stage)
    ctx->program->info->num_input_sgprs += args.num_sgprs_used;
    ctx->program->info->num_user_sgprs = user_sgpr_info.num_sgpr;
 
-   if (stage != MESA_SHADER_FRAGMENT)
+   if (ctx->stage != MESA_SHADER_FRAGMENT)
       ctx->program->info->num_input_vgprs = args.num_vgprs_used;
 
    std::unique_ptr<Instruction> startpgm{create_instruction<Instruction>(aco_opcode::p_startpgm, Format::PSEUDO, 0, args.count)};
@@ -2456,7 +2457,6 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    program->config = config;
    program->info = info;
 
-
    for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i)
       program->info->user_sgprs_locs.descriptor_sets[i].sgpr_idx = -1;
    for (unsigned i = 0; i < AC_UD_MAX_UD; ++i)
@@ -2465,6 +2465,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    isel_context ctx = {};
    ctx.program = program.get();
    ctx.options = options;
+   ctx.stage = nir->info.stage;
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
    nir_index_ssa_defs(func->impl);
@@ -2477,20 +2478,21 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    ctx.block = ctx.program->blocks.back().get();
    ctx.block->index = 0;
 
-   nir_foreach_variable(variable, &nir->inputs)
-   {
-      int idx = variable->data.location - VARYING_SLOT_VAR0;
-      ctx.input_mask |= 1ull << idx;
+   if (ctx.stage == MESA_SHADER_FRAGMENT) {
+      nir_foreach_variable(variable, &nir->inputs)
+      {
+         int idx = variable->data.location - VARYING_SLOT_VAR0;
+         ctx.input_mask |= 1ull << idx;
+      }
+      program->info->fs.num_interp = util_bitcount(ctx.input_mask);
+      program->info->fs.input_mask = ctx.input_mask;
    }
 
-   add_startpgm(&ctx, nir->info.stage);
+   add_startpgm(&ctx);
 
    visit_cf_list(&ctx, &func->impl->body);
 
    ctx.block->instructions.push_back(std::unique_ptr<SOPP_instruction>(create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)));
-
-   program->info->fs.num_interp = util_bitcount(ctx.input_mask);
-   program->info->fs.input_mask = ctx.input_mask;
 
    return program;
 }
