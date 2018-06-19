@@ -1424,7 +1424,7 @@ Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
 void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
    bool has_bias = false, has_lod = false, level_zero = false, has_compare = false, has_offset = false;
-   Temp resource, sampler, fmask_ptr, bias, coords, lod, compare, offset = Temp();
+   Temp resource, sampler, fmask_ptr, bias, coords, compare, lod = Temp(), offset = Temp();
    tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
 
    for (unsigned i = 0; i < instr->num_srcs; i++) {
@@ -1479,7 +1479,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
    if (has_offset && instr->op != nir_texop_txf) {
       std::unique_ptr<Instruction> tmp_instr;
-      Temp pack, acc;
+      Temp acc, pack = Temp();
       for (unsigned i = 0; i < offset.size(); i++) {
          tmp_instr.reset(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
          tmp_instr->getOperand(0) = Operand(offset);
