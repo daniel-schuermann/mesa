@@ -98,6 +98,27 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
       out.push_back(encoding);
       break;
    }
+   case Format::MUBUF: {
+      MUBUF_instruction* mubuf = static_cast<MUBUF_instruction*>(instr);
+      uint32_t encoding = (0b111000 << 26);
+      encoding |= opcode_infos[(int)instr->opcode].opcode << 18;
+      encoding |= (mubuf->slc ? 1 : 0) << 17;
+      encoding |= (mubuf->lds ? 1 : 0) << 16;
+      encoding |= (mubuf->glc ? 1 : 0) << 14;
+      encoding |= (mubuf->idxen ? 1 : 0) << 13;
+      encoding |= (mubuf->offen ? 1 : 0) << 12;
+      encoding |= 0x0FFF & mubuf->offset;
+      out.push_back(encoding);
+      encoding = 0;
+      encoding |= instr->getOperand(2).physReg().reg << 24;
+      encoding |= (mubuf->tfe ? 1 : 0) << 23;
+      encoding |= (instr->getOperand(1).physReg().reg >> 2) << 16;
+      unsigned reg = instr->num_operands > 3 ? instr->getOperand(3).physReg().reg : instr->getDefinition(0).physReg().reg;
+      encoding |= (0xFF & reg) << 8;
+      encoding |= (0xFF & instr->getOperand(0).physReg().reg);
+      out.push_back(encoding);
+      break;
+   }
    case Format::MIMG: {
       MIMG_instruction* mimg = static_cast<MIMG_instruction*>(instr);
       uint32_t encoding = (0b111100 << 26);

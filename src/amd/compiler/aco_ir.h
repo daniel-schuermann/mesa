@@ -537,6 +537,26 @@ struct Interp_instruction : public Instruction {
 };
 
 /**
+ * Vector Memory Untyped-buffer Instructions
+ * Operand(0): VADDR - Address source. Can carry an index and/or offset
+ * Operand(1): SRSRC - Specifies which SGPR supplies T# (resource constant)
+ * Operand(2): SOFFSET - SGPR to supply unsigned byte offset. (SGPR, M0, or inline constant)
+ * Operand(3) / Definition(0): VDATA - Vector GPR for write result / read data
+ *
+ */
+struct MUBUF_instruction : public Instruction {
+   unsigned dfmt; /* Data Format of data in memory buffer */
+   unsigned nfmt; /* Numeric format of data in memory */
+   unsigned offset; /* Unsigned byte offset - 12 bit */
+   bool offen; /* Supply an offset from VGPR (VADDR) */
+   bool idxen; /* Supply an index from VGPR (VADDR) */
+   bool glc; /* globally coherent */
+   bool slc; /* system level coherent */
+   bool tfe; /* texture fail enable */
+   bool lds; /* Return read-data to LDS instead of VGPRs */
+};
+
+/**
  * Vector Memory Image Instructions
  * Operand(0): VADDR - Address source. Can carry an offset or an index.
  * Operand(1): SRSRC - Scalar GPR that specifies the resource constant.
