@@ -41,7 +41,7 @@ static
 void aco_print_operand(const Operand *operand, FILE *output)
 {
    if (operand->isConstant()) {
-      fprintf(output, "%x", operand->constantValue());
+      fprintf(output, "0x%x", operand->constantValue());
       return;
    }
 
