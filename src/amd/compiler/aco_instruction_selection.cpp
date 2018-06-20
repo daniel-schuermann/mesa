@@ -850,19 +850,91 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
 
 void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
 {
-   unsigned base = nir_intrinsic_base(instr) / 4 - VARYING_SLOT_VAR0;
-   unsigned idx = util_bitcount(ctx->input_mask & ((1u << base) - 1));
-   unsigned component = nir_intrinsic_component(instr);
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+   if (ctx->stage == MESA_SHADER_VERTEX) {
 
-   std::unique_ptr<Interp_instruction> mov{create_instruction<Interp_instruction>(aco_opcode::v_interp_mov_f32, Format::VINTRP, 2, 1)};
-   mov->getOperand(0) = Operand();
-   mov->getOperand(0).setFixed(PhysReg{2});
-   mov->getOperand(1) = Operand(ctx->prim_mask);
-   mov->getOperand(1).setFixed(m0);
-   mov->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
-   mov->attribute = idx;
-   mov->component = component;
-   ctx->block->instructions.emplace_back(std::move(mov));
+      Temp vertex_buffers = ctx->vertex_buffers;
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      vec->getOperand(0) = Operand(vertex_buffers);
+      vec->getOperand(1) = Operand((uint32_t) 0);
+      vertex_buffers = {ctx->program->allocateId(), s2};
+      vec->getDefinition(0) = Definition(vertex_buffers);
+      ctx->block->instructions.emplace_back(std::move(vec));
+
+      unsigned offset = (nir_intrinsic_base(instr) / 4 - VERT_ATTRIB_GENERIC0) * 16;
+      std::unique_ptr<Instruction> load;
+      load.reset(create_instruction<SMEM_instruction>(aco_opcode::s_load_dwordx4, Format::SMEM, 2, 1));
+      load->getOperand(0) = Operand(vertex_buffers);
+      load->getOperand(1) = Operand((uint32_t) offset);
+      Temp list = {ctx->program->allocateId(), s4};
+      load->getDefinition(0) = Definition(list);
+      ctx->block->instructions.emplace_back(std::move(load));
+
+      Temp index = {ctx->program->allocateId(), v1};
+      if (ctx->options->key.vs.instance_rate_inputs & (1u << offset)) {
+         fprintf(stderr, "Unimplemented: instance rate inputs\n");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+         abort();
+      } else {
+         std::unique_ptr<VOP2_instruction> add{create_instruction<VOP2_instruction>(aco_opcode::v_add_i32, Format::VOP2, 2, 1)};
+         add->getOperand(0) = Operand(ctx->base_vertex);
+         add->getOperand(1) = Operand(ctx->vertex_id);
+         add->getDefinition(0) = Definition(index);
+         ctx->block->instructions.emplace_back(std::move(add));
+      }
+
+      aco_opcode opcode;
+      switch (dst.size()) {
+      case 1:
+         opcode = aco_opcode::buffer_load_format_x;
+         break;
+      case 2:
+         opcode = aco_opcode::buffer_load_format_xy;
+         break;
+      case 3:
+         opcode = aco_opcode::buffer_load_format_xyz;
+         break;
+      case 4:
+         opcode = aco_opcode::buffer_load_format_xyzw;
+         break;
+      default:
+         unreachable("Unimplemented load_input vector size");
+      }
+
+      std::unique_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(opcode, Format::MUBUF, 3, 1)};
+      mubuf->getOperand(0) = Operand(index);
+      mubuf->getOperand(1) = Operand(list); /* resource constant */
+      mubuf->getOperand(2) = Operand((uint32_t) 0); /* soffset */
+      mubuf->getDefinition(0) = Definition(dst);
+      mubuf->idxen = true;
+      ctx->block->instructions.emplace_back(std::move(mubuf));
+
+      unsigned alpha_adjust = (ctx->options->key.vs.alpha_adjust >> (offset * 2)) & 3;
+      if (alpha_adjust != RADV_ALPHA_ADJUST_NONE) {
+         fprintf(stderr, "Unimplemented alpha adjust\n");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+         abort();
+      }
+
+   } else if (ctx->stage == MESA_SHADER_FRAGMENT) {
+      unsigned base = nir_intrinsic_base(instr) / 4 - VARYING_SLOT_VAR0;
+      unsigned idx = util_bitcount(ctx->input_mask & ((1u << base) - 1));
+      unsigned component = nir_intrinsic_component(instr);
+
+      std::unique_ptr<Interp_instruction> mov{create_instruction<Interp_instruction>(aco_opcode::v_interp_mov_f32, Format::VINTRP, 2, 1)};
+      mov->getOperand(0) = Operand();
+      mov->getOperand(0).setFixed(PhysReg{2});
+      mov->getOperand(1) = Operand(ctx->prim_mask);
+      mov->getOperand(1).setFixed(m0);
+      mov->getDefinition(0) = Definition(dst);
+      mov->attribute = idx;
+      mov->component = component;
+      ctx->block->instructions.emplace_back(std::move(mov));
+   } else {
+      unreachable("Shader stage not implemented");
+   }
 }
 
 void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
