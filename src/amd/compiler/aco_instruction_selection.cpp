@@ -364,11 +364,19 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       ctx->block->instructions.emplace_back(std::move(vec));
       break;
    }
+   case nir_op_imov:
+   case nir_op_fmov: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      ctx->allocated.insert({instr->dest.dest.ssa.index, src.id()});
+      break;
+   }
    case nir_op_ior: {
       if (dst.regClass() == v1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_or_b32, dst, true);
       } else if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_or_b32, dst);
+      } else if (dst.regClass() == s2) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_or_b64, dst);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -381,6 +389,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          emit_vop2_instruction(ctx, instr, aco_opcode::v_and_b32, dst, true);
       } else if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_and_b32, dst);
+      } else if (dst.regClass() == s2) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_and_b64, dst);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -666,13 +676,30 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_ilt: {
-      if (dst.regClass() == s2) {
+      if (dst.regClass() == v1) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_lt_i32, dst);
-      } else {
-         fprintf(stderr, "Unimplemented: scalar cmp instr: ");
-         nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
+      } else if (dst.regClass() == s1) {
+         Temp src0 = get_alu_src(ctx, instr->src[0]);
+         Temp src1 = get_alu_src(ctx, instr->src[1]);
+         if (src0.regClass() == v1 || src1.regClass() == v1) {
+            Temp dst_tmp = {ctx->program->allocateId(), s2};
+            std::unique_ptr<Instruction> cmp{create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_lt_i32, (Format) ((int) Format::VOP3A | (int) Format::VOPC), 2, 1)};
+            cmp->getOperand(0) = Operand(src0);
+            cmp->getOperand(1) = Operand(src1);
+            cmp->getDefinition(0) = Definition(dst_tmp);
+            ctx->block->instructions.emplace_back(std::move(cmp));
+            cmp.reset(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
+            cmp->getOperand(0) = Operand(dst_tmp);
+            cmp->getOperand(1) = Operand{0};
+            cmp->getDefinition(0) = Definition(dst);
+            ctx->block->instructions.emplace_back(std::move(cmp));
+         } else {
+            fprintf(stderr, "Unimplemented: scalar cmp instr: ");
+            nir_print_instr(&instr->instr, stderr);
+            fprintf(stderr, "\n");
+         }
       }
+      break;
    }
    default:
       fprintf(stderr, "Unknown NIR instr type: ");
@@ -899,12 +926,8 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
    if (ctx->stage == MESA_SHADER_VERTEX) {
 
       Temp vertex_buffers = ctx->vertex_buffers;
-      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-      vec->getOperand(0) = Operand(vertex_buffers);
-      vec->getOperand(1) = Operand((uint32_t) 0);
-      vertex_buffers = {ctx->program->allocateId(), s2};
-      vec->getDefinition(0) = Definition(vertex_buffers);
-      ctx->block->instructions.emplace_back(std::move(vec));
+      if (vertex_buffers.size() == 1)
+         vertex_buffers = convert_pointer_to_64_bit(ctx, vertex_buffers);
 
       unsigned offset = (nir_intrinsic_base(instr) / 4 - VERT_ATTRIB_GENERIC0) * 16;
       std::unique_ptr<Instruction> load;
@@ -2036,23 +2059,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                case nir_op_ine:
                case nir_op_ult:
                case nir_op_uge:
-                  type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
-                  break;
                case nir_op_bcsel:
-                  if ((typeOf(reg_class[alu_instr->src[1].src.ssa->index]) == vgpr) ||
-                      (typeOf(reg_class[alu_instr->src[2].src.ssa->index]) == vgpr)) {
-                     type = vgpr;
-                  /* if the arguments are not vgpr, but divergent, it must be bools */
-                  } else if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index] &&
-                             ctx->divergent_vals[alu_instr->src[1].src.ssa->index] &&
-                             ctx->divergent_vals[alu_instr->src[2].src.ssa->index]) {
-                     type = sgpr;
-                     size = 2;
-                  } else if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index]){
-                     type = vgpr;
-                  } else {
-                     type = sgpr;
-                  }
+                  type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
                   break;
                default:
                   for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
