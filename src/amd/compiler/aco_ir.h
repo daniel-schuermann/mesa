@@ -483,6 +483,12 @@ struct Instruction {
    {
       return (uint16_t) format & (uint16_t) Format::DPP;
    }
+   bool isVOP3()
+   {
+      return ((uint16_t) format & (uint16_t) Format::VOP3A) ||
+             ((uint16_t) format & (uint16_t) Format::VOP3B) ||
+             format == Format::VOP3P;
+   }
 };
 
 struct SOPK_instruction : public Instruction {
@@ -666,6 +672,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         ac_shader_config* config,
                                         struct radv_shader_variant_info *info,
                                         struct radv_nir_compiler_options *options);
+void optimize(Program* program);
 void combine_fw(Program* program);
 void combine_bw(Program* program);
 void register_allocation(Program *program);
