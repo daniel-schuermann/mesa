@@ -66,6 +66,7 @@ libaco_files = files(
   'aco_scheduler_postRA.cpp',
   'aco_register_allocation.cpp',
   'aco_lower_to_hw_instr.cpp',
+  'aco_optimizer.cpp',
   'aco_print_asm.cpp',
   'aco_print_ir.cpp',
   'aco_validate.cpp',
