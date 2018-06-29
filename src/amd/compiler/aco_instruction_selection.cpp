@@ -1304,7 +1304,7 @@ get_sampler_dim(isel_context *ctx, enum glsl_sampler_dim dim, bool is_array)
    }
 }
 
-Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
+Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
                       enum aco_descriptor_type desc_type,
                       const nir_tex_instr *tex_instr, bool image, bool write)
 {
@@ -1314,65 +1314,57 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
    unsigned descriptor_set;
    unsigned base_index;
 
-   if (!deref) {
+   if (!deref_instr) {
       assert(tex_instr && !image);
       descriptor_set = 0;
       base_index = tex_instr->sampler_index;
    } else {
-      const nir_deref *tail = &deref->deref;
-      while (tail->child) {
-         const nir_deref_array *child = nir_deref_as_array(tail->child);
-         unsigned array_size = glsl_get_aoa_size(tail->child->type);
-
+      while(deref_instr->deref_type != nir_deref_type_var) {
+         unsigned array_size = glsl_get_aoa_size(deref_instr->type);
          if (!array_size)
             array_size = 1;
 
-         assert(child->deref_array_type != nir_deref_array_type_wildcard);
-
-         if (child->deref_array_type == nir_deref_array_type_indirect) {
+         assert(deref_instr->deref_type == nir_deref_type_array);
+         nir_const_value *const_value = nir_src_as_const_value(deref_instr->arr.index);
+         if (const_value) {
+            constant_index += array_size * const_value->u32[0];
+         } else {
+            Temp indirect = get_ssa_temp(ctx, deref_instr->arr.index.ssa);
             /* check if index is in sgpr */
-            Temp indirect_tmp = get_ssa_temp(ctx, child->indirect.ssa);
-            if (indirect_tmp.type() == vgpr) {
+            if (indirect.type() == vgpr) {
                std::unique_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
-               readlane->getOperand(0) = Operand(indirect_tmp);
-               indirect_tmp = {ctx->program->allocateId(), s1};
-               readlane->getDefinition(0) = Definition(indirect_tmp);
+               readlane->getOperand(0) = Operand(indirect);
+               indirect = {ctx->program->allocateId(), s1};
+               readlane->getDefinition(0) = Definition(indirect);
                ctx->block->instructions.emplace_back(std::move(readlane));
             }
+
             if (array_size != 1) {
-               std::unique_ptr<Instruction> indirect;
-               indirect.reset(create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1));
-               indirect_tmp = {ctx->program->allocateId(), s1};
-               indirect->getDefinition(0) = Definition(indirect_tmp);
-               indirect->getOperand(0) = Operand(array_size);
-               indirect->getOperand(1) = Operand(indirect_tmp);
-               ctx->block->instructions.emplace_back(std::move(indirect));
+               std::unique_ptr<Instruction> mul{create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1)};
+               indirect = {ctx->program->allocateId(), s1};
+               mul->getDefinition(0) = Definition(indirect);
+               mul->getOperand(0) = Operand(array_size);
+               mul->getOperand(1) = Operand(indirect);
+               ctx->block->instructions.emplace_back(std::move(mul));
             }
+
             if (!index_set) {
-               index = indirect_tmp;
+               index = indirect;
                index_set = true;
             } else {
-               std::unique_ptr<Instruction> add;
-               add.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1));
+               std::unique_ptr<Instruction> add{create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1)};
                add->getDefinition(0) = Definition{ctx->program->allocateId(), s1};
                add->getOperand(0) = Operand(index);
-               add->getOperand(1) = Operand(indirect_tmp);
-
+               add->getOperand(1) = Operand(indirect);
                ctx->block->instructions.emplace_back(std::move(add));
                index = add->getDefinition(0).getTemp();
             }
          }
 
-         constant_index += child->base_offset * array_size;
-         tail = &child->deref;
+         deref_instr = nir_src_as_deref(deref_instr->parent);
       }
-      descriptor_set = deref->var->data.descriptor_set;
-
-      if (deref->var->data.bindless) {
-         base_index = deref->var->data.driver_location;
-      } else {
-         base_index = deref->var->data.binding;
-      }
+      descriptor_set = deref_instr->var->data.descriptor_set;
+      base_index = deref_instr->var->data.binding;
    }
 
    Temp list = ctx->descriptor_sets[descriptor_set];
@@ -1465,22 +1457,42 @@ Temp get_sampler_desc(isel_context *ctx, const nir_deref_var *deref,
 void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
                            Temp *res_ptr, Temp *samp_ptr, Temp *fmask_ptr)
 {
+   nir_deref_instr *texture_deref_instr = NULL;
+   nir_deref_instr *sampler_deref_instr = NULL;
+
+   for (unsigned i = 0; i < instr->num_srcs; i++) {
+      switch (instr->src[i].src_type) {
+      case nir_tex_src_texture_deref:
+         texture_deref_instr = nir_src_as_deref(instr->src[i].src);
+         break;
+      case nir_tex_src_sampler_deref:
+         sampler_deref_instr = nir_src_as_deref(instr->src[i].src);
+         break;
+      default:
+         break;
+      }
+   }
+
+   if (!sampler_deref_instr)
+      sampler_deref_instr = texture_deref_instr;
+
    if (instr->sampler_dim  == GLSL_SAMPLER_DIM_BUF)
-      *res_ptr = get_sampler_desc(ctx, instr->texture, ACO_DESC_BUFFER, instr, false, false);
+      *res_ptr = get_sampler_desc(ctx, texture_deref_instr, ACO_DESC_BUFFER, instr, false, false);
    else
-      *res_ptr = get_sampler_desc(ctx, instr->texture, ACO_DESC_IMAGE, instr, false, false);
+      *res_ptr = get_sampler_desc(ctx, texture_deref_instr, ACO_DESC_IMAGE, instr, false, false);
    if (samp_ptr) {
-      if (instr->sampler)
-         *samp_ptr = get_sampler_desc(ctx, instr->sampler, ACO_DESC_SAMPLER, instr, false, false);
-      else
-         *samp_ptr = get_sampler_desc(ctx, instr->texture, ACO_DESC_SAMPLER, instr, false, false);
+      *samp_ptr = get_sampler_desc(ctx, sampler_deref_instr, ACO_DESC_SAMPLER, instr, false, false);
       if (instr->sampler_dim < GLSL_SAMPLER_DIM_RECT && ctx->options->chip_class < VI) {
+         fprintf(stderr, "Unimplemented sampler descriptor: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+         abort();
          // TODO: build samp_ptr = and(samp_ptr, res_ptr)
       }
    }
-   if (fmask_ptr && !instr->sampler && (instr->op == nir_texop_txf_ms ||
-                                        instr->op == nir_texop_samples_identical))
-      *fmask_ptr = get_sampler_desc(ctx, instr->texture, ACO_DESC_FMASK, instr, false, false);
+   if (fmask_ptr && (instr->op == nir_texop_txf_ms ||
+                     instr->op == nir_texop_samples_identical))
+      *fmask_ptr = get_sampler_desc(ctx, texture_deref_instr, ACO_DESC_FMASK, instr, false, false);
 }
 
 void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is_array, bool is_lod)
@@ -1873,6 +1885,8 @@ void visit_block(isel_context *ctx, nir_block *block)
          break;
       case nir_instr_type_ssa_undef:
          visit_undef(ctx, nir_instr_as_ssa_undef(instr));
+         break;
+      case nir_instr_type_deref:
          break;
       default:
          fprintf(stderr, "Unknown NIR instr type: ");
@@ -2438,10 +2452,6 @@ void add_startpgm(struct isel_context *ctx)
    case MESA_SHADER_FRAGMENT: {
       declare_global_input_sgprs(ctx, &user_sgpr_info, &args, ctx->descriptor_sets);
 
-      if (ctx->program->info->info.ps.needs_sample_positions) {
-         add_arg(&args, s1, &ctx->sample_pos_offset, user_sgpr_info.user_sgpr_idx);
-         set_loc_shader(ctx, AC_UD_PS_SAMPLE_POS_OFFSET, &user_sgpr_info.user_sgpr_idx, 1);
-      }
       assert(user_sgpr_info.user_sgpr_idx == user_sgpr_info.num_sgpr);
       add_arg(&args, s1, &ctx->prim_mask, user_sgpr_info.user_sgpr_idx);
 
