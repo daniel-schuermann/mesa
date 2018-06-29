@@ -243,7 +243,17 @@ static void visit_ssa_undef(bool *divergent, nir_ssa_undef_instr *instr)
    divergent[instr->def.index] = false;
 }
 
-
+static void visit_deref(bool *divergent, nir_deref_instr *instr)
+{
+   nir_foreach_use(src, &instr->dest.ssa)
+   {
+      if (src->parent_instr->type != nir_instr_type_tex) {
+         divergent[instr->dest.ssa.index] = false;
+         return;
+      }
+   }
+   divergent[instr->dest.ssa.index] = true;
+}
 
 bool* nir_divergence_analysis(nir_shader *shader)
 {
@@ -286,6 +296,9 @@ bool* nir_divergence_analysis(nir_shader *shader)
             break;
          case nir_instr_type_ssa_undef:
             visit_ssa_undef(t, nir_instr_as_ssa_undef(instr));
+            break;
+         case nir_instr_type_deref:
+            visit_deref(t, nir_instr_as_deref(instr));
             break;
          case nir_instr_type_jump:
             break;
