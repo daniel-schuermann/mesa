@@ -47,6 +47,8 @@
 // Match MAX_SETS from radv_descriptor_set.h
 #define RADV_UD_MAX_SETS MAX_SETS
 #define MAX_VERTEX_ATTRIBS 32
+#define MAX_SO_BUFFERS 4
+#define MAX_SO_OUTPUTS 64
 
 #define RADV_NUM_PHYSICAL_VGPRS 256
 
@@ -443,5 +445,8 @@ radv_can_dump_shader(struct radv_device *device,
 bool
 radv_can_dump_shader_stats(struct radv_device *device,
 			   struct radv_shader_module *module);
+
+unsigned
+shader_io_get_unique_index(gl_varying_slot slot);
 
 #endif

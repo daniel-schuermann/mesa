@@ -31,6 +31,7 @@
 struct radeon_winsys_cs;
 struct radv_device;
 struct radv_queue;
+struct radeon_cmdbuf;
 
 enum {
 	RADV_DEBUG_NO_FAST_CLEARS    =   0x1,
