@@ -61,14 +61,14 @@ class Format(Enum):
    FLAT = 13
    GLOBAL = 14
    SCRATCH = 15
-   VOP1 = 16
-   VOP2 = 17
-   VOPC = 18
-   VOP3B = 19
-   VOP3P = 20
-   VOP3A = 1 << 8
-   DPP = 1 << 9
-   SDWA = 1 << 10
+   VOP1 = 1 << 8
+   VOP2 = 1 << 9
+   VOPC = 1 << 10
+   VOP3B = 1 << 11
+   VOP3P = 1 << 12
+   VOP3A = 1 << 13
+   DPP = 1 << 14
+   SDWA = 1 << 15
 
 
 class Opcode(object):
