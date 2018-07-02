@@ -649,15 +649,7 @@ public:
 
    Block* createAndInsertBlock()
    {
-      Block* b = new Block
-      {
-         (unsigned) blocks.size(),
-         std::vector<std::unique_ptr<Instruction>>(),
-         std::vector<Block*>(2),
-         std::vector<Block*>(2),
-         std::vector<Block*>(2),
-         std::vector<Block*>(2),
-      };
+      Block* b = new Block{(unsigned) blocks.size()};
       b->linear_predecessors.push_back(blocks.back().get());
       blocks.back().get()->linear_successors.push_back(b);
       blocks.push_back(std::unique_ptr<Block>(b));
