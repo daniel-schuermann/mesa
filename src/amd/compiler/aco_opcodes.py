@@ -121,6 +121,7 @@ opcode("exp", 0, [], format = Format.EXP)
 opcode("p_parallelcopy", 0, [])
 opcode("p_startpgm", 0, [])
 opcode("p_phi", 0, [])
+opcode("p_linear_phi", 0, [])
 
 opcode("p_create_vector", 0, [])
 opcode("p_extract_vector", 0, [])
