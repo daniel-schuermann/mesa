@@ -1,6 +1,7 @@
 #include "aco_ir.h"
 
 #include <algorithm>
+#include <map>
 #include <set>
 #include <vector>
 #include <unordered_map>
@@ -10,16 +11,72 @@
 namespace aco {
 // TODO most of the functions here do not support multiple basic blocks yet.
 
+static
+std::map<Block*, std::map<unsigned, Temp>> live_temps_at_end_of_blocks(Program *program) {
+   std::map<Block*, std::map<unsigned, Temp>> result;
+   bool changed;
+   do {
+      changed = false;
+      for (auto&& block : program->blocks) {
+         std::map<unsigned, Temp> live = result[block.get()];
+         for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
+            Instruction *insn = it->get();
+            for (unsigned i = 0; i < insn->definitionCount(); ++i) {
+               auto& definition = insn->getDefinition(i);
+               if (definition.isTemp()) {
+                   auto it2 = live.find(definition.tempId());
+                   if (it2 != live.end())
+                      live.erase(it2);
+               }
+            }
+
+            if (insn->opcode == aco_opcode::p_phi ||
+                insn->opcode == aco_opcode::p_linear_phi) {
+               auto& predecessors = insn->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
+               assert(insn->operandCount() == predecessors.size());
+
+               for (unsigned i = 0; i < insn->operandCount(); ++i) {
+                  auto& operand = insn->getOperand(i);
+                  if (operand.isTemp()) {
+                     if (result[predecessors[i]].insert({operand.tempId(), operand.getTemp()}).second)
+                        changed = true;
+                  }
+               }
+            } else {
+               for (unsigned i = 0; i < insn->operandCount(); ++i) {
+                  auto& operand = insn->getOperand(i);
+                  if (operand.isTemp()) {
+                     live[operand.tempId()] = operand.getTemp();
+                  }
+               }
+            }
+         }
+         for (auto e : live) {
+            bool is_vgpr = typeOf(e.second.regClass()) == vgpr;
+            auto* predecessors = is_vgpr ? &block->logical_predecessors : &block->linear_predecessors;
+            for (auto pred : *predecessors) {
+                if (result[pred].insert(e).second)
+                   changed = true;
+            }
+         }
+      }
+   } while (changed);
+
+   return result;
+}
+
 /* Insert copies of all live temps before an instruction that uses any of
  * the temps at a fixed register. That way we avoid collisions where multiple
  * temps are assigned the same fixed register. This does not properly keep
  * the SSA property, so this needs fix_ssa afterwards.
  */
-void insert_copies(Program * program)
+void insert_copies(Program *program)
 {
+   auto live_out = live_temps_at_end_of_blocks(program);
+
    for (auto&& block : program->blocks) {
       std::vector<std::unique_ptr<Instruction>> instructions;
-      std::unordered_map<unsigned, Temp> live;
+      std::map<unsigned, Temp> live = live_out[block.get()];
       for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
          Instruction *insn = it->get();
          bool needMove = false;
@@ -49,7 +106,6 @@ void insert_copies(Program * program)
             std::unique_ptr<Instruction> move{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, live.size(), live.size())};
             int idx = 0;
             for (auto e : live) {
-               //std::cerr << "Move " << e.second.id() << "\n";
                move->getOperand(idx) = Operand{e.second};
                move->getDefinition(idx) = Definition{e.second};
                ++idx;
