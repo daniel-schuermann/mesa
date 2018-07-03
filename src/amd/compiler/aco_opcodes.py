@@ -61,6 +61,7 @@ class Format(Enum):
    FLAT = 13
    GLOBAL = 14
    SCRATCH = 15
+   PSEUDO_BRANCH = 16
    VOP1 = 1 << 8
    VOP2 = 1 << 9
    VOPC = 1 << 10
@@ -125,6 +126,14 @@ opcode("p_linear_phi", 0, [])
 
 opcode("p_create_vector", 0, [])
 opcode("p_extract_vector", 0, [])
+
+opcode("p_branch", 0, [], format= Format.PSEUDO_BRANCH)
+opcode("p_cbranch", 0, [], format= Format.PSEUDO_BRANCH)
+
+opcode("p_linear_branch", 0, [], format= Format.PSEUDO_BRANCH)
+opcode("p_linear_cbranch", 0, [], format= Format.PSEUDO_BRANCH)
+opcode("p_linear_cbranch_execz", 0, [], format= Format.PSEUDO_BRANCH)
+opcode("p_linear_cbranch_execnz", 0, [], format= Format.PSEUDO_BRANCH)
 
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
 SOP2_SCC = {
