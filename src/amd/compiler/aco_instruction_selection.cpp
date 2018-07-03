@@ -14,7 +14,8 @@ namespace {
 
 enum fs_input {
    persp_sample,
-   persp_center,
+   persp_center_p1,
+   persp_center_p2,
    persp_centroid,
    persp_pull_model,
    linear_sample,
@@ -926,8 +927,10 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
    if (ctx->stage == MESA_SHADER_VERTEX) {
 
       Temp vertex_buffers = ctx->vertex_buffers;
-      if (vertex_buffers.size() == 1)
+      if (vertex_buffers.size() == 1) {
          vertex_buffers = convert_pointer_to_64_bit(ctx, vertex_buffers);
+         ctx->vertex_buffers = vertex_buffers;
+      }
 
       unsigned offset = (nir_intrinsic_base(instr) / 4 - VERT_ATTRIB_GENERIC0) * 16;
       std::unique_ptr<Instruction> load;
@@ -1143,8 +1146,10 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
       ctx->block->instructions.emplace_back(std::move(add));
    }
    Temp ptr = ctx->push_constants;
-   if (ptr.size() == 1)
+   if (ptr.size() == 1) {
       ptr = convert_pointer_to_64_bit(ctx, ptr);
+      ctx->push_constants = ptr;
+   }
 
    unsigned range = nir_intrinsic_range(instr);
    aco_opcode op;
@@ -1216,9 +1221,14 @@ void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
-   case nir_intrinsic_load_barycentric_pixel:
-      ctx->allocated[instr->dest.ssa.index] = ctx->fs_inputs[fs_input::persp_center].id();
+   case nir_intrinsic_load_barycentric_pixel: {
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      vec->getOperand(0) = Operand(ctx->fs_inputs[fs_input::persp_center_p1]);
+      vec->getOperand(1) = Operand(ctx->fs_inputs[fs_input::persp_center_p2]);
+      vec->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      ctx->block->instructions.emplace_back(std::move(vec));
       break;
+   }
    case nir_intrinsic_load_front_face: {
       std::unique_ptr<VOPC_instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_lg_u32, Format::VOPC, 2, 1)};
       cmp->getOperand(0) = Operand((uint32_t) 0);
@@ -1370,7 +1380,7 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
    Temp list = ctx->descriptor_sets[descriptor_set];
    if (list.size() == 1) {
       list = convert_pointer_to_64_bit(ctx, list);
-      //ctx->descriptor_sets[descriptor_set] = list;
+      ctx->descriptor_sets[descriptor_set] = list;
    }
 
    struct radv_descriptor_set_layout *layout = ctx->options->layout->set[descriptor_set].layout;
@@ -2129,7 +2139,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
 
             switch(intrinsic->intrinsic) {
                case nir_intrinsic_load_barycentric_pixel:
-                  ctx->fs_vgpr_args[fs_input::persp_center] = true;
+                  ctx->fs_vgpr_args[fs_input::persp_center_p1] = true;
                   break;
                case nir_intrinsic_load_front_face:
                   ctx->fs_vgpr_args[fs_input::front_face] = true;
@@ -2463,11 +2473,11 @@ void add_startpgm(struct isel_context *ctx)
          ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_SAMPLE_ENA(1);
          vgpr_idx += 2;
       }
-      if (ctx->fs_vgpr_args[fs_input::persp_center]) {
-         add_arg(&args, v2, &ctx->fs_inputs[fs_input::persp_center], vgpr_idx);
+      if (ctx->fs_vgpr_args[fs_input::persp_center_p1]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::persp_center_p1], vgpr_idx++);
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::persp_center_p2], vgpr_idx++);
          ctx->program->config->spi_ps_input_addr |= S_0286CC_PERSP_CENTER_ENA(1);
          ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_CENTER_ENA(1);
-         vgpr_idx += 2;
       }
       if (ctx->fs_vgpr_args[fs_input::persp_centroid]) {
          add_arg(&args, v2, &ctx->fs_inputs[fs_input::persp_centroid], vgpr_idx);
@@ -2602,6 +2612,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    ctx.options = options;
    ctx.stage = nir->info.stage;
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
+   nir_opt_cse(nir);
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
    nir_index_ssa_defs(func->impl);
    ctx.divergent_vals = nir_divergence_analysis(nir);
