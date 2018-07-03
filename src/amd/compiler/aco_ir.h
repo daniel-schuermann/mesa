@@ -109,6 +109,9 @@ enum class Format : std::uint16_t {
    FLAT = 13,
    GLOBAL = 14,
    SCRATCH = 15,
+
+   PSEUDO_BRANCH = 16,
+
    /* Vector ALU Formats */
    VOP1 = 1 << 8,
    VOP2 = 1 << 9,
@@ -595,6 +598,10 @@ struct Export_instruction : public Instruction {
    bool done;
    bool valid_mask;
 
+};
+
+struct Pseudo_branch_instruction {
+   Block *targets[2];
 };
 
 template<typename T>
