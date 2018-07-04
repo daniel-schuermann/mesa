@@ -50,6 +50,7 @@ struct isel_context {
    Temp push_constants;
    Temp ring_offsets;
    Temp sample_pos_offset;
+   std::unordered_map<uint64_t, Temp> tex_desc;
 
    /* VS inputs */
    Temp vertex_buffers;
@@ -1070,8 +1071,13 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
    tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1));
    tmp->getOperand(0) = Operand(index);
    tmp->getOperand(1) = Operand(desc_ptr);
-   tmp->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+   index = {ctx->program->allocateId(), index.regClass()};
+   tmp->getDefinition(0) = Definition(index);
    ctx->block->instructions.emplace_back(std::move(tmp));
+
+   index = convert_pointer_to_64_bit(ctx, index);
+   ctx->allocated.insert({instr->dest.ssa.index, index.id()});
+
 
 }
 
@@ -1079,12 +1085,9 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    Temp rsrc = get_ssa_temp(ctx, instr->src[0].ssa);
-   Temp offset = get_ssa_temp(ctx, instr->src[1].ssa);
+   nir_const_value* const_offset = nir_src_as_const_value(instr->src[1]);
 
    if (dst.type() == sgpr) {
-      if (rsrc.size() == 1)
-         rsrc = convert_pointer_to_64_bit(ctx, rsrc);
-
       std::unique_ptr<Instruction> load;
       load.reset(create_instruction<SMEM_instruction>(aco_opcode::s_load_dwordx4, Format::SMEM, 2, 1));
       load->getOperand(0) = Operand(rsrc);
@@ -1116,7 +1119,11 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       }
       load.reset(create_instruction<SMEM_instruction>(op, Format::SMEM, 2, 1));
       load->getOperand(0) = Operand(rsrc);
-      load->getOperand(1) = Operand(offset);
+
+      if (const_offset && const_offset->u32[0] < 0xFFFFF)
+         load->getOperand(1) = Operand(const_offset->u32[0]);
+      else
+         load->getOperand(1) = Operand(get_ssa_temp(ctx, instr->src[1].ssa));
       load->getDefinition(0) = Definition(dst);
 
       if (dst.size() == 3) {
@@ -1337,6 +1344,10 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
                       enum aco_descriptor_type desc_type,
                       const nir_tex_instr *tex_instr, bool image, bool write)
 {
+   std::unordered_map<uint64_t, Temp>::iterator it = ctx->tex_desc.find((uint64_t) desc_type << 32 | deref_instr->dest.ssa.index);
+   if (it != ctx->tex_desc.end())
+      return it->second;
+
    Temp index;
    bool index_set = false;
    unsigned constant_index = 0;
@@ -1480,6 +1491,7 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
    Temp t = {ctx->program->allocateId(), type};
    load->getDefinition(0) = Definition(t);
    ctx->block->instructions.emplace_back(std::move(load));
+   ctx->tex_desc.insert({(uint64_t) desc_type << 32 | deref_instr->dest.ssa.index, t});
    return t;
 }
 
@@ -2227,6 +2239,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   break;
                case nir_intrinsic_vulkan_resource_index:
                   type = sgpr;
+                  size = 2;
                   break;
                case nir_intrinsic_load_ubo:
                   type = ctx->divergent_vals[intrinsic->src[0].ssa->index] ? vgpr : sgpr;
