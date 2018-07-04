@@ -275,34 +275,19 @@ bool can_use_VOP3(std::unique_ptr<Instruction>& instr)
 {
    if (instr->num_operands && instr->getOperand(0).isLiteral())
       return false;
+
    return instr->opcode != aco_opcode::v_madmk_f32 &&
           instr->opcode != aco_opcode::v_madak_f32 &&
           instr->opcode != aco_opcode::v_madmk_f16 &&
           instr->opcode != aco_opcode::v_madak_f16;
 }
 
-Temp rematerialize_literal(opt_ctx& ctx, uint32_t literal)
-{
-   if (literal == ctx.last_literal.first) {
-      return ctx.last_literal.second;
-   } else { /* rematerialize */
-      std::unique_ptr<SOP1_instruction> mov{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1)};
-      mov->getOperand(0) = Operand(literal);
-      Temp t = Temp(ctx.program->allocateId(), s1);
-      mov->getDefinition(0) = Definition(t);
-      ctx.instructions.emplace_back(std::move(mov));
-      ctx.last_literal = {literal, t};
-      return t;
-   }
-}
-
 void to_VOP3(opt_ctx& ctx, std::unique_ptr<Instruction>& instr)
 {
    if (instr->isVOP3())
       return;
-   if (instr->getOperand(0).isLiteral())
-      instr->getOperand(0) = Operand(rematerialize_literal(ctx, instr->getOperand(0).constantValue()));
 
+   assert(!instr->getOperand(0).isLiteral());
    std::unique_ptr<Instruction> tmp = std::move(instr);
    Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
    instr.reset(create_instruction<VOP3A_instruction>(tmp->opcode, format, tmp->num_operands, tmp->num_definitions));
@@ -372,9 +357,6 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
             }
          }
       }
-
-      /* add operand uses to ssa info */
-      ctx.info[instr->getOperand(i).tempId()].uses++;
    }
 
    /* if this instruction doesn't define anything, return */
@@ -393,7 +375,6 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
 
          /* convert this extract into a mov instruction */
          Operand vec_op = vec->getOperand(instr->getOperand(1).constantValue());
-         ctx.info[instr->getOperand(0).tempId()].uses--;
          bool is_vgpr = instr->getDefinition(0).getTemp().type() == vgpr;
          aco_opcode opcode = is_vgpr ? aco_opcode::v_mov_b32 : aco_opcode::s_mov_b32;
          Format format = is_vgpr ? Format::VOP1 : Format::SOP1;
@@ -409,7 +390,6 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
                ctx.info[instr->getDefinition(0).tempId()].set_constant(vec_op.constantValue());
          } else {
             assert(vec_op.isTemp());
-            ctx.info[vec_op.tempId()].uses++;
             ctx.info[instr->getDefinition(0).tempId()].set_temp(vec_op.getTemp());
          }
       }
@@ -471,6 +451,32 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
    }
 }
 
+
+void check_instruction_uses(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
+{
+   if (instr->num_definitions) {
+      bool is_used = false;
+      for (unsigned i = 0; i < instr->num_definitions; i++)
+      {
+         if (instr->getDefinition(i).isFixed() || ctx.info[instr->getDefinition(i).tempId()].uses) {
+            is_used = true;
+            break;
+         }
+      }
+      if (!is_used)
+         return;
+   }
+
+   /* add operand uses to ssa info */
+   for (unsigned i = 0; i < instr->num_operands; i++)
+   {
+      if (instr->getOperand(i).isTemp())
+         ctx.info[instr->getOperand(i).tempId()].uses++;
+   }
+}
+
+// TODO: we could possibly move the whole label_instruction pass to combine_instruction:
+// this would mean that we'd have to fix the instruction uses while value propagation
 
 void combine_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
 {
@@ -659,7 +665,7 @@ void combine_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
             if (!(i == 0 || (op[i].isTemp() && op[i].getTemp().type() == vgpr)))
                need_vop3 = true;
          }
-         // TODO: would be better to check this before selecting a mul instr */
+         // TODO: would be better to check this before selecting a mul instr?
          if (num_sgpr > 1)
             return;
 
@@ -734,7 +740,7 @@ void select_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       bool is_used = false;
       for (unsigned i = 0; i < instr->num_definitions; i++)
       {
-         if (ctx.info[instr->getDefinition(i).tempId()].uses || instr->getDefinition(i).isFixed()) {
+         if (instr->getDefinition(i).isFixed() || ctx.info[instr->getDefinition(i).tempId()].uses) {
             is_used = true;
             break;
          }
@@ -896,6 +902,12 @@ void optimize(Program* program)
    for (auto&& block : program->blocks) {
       for (std::unique_ptr<Instruction>& instr : block->instructions)
          label_instruction(ctx, instr);
+   }
+
+   /* Backward pass to calculate the number of uses for each instruction */
+   for (auto&& block : program->blocks) {
+      for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
+         check_instruction_uses(ctx, *it);
    }
 
    /* 2. Combine v_mad, omod, clamp and propagate sgpr on VALU instructions */
