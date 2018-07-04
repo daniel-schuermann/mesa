@@ -2758,7 +2758,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    visit_cf_list(&ctx, &func->impl->body);
 
    append_logical_end(ctx.block);
-   ctx.block->instructions.push_back(std::unique_ptr<SOPP_instruction>(create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::PSEUDO, 0, 0)));
+   ctx.block->instructions.push_back(std::unique_ptr<SOPP_instruction>(create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)));
 
    return program;
 }
