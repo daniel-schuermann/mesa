@@ -127,13 +127,15 @@ opcode("p_linear_phi", 0, [])
 opcode("p_create_vector", 0, [])
 opcode("p_extract_vector", 0, [])
 
-opcode("p_branch", 0, [], format= Format.PSEUDO_BRANCH)
-opcode("p_cbranch", 0, [], format= Format.PSEUDO_BRANCH)
+# start/end the parts where we can use exec based instructions
+# implicitly
+opcode("p_logical_start", 0, [])
+opcode("p_logical_end", 0, [])
 
-opcode("p_linear_branch", 0, [], format= Format.PSEUDO_BRANCH)
-opcode("p_linear_cbranch", 0, [], format= Format.PSEUDO_BRANCH)
-opcode("p_linear_cbranch_execz", 0, [], format= Format.PSEUDO_BRANCH)
-opcode("p_linear_cbranch_execnz", 0, [], format= Format.PSEUDO_BRANCH)
+opcode("p_branch", 0, [], format=Format.PSEUDO_BRANCH)
+opcode("p_cbranch", 0, [], format=Format.PSEUDO_BRANCH)
+opcode("p_cbranch_z", 0, [], format=Format.PSEUDO_BRANCH)
+opcode("p_cbranch_nz", 0, [], format=Format.PSEUDO_BRANCH)
 
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
 SOP2_SCC = {

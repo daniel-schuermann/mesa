@@ -238,26 +238,45 @@ void emit_vopc_instruction_output32(isel_context *ctx, nir_alu_instr *instr, aco
    }
 }
 
+
+Temp extract_uniform_cond32(isel_context *ctx, Temp cond32)
+{
+   Temp cond = Temp{ctx->program->allocateId(), b};
+
+   std::unique_ptr<Instruction> cmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_u32, Format::SOPC, 2, 1)};
+   cmp->getOperand(0) = Operand{cond32};
+   cmp->getOperand(1) = Operand{0};
+   cmp->getDefinition(0) = Definition{cond};
+   ctx->block->instructions.emplace_back(std::move(cmp));
+
+   return cond;
+}
+
+Temp extract_divergent_cond32(isel_context *ctx, Temp cond32)
+{
+   Temp cond = Temp{ctx->program->allocateId(), s2};
+
+   std::unique_ptr<Instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_lg_u32, Format::VOPC, 2, 1)};
+   cmp->getOperand(0) = Operand{0};
+   cmp->getOperand(1) = Operand{cond32};
+   cmp->getDefinition(0) = Definition{cond};
+   cmp->getDefinition(0).setHint(vcc);
+   ctx->block->instructions.emplace_back(std::move(cmp));
+
+   return cond;
+}
+
 void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
 {
    Temp cond32 = get_alu_src(ctx, instr->src[0]);
    Temp then = get_alu_src(ctx, instr->src[1]);
    Temp els = get_alu_src(ctx, instr->src[2]);
 
-   Temp cond = Temp{ctx->program->allocateId(), cond32.type() == vgpr ? s2 : b};
+   Temp cond;
    if (cond32.type() == vgpr) {
-      std::unique_ptr<Instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_lg_u32, Format::VOPC, 2, 1)};
-      cmp->getOperand(0) = Operand{0};
-      cmp->getOperand(1) = Operand{cond32};
-      cmp->getDefinition(0) = Definition{cond};
-      cmp->getDefinition(0).setHint(vcc);
-      ctx->block->instructions.emplace_back(std::move(cmp));
+      cond = extract_divergent_cond32(ctx, cond32);
    } else {
-      std::unique_ptr<Instruction> cmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_u32, Format::SOPC, 2, 1)};
-      cmp->getOperand(0) = Operand{cond32};
-      cmp->getOperand(1) = Operand{0};
-      cmp->getDefinition(0) = Definition{cond};
-      ctx->block->instructions.emplace_back(std::move(cmp));
+      cond = extract_uniform_cond32(ctx, cond32);
    }
 
    if (ctx->divergent_vals[instr->dest.dest.ssa.index]) {
@@ -1907,27 +1926,69 @@ void visit_block(isel_context *ctx, nir_block *block)
    }
 }
 
+
+static void add_logical_edge(Block *pred, Block *succ)
+{
+   pred->logical_successors.push_back(succ);
+   succ->logical_predecessors.push_back(pred);
+}
+
+static void add_linear_edge(Block *pred, Block *succ)
+{
+   pred->linear_successors.push_back(succ);
+   succ->linear_predecessors.push_back(pred);
+}
+
+static void add_edge(Block *pred, Block *succ)
+{
+   add_logical_edge(pred, succ);
+   add_linear_edge(pred, succ);
+}
+
+static void append_logical_start(Block *b)
+{
+   b->instructions.push_back(
+      std::unique_ptr<Instruction>(create_instruction<Instruction>(aco_opcode::p_logical_start,
+                                                                   Format::PSEUDO, 0, 0)));
+}
+
+static void append_logical_end(Block *b)
+{
+   b->instructions.push_back(
+      std::unique_ptr<Instruction>(create_instruction<Instruction>(aco_opcode::p_logical_end,
+                                                                   Format::PSEUDO, 0, 0)));
+}
+
+
 static void visit_if(isel_context *ctx, nir_if *if_stmt)
 {
-   /* Disabled for now till I find time to untangle the assumptions. */
-#if 0
-   Temp cond = get_ssa_temp(ctx, if_stmt->condition.ssa);
+   Temp cond32 = get_ssa_temp(ctx, if_stmt->condition.ssa);
 
    Block* aco_then = ctx->program->createAndInsertBlock();
-   aco_then->logical_predecessors.push_back(ctx->block);
-   ctx->block->logical_successors.push_back(aco_then);
+   add_edge(ctx->block, aco_then);
 
-   if (cond.type() == RegType::scc) { /* uniform condition */
+   if (cond32.type() == RegType::sgpr) { /* uniform condition */
+      Temp cond = extract_uniform_cond32(ctx, cond32);
+
+      append_logical_end(ctx->block);
+
       Block* aco_else = ctx->program->createAndInsertBlock();
-      aco_else->logical_predecessors.push_back(ctx->block);
-      ctx->block->logical_successors.push_back(aco_else);
+      add_edge(ctx->block, aco_else);
 
-      /* branch to the new block if condition is false */
-      Builder(ctx->program, ctx->block).s_cbranch_scc0(Operand(cond), aco_else);
+      std::unique_ptr<Pseudo_branch_instruction> cbranch{
+         create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz,
+                                                       Format::PSEUDO_BRANCH, 1, 0)};
+      cbranch->getOperand(0) = Operand(cond);
+      cbranch->targets[0] = aco_then;
+      cbranch->targets[1] = aco_else;
+      ctx->block->instructions.emplace_back(std::move(cbranch));
 
       /* emit then block */
       ctx->block = aco_then;
+      append_logical_start(ctx->block);
       visit_cf_list(ctx, &if_stmt->then_list);
+      append_logical_end(ctx->block);
+      aco_then = ctx->block;
 
       if (exec_list_is_empty(&if_stmt->else_list)) {
          /* if there is no else-list, take the
@@ -1935,29 +1996,44 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          ctx->block = aco_else;
       } else {
          Block* aco_cont = ctx->program->createAndInsertBlock();
-         aco_else->logical_successors.push_back(aco_cont);
-         aco_cont->logical_predecessors.push_back(aco_else);
 
          /* at the end of the then block, jump to the cont block */
          Builder(ctx->program, ctx->block).s_branch(aco_cont);
 
          /* emit else block */
          ctx->block = aco_else;
+         append_logical_start(ctx->block);
          visit_cf_list(ctx, &if_stmt->else_list);
+         append_logical_end(ctx->block);
+         add_edge(ctx->block, aco_cont);
 
          ctx->block = aco_cont;
-      }
-      aco_then->logical_successors.push_back(ctx->block);
-      ctx->block->logical_predecessors.push_back(aco_then);
 
+         std::unique_ptr<Pseudo_branch_instruction> else_branch{
+            create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch,
+                                                          Format::PSEUDO_BRANCH, 0, 0)};
+         else_branch->targets[0] = ctx->block;
+         aco_else->instructions.emplace_back(std::move(else_branch));
+      }
+
+      add_edge(aco_then, ctx->block);
+
+      std::unique_ptr<Pseudo_branch_instruction> then_branch{
+         create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch,
+                                                       Format::PSEUDO_BRANCH, 0, 0)};
+      then_branch->targets[0] = ctx->block;
+      aco_then->instructions.emplace_back(std::move(then_branch));
+
+      append_logical_start(ctx->block);
    } else { /* non-uniform condition */
+      Temp cond = extract_divergent_cond32(ctx, cond32);
+
+      append_logical_end(ctx->block);
 
       if (exec_list_is_empty(&if_stmt->else_list)) {
          Block* aco_cont = ctx->program->createAndInsertBlock();
-         ctx->block->logical_successors.push_back(aco_cont);
-         aco_cont->logical_predecessors.push_back(ctx->block);
-         aco_then->logical_successors.push_back(aco_cont);
-         aco_cont->logical_predecessors.push_back(aco_then);
+         add_edge(ctx->block, aco_cont);
+         add_edge(ctx->block, aco_then);
 
          /* without else-list, directly branch on condition */
          Builder(ctx->program, ctx->block).s_cbranch_vccz(Operand(cond), aco_cont);
@@ -1968,54 +2044,82 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          Instruction* orig_exec = B.s_and_saveexec_b64(Operand(cond));
 
          /* emit then block */
+         append_logical_start(ctx->block);
          visit_cf_list(ctx, &if_stmt->then_list);
+         append_logical_end(ctx->block);
+
+         add_edge(ctx->block, aco_cont);
 
          /* restore exec mask */
-         Instruction* restore = B.s_mov_b64(orig_exec->asOperand(0));
+         Builder B2(ctx->program, ctx->block);
+         Instruction* restore = B2.s_mov_b64(Operand(orig_exec->getDefinition(0).getTemp()));
          restore->getDefinition(0).setFixed(PhysReg{126});
          ctx->block = aco_cont;
-
       } else {
          Block* aco_T = ctx->program->createAndInsertBlock();
          Block* aco_else = ctx->program->createAndInsertBlock();
          Block* aco_cont = ctx->program->createAndInsertBlock();
-         ctx->block->logical_successors.push_back(aco_else);
-         aco_else->logical_predecessors.push_back(ctx->block);
-         aco_then->logical_successors.push_back(aco_cont);
-         aco_cont->logical_predecessors.push_back(aco_then);
-         aco_else->logical_successors.push_back(aco_cont);
-         aco_cont->logical_predecessors.push_back(aco_else);
+
+         add_edge(ctx->block, aco_then);
+         add_linear_edge(ctx->block, aco_T);
+         add_linear_edge(aco_T, aco_else);
+         add_linear_edge(aco_T, aco_cont);
+         add_logical_edge(ctx->block, aco_else);
+
          Builder B(ctx->program, ctx->block);
          /* with else-list, first set exec mask */
          Instruction* orig_exec = B.s_and_saveexec_b64(Operand(cond));
 
-         /* branch on exec mask to T block */
-         B.s_cbranch_execz(aco_T);
+         std::unique_ptr<Pseudo_branch_instruction> skip_then{
+            create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z,
+                                                          Format::PSEUDO_BRANCH, 1, 0)};
+         skip_then->getOperand(0) = Operand(PhysReg{126}, s2);
+         skip_then->targets[0] = aco_T;
+         skip_then->targets[1] = aco_then;
+         ctx->block->instructions.push_back(std::move(skip_then));
 
          /* emit then block */
          ctx->block = aco_then;
+         append_logical_start(ctx->block);
          visit_cf_list(ctx, &if_stmt->then_list);
+         append_logical_end(ctx->block);
+         aco_then = ctx->block;
+
+         add_logical_edge(aco_then, aco_cont);
+         add_linear_edge(aco_then, aco_T);
 
          ctx->block = aco_T;
          B = Builder(ctx->program, aco_T);
          /* negate exec mask */
-         Instruction* else_exec = B.s_xor_b64(Operand(PhysReg{126}, s2), orig_exec->asOperand(0));
+         Instruction* else_exec = B.s_xor_b64(Operand(PhysReg{126}, s2), Operand(orig_exec->getDefinition(0).getTemp()));
          else_exec->getDefinition(0).setFixed(PhysReg{126});
 
-         /* branch on exec mask to cont block */
-         B.s_cbranch_execz(aco_cont);
+         std::unique_ptr<Pseudo_branch_instruction> skip_else{
+            create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z,
+                                                          Format::PSEUDO_BRANCH, 1, 0)};
+         skip_else->getOperand(0) = Operand(PhysReg{126}, s2);
+         skip_else->targets[0] = aco_cont;
+         skip_else->targets[1] = aco_else;
+         ctx->block->instructions.push_back(std::move(skip_else));
+
 
          /* emit else block */
          ctx->block = aco_else;
+         append_logical_start(ctx->block);
          visit_cf_list(ctx, &if_stmt->else_list);
+         append_logical_end(ctx->block);
+         aco_else = ctx->block;
 
          ctx->block = aco_cont;
          /* restore original exec mask */
-         Instruction* restore = Builder(ctx->program, aco_cont).s_mov_b64(orig_exec->asOperand(0));
+         Instruction* restore = Builder(ctx->program, aco_cont).s_mov_b64(Operand(orig_exec->getDefinition(0).getTemp()));
          restore->getDefinition(0).setFixed(PhysReg{126});
+
+         add_edge(aco_else, aco_cont);
       }
+
+      append_logical_start(ctx->block);
    }
-#endif
 }
 
 static void visit_cf_list(isel_context *ctx,
@@ -2583,6 +2687,8 @@ void add_startpgm(struct isel_context *ctx)
    wqm->getOperand(0) = Operand(PhysReg{126}, s2);
    wqm->getDefinition(0) = Definition(PhysReg{126}, s2);
    ctx->block->instructions.push_back(std::move(wqm));
+
+   append_logical_start(ctx->block);
 }
 
 }
@@ -2638,7 +2744,8 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
 
    visit_cf_list(&ctx, &func->impl->body);
 
-   ctx.block->instructions.push_back(std::unique_ptr<SOPP_instruction>(create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)));
+   append_logical_end(ctx.block);
+   ctx.block->instructions.push_back(std::unique_ptr<SOPP_instruction>(create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::PSEUDO, 0, 0)));
 
    return program;
 }
