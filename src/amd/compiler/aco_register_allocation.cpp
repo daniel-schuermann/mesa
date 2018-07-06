@@ -123,8 +123,8 @@ void insert_copies(Program *program)
  */
 void fix_ssa(Program *program)
 {
+   std::unordered_map<unsigned, unsigned> renames;
    for (auto&& block : program->blocks) {
-      std::unordered_map<unsigned, unsigned> renames;
       for(auto&& insn : block->instructions) {
          for (unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
