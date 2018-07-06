@@ -109,20 +109,33 @@ void aco_print_instr(struct Instruction *instr, FILE *output)
       if (((imm >> 4) & 0x7) < 0x7) fprintf(output, " expcnt(%d)", (imm >> 4) & 0x7);
       if (((imm >> 7) & 0x1F) < 0x1F) fprintf(output, " lgkmcnt(%d)", (imm >> 7) & 0x1F);
    }
+   if (instr->format == Format::PSEUDO_BRANCH) {
+      Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(instr);
+      fprintf(output, " BB%d", branch->targets[0]->index);
+      if (branch->targets[1])
+         fprintf(output, ", BB%d", branch->targets[1]->index);
+   }
+}
+
+void aco_print_block(const struct Block* block, FILE *output)
+{
+   fprintf(output, "BB%d\n", block->index);
+   fprintf(output, "/* preds: ");
+   for (auto const& pred : block->logical_predecessors)
+      fprintf(output, "BB%d, ", pred->index);
+   fprintf(output, " */\n");
+   for (auto const& instr : block->instructions) {
+      fprintf(output, "\t");
+      aco_print_instr(instr.get(), output);
+      fprintf(output, "\n");
+   }
 }
 
 void aco_print_program(Program *program, FILE *output)
 {
-   int BB = 0;
-   for (auto const& block : program->blocks) {
-      fprintf(output, "BB%d\n", BB);
-      for (auto const& instr : block->instructions) {
-         fprintf(output, "\t");
-         aco_print_instr(instr.get(), output);
-         fprintf(output, "\n");
-      }
-      ++BB;
-   }
+   for (auto const& block : program->blocks)
+      aco_print_block(block.get(), output);
+
    fprintf(output, "\n");
 }
 
