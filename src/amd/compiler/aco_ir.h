@@ -673,6 +673,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         struct radv_nir_compiler_options *options);
 void optimize(Program* program);
 void register_allocation(Program *program);
+void eliminate_phis(Program* program);
 void lower_to_hw_instr(Program* program);
 void schedule(Program* program);
 void insert_wait_states(Program* program);

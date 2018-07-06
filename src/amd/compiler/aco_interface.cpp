@@ -65,6 +65,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    std::cerr << "After RA:\n";
    aco_print_program(program.get(), stderr);
 
+   aco::eliminate_phis(program.get());
    /* Lower to HW Instructions */
    aco::lower_to_hw_instr(program.get());
    //std::cerr << "After Eliminate Pseudo Instr:\n";
