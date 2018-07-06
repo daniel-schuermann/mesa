@@ -184,13 +184,18 @@ void lower_to_hw_instr(Program* program)
                std::deque<copy_operand> operands;
                for (unsigned i = 0; i < instr->num_operands; i++)
                {
-                  assert(!instr->getOperand(i).isConstant());
-                  RegClass rc = (RegClass) (((int) v1 & (int) instr->getDefinition(i).regClass()) | 1);
-                  for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
-                  {
-                     Operand op = Operand(PhysReg{instr->getOperand(i).physReg().reg + j}, rc);
-                     Definition def = Definition(PhysReg{instr->getDefinition(i).physReg().reg + j}, rc);
-                     insert_sorted(operands, copy_operand{op, def});
+                  if (instr->getOperand(i).isConstant()) {
+                     assert(instr->getDefinition(i).size() == 1);
+                     insert_sorted(operands, {instr->getOperand(i), instr->getDefinition(i)});
+
+                  } else {
+                     RegClass rc = (RegClass) (((int) v1 & (int) instr->getDefinition(i).regClass()) | 1);
+                     for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
+                     {
+                        Operand op = Operand(PhysReg{instr->getOperand(i).physReg().reg + j}, rc);
+                        Definition def = Definition(PhysReg{instr->getDefinition(i).physReg().reg + j}, rc);
+                        insert_sorted(operands, copy_operand{op, def});
+                     }
                   }
                }
                handle_operands(operands, new_instructions);
@@ -200,6 +205,40 @@ void lower_to_hw_instr(Program* program)
                new_instructions.emplace_back(std::move(instr));
                break;
             }
+         } else if (instr->format == Format::PSEUDO_BRANCH) {
+            Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(instr.get());
+            std::unique_ptr<SOPP_instruction> sopp;
+            switch (instr->opcode) {
+               case aco_opcode::p_branch:
+                  sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_branch, Format::SOPP, 0, 0));
+                  break;
+               case aco_opcode::p_cbranch_nz:
+                  if (branch->getOperand(0).physReg() == exec)
+                     sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_execnz, Format::SOPP, 0, 0));
+                  else if (branch->getOperand(0).physReg() == vcc)
+                     sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_vccnz, Format::SOPP, 0, 0));
+                  else {
+                     assert(branch->getOperand(0).physReg() == PhysReg{253});
+                     sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc1, Format::SOPP, 0, 0));
+                  }
+                  break;
+               case aco_opcode::p_cbranch_z:
+                  if (branch->getOperand(0).physReg() == exec)
+                     sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_execz, Format::SOPP, 0, 0));
+                  else if (branch->getOperand(0).physReg() == vcc)
+                     sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_vccz, Format::SOPP, 0, 0));
+                  else {
+                     assert(branch->getOperand(0).physReg() == PhysReg{253});
+                     sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc0, Format::SOPP, 0, 0));
+                  }
+                  break;
+               default:
+                  unreachable("Unknown Pseudo branch instruction!");
+            }
+            sopp->block = branch->targets[0];
+            new_instructions.emplace_back(std::move(sopp));
+            //instr.reset(sopp.release());
+
          // FIXME: do this while RA?
          } else if (instr->format == Format::VOPC) {
             /* check if the register allocator was able to assign vcc */
