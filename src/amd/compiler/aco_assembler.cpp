@@ -1,15 +1,18 @@
 #include <vector>
+#include <map>
 
 #include "aco_ir.h"
 
 namespace aco {
 
 struct asm_context {
+   std::map<int, SOPP_instruction*> branches;
+   std::vector<int> block_offset;
    // TODO: keep track of branch instructions referring blocks
    // and, when emitting the block, correct the offset in instr
 };
 
-void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* instr)
+void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction* instr)
 {
    switch (instr->format)
    {
@@ -51,9 +54,12 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
       break;
    }
    case Format::SOPP: {
+      SOPP_instruction* sopp = static_cast<SOPP_instruction*>(instr);
       uint32_t encoding = (0b101111111 << 23);
       encoding |= opcode_infos[(int)instr->opcode].opcode << 16;
-      encoding |= (uint16_t) static_cast<SOPP_instruction*>(instr)->imm;
+      encoding |= (uint16_t) sopp->imm;
+      if (sopp->block)
+         ctx.branches.insert({out.size(), sopp});
       out.push_back(encoding);
       break;
    }
@@ -182,17 +188,18 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
          else
             opcode = opcode_infos[(int)instr->opcode].opcode;
 
-         // TODO: clmp, op_sel
+         // TODO: op_sel
          uint32_t encoding = (0b110100 << 26);
          encoding |= opcode << 16;
+         encoding |= (vop3->clamp ? 1 : 0) << 15;
          for (unsigned i = 0; i < 3; i++)
             encoding |= vop3->abs[i] << (8+i);
          encoding |= (0xFF & instr->getDefinition(0).physReg().reg);
          out.push_back(encoding);
-         // TODO: omod
          encoding = 0;
          for (unsigned i = 0; i < instr->operandCount(); i++)
             encoding |= instr->getOperand(i).physReg().reg << (i * 9);
+         encoding |= vop3->omod << 27;
          for (unsigned i = 0; i < 3; i++)
             encoding |= vop3->neg[i] << (29+i);
          out.push_back(encoding);
@@ -205,7 +212,7 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
    /* append literal dword */
    for (unsigned i = 0; i < instr->num_operands; i++)
    {
-      if (instr->getOperand(i).isConstant() && instr->getOperand(i).physReg().reg == 255)
+      if (instr->getOperand(i).isLiteral())
       {
          uint32_t literal = instr->getOperand(i).constantValue();
          out.push_back(literal);
@@ -214,15 +221,13 @@ void emit_instruction(asm_context ctx, std::vector<uint32_t>& out, Instruction* 
    }
 }
 
-void emit_block(asm_context ctx, std::vector<uint32_t>& out, Block* block)
+void emit_block(asm_context& ctx, std::vector<uint32_t>& out, Block* block)
 {
-   // TODO: emit offsets on previous branches to this block
-
    for (auto const& instr : block->instructions)
       emit_instruction(ctx, out, instr.get());
 }
 
-void fix_exports(asm_context ctx, std::vector<uint32_t>& out, Program* program)
+void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
 {
    // TODO
    for (std::vector<std::unique_ptr<Block>>::reverse_iterator block_it = program->blocks.rbegin(); block_it != program->blocks.rend(); ++block_it)
@@ -257,15 +262,28 @@ void fix_exports(asm_context ctx, std::vector<uint32_t>& out, Program* program)
    }
 }
 
+void fix_branches(asm_context& ctx, std::vector<uint32_t>& out)
+{
+   for (std::pair<int, SOPP_instruction*> branch : ctx.branches)
+   {
+      int offset = ctx.block_offset[branch.second->block->index] - branch.first - 1;
+      out[branch.first] |= (uint16_t) offset;
+   }
+}
+
 std::vector<uint32_t> emit_program(Program* program)
 {
-   // TODO: initialize context
    asm_context ctx;
+   ctx.block_offset.resize(program->blocks.size());
    std::vector<uint32_t> out;
    fix_exports(ctx, out, program);
    for (auto const& block : program->blocks)
+   {
+      ctx.block_offset[block->index] = out.size();
       emit_block(ctx, out, block.get());
-   // footer?
+   }
+   fix_branches(ctx, out);
+
    return out;
 }
 
