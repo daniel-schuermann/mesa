@@ -2010,157 +2010,121 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
 
    Block* aco_then = ctx->program->createAndInsertBlock();
    add_edge(ctx->block, aco_then);
+   /* remember current block */
+   Block* if_block = ctx->block;
 
    if (cond32.type() == RegType::sgpr) { /* uniform condition */
       Temp cond = extract_uniform_cond32(ctx, cond32);
-
       append_logical_end(ctx->block);
-
-      Block* aco_else = ctx->program->createAndInsertBlock();
-      add_edge(ctx->block, aco_else);
-
-      std::unique_ptr<Pseudo_branch_instruction> cbranch{
-         create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz,
-                                                       Format::PSEUDO_BRANCH, 1, 0)};
-      cbranch->getOperand(0) = Operand(cond);
-      cbranch->targets[0] = aco_then;
-      cbranch->targets[1] = aco_else;
-      ctx->block->instructions.emplace_back(std::move(cbranch));
 
       /* emit then block */
       ctx->block = aco_then;
       append_logical_start(ctx->block);
       visit_cf_list(ctx, &if_stmt->then_list);
       append_logical_end(ctx->block);
+
+      Block* aco_else = ctx->program->createAndInsertBlock();
+
+      /* after creating the else-block, we can add the branch instruction to the if */
+      std::unique_ptr<Pseudo_branch_instruction> cbranch{
+         create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz,
+                                                       Format::PSEUDO_BRANCH, 1, 0)};
+      cbranch->getOperand(0) = Operand(cond);
+      cbranch->targets[0] = aco_then;
+      cbranch->targets[1] = aco_else;
+      if_block->instructions.emplace_back(std::move(cbranch));
+      add_edge(if_block, aco_else);
       aco_then = ctx->block;
 
-      if (exec_list_is_empty(&if_stmt->else_list)) {
-         /* if there is no else-list, take the
-          * created aco_else block to continue */
-         ctx->block = aco_else;
-      } else {
-         Block* aco_cont = ctx->program->createAndInsertBlock();
+      /* emit else block */
+      ctx->block = aco_else;
+      append_logical_start(ctx->block);
+      visit_cf_list(ctx, &if_stmt->else_list);
+      append_logical_end(ctx->block);
 
-         /* at the end of the then block, jump to the cont block */
-         Builder(ctx->program, ctx->block).s_branch(aco_cont);
+      Block* aco_cont = ctx->program->createAndInsertBlock();
 
-         /* emit else block */
-         ctx->block = aco_else;
-         append_logical_start(ctx->block);
-         visit_cf_list(ctx, &if_stmt->else_list);
-         append_logical_end(ctx->block);
-         add_edge(ctx->block, aco_cont);
-
-         ctx->block = aco_cont;
-
-         std::unique_ptr<Pseudo_branch_instruction> else_branch{
-            create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch,
-                                                          Format::PSEUDO_BRANCH, 0, 0)};
-         else_branch->targets[0] = ctx->block;
-         aco_else->instructions.emplace_back(std::move(else_branch));
-      }
-
-      add_edge(aco_then, ctx->block);
-
+      /* after creating the cont block, we can add the branch from then block */
       std::unique_ptr<Pseudo_branch_instruction> then_branch{
          create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch,
                                                        Format::PSEUDO_BRANCH, 0, 0)};
-      then_branch->targets[0] = ctx->block;
+      then_branch->targets[0] = aco_cont;
       aco_then->instructions.emplace_back(std::move(then_branch));
+      add_edge(aco_then, aco_cont);
 
+      /* and the branch from the else block */
+      std::unique_ptr<Pseudo_branch_instruction> else_branch{
+         create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch,
+                                                       Format::PSEUDO_BRANCH, 0, 0)};
+      else_branch->targets[0] = aco_cont;
+      ctx->block->instructions.emplace_back(std::move(else_branch));
+      add_edge(ctx->block, aco_cont);
+
+      ctx->block = aco_cont;
       append_logical_start(ctx->block);
+
    } else { /* non-uniform condition */
       Temp cond = extract_divergent_cond32(ctx, cond32);
-
       append_logical_end(ctx->block);
 
-      if (exec_list_is_empty(&if_stmt->else_list)) {
-         Block* aco_cont = ctx->program->createAndInsertBlock();
-         add_edge(ctx->block, aco_cont);
-         add_edge(ctx->block, aco_then);
+      /* emit then block */
+      ctx->block = aco_then;
+      append_logical_start(ctx->block);
+      visit_cf_list(ctx, &if_stmt->then_list);
+      append_logical_end(ctx->block);
 
-         /* without else-list, directly branch on condition */
-         Builder(ctx->program, ctx->block).s_cbranch_vccz(Operand(cond), aco_cont);
+      Block* aco_T = ctx->program->createAndInsertBlock();
+      Block* aco_else = ctx->program->createAndInsertBlock();
+      add_linear_edge(ctx->block, aco_T);
+      add_linear_edge(aco_T, aco_else);
+      add_logical_edge(if_block, aco_else);
 
-         ctx->block = aco_then;
-         Builder B(ctx->program, aco_then);
-         /* set the exec mask inside then-block */
-         Instruction* orig_exec = B.s_and_saveexec_b64(Operand(cond));
+      /* after creating the else-block, we can add the exec mask and branch instruction to the if */
+      std::unique_ptr<SOP1_instruction> set_exec{create_instruction<SOP1_instruction>(aco_opcode::s_and_saveexec_b64, Format::SOP1, 1, 1)};
+      set_exec->getOperand(0) = Operand(cond);
+      Temp orig_exec = {ctx->program->allocateId(), s2};
+      set_exec->getDefinition(0) = Definition(orig_exec);
+      if_block->instructions.push_back(std::move(set_exec));
+      std::unique_ptr<Pseudo_branch_instruction> skip_then{
+         create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z,
+                                                       Format::PSEUDO_BRANCH, 1, 0)};
+      skip_then->getOperand(0) = Operand(exec, s2);
+      skip_then->targets[0] = aco_T;
+      skip_then->targets[1] = aco_then;
+      if_block->instructions.push_back(std::move(skip_then));
+      aco_then = ctx->block;
 
-         /* emit then block */
-         append_logical_start(ctx->block);
-         visit_cf_list(ctx, &if_stmt->then_list);
-         append_logical_end(ctx->block);
+      /* emit else block */
+      ctx->block = aco_else;
+      append_logical_start(ctx->block);
+      visit_cf_list(ctx, &if_stmt->else_list);
+      append_logical_end(ctx->block);
 
-         add_edge(ctx->block, aco_cont);
+      Block* aco_cont = ctx->program->createAndInsertBlock();
+      add_edge(ctx->block, aco_cont);
+      add_logical_edge(aco_then, aco_cont);
+      add_linear_edge(aco_T, aco_cont);
 
-         /* restore exec mask */
-         Builder B2(ctx->program, ctx->block);
-         Instruction* restore = B2.s_mov_b64(Operand(orig_exec->getDefinition(0).getTemp()));
-         restore->getDefinition(0).setFixed(PhysReg{126});
-         ctx->block = aco_cont;
-      } else {
-         Block* aco_T = ctx->program->createAndInsertBlock();
-         Block* aco_else = ctx->program->createAndInsertBlock();
-         Block* aco_cont = ctx->program->createAndInsertBlock();
+      /* after creating the cont block, we can emit T block */
+      std::unique_ptr<SOP2_instruction> neg_exec{create_instruction<SOP2_instruction>(aco_opcode::s_xor_b64, Format::SOP2, 2, 1)};
+      neg_exec->getOperand(0) = Operand(exec, s2);
+      neg_exec->getOperand(1) = Operand(orig_exec);
+      neg_exec->getDefinition(0) = Definition(exec, s2);
+      aco_T->instructions.push_back(std::move(neg_exec));
+      std::unique_ptr<Pseudo_branch_instruction> skip_else{
+         create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z,
+                                                       Format::PSEUDO_BRANCH, 1, 0)};
+      skip_else->getOperand(0) = Operand(PhysReg{126}, s2);
+      skip_else->targets[0] = aco_cont;
+      skip_else->targets[1] = aco_else;
+      aco_T->instructions.push_back(std::move(skip_else));
 
-         add_edge(ctx->block, aco_then);
-         add_linear_edge(ctx->block, aco_T);
-         add_linear_edge(aco_T, aco_else);
-         add_linear_edge(aco_T, aco_cont);
-         add_logical_edge(ctx->block, aco_else);
-
-         Builder B(ctx->program, ctx->block);
-         /* with else-list, first set exec mask */
-         Instruction* orig_exec = B.s_and_saveexec_b64(Operand(cond));
-
-         std::unique_ptr<Pseudo_branch_instruction> skip_then{
-            create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z,
-                                                          Format::PSEUDO_BRANCH, 1, 0)};
-         skip_then->getOperand(0) = Operand(PhysReg{126}, s2);
-         skip_then->targets[0] = aco_T;
-         skip_then->targets[1] = aco_then;
-         ctx->block->instructions.push_back(std::move(skip_then));
-
-         /* emit then block */
-         ctx->block = aco_then;
-         append_logical_start(ctx->block);
-         visit_cf_list(ctx, &if_stmt->then_list);
-         append_logical_end(ctx->block);
-         aco_then = ctx->block;
-
-         add_logical_edge(aco_then, aco_cont);
-         add_linear_edge(aco_then, aco_T);
-
-         ctx->block = aco_T;
-         B = Builder(ctx->program, aco_T);
-         /* negate exec mask */
-         Instruction* else_exec = B.s_xor_b64(Operand(PhysReg{126}, s2), Operand(orig_exec->getDefinition(0).getTemp()));
-         else_exec->getDefinition(0).setFixed(PhysReg{126});
-
-         std::unique_ptr<Pseudo_branch_instruction> skip_else{
-            create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z,
-                                                          Format::PSEUDO_BRANCH, 1, 0)};
-         skip_else->getOperand(0) = Operand(PhysReg{126}, s2);
-         skip_else->targets[0] = aco_cont;
-         skip_else->targets[1] = aco_else;
-         ctx->block->instructions.push_back(std::move(skip_else));
-
-
-         /* emit else block */
-         ctx->block = aco_else;
-         append_logical_start(ctx->block);
-         visit_cf_list(ctx, &if_stmt->else_list);
-         append_logical_end(ctx->block);
-         aco_else = ctx->block;
-
-         ctx->block = aco_cont;
-         /* restore original exec mask */
-         Instruction* restore = Builder(ctx->program, aco_cont).s_mov_b64(Operand(orig_exec->getDefinition(0).getTemp()));
-         restore->getDefinition(0).setFixed(PhysReg{126});
-
-         add_edge(aco_else, aco_cont);
-      }
+      ctx->block = aco_cont;
+      /* restore original exec mask */
+      std::unique_ptr<SOP1_instruction> restore{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
+      restore->getOperand(0) = Operand(orig_exec);
+      restore->getDefinition(0) = Definition(exec, s2);
+      ctx->block->instructions.emplace_back(std::move(restore));
 
       append_logical_start(ctx->block);
    }
