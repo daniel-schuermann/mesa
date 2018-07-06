@@ -248,6 +248,7 @@ Temp extract_uniform_cond32(isel_context *ctx, Temp cond32)
    cmp->getOperand(0) = Operand{cond32};
    cmp->getOperand(1) = Operand{0};
    cmp->getDefinition(0) = Definition{cond};
+   cmp->getDefinition(0).setFixed(PhysReg{253}); /* scc */
    ctx->block->instructions.emplace_back(std::move(cmp));
 
    return cond;
@@ -2101,9 +2102,9 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       append_logical_end(ctx->block);
 
       Block* aco_cont = ctx->program->createAndInsertBlock();
-      add_edge(ctx->block, aco_cont);
       add_logical_edge(aco_then, aco_cont);
       add_linear_edge(aco_T, aco_cont);
+      add_edge(ctx->block, aco_cont);
 
       /* after creating the cont block, we can emit T block */
       std::unique_ptr<SOP2_instruction> neg_exec{create_instruction<SOP2_instruction>(aco_opcode::s_xor_b64, Format::SOP2, 2, 1)};
