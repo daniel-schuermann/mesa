@@ -50,7 +50,7 @@ struct isel_context {
    Temp push_constants;
    Temp ring_offsets;
    Temp sample_pos_offset;
-   std::unordered_map<uint64_t, Temp> tex_desc;
+   //std::unordered_map<uint64_t, Temp> tex_desc;
 
    /* VS inputs */
    Temp vertex_buffers;
@@ -715,9 +715,19 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             cmp->getDefinition(0) = Definition(dst);
             ctx->block->instructions.emplace_back(std::move(cmp));
          } else {
-            fprintf(stderr, "Unimplemented: scalar cmp instr: ");
-            nir_print_instr(&instr->instr, stderr);
-            fprintf(stderr, "\n");
+            std::unique_ptr<SOPC_instruction> cmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lt_i32, Format::SOPC, 2, 1)};
+            cmp->getOperand(0) = Operand(src0);
+            cmp->getOperand(1) = Operand(src1);
+            Temp scc = {ctx->program->allocateId(), b};
+            cmp->getDefinition(0) = Definition(scc);
+            cmp->getDefinition(0).setFixed({253}); /* scc */
+            ctx->block->instructions.emplace_back(std::move(cmp));
+            std::unique_ptr<SOP2_instruction> to_sgpr{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
+            to_sgpr->getOperand(0) = Operand(0xFFFFFFFF);
+            to_sgpr->getOperand(1) = Operand(0);
+            to_sgpr->getOperand(2) = Operand(scc);
+            to_sgpr->getDefinition(0) = Definition(dst);
+            ctx->block->instructions.emplace_back(std::move(to_sgpr));
          }
       }
       break;
@@ -1344,10 +1354,11 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
                       enum aco_descriptor_type desc_type,
                       const nir_tex_instr *tex_instr, bool image, bool write)
 {
+/* FIXME: we should lower the deref with some new nir_intrinsic_load_desc
    std::unordered_map<uint64_t, Temp>::iterator it = ctx->tex_desc.find((uint64_t) desc_type << 32 | deref_instr->dest.ssa.index);
    if (it != ctx->tex_desc.end())
       return it->second;
-
+*/
    Temp index;
    bool index_set = false;
    unsigned constant_index = 0;
@@ -1491,7 +1502,7 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
    Temp t = {ctx->program->allocateId(), type};
    load->getDefinition(0) = Definition(t);
    ctx->block->instructions.emplace_back(std::move(load));
-   ctx->tex_desc.insert({(uint64_t) desc_type << 32 | deref_instr->dest.ssa.index, t});
+   //ctx->tex_desc.insert({(uint64_t) desc_type << 32 | deref_instr->dest.ssa.index, t});
    return t;
 }
 
@@ -1892,6 +1903,24 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
 }
 
+
+void visit_phi(isel_context *ctx, nir_phi_instr *instr)
+{
+   // FIXME: are we sure that the order of phi src corresponds to our order of block predecessors?
+   std::unique_ptr<Instruction> phi;
+   unsigned num_src = exec_list_length(&instr->srcs);
+   phi.reset(create_instruction<Instruction>(aco_opcode::p_phi, Format::PSEUDO, num_src, 1));
+   unsigned i = 0;
+   nir_foreach_phi_src(src, instr)
+   {
+      phi->getOperand(i) = Operand(get_ssa_temp(ctx, src->src.ssa));
+      i++;
+   }
+   phi->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+   ctx->block->instructions.emplace_back(std::move(phi));
+}
+
+
 void visit_undef(isel_context *ctx, nir_ssa_undef_instr *instr)
 {
    Temp dst = get_ssa_temp(ctx, &instr->def);
@@ -1923,6 +1952,9 @@ void visit_block(isel_context *ctx, nir_block *block)
          break;
       case nir_instr_type_tex:
          visit_tex(ctx, nir_instr_as_tex(instr));
+         break;
+      case nir_instr_type_phi:
+         visit_phi(ctx, nir_instr_as_phi(instr));
          break;
       case nir_instr_type_ssa_undef:
          visit_undef(ctx, nir_instr_as_ssa_undef(instr));
