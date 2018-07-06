@@ -905,7 +905,9 @@ void optimize(Program* program)
    }
 
    /* Backward pass to calculate the number of uses for each instruction */
-   for (auto&& block : program->blocks) {
+   for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it)
+   {
+      Block* block = it->get();
       for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
          check_instruction_uses(ctx, *it);
    }
@@ -917,7 +919,9 @@ void optimize(Program* program)
    }
 
    /* 3. Top-Down DAG pass (backward) to select instructions (includes DCE) */
-   for (auto&& block : program->blocks) {
+   for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it)
+   {
+      Block* block = it->get();
       for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
          select_instruction(ctx, *it);
    }
