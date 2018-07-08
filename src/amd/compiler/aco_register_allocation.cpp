@@ -292,7 +292,7 @@ void register_allocation(Program *program)
    }
 
    /* Finish the assignment */
-   for(auto b_it = program->blocks.rbegin(); b_it != program->blocks.rend(); ++b_it) {
+   for(auto b_it = program->blocks.begin(); b_it != program->blocks.end(); ++b_it) {
       for(auto i_it = (*b_it)->instructions.begin(); i_it != (*b_it)->instructions.end(); ++i_it) {
          auto& insn = *i_it;
          for (unsigned i = 0; i < insn->definitionCount(); ++i) {
