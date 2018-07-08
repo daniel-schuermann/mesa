@@ -79,7 +79,8 @@ void insert_copies(Program *program)
       std::map<unsigned, Temp> live = live_out[block.get()];
       for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
          Instruction *insn = it->get();
-         bool needMove = false;
+         bool need_sgpr_move = false;
+         bool need_vgpr_move = false;
          for (unsigned i = 0; i < insn->definitionCount(); ++i) {
             auto& definition = insn->getDefinition(i);
             if (definition.isTemp()) {
@@ -87,7 +88,7 @@ void insert_copies(Program *program)
                if (it2 != live.end())
                   live.erase(it2);
                if (definition.isFixed())
-                  needMove = true;
+                  (definition.getTemp().type() == vgpr ? need_vgpr_move : need_sgpr_move) = true;
             }
          }
 
@@ -96,16 +97,27 @@ void insert_copies(Program *program)
             if (operand.isTemp()) {
                live[operand.tempId()] = operand.getTemp();
                if (operand.isFixed())
-                  needMove = true;
+                  (operand.getTemp().type() == vgpr ? need_vgpr_move : need_sgpr_move) = true;
             }
          }
 
          instructions.push_back(std::move(*it));
 
-         if (needMove && !live.empty()) {
-            std::unique_ptr<Instruction> move{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, live.size(), live.size())};
+         if ((need_vgpr_move || need_sgpr_move) && !live.empty()) {
+            unsigned count = 0;
+            for (auto e : live) {
+               if ((need_sgpr_move && e.second.type() != vgpr) ||
+                   (need_vgpr_move && e.second.type() == vgpr))
+                  ++count;
+            }
+
+            std::unique_ptr<Instruction> move{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, count, count)};
             int idx = 0;
             for (auto e : live) {
+               if ((need_sgpr_move && e.second.type() == vgpr) ||
+                   (need_vgpr_move && e.second.type() != vgpr))
+                  continue;
+
                move->getOperand(idx) = Operand{e.second};
                move->getDefinition(idx) = Definition{e.second};
                ++idx;
