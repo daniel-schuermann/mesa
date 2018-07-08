@@ -227,8 +227,9 @@ void register_allocation(Program *program)
 
    /* Determine operands & defs which are the last use of a temp. */
    /* Also create an interference graph. */
+   auto block_live = live_temps_at_end_of_blocks(program);
    for(auto b_it = program->blocks.rbegin(); b_it != program->blocks.rend(); ++b_it) {
-      std::set<unsigned> live;
+      auto live = block_live.find(b_it->get())->second;
       for(auto i_it = (*b_it)->instructions.rbegin(); i_it != (*b_it)->instructions.rend(); ++i_it) {
          auto& insn = *i_it;
          for (unsigned i = 0; i < insn->definitionCount(); ++i) {
@@ -242,9 +243,9 @@ void register_allocation(Program *program)
                else
                   kills.insert(&definition);
                for(auto e : live) {
-                  if (e != definition.tempId()) {
-                     interfere.insert({definition.tempId(), e});
-                     interfere.insert({e, definition.tempId()});
+                  if (e.first != definition.tempId()) {
+                     interfere.insert({definition.tempId(), e.first});
+                     interfere.insert({e.first, definition.tempId()});
                   }
                }
             }
@@ -267,7 +268,7 @@ void register_allocation(Program *program)
             if (operand.isTemp()) {
                auto it = live.find(operand.tempId());
                if (it == live.end()) {
-                  live.insert(operand.tempId());
+                  live.insert({operand.tempId(), Temp{}});
                   kills.insert(&operand);
                }
             }
@@ -277,7 +278,6 @@ void register_allocation(Program *program)
 
    /* Finish the assignment */
    for(auto b_it = program->blocks.rbegin(); b_it != program->blocks.rend(); ++b_it) {
-      std::set<unsigned> live;
       for(auto i_it = (*b_it)->instructions.begin(); i_it != (*b_it)->instructions.end(); ++i_it) {
          auto& insn = *i_it;
          for (unsigned i = 0; i < insn->definitionCount(); ++i) {
