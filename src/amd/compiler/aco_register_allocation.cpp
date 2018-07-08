@@ -263,6 +263,9 @@ void register_allocation(Program *program)
              insn->opcode == aco_opcode::v_mac_f32)
             temp_assignments[insn->getDefinition(0).tempId()] = insn->getOperand(2).tempId();
 
+         if (insn->opcode == aco_opcode::p_phi || insn->opcode == aco_opcode::p_linear_phi)
+            continue;
+
          for(unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp()) {
