@@ -34,6 +34,18 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    if (shader->info.stage != MESA_SHADER_FRAGMENT)
       return;
 
+   struct ac_shader_config local_config = *config;
+   struct ac_shader_binary local_binary = *binary;
+   struct radv_shader_variant_info local_info = *info;
+   struct radv_nir_compiler_options local_options = *options;
+
+   if (getenv("ACO_DRY_RUN")) {
+      config = &local_config;
+      binary = &local_binary;
+      info = &local_info;
+      options = &local_options;
+   }
+
    /* return if shader contains multiple blocks from control flow */
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&shader->functions);
    if (func->impl->num_blocks > 1)
