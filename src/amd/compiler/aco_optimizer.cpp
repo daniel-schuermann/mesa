@@ -187,44 +187,44 @@ struct ssa_info {
 
    void set_omod5()
    {
-      label.set(10,1);
+      label.set(11,1);
    }
 
    bool is_omod5()
    {
-      return label.test(10);
+      return label.test(11);
    }
 
    void set_omod_success(Instruction* omod_instr)
    {
       instr = omod_instr;
-      label.set(11,1);
+      label.set(12,1);
    }
 
    bool is_omod_success()
    {
-      return label.test(11);
+      return label.test(12);
    }
 
    void set_clamp()
    {
-      label.set(12,1);
+      label.set(13,1);
    }
 
    bool is_clamp()
    {
-      return label.test(12);
+      return label.test(13);
    }
 
    void set_clamp_success(Instruction* clamp_instr)
    {
       instr = clamp_instr;
-      label.set(13,1);
+      label.set(14,1);
    }
 
    bool is_clamp_success()
    {
-      return label.test(13);
+      return label.test(14);
    }
 
 };
@@ -408,6 +408,7 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       }
       break;
    case aco_opcode::v_mul_f32: /* omod */
+      break; // FIXME: only instructions with explicit floating point result can have this modifier.
       if (instr->getOperand(0).isConstant()) {
          assert(instr->getOperand(1).isTemp());
          if (instr->getOperand(0).constantValue() == 0x40000000) { /* 2.0 */
@@ -428,6 +429,7 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
          ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(1).getTemp());
       break;
    case aco_opcode::v_med3_f32: { /* clamp */
+      break; // FIXME: only instructions with explicit floating point result can have this modifier.
       unsigned idx = 0;
       bool found_zero = false, found_one = false;
       for (unsigned i = 0; i < 3; i++)
