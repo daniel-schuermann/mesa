@@ -307,6 +307,7 @@ void register_allocation(Program *program)
                }
 
                if (insn->opcode == aco_opcode::p_parallelcopy) {
+                  assert(assignments.find(insn->getOperand(i).tempId()) != assignments.end());
                   unsigned preferred_reg = assignments.find(insn->getOperand(i).tempId())->second.first.reg;
                   if (can_allocate_register(&interfere, &assignments, id, preferred_reg, count)) {
                      alloc_reg = preferred_reg;
