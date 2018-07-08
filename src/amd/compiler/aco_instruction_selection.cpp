@@ -445,7 +445,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_iadd: {
       if (dst.regClass() == v1) {
-         emit_vop2_instruction(ctx, instr, aco_opcode::v_add_i32, dst, true);
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_add_u32, dst, true);
       } else if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_add_i32, dst);
       } else {
@@ -1050,7 +1050,7 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
          fprintf(stderr, "\n");
          abort();
       } else {
-         std::unique_ptr<VOP2_instruction> add{create_instruction<VOP2_instruction>(aco_opcode::v_add_i32, Format::VOP2, 2, 1)};
+         std::unique_ptr<VOP2_instruction> add{create_instruction<VOP2_instruction>(aco_opcode::v_add_u32, Format::VOP2, 2, 1)};
          add->getOperand(0) = Operand(ctx->base_vertex);
          add->getOperand(1) = Operand(ctx->vertex_id);
          add->getDefinition(0) = Definition(index);
@@ -2099,11 +2099,11 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
 
       /* after creating the else-block, we can add the branch instruction to the if */
       std::unique_ptr<Pseudo_branch_instruction> cbranch{
-         create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz,
+         create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z,
                                                        Format::PSEUDO_BRANCH, 1, 0)};
       cbranch->getOperand(0) = Operand(cond);
-      cbranch->targets[0] = aco_then;
-      cbranch->targets[1] = aco_else;
+      cbranch->targets[0] = aco_else;
+      cbranch->targets[1] = aco_then;
       if_block->instructions.emplace_back(std::move(cbranch));
       add_edge(if_block, aco_else);
       aco_then = ctx->block;
