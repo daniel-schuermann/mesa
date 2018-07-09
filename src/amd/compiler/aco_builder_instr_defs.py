@@ -195,7 +195,7 @@ print Template(template).render(
    SOP2=aco_opcodes.SOP2,
    SOPK=aco_opcodes.SOPK,
    SOP1=aco_opcodes.SOP1,
-   SOPC=aco_opcodes.SOPC_SCC,
+   SOPC=aco_opcodes.SOPC,
    SOPP=aco_opcodes.SOPP,
    VOP1=aco_opcodes.VOP1,
    VOPC=aco_opcodes.VOPC,
