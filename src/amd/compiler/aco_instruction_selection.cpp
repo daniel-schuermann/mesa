@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <unordered_map>
+#include <set>
 
 #include "aco_ir.h"
 #include "aco_builder.h"
@@ -705,6 +706,16 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_feq: {
       if (instr->src[0].src.ssa->bit_size == 32) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_eq_f32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_fne: {
+      if (instr->src[0].src.ssa->bit_size == 32) {
+         emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_lg_f32, dst);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -1982,12 +1993,14 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
    std::unique_ptr<Instruction> phi;
    unsigned num_src = exec_list_length(&instr->srcs);
    phi.reset(create_instruction<Instruction>(aco_opcode::p_phi, Format::PSEUDO, num_src, 1));
-   unsigned i = 0;
+   std::set<unsigned> block_idx;
+
    nir_foreach_phi_src(src, instr)
-   {
-      phi->getOperand(i) = Operand(get_ssa_temp(ctx, src->src.ssa));
-      i++;
-   }
+      block_idx.insert(src->pred->index);
+
+   nir_foreach_phi_src(src, instr)
+      phi->getOperand(std::distance(block_idx.begin(), block_idx.find(src->pred->index))) = Operand(get_ssa_temp(ctx, src->src.ssa));
+
    phi->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
    ctx->block->instructions.emplace_back(std::move(phi));
 }
