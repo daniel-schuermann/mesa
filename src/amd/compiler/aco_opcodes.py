@@ -353,28 +353,28 @@ SOP1 = dict(SOP1_NOSCC).values() + dict(SOP1_NOSCC_64).values() + dict(SOP1_SCC)
 
 
 # SOPC instructions: 2 inputs and 0 outputs (+SCC)
-SOPC_SCC = [
-   "s_cmp_eq_i32",
-   "s_cmp_lg_i32",
-   "s_cmp_gt_i32",
-   "s_cmp_ge_i32",
-   "s_cmp_lt_i32",
-   "s_cmp_le_i32",
-   "s_cmp_eq_u32",
-   "s_cmp_lg_u32",
-   "s_cmp_gt_u32",
-   "s_cmp_ge_u32",
-   "s_cmp_lt_u32",
-   "s_cmp_le_u32",
-   "s_bitcmp0_b32",
-   "s_bitcmp1_b32",
-   "s_bitcmp0_b64",
-   "s_bitcmp1_b64",
-   "s_cmp_eq_u64",
-   "s_cmp_lg_u64"
-]
-for name in SOPC_SCC:
-   opcode(name, 2, [b], write_reg = SCC)
+SOPC_SCC = {
+   (0, "s_cmp_eq_i32"),
+   (1, "s_cmp_lg_i32"),
+   (2, "s_cmp_gt_i32"),
+   (3, "s_cmp_ge_i32"),
+   (4, "s_cmp_lt_i32"),
+   (5, "s_cmp_le_i32"),
+   (6, "s_cmp_eq_u32"),
+   (7, "s_cmp_lg_u32"),
+   (8, "s_cmp_gt_u32"),
+   (9, "s_cmp_ge_u32"),
+   (10, "s_cmp_lt_u32"),
+   (11, "s_cmp_le_u32"),
+   (12, "s_bitcmp0_b32"),
+   (13, "s_bitcmp1_b32"),
+   (14, "s_bitcmp0_b64"),
+   (15, "s_bitcmp1_b64"),
+   (18, "s_cmp_eq_u64"),
+   (19, "s_cmp_lg_u64")
+}
+for code, name in SOPC_SCC:
+   opcode(name, 2, [b], code, Format.SOPC, write_reg = SCC)
 
 SOPC_SPECIAL = [
    "s_setvskip",
@@ -383,29 +383,19 @@ SOPC_SPECIAL = [
 opcode("s_setvskip", 2, [])
 opcode("s_set_gpr_idx_on", 1, [])
 
-SOPC = SOPC_SCC + SOPC_SPECIAL
+SOPC = dict(SOPC_SCC).values() + SOPC_SPECIAL
 
 
 # SOPP instructions: 0 inputs (+optional scc/vcc) , 0 outputs
-SOPP_SCC = [
-   "s_cbranch_scc0",
-   "s_cbranch_scc1"
-]
-for name in SOPP_SCC:
-   opcode(name, 1, [], read_reg = SCC)
-
-SOPP_VCC = [
-   "s_cbranch_vccz",
-   "s_cbranch_vccnz"
-]
-for name in SOPP_VCC:
-   opcode(name, 1, [], read_reg = VCC)
-
 SOPP_SPECIAL = {
    (0, "s_nop"),
    (1, "s_endpgm"),
    (2, "s_branch"),
    (3, "s_wakeup"),
+   (4, "s_cbranch_scc0"),
+   (5, "s_cbranch_scc1"),
+   (6, "s_cbranch_vccz"),
+   (7, "s_cbranch_vccnz"),
    (8, "s_cbranch_execz"),
    (9, "s_cbranch_execnz"),
    (10, "s_barrier"),
@@ -433,7 +423,7 @@ SOPP_SPECIAL = {
 for code, name in SOPP_SPECIAL:
    opcode(name, 0, [], code, Format.SOPP)
 
-SOPP = SOPP_SCC + SOPP_VCC + dict(SOPP_SPECIAL).values()
+SOPP = dict(SOPP_SPECIAL).values()
 
 
 # SMEM instructions: sbase input (2 sgpr), potentially 2 offset inputs, 1 sdata input/output
