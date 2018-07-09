@@ -5,62 +5,101 @@
 #include <set>
 #include <vector>
 #include <unordered_map>
+#include <set>
 
 #include "sid.h"
 
 namespace aco {
 // TODO most of the functions here do not support multiple basic blocks yet.
 
+
 static
-std::map<Block*, std::map<unsigned, Temp>> live_temps_at_end_of_blocks(Program *program) {
-   std::map<Block*, std::map<unsigned, Temp>> result;
-   bool changed;
-   do {
-      changed = false;
-      for (auto&& block : program->blocks) {
-         std::map<unsigned, Temp> live = result[block.get()];
-         for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
-            Instruction *insn = it->get();
-            for (unsigned i = 0; i < insn->definitionCount(); ++i) {
-               auto& definition = insn->getDefinition(i);
-               if (definition.isTemp()) {
-                   auto it2 = live.find(definition.tempId());
-                   if (it2 != live.end())
-                      live.erase(it2);
-               }
-            }
+void process_live_temps_per_block(std::vector<std::set<Temp>>& live_temps, Block* block, std::set<Block*>& worklist)
+{
+   std::set<Temp> live_sgprs;
+   std::set<Temp> live_vgprs;
+   /* first, insert the live-outs from this block into our temporary sets */
+   for (std::set<Temp>::iterator it = live_temps[block->index].begin(); it != live_temps[block->index].end(); ++it)
+   {
+      if ((*it).type() == vgpr)
+         live_vgprs.insert(*it);
+      else
+         live_sgprs.insert(*it);
+   }
 
-            if (insn->opcode == aco_opcode::p_phi ||
-                insn->opcode == aco_opcode::p_linear_phi) {
-               auto& predecessors = insn->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
-               assert(insn->operandCount() == predecessors.size());
+   /* traverse the instructions backwards */
+   for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
+   {
+      Instruction *insn = it->get();
+      /* KILL */
+      for (unsigned i = 0; i < insn->definitionCount(); ++i)
+      {
+         auto& definition = insn->getDefinition(i);
+         if (definition.isTemp()) {
+            if (definition.getTemp().type() == vgpr)
+               live_vgprs.erase(definition.getTemp());
+            else
+               live_sgprs.erase(definition.getTemp());
+         }
+      }
 
-               for (unsigned i = 0; i < insn->operandCount(); ++i) {
-                  auto& operand = insn->getOperand(i);
-                  if (operand.isTemp()) {
-                     if (result[predecessors[i]].insert({operand.tempId(), operand.getTemp()}).second)
-                        changed = true;
-                  }
-               }
-            } else {
-               for (unsigned i = 0; i < insn->operandCount(); ++i) {
-                  auto& operand = insn->getOperand(i);
-                  if (operand.isTemp()) {
-                     live[operand.tempId()] = operand.getTemp();
-                  }
-               }
+      /* GEN */
+      if (insn->opcode == aco_opcode::p_phi ||
+          insn->opcode == aco_opcode::p_linear_phi) {
+         /* directly insert into the predecessors live-out set */
+         for (unsigned i = 0; i < insn->operandCount(); ++i)
+         {
+            auto& operand = insn->getOperand(i);
+            if (operand.isTemp()) {
+               Block* predecessor = operand.getTemp().type() == vgpr ? block->logical_predecessors[i] : block->linear_predecessors[i];
+               auto it = live_temps[predecessor->index].insert(operand.getTemp());
+               /* check if we changed an already processed block */
+               if (it.second && predecessor->index >= block->index)
+                  worklist.insert(block->logical_predecessors[i]);
             }
          }
-         for (auto e : live) {
-            bool is_vgpr = typeOf(e.second.regClass()) == vgpr;
-            auto* predecessors = is_vgpr ? &block->logical_predecessors : &block->linear_predecessors;
-            for (auto pred : *predecessors) {
-                if (result[pred].insert(e).second)
-                   changed = true;
+      } else {
+         for (unsigned i = 0; i < insn->operandCount(); ++i)
+         {
+            auto& operand = insn->getOperand(i);
+            if (operand.isTemp()) {
+            if (operand.tempId() == 0) {
+            aco_print_instr(insn, stderr);
+               assert(operand.tempId() != 0);}
+               if (operand.getTemp().type() == vgpr)
+                  live_vgprs.insert(operand.getTemp());
+               else
+                  live_sgprs.insert(operand.getTemp());
             }
          }
       }
-   } while (changed);
+   }
+
+   /* now, we have the live-in sets and need to merge them into the live-out sets */
+   for (Block* predecessor : block->logical_predecessors)
+      live_temps[predecessor->index].insert(live_vgprs.begin(), live_vgprs.end());
+
+   for (Block* predecessor : block->linear_predecessors)
+      live_temps[predecessor->index].insert(live_sgprs.begin(), live_sgprs.end());
+
+}
+
+static
+std::vector<std::set<Temp>> live_temps_at_end_of_block(Program* program)
+{
+   std::vector<std::set<Temp>> result(program->blocks.size());
+   std::set<Block*> worklist;
+   /* Postorder traversal through the program */
+   for (auto b_it = program->blocks.rbegin(); b_it != program->blocks.rend(); ++b_it)
+      process_live_temps_per_block(result, b_it->get(), worklist);
+
+   while (!worklist.empty())
+   {
+      std::set<Block*>::iterator b_it = worklist.begin();
+      Block* block = *b_it;
+      worklist.erase(b_it);
+      process_live_temps_per_block(result, block, worklist);
+   }
 
    return result;
 }
@@ -72,11 +111,12 @@ std::map<Block*, std::map<unsigned, Temp>> live_temps_at_end_of_blocks(Program *
  */
 void insert_copies(Program *program)
 {
-   auto live_out = live_temps_at_end_of_blocks(program);
+   std::vector<std::set<Temp>> live_out_per_block = live_temps_at_end_of_block(program);
 
    for (auto&& block : program->blocks) {
       std::vector<std::unique_ptr<Instruction>> instructions;
-      std::map<unsigned, Temp> live = live_out[block.get()];
+      std::set<Temp> live = live_out_per_block[block.get()->index];
+
       for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
          Instruction *insn = it->get();
          bool need_sgpr_move = false;
@@ -84,9 +124,9 @@ void insert_copies(Program *program)
          for (unsigned i = 0; i < insn->definitionCount(); ++i) {
             auto& definition = insn->getDefinition(i);
             if (definition.isTemp()) {
-               auto it2 = live.find(definition.tempId());
-               if (it2 != live.end())
-                  live.erase(it2);
+               auto temp = live.find(definition.getTemp());
+               if (temp != live.end())
+                  live.erase(temp);
                if (definition.isFixed())
                   (definition.getTemp().type() == vgpr ? need_vgpr_move : need_sgpr_move) = true;
             }
@@ -95,7 +135,10 @@ void insert_copies(Program *program)
          for (unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp()) {
-               live[operand.tempId()] = operand.getTemp();
+            if (operand.tempId() == 0) {
+            aco_print_instr(insn, stderr);
+               assert(operand.tempId() != 0);}
+               live.insert(operand.getTemp());
                if (operand.isFixed())
                   (operand.getTemp().type() == vgpr ? need_vgpr_move : need_sgpr_move) = true;
             }
@@ -105,21 +148,20 @@ void insert_copies(Program *program)
 
          if ((need_vgpr_move || need_sgpr_move) && !live.empty()) {
             unsigned count = 0;
-            for (auto e : live) {
-               if ((need_sgpr_move && e.second.type() != vgpr) ||
-                   (need_vgpr_move && e.second.type() == vgpr))
+            for (auto temp : live) {
+               if ((need_sgpr_move && temp.type() != vgpr) ||
+                   (need_vgpr_move && temp.type() == vgpr))
                   ++count;
             }
 
             std::unique_ptr<Instruction> move{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, count, count)};
             int idx = 0;
-            for (auto e : live) {
-               if ((need_sgpr_move && e.second.type() == vgpr) ||
-                   (need_vgpr_move && e.second.type() != vgpr))
+            for (auto temp : live) {
+               if ((need_sgpr_move && temp.type() == vgpr) ||
+                   (need_vgpr_move && temp.type() != vgpr))
                   continue;
-
-               move->getOperand(idx) = Operand{e.second};
-               move->getDefinition(idx) = Definition{e.second};
+               move->getOperand(idx) = Operand{temp};
+               move->getDefinition(idx) = Definition{temp};
                ++idx;
             }
             instructions.push_back(std::move(move));
@@ -239,9 +281,9 @@ void register_allocation(Program *program)
 
    /* Determine operands & defs which are the last use of a temp. */
    /* Also create an interference graph. */
-   auto block_live = live_temps_at_end_of_blocks(program);
+   std::vector<std::set<Temp>> live_out_per_block = live_temps_at_end_of_block(program);
    for(auto b_it = program->blocks.rbegin(); b_it != program->blocks.rend(); ++b_it) {
-      auto live = block_live.find(b_it->get())->second;
+      std::set<Temp> live = live_out_per_block[(*b_it)->index];
       for(auto i_it = (*b_it)->instructions.rbegin(); i_it != (*b_it)->instructions.rend(); ++i_it) {
          auto& insn = *i_it;
          for (unsigned i = 0; i < insn->definitionCount(); ++i) {
@@ -249,15 +291,15 @@ void register_allocation(Program *program)
             if (definition.isTemp()) {
                simplicial_order.push_back(&definition);
 
-               auto it = live.find(definition.tempId());
+               auto it = live.find(definition.getTemp());
                if (it != live.end())
                   live.erase(it);
                else
                   kills.insert(&definition);
-               for(auto e : live) {
-                  if (e.first != definition.tempId()) {
-                     interfere.insert({definition.tempId(), e.first});
-                     interfere.insert({e.first, definition.tempId()});
+               for(auto temp : live) {
+                  if (temp.id() != definition.tempId()) {
+                     interfere.insert({definition.tempId(), temp.id()});
+                     interfere.insert({temp.id(), definition.tempId()});
                   }
                }
             }
@@ -281,9 +323,9 @@ void register_allocation(Program *program)
          for(unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp()) {
-               auto it = live.find(operand.tempId());
+               auto it = live.find(operand.getTemp());
                if (it == live.end()) {
-                  live.insert({operand.tempId(), Temp{}});
+                  live.insert(operand.getTemp());
                   kills.insert(&operand);
                }
             }
