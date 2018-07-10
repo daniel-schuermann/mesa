@@ -67,7 +67,10 @@ void validate(Program* program, FILE * output)
 
             /* check num sgprs for VALU */
             if (instr->isVALU()) {
-               check(instr->getDefinition(0).getTemp().type() == vgpr || (int) instr->format & (int) Format::VOPC,
+               check(instr->getDefinition(0).getTemp().type() == vgpr ||
+                     (int) instr->format & (int) Format::VOPC ||
+                     instr->opcode == aco_opcode::v_readfirstlane_b32 ||
+                     instr->opcode == aco_opcode::v_readlane_b32,
                      "Wrong Definition type for VALU instruction", instr.get());
                unsigned num_sgpr = 0;
                for (unsigned i = 0; i < instr->num_operands; i++)
