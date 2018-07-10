@@ -168,7 +168,7 @@ public:
       return sizeOf(reg_class);
    }
 
-   RegType type()
+   RegType type() const noexcept
    {
       return typeOf(reg_class);
    }
@@ -176,6 +176,11 @@ public:
    RegClass regClass() const noexcept
    {
       return reg_class;
+   }
+
+   bool operator<(Temp other) const noexcept
+   {
+      return id() < other.id();
    }
 
 private:
