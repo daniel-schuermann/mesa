@@ -1180,15 +1180,15 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp rsrc = get_ssa_temp(ctx, instr->src[0].ssa);
    nir_const_value* const_offset = nir_src_as_const_value(instr->src[1]);
 
-   if (dst.type() == sgpr) {
-      std::unique_ptr<Instruction> load;
-      load.reset(create_instruction<SMEM_instruction>(aco_opcode::s_load_dwordx4, Format::SMEM, 2, 1));
-      load->getOperand(0) = Operand(rsrc);
-      load->getOperand(1) = Operand((uint32_t) 0);
-      rsrc = {ctx->program->allocateId(), s4};
-      load->getDefinition(0) = Definition(rsrc);
-      ctx->block->instructions.emplace_back(std::move(load));
+   std::unique_ptr<Instruction> load;
+   load.reset(create_instruction<SMEM_instruction>(aco_opcode::s_load_dwordx4, Format::SMEM, 2, 1));
+   load->getOperand(0) = Operand(rsrc);
+   load->getOperand(1) = Operand((uint32_t) 0);
+   rsrc = {ctx->program->allocateId(), s4};
+   load->getDefinition(0) = Definition(rsrc);
+   ctx->block->instructions.emplace_back(std::move(load));
 
+   if (dst.type() == sgpr) {
       aco_opcode op;
       switch(dst.size()) {
       case 1:
@@ -1243,13 +1243,34 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
          ctx->block->instructions.emplace_back(std::move(load));
       }
 
-   } else {
-      fprintf(stderr, "Unsupported: ubo vector load: ");
-      nir_print_instr(&instr->instr, stderr);
-      fprintf(stderr, "\n");
-      abort();
-   }
+   } else { /* vgpr dst */
+      aco_opcode op;
+      switch(dst.size()) {
+      case 1:
+         op = aco_opcode::buffer_load_dword;
+         break;
+      case 2:
+         op = aco_opcode::buffer_load_dwordx2;
+         break;
+      case 3:
+         op = aco_opcode::buffer_load_dwordx3;
+         break;
+      case 4:
+         op = aco_opcode::buffer_load_dwordx4;
+         break;
+      default:
+         unreachable("Unimplemented regclass in load_ubo instruction.");
+      }
 
+      std::unique_ptr<MUBUF_instruction> mubuf;
+      mubuf.reset(create_instruction<MUBUF_instruction>(op, Format::MUBUF, 3, 1));
+      mubuf->getOperand(0) = Operand(get_ssa_temp(ctx, instr->src[1].ssa));
+      mubuf->getOperand(1) = Operand(rsrc);
+      mubuf->getOperand(2) = Operand(0);
+      mubuf->getDefinition(0) = Definition(dst);
+      mubuf->offen = true;
+      ctx->block->instructions.emplace_back(std::move(mubuf));
+   }
 }
 
 void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
@@ -2323,7 +2344,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   size = 2;
                   break;
                case nir_intrinsic_load_ubo:
-                  type = ctx->divergent_vals[intrinsic->src[0].ssa->index] ? vgpr : sgpr;
+                  type = ctx->divergent_vals[intrinsic->dest.ssa.index] ? vgpr : sgpr;
                   break;
                default:
                   for (unsigned i = 0; i < nir_intrinsic_infos[intrinsic->intrinsic].num_srcs; i++) {
