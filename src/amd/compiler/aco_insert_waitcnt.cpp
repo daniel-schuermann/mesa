@@ -431,6 +431,23 @@ bool gen(Instruction* instr, wait_ctx& ctx)
          return true;
       }
    }
+   case Format::MUBUF: {
+      if (instr->num_definitions) {
+         /* increase counter for all entries of same wait_type */
+         for (std::pair<uint8_t,wait_entry> e : ctx.vgpr_map)
+         {
+            if (e.second.type == vm_type)
+               e.second.vm_cnt++;
+         }
+         for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
+         {
+            ctx.vgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
+            wait_entry(vm_type, 0, max_exp_cnt, max_lgkm_cnt));
+         }
+         ctx.vm_cnt++;
+         return true;
+      }
+   }
    case Format::MIMG: {
       if (instr->num_definitions) {
          /* increase counter for all entries of same wait_type */
