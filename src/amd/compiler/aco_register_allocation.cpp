@@ -187,11 +187,16 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
          if (renames_per_block[preds[0]->index].find(temp.id()) == renames_per_block[preds[0]->index].end())
             continue;
          unsigned idx = renames_per_block[preds[0]->index][temp.id()];
+         bool has_different_def = false;
          for (unsigned i = 1; i < preds.size(); i++) {
             if (renames_per_block[preds[i]->index].find(temp.id()) == renames_per_block[preds[i]->index].end() ||
-                renames_per_block[preds[0]->index][temp.id()] != idx)
-               continue;
+                renames_per_block[preds[0]->index][temp.id()] != idx) {
+               has_different_def = true;
+               break;
+            }
          }
+         if (has_different_def)
+            continue;
          renames.insert({temp.id(), idx});
       }
    }
@@ -203,11 +208,16 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
          if (renames_per_block[preds[0]->index].find(temp.id()) == renames_per_block[preds[0]->index].end())
             continue;
          unsigned idx = renames_per_block[preds[0]->index][temp.id()];
+         bool has_different_def = false;
          for (unsigned i = 1; i < preds.size(); i++) {
             if (renames_per_block[preds[i]->index].find(temp.id()) == renames_per_block[preds[i]->index].end() ||
-                renames_per_block[preds[0]->index][temp.id()] != idx)
-               continue;
+                renames_per_block[preds[0]->index][temp.id()] != idx) {
+               has_different_def = true;
+               break;
+            }
          }
+         if (has_different_def)
+            continue;
          renames.insert({temp.id(), idx});
       }
    }
