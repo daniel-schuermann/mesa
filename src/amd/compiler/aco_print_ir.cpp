@@ -120,8 +120,11 @@ void aco_print_instr(struct Instruction *instr, FILE *output)
 void aco_print_block(const struct Block* block, FILE *output)
 {
    fprintf(output, "BB%d\n", block->index);
-   fprintf(output, "/* preds: ");
+   fprintf(output, "/* logical preds: ");
    for (auto const& pred : block->logical_predecessors)
+      fprintf(output, "BB%d, ", pred->index);
+   fprintf(output, "/ linear preds: ");
+   for (auto const& pred : block->linear_predecessors)
       fprintf(output, "BB%d, ", pred->index);
    fprintf(output, " */\n");
    for (auto const& instr : block->instructions) {
