@@ -232,8 +232,8 @@ void emit_vopc_instruction_output32(isel_context *ctx, nir_alu_instr *instr, aco
       ctx->block->instructions.emplace_back(std::move(cmp));
 
       std::unique_ptr<Instruction> cselect{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
-      cselect->getOperand(0) = Operand{0x0};
-      cselect->getOperand(1) = Operand{0xFFFFFFFf};
+      cselect->getOperand(0) = Operand{0xFFFFFFFF};
+      cselect->getOperand(1) = Operand{0};
       cselect->getOperand(2) = Operand{scc_tmp};
       cselect->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(cselect));
@@ -389,8 +389,19 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_imov:
    case nir_op_fmov: {
-      Temp src = get_alu_src(ctx, instr->src[0]);
-      ctx->allocated.insert({instr->dest.dest.ssa.index, src.id()});
+      std::unique_ptr<Instruction> mov;
+      if (dst.regClass() == s1) {
+         mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+      } else if (dst.regClass() == v1) {
+         mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      mov->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
+      mov->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(mov));
       break;
    }
    case nir_op_ior: {
@@ -1244,6 +1255,11 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       }
 
    } else { /* vgpr dst */
+      fprintf(stderr, "Unimplemented vector load\n");
+      nir_print_instr(&instr->instr, stderr);
+      fprintf(stderr, "\n");
+      abort();
+      #if 0
       aco_opcode op;
       switch(dst.size()) {
       case 1:
@@ -1270,6 +1286,7 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       mubuf->getDefinition(0) = Definition(dst);
       mubuf->offen = true;
       ctx->block->instructions.emplace_back(std::move(mubuf));
+      #endif
    }
 }
 
@@ -2181,6 +2198,7 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
 
       Block* aco_T = ctx->program->createAndInsertBlock();
       Block* aco_else = ctx->program->createAndInsertBlock();
+      add_linear_edge(if_block, aco_T);
       add_linear_edge(ctx->block, aco_T);
       add_linear_edge(aco_T, aco_else);
       add_logical_edge(if_block, aco_else);
