@@ -14,7 +14,7 @@ namespace aco {
 
 
 static
-void process_live_temps_per_block(std::vector<std::set<Temp>>& live_temps, Block* block, std::set<Block*>& worklist)
+void process_live_temps_per_block(std::vector<std::set<Temp>>& live_temps, Block* block, std::set<unsigned>& worklist)
 {
    std::set<Temp> live_sgprs;
    std::set<Temp> live_vgprs;
@@ -47,40 +47,51 @@ void process_live_temps_per_block(std::vector<std::set<Temp>>& live_temps, Block
       if (insn->opcode == aco_opcode::p_phi ||
           insn->opcode == aco_opcode::p_linear_phi) {
          /* directly insert into the predecessors live-out set */
+         bool is_vgpr = insn->getDefinition(0).getTemp().type() == vgpr;
+         std::vector<Block*>& preds = is_vgpr ? block->logical_predecessors : block->linear_predecessors;
          for (unsigned i = 0; i < insn->operandCount(); ++i)
          {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp()) {
-               Block* predecessor = operand.getTemp().type() == vgpr ? block->logical_predecessors[i] : block->linear_predecessors[i];
-               auto it = live_temps[predecessor->index].insert(operand.getTemp());
+               auto it = live_temps[preds[i]->index].insert(operand.getTemp());
                /* check if we changed an already processed block */
-               if (it.second && predecessor->index >= block->index)
-                  worklist.insert(block->logical_predecessors[i]);
+               if (it.second)
+                  worklist.insert(preds[i]->index);
             }
          }
-      } else {
-         for (unsigned i = 0; i < insn->operandCount(); ++i)
-         {
-            auto& operand = insn->getOperand(i);
-            if (operand.isTemp()) {
-            if (operand.tempId() == 0) {
-            aco_print_instr(insn, stderr);
-               assert(operand.tempId() != 0);}
-               if (operand.getTemp().type() == vgpr)
-                  live_vgprs.insert(operand.getTemp());
-               else
-                  live_sgprs.insert(operand.getTemp());
-            }
+         continue;
+      }
+
+      for (unsigned i = 0; i < insn->operandCount(); ++i)
+      {
+         auto& operand = insn->getOperand(i);
+         if (operand.isTemp()) {
+            if (operand.getTemp().type() == vgpr)
+               live_vgprs.insert(operand.getTemp());
+            else
+               live_sgprs.insert(operand.getTemp());
          }
       }
    }
 
    /* now, we have the live-in sets and need to merge them into the live-out sets */
-   for (Block* predecessor : block->logical_predecessors)
-      live_temps[predecessor->index].insert(live_vgprs.begin(), live_vgprs.end());
+   for (Block* predecessor : block->logical_predecessors) {
+      for (Temp vgpr : live_vgprs) {
+         auto it = live_temps[predecessor->index].insert(vgpr);
+         if (it.second)
+            worklist.insert(predecessor->index);
+      }
+   }
 
-   for (Block* predecessor : block->linear_predecessors)
-      live_temps[predecessor->index].insert(live_sgprs.begin(), live_sgprs.end());
+   for (Block* predecessor : block->linear_predecessors) {
+      for (Temp sgpr : live_sgprs) {
+         auto it = live_temps[predecessor->index].insert(sgpr);
+         if (it.second)
+            worklist.insert(predecessor->index);
+      }
+   }
+
+   assert(block->linear_predecessors.size() != 0 || (live_vgprs.empty() && live_sgprs.empty()));
 
 }
 
@@ -88,17 +99,15 @@ static
 std::vector<std::set<Temp>> live_temps_at_end_of_block(Program* program)
 {
    std::vector<std::set<Temp>> result(program->blocks.size());
-   std::set<Block*> worklist;
-   /* Postorder traversal through the program */
-   for (auto b_it = program->blocks.rbegin(); b_it != program->blocks.rend(); ++b_it)
-      process_live_temps_per_block(result, b_it->get(), worklist);
-
-   while (!worklist.empty())
-   {
-      std::set<Block*>::iterator b_it = worklist.begin();
-      Block* block = *b_it;
-      worklist.erase(b_it);
-      process_live_temps_per_block(result, block, worklist);
+   std::set<unsigned> worklist;
+   /* this implementation assumes that the block idx corresponds to the block's position in program->blocks vector */
+   for (auto& block : program->blocks)
+      worklist.insert(block->index);
+   while (!worklist.empty()) {
+      std::set<unsigned>::reverse_iterator b_it = worklist.rbegin();
+      unsigned block_idx = *b_it;
+      worklist.erase(block_idx);
+      process_live_temps_per_block(result, program->blocks[block_idx].get(), worklist);
    }
 
    return result;
@@ -190,7 +199,7 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
          bool has_different_def = false;
          for (unsigned i = 1; i < preds.size(); i++) {
             if (renames_per_block[preds[i]->index].find(temp.id()) == renames_per_block[preds[i]->index].end() ||
-                renames_per_block[preds[0]->index][temp.id()] != idx) {
+                renames_per_block[preds[i]->index][temp.id()] != idx) {
                has_different_def = true;
                break;
             }
@@ -211,7 +220,7 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
          bool has_different_def = false;
          for (unsigned i = 1; i < preds.size(); i++) {
             if (renames_per_block[preds[i]->index].find(temp.id()) == renames_per_block[preds[i]->index].end() ||
-                renames_per_block[preds[0]->index][temp.id()] != idx) {
+                renames_per_block[preds[i]->index][temp.id()] != idx) {
                has_different_def = true;
                break;
             }
@@ -224,6 +233,7 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
 
    /* rename operands of each instruction */
    for (auto&& insn : block->instructions) {
+      /* phi operand renames are found in the corresponding predecessor rename sets */
       if (insn->opcode == aco_opcode::p_phi) {
          bool is_vgpr = insn->getDefinition(0).getTemp().type() == vgpr;
          std::vector<Block*> preds = is_vgpr ? block->logical_predecessors : block->linear_predecessors;
@@ -240,27 +250,37 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
       } else {
          for (unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
-            if (operand.isTemp()) {
-               if (renames.find(operand.tempId()) != renames.end()) {
-                  operand.setTemp(Temp{renames[operand.tempId()], operand.regClass()});
-               } else { /* insert phi */
-                  Temp temp = operand.getTemp();
-                  std::vector<Block*> preds = temp.type() == vgpr ? block->logical_predecessors : block->linear_predecessors;
-                  std::unique_ptr<Instruction> phi{create_instruction<Instruction>(aco_opcode::p_phi, Format::PSEUDO, preds.size(), 1)};
-                  for (unsigned i = 0; i < preds.size(); i++) {
-                     std::map<unsigned, unsigned> pred_renames = renames_per_block[preds[i]->index];
-                     if (pred_renames.find(temp.id()) != pred_renames.end())
-                        phi->getOperand(i) = Operand{Temp{pred_renames[temp.id()], temp.regClass()}};
-                     else {
-                        phi->getOperand(i) = operand;
-                        reprocess = true;
-                     }
-                  }
-                  phi->getDefinition(0) = Definition{Temp(program->allocateId(), temp.regClass())};
-                  renames[temp.id()] = phi->getDefinition(0).tempId();
-                  new_instructions.emplace_back(std::move(phi));
-               }
+            if (!operand.isTemp())
+               continue;
+            if (renames.find(operand.tempId()) != renames.end()) {
+               operand.setTemp(Temp{renames[operand.tempId()], operand.regClass()});
+               continue;
             }
+
+            /* if we didn't find the operand in the renames set, check if it has been processed in all predecessors */
+            Temp temp = operand.getTemp();
+            std::vector<Block*> preds = temp.type() == vgpr ? block->logical_predecessors : block->linear_predecessors;
+            unsigned operand_ids[preds.size()];
+            for (unsigned i = 0; i < preds.size(); i++) {
+               std::map<unsigned, unsigned> pred_renames = renames_per_block[preds[i]->index];
+               if (pred_renames.find(temp.id()) != pred_renames.end())
+                  operand_ids[i] = pred_renames[temp.id()];
+               else
+                  reprocess = true;
+            }
+            if (reprocess) {
+               /* we don't know all operand renames yet */
+               renames[temp.id()] = temp.id();
+               continue;
+            }
+            /* the operand has been renamed differently in the predecessors. we have to insert a phi-node. */
+            std::unique_ptr<Instruction> phi{create_instruction<Instruction>(aco_opcode::p_phi, Format::PSEUDO, preds.size(), 1)};
+            for (unsigned i = 0; i < preds.size(); i++)
+               phi->getOperand(i) = Operand({operand_ids[i], temp.regClass()});
+            phi->getDefinition(0) = Definition{Temp(program->allocateId(), temp.regClass())};
+            renames[temp.id()] = phi->getDefinition(0).tempId();
+            renames[phi->getDefinition(0).tempId()] = phi->getDefinition(0).tempId();
+            new_instructions.emplace_back(std::move(phi));
          }
       }
       /* rename re-definitions of the same id */
@@ -270,32 +290,46 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
          if (renames.find(id) != renames.end()) {
             id = program->allocateId();
             renames[definition.tempId()] = id;
-         } else {
-            renames[id] = id;
+            definition.setTemp(Temp{id, definition.regClass()});
          }
-         definition.setTemp(Temp{id, definition.regClass()});
+        renames[id] = id;
       }
    }
 
    /* check if there are live-outs of this block, which have not yet been renamed */
-   std::set<Temp> live_out = live_out_per_block[block->index];
+   std::set<Temp>& live_out = live_out_per_block[block->index];
    for (Temp temp : live_out) {
-      if (renames.find(temp.id()) != renames.end())
+      if (renames.find(temp.id()) != renames.end()) {
+         /* if we have a new name for this live_out, we add it to live_outs */
+         if (renames[temp.id()] != temp.id())
+            live_out.insert({renames[temp.id()], temp.regClass()});
          continue;
-      std::vector<Block*> preds = temp.type() == vgpr ? block->logical_predecessors : block->linear_predecessors;
-      std::unique_ptr<Instruction> phi{create_instruction<Instruction>(aco_opcode::p_phi, Format::PSEUDO, preds.size(), 1)};
+      }
+
+      /* the live-out has not yet been renamed. check, if we already processed all predecessors */
+      std::vector<Block*>& preds = temp.type() == vgpr ? block->logical_predecessors : block->linear_predecessors;
+      unsigned operand_ids[preds.size()];
       for (unsigned i = 0; i < preds.size(); i++) {
          std::map<unsigned, unsigned> pred_renames = renames_per_block[preds[i]->index];
          if (pred_renames.find(temp.id()) != pred_renames.end())
-            phi->getOperand(i) = Operand{Temp{pred_renames[temp.id()], temp.regClass()}};
-         else {
-            phi->getOperand(i) = Operand(temp);
+            operand_ids[i] = pred_renames[temp.id()];
+         else
             reprocess = true;
-         }
-         phi->getDefinition(0) = Definition{Temp(program->allocateId(), temp.regClass())};
-         renames[temp.id()] = phi->getDefinition(0).tempId();
-         new_instructions.emplace_back(std::move(phi));
       }
+      if (reprocess) {
+         /* at least one predecessor has not yet been processed, thus we have to come back */
+         renames[temp.id()] = temp.id();
+         continue;
+      }
+      /* the live-out has been renamed differently in the predecessors. we have to insert a phi-node. */
+      std::unique_ptr<Instruction> phi{create_instruction<Instruction>(aco_opcode::p_phi, Format::PSEUDO, preds.size(), 1)};
+      for (unsigned i = 0; i < preds.size(); i++)
+         phi->getOperand(i) = Operand({operand_ids[i], temp.regClass()});
+      phi->getDefinition(0) = Definition{Temp(program->allocateId(), temp.regClass())};
+      renames[temp.id()] = phi->getDefinition(0).tempId();
+      renames[phi->getDefinition(0).tempId()] = phi->getDefinition(0).tempId();
+      live_out_per_block[block->index].insert(phi->getDefinition(0).getTemp());
+      new_instructions.emplace_back(std::move(phi));
    }
 
    renames_per_block[block->index] = renames;
@@ -315,22 +349,18 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
 void fix_ssa(Program *program, std::vector<std::set<Temp>> live_out_per_block)
 {
    std::vector<std::map<unsigned, unsigned>> renames_per_block(program->blocks.size());
+   bool reprocess = false;
    std::deque<Block*> worklist;
+   for (auto& block : program->blocks)
+      reprocess |= fix_ssa_block(block.get(), renames_per_block, program, live_out_per_block);
 
-   /* first, process each block once */
-   for (auto&& block : program->blocks) {
-      bool reprocess = fix_ssa_block(block.get(), renames_per_block, program, live_out_per_block);
-      if (reprocess)
-         worklist.emplace_back(block.get());
-   }
-   /* second, process blocks which had incomplete live-in renames */
-   while (!worklist.empty()) {
-      bool reprocess = fix_ssa_block(worklist.front(), renames_per_block, program, live_out_per_block);
-      if (reprocess)
-         worklist.emplace_back(worklist.front());
-      worklist.pop_front();
+   if (reprocess) {
+      reprocess = false;
+      for (auto& block : program->blocks)
+         reprocess |= fix_ssa_block(block.get(), renames_per_block, program, live_out_per_block);
    }
 
+   assert(!reprocess && "Fix ssa: this algorithm should have terminated in two interations.");
 }
 
 static unsigned reg_count(RegClass reg_class)
