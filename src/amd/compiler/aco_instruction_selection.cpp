@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <set>
+#include <stack>
 
 #include "aco_ir.h"
 #include "aco_builder.h"
@@ -34,6 +35,11 @@ enum fs_input {
    max_inputs,
 };
 
+struct loop_info {
+   Block* loop_header;
+   Block* loop_footer;
+};
+
 struct isel_context {
    struct radv_nir_compiler_options *options;
    Program *program;
@@ -42,6 +48,7 @@ struct isel_context {
    std::unique_ptr<RegClass[]> reg_class;
    std::unordered_map<unsigned, unsigned> allocated;
    gl_shader_stage stage;
+   std::stack<loop_info> loop_infos;
 
    /* FS inputs */
    bool fs_vgpr_args[fs_input::max_inputs];
@@ -2112,6 +2119,41 @@ void visit_undef(isel_context *ctx, nir_ssa_undef_instr *instr)
    ctx->block->instructions.emplace_back(std::move(undef));
 }
 
+static void add_logical_edge(Block *pred, Block *succ)
+{
+   pred->logical_successors.push_back(succ);
+   succ->logical_predecessors.push_back(pred);
+}
+
+static void add_linear_edge(Block *pred, Block *succ)
+{
+   pred->linear_successors.push_back(succ);
+   succ->linear_predecessors.push_back(pred);
+}
+
+static void add_edge(Block *pred, Block *succ)
+{
+   add_logical_edge(pred, succ);
+   add_linear_edge(pred, succ);
+}
+
+void visit_jump(isel_context *ctx, nir_jump_instr *instr)
+{
+   switch (instr->type) {
+   case nir_jump_break:
+      add_logical_edge(ctx->block, ctx->loop_infos.top().loop_footer);
+      break;
+   case nir_jump_continue:
+      add_logical_edge(ctx->block, ctx->loop_infos.top().loop_header);
+     // break;
+   default:
+      fprintf(stderr, "Unknown NIR jump instr: ");
+      nir_print_instr(&instr->instr, stderr);
+      fprintf(stderr, "\n");
+      abort();
+   }
+}
+
 void visit_block(isel_context *ctx, nir_block *block)
 {
    nir_foreach_instr(instr, block) {
@@ -2136,6 +2178,9 @@ void visit_block(isel_context *ctx, nir_block *block)
          break;
       case nir_instr_type_deref:
          break;
+      case nir_instr_type_jump:
+         visit_jump(ctx, nir_instr_as_jump(instr));
+         break;
       default:
          fprintf(stderr, "Unknown NIR instr type: ");
          nir_print_instr(instr, stderr);
@@ -2143,25 +2188,6 @@ void visit_block(isel_context *ctx, nir_block *block)
          //abort();
       }
    }
-}
-
-
-static void add_logical_edge(Block *pred, Block *succ)
-{
-   pred->logical_successors.push_back(succ);
-   succ->logical_predecessors.push_back(pred);
-}
-
-static void add_linear_edge(Block *pred, Block *succ)
-{
-   pred->linear_successors.push_back(succ);
-   succ->linear_predecessors.push_back(pred);
-}
-
-static void add_edge(Block *pred, Block *succ)
-{
-   add_logical_edge(pred, succ);
-   add_linear_edge(pred, succ);
 }
 
 static void append_logical_start(Block *b)
@@ -2178,6 +2204,52 @@ static void append_logical_end(Block *b)
                                                                    Format::PSEUDO, 0, 0)));
 }
 
+static void visit_loop(isel_context *ctx, nir_loop *loop)
+{
+   append_logical_end(ctx->block);
+   Block* loop_header = ctx->program->createAndInsertBlock();
+   add_edge(ctx->block, loop_header);
+
+   /* we create a loop successor block, but don't emit */
+   std::unique_ptr<Block> loop_footer = std::unique_ptr<Block>(new Block());
+   /* save original exec */
+   std::unique_ptr<Instruction> save_exec{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
+   save_exec->getOperand(0) = Operand{exec, s2};
+   Temp orig_exec = {ctx->program->allocateId(), s2};
+   save_exec->getDefinition(0) = Definition(orig_exec);
+   ctx->block->instructions.emplace_back(std::move(save_exec));
+
+   ctx->loop_infos.push({loop_header, loop_footer.get()});
+
+   ctx->block = loop_header;
+   append_logical_start(ctx->block);
+   visit_cf_list(ctx, &loop->body);
+   append_logical_end(ctx->block);
+
+   /* TODO: restore all 'continue' lanes */
+
+   /* jump back to loop_header */
+   std::unique_ptr<Pseudo_branch_instruction> branch{create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0)};
+   branch->getOperand(0) = Operand{exec, s2};
+   branch->targets[0] = loop_header;
+   branch->targets[1] = loop_footer.get();
+   ctx->block->instructions.emplace_back(std::move(branch));
+   add_edge(ctx->block, loop_header);
+   add_linear_edge(ctx->block, loop_footer.get());
+
+   /* emit loop successor block */
+   loop_footer->index = ctx->program->blocks.size();
+   ctx->block = loop_footer.get();
+   ctx->program->blocks.emplace_back(std::move(loop_footer));
+   /* restore original exec */
+   std::unique_ptr<Instruction> restore_exec{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
+   restore_exec->getOperand(0) = Operand(orig_exec);
+   restore_exec->getDefinition(0) = Definition{exec, s2};
+   ctx->block->instructions.emplace_back(std::move(restore_exec));
+
+   ctx->loop_infos.pop();
+   append_logical_start(ctx->block);
+}
 
 static void visit_if(isel_context *ctx, nir_if *if_stmt)
 {
@@ -2296,11 +2368,15 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       aco_T->instructions.push_back(std::move(skip_else));
 
       ctx->block = aco_cont;
-      /* restore original exec mask */
-      std::unique_ptr<SOP1_instruction> restore{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
-      restore->getOperand(0) = Operand(orig_exec);
-      restore->getDefinition(0) = Definition(exec, s2);
-      ctx->block->instructions.emplace_back(std::move(restore));
+
+      /* restore original exec mask except there is a break at the end of the then-branch */
+      nir_instr *instr = nir_block_last_instr(nir_if_last_then_block(if_stmt));
+      if (!instr || instr->type != nir_instr_type_jump || (nir_instr_as_jump(instr)->type != nir_jump_break)) {
+         std::unique_ptr<SOP1_instruction> restore{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
+         restore->getOperand(0) = Operand(orig_exec);
+         restore->getDefinition(0) = Definition(exec, s2);
+         ctx->block->instructions.emplace_back(std::move(restore));
+      }
 
       append_logical_start(ctx->block);
    }
@@ -2316,6 +2392,9 @@ static void visit_cf_list(isel_context *ctx,
          break;
       case nir_cf_node_if:
          visit_if(ctx, nir_cf_node_as_if(node));
+         break;
+      case nir_cf_node_loop:
+         visit_loop(ctx, nir_cf_node_as_loop(node));
          break;
       default:
          unreachable("unimplemented cf list type");
