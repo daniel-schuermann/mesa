@@ -17,6 +17,7 @@ void aco_print_reg_class(const RegClass rc, FILE *output)
       case v2: fprintf(output, " v2: "); return;
       case v3: fprintf(output, " v3: "); return;
       case v4: fprintf(output, " v4: "); return;
+      case v6: fprintf(output, " v6: "); return;
    }
 }
 
