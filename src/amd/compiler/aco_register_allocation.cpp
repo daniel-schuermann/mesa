@@ -379,6 +379,8 @@ static unsigned reg_count(RegClass reg_class)
       case s4:
       case v4:
          return 4;
+      case v6:
+         return 6;
       case s8:
          return 8;
       case s16:
@@ -543,9 +545,11 @@ void register_allocation(Program *program)
                      for(unsigned reg = start; reg + count <= end; reg += alignment) {
                         if (can_allocate_register(&interfere, &assignments, id, reg, count)) {
                            alloc_reg = reg;
+                           allocated = true;
                            break;
                         }
                      }
+                     assert(allocated && "Couldn't find free register!");
                   }
                }
 
