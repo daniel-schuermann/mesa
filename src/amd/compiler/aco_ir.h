@@ -50,6 +50,7 @@ typedef enum {
    v2 = s2 | (1 << 5),
    v3 = s3 | (1 << 5),
    v4 = s4 | (1 << 5),
+   v6 = 6  | (1 << 5),
 } RegClass;
 
 typedef struct {
