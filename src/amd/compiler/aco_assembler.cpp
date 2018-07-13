@@ -20,7 +20,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       uint32_t encoding = (0b10 << 30);
       encoding |= opcode_infos[(int)instr->opcode].opcode << 23;
       encoding |= instr->definitionCount() ? instr->getDefinition(0).physReg().reg << 16 : 0;
-      encoding |= instr->operandCount() == 2 ? instr->getOperand(1).physReg().reg << 8 : 0;
+      encoding |= instr->operandCount() >= 2 ? instr->getOperand(1).physReg().reg << 8 : 0;
       encoding |= instr->operandCount() ? instr->getOperand(0).physReg().reg : 0;
       out.push_back(encoding);
       break;
