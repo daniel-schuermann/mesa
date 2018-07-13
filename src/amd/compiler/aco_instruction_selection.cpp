@@ -1795,7 +1795,7 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
    tmp->getDefinition(0) = Definition(*coords);
    ctx->block->instructions.emplace_back(std::move(tmp));
 
-   if (is_deriv)
+   if (is_deriv || is_array)
       fprintf(stderr, "Unimplemented tex instr type: ");
 
 }
@@ -1830,8 +1830,9 @@ Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
 
 void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
-   bool has_bias = false, has_lod = false, level_zero = false, has_compare = false, has_offset = false;
-   Temp resource, sampler, fmask_ptr, bias, coords, compare, lod = Temp(), offset = Temp();
+   bool has_bias = false, has_lod = false, level_zero = false, has_compare = false,
+        has_offset = false, has_ddx = false, has_ddy = false, has_derivs = false;
+   Temp resource, sampler, fmask_ptr, bias, coords, compare, lod = Temp(), offset = Temp(), ddx, ddy, derivs;
    tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
 
    for (unsigned i = 0; i < instr->num_srcs; i++) {
@@ -1868,7 +1869,13 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          has_offset = true;
          break;
       case nir_tex_src_ddx:
+         ddx = get_ssa_temp(ctx, instr->src[i].src.ssa);
+         has_ddx = true;
+         break;
       case nir_tex_src_ddy:
+         ddy = get_ssa_temp(ctx, instr->src[i].src.ssa);
+         has_ddy = true;
+         break;
       case nir_tex_src_ms_index:
          assert(false && "Unimplemented tex instr type\n");
       case nir_tex_src_texture_offset:
@@ -1923,6 +1930,27 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       offset = pack;
    }
 
+   /* pack derivatives */
+   if (has_ddx || has_ddy) {
+      std::unique_ptr<Instruction> pack_derivs;
+      if (instr->sampler_dim == GLSL_SAMPLER_DIM_1D && ctx->options->chip_class >= GFX9) {
+         pack_derivs.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 4, 1));
+         pack_derivs->getOperand(0) = Operand(0);
+         pack_derivs->getOperand(1) = Operand(ddx);
+         pack_derivs->getOperand(2) = Operand(0);
+         pack_derivs->getOperand(3) = Operand(ddy);
+         derivs = {ctx->program->allocateId(), v4};
+      } else {
+         pack_derivs.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1));
+         pack_derivs->getOperand(0) = Operand(ddx);
+         pack_derivs->getOperand(1) = Operand(ddy);
+         derivs = {ctx->program->allocateId(), getRegClass(vgpr, ddx.size() + ddy.size())};
+      }
+      pack_derivs->getDefinition(0) = Definition(derivs);
+      ctx->block->instructions.emplace_back(std::move(pack_derivs));
+      has_derivs = true;
+   }
+
    if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && instr->coord_components)
       prepare_cube_coords(ctx, &coords, instr->op == nir_texop_txd, instr->is_array, instr->op == nir_texop_lod);
 
@@ -1970,8 +1998,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    }
 
    /* Build tex instruction */
-   unsigned dmask = (1 << instr->dest.ssa.num_components) - 1;//0xf;
-   Temp arg = coords;
+   unsigned dmask = (1 << instr->dest.ssa.num_components) - 1;
+
    std::unique_ptr<MIMG_instruction> tex;
    if (instr->op == nir_texop_txs) {
       if (!has_lod) {
@@ -1988,6 +2016,18 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tex->getDefinition(0) = get_ssa_temp(ctx, &instr->dest.ssa);
       ctx->block->instructions.emplace_back(std::move(tex));
       return;
+   }
+
+   Temp arg = coords;
+
+   if (has_derivs) {
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      vec->getOperand(0) = Operand(derivs);
+      vec->getOperand(1) = Operand(arg);
+      RegClass rc = getRegClass(vgpr, derivs.size() + arg.size());
+      arg = Temp{ctx->program->allocateId(), rc};
+      vec->getDefinition(0) = Definition(arg);
+      ctx->block->instructions.emplace_back(std::move(vec));
    }
 
    if (has_compare) {
@@ -2025,6 +2065,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (has_offset) { /* image_sample_*_o */
       if (has_compare) {
          opcode = aco_opcode::image_sample_c_o;
+         if (has_derivs)
+            opcode = aco_opcode::image_sample_c_d_o;
          if (has_bias)
             opcode = aco_opcode::image_sample_c_b_o;
          if (level_zero)
@@ -2033,6 +2075,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
             opcode = aco_opcode::image_sample_c_l_o;
       } else {
          opcode = aco_opcode::image_sample_o;
+         if (has_derivs)
+            opcode = aco_opcode::image_sample_c_d;
          if (has_bias)
             opcode = aco_opcode::image_sample_b_o;
          if (level_zero)
@@ -2043,6 +2087,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    } else { /* no offset */
       if (has_compare) {
          opcode = aco_opcode::image_sample_c;
+         if (has_derivs)
+            opcode = aco_opcode::image_sample_c_d;
          if (has_bias)
             opcode = aco_opcode::image_sample_c_b;
          if (level_zero)
@@ -2051,6 +2097,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
             opcode = aco_opcode::image_sample_c_l;
       } else {
          opcode = aco_opcode::image_sample;
+         if (has_derivs)
+            opcode = aco_opcode::image_sample_d;
          if (has_bias)
             opcode = aco_opcode::image_sample_b;
          if (level_zero)
