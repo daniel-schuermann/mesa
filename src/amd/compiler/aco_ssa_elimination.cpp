@@ -37,9 +37,12 @@ typedef std::map<uint32_t, std::vector<std::pair<Definition, Operand>>> phi_info
 
 void collect_phi_info(phi_info& ctx, std::unique_ptr<Instruction>& phi, std::unique_ptr<Block>& block)
 {
+   bool is_vgpr = phi->getDefinition(0).getTemp().type() == vgpr;
+   std::vector<Block*>& preds = is_vgpr ? block->logical_predecessors : block->linear_predecessors;
+   assert(phi->num_operands == preds.size());
    for (unsigned i = 0; i < phi->num_operands; i++)
    {
-      const auto result = ctx.emplace(block->logical_predecessors[i]->index, std::vector<std::pair<Definition, Operand>>());
+      const auto result = ctx.emplace(preds[i]->index, std::vector<std::pair<Definition, Operand>>());
       result.first->second.emplace_back(phi->getDefinition(0), phi->getOperand(i));
    }
 
