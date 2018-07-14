@@ -196,6 +196,10 @@ struct PhysReg
    {
       return reg == rhs.reg;
    }
+   bool operator<(const PhysReg& rhs) const
+   {
+      return reg < rhs.reg;
+   }
 };
 
 static inline PhysReg fixed_vgpr(unsigned idx)
