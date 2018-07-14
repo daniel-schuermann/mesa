@@ -46,7 +46,6 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
       options = &local_options;
    }
 
-   struct nir_function *func = (struct nir_function *)exec_list_get_head(&shader->functions);
 
    struct radv_shader_info pre_info = info->info;
 
@@ -64,8 +63,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    aco::validate(program.get(), stderr);
 
    /* Optimization: doesn't work yet with control flow */
-   if (func->impl->num_blocks == 1)
-      aco::optimize(program.get());
+   aco::optimize(program.get());
    std::cerr << "After Opt:\n";
    aco_print_program(program.get(), stderr);
    aco::validate(program.get(), stderr);
