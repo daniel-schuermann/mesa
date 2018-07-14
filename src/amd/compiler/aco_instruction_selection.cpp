@@ -1601,7 +1601,7 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
    Temp list = ctx->descriptor_sets[descriptor_set];
    if (list.size() == 1) {
       list = convert_pointer_to_64_bit(ctx, list);
-      ctx->descriptor_sets[descriptor_set] = list;
+      //ctx->descriptor_sets[descriptor_set] = list;
    }
 
    struct radv_descriptor_set_layout *layout = ctx->options->layout->set[descriptor_set].layout;

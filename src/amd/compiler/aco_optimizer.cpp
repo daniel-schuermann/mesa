@@ -448,6 +448,12 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       }
       break;
    }
+   case aco_opcode::p_phi:
+   case aco_opcode::p_linear_phi:
+      for (unsigned i = 0; i < instr->num_operands; i++)
+         if (instr->getOperand(i).isTemp())
+            ctx.info[instr->getOperand(i).tempId()].uses++;
+      break;
    default:
       break;
    }
@@ -468,6 +474,10 @@ void check_instruction_uses(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       if (!is_used)
          return;
    }
+
+   /* phi operand uses are handled in label_instruction as they can refer to definitions below */
+   if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi)
+      return;
 
    /* add operand uses to ssa info */
    for (unsigned i = 0; i < instr->num_operands; i++)
