@@ -758,6 +758,7 @@ void select_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       mad_info* info = &ctx.mad_infos[ctx.info[instr->getDefinition(0).tempId()].val];
       /* first, check profitability */
       if (ctx.info[info->mul_temp_id].uses) {
+         ctx.info[info->mul_temp_id].uses++;
          instr.swap(info->add_instr);
 
       /* second, check possible literals */
