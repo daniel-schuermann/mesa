@@ -314,7 +314,7 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       }
 
       /* SALU / PSEUDO: propagate inline constants */
-      if (instr->isSALU() || instr->format == Format::PSEUDO) {
+      if (instr->isSALU() || (instr->format == Format::PSEUDO && instr->opcode != aco_opcode::p_extract_vector)) {
          if (info.is_temp()) {
             instr->getOperand(i) = Operand(info.temp);
             info = ctx.info[info.temp.id()];
