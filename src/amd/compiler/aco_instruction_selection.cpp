@@ -928,14 +928,18 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
    for (unsigned i = 0; i < 4; ++i) {
       if (write_mask & (1 << i)) {
-         Temp tmp{ctx->program->allocateId(), v1};
-         std::unique_ptr<Instruction> extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-         extract->getOperand(0) = Operand(src);
-         extract->getOperand(1) = Operand(i);
-         extract->getDefinition(0) = Definition(tmp);
+         if (instr->src[0].ssa->num_components > 1) {
+            Temp tmp{ctx->program->allocateId(), v1};
+            std::unique_ptr<Instruction> extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
+            extract->getOperand(0) = Operand(src);
+            extract->getOperand(1) = Operand(i);
+            extract->getDefinition(0) = Definition(tmp);
 
-         ctx->block->instructions.emplace_back(std::move(extract));
-         values[i] = Operand(tmp);
+            ctx->block->instructions.emplace_back(std::move(extract));
+            values[i] = Operand(tmp);
+         } else {
+            values[i] = Operand(src);
+         }
       } else {
          values[i] = Operand((uint32_t) 0);
       }
