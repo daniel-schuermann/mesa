@@ -89,20 +89,6 @@ Temp get_ssa_temp(struct isel_context *ctx, nir_ssa_def *def)
    return Temp{id, rc};
 }
 
-Temp get_alu_src(struct isel_context *ctx, nir_alu_src src)
-{
-   if (src.src.ssa->num_components == 1 && src.swizzle[0] == 0)
-      return get_ssa_temp(ctx, src.src.ssa);
-
-   Temp vec = get_ssa_temp(ctx, src.src.ssa);
-   Temp tmp{ctx->program->allocateId(), getRegClass(vec.type(), 1)};
-   std::unique_ptr<Instruction> extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-   extract->getOperand(0) = Operand(vec);
-   extract->getOperand(1) = Operand((uint32_t) src.swizzle[0]);
-   extract->getDefinition(0) = Definition(tmp);
-   ctx->block->instructions.emplace_back(std::move(extract));
-   return tmp;
-}
 
 void emit_v_mov(isel_context *ctx, Temp src, Temp dst)
 {
@@ -119,6 +105,37 @@ void emit_v_mov(isel_context *ctx, Temp src, Temp dst)
       vec->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(vec));
    }
+}
+
+Temp emit_extract_vector(isel_context* ctx, Temp src, uint32_t idx, RegClass dst_rc)
+{
+   /* no need to extract the whole vector */
+   if (src.regClass() == dst_rc) {
+      assert(idx == 0);
+      return src;
+   }
+
+   Temp dst = {ctx->program->allocateId(), dst_rc};
+   if (src.size() == sizeOf(dst_rc)) {
+      assert(idx == 0);
+      emit_v_mov(ctx, src, dst);
+   } else {
+      std::unique_ptr<Instruction> extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
+      extract->getOperand(0) = Operand(src);
+      extract->getOperand(1) = Operand(idx);
+      extract->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(extract));
+   }
+   return dst;
+}
+
+Temp get_alu_src(struct isel_context *ctx, nir_alu_src src)
+{
+   if (src.src.ssa->num_components == 1 && src.swizzle[0] == 0)
+      return get_ssa_temp(ctx, src.src.ssa);
+
+   Temp vec = get_ssa_temp(ctx, src.src.ssa);
+   return emit_extract_vector(ctx, vec, src.swizzle[0], getRegClass(vec.type(), 1));
 }
 
 Temp convert_pointer_to_64_bit(isel_context *ctx, Temp ptr)
@@ -342,12 +359,7 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
       }
    } else { /* condition is uniform */
       if (cond.regClass() == s2) {
-         std::unique_ptr<Instruction> extract{create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1)};
-         extract->getOperand(0) = Operand(cond);
-         extract->getOperand(1) = Operand((uint32_t) 0);
-         cond = {ctx->program->allocateId(), s1};
-         extract->getDefinition(0) = Definition(cond);
-         ctx->block->instructions.emplace_back(std::move(extract));
+         cond = emit_extract_vector(ctx, cond, 0, s1);
          std::unique_ptr<SOPK_instruction> sopk{create_instruction<SOPK_instruction>(aco_opcode::s_cmpk_lg_u32, Format::SOPK, 1, 1)};
          sopk->getOperand(0) = Operand(cond);
          sopk->imm = 0;
@@ -928,18 +940,8 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
    for (unsigned i = 0; i < 4; ++i) {
       if (write_mask & (1 << i)) {
-         if (instr->src[0].ssa->num_components > 1) {
-            Temp tmp{ctx->program->allocateId(), v1};
-            std::unique_ptr<Instruction> extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-            extract->getOperand(0) = Operand(src);
-            extract->getOperand(1) = Operand(i);
-            extract->getDefinition(0) = Definition(tmp);
-
-            ctx->block->instructions.emplace_back(std::move(extract));
-            values[i] = Operand(tmp);
-         } else {
-            values[i] = Operand(src);
-         }
+         Temp tmp = emit_extract_vector(ctx, src, i, v1);
+         values[i] = Operand(tmp);
       } else {
          values[i] = Operand((uint32_t) 0);
       }
@@ -1040,21 +1042,8 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 
 void emit_interp_instr(isel_context *ctx, unsigned idx, unsigned component, Temp src, Temp dst)
 {
-   Temp coord1{ctx->program->allocateId(), v1};
-   Temp coord2{ctx->program->allocateId(), v1};
-
-   std::unique_ptr<Instruction> coord1_extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-   coord1_extract->getOperand(0) = Operand{src};
-   coord1_extract->getOperand(1) = Operand((uint32_t)0);
-   coord1_extract->getDefinition(0) = Definition{coord1};
-
-   std::unique_ptr<Instruction> coord2_extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-   coord2_extract->getOperand(0) = Operand{src};
-   coord2_extract->getOperand(1) = Operand((uint32_t)1);
-   coord2_extract->getDefinition(0) = Definition{coord2};
-
-   ctx->block->instructions.emplace_back(std::move(coord1_extract));
-   ctx->block->instructions.emplace_back(std::move(coord2_extract));
+   Temp coord1 = emit_extract_vector(ctx, src, 0, v1);
+   Temp coord2 = emit_extract_vector(ctx, src, 1, v1);
 
    Temp tmp{ctx->program->allocateId(), v1};
    std::unique_ptr<Interp_instruction> p1{create_instruction<Interp_instruction>(aco_opcode::v_interp_p1_f32, Format::VINTRP, 2, 1)};
@@ -1301,14 +1290,8 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
 
          std::unique_ptr<Instruction> trimmed{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1)};
          std::unique_ptr<Instruction> extract;
-         Temp tmp;
          for (unsigned i = 0; i < 3; i++) {
-            extract.reset(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-            extract->getOperand(0) = Operand(vec);
-            extract->getOperand(1) = Operand((uint32_t) i);
-            tmp = {ctx->program->allocateId(), s1};
-            extract->getDefinition(0) = Definition(tmp);
-            ctx->block->instructions.emplace_back(std::move(extract));
+            Temp tmp = emit_extract_vector(ctx, vec, i, s1);
             trimmed->getOperand(i) = Operand(tmp);
          }
          trimmed->getDefinition(0) = Definition(dst);
@@ -1739,14 +1722,9 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
 
    Temp coord_args[3], ma, tc, sc, id;
    std::unique_ptr<Instruction> tmp;
-   for (unsigned i = 0; i < 3; i++) {
-      tmp.reset(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-      tmp->getOperand(0) = Operand(*coords);
-      tmp->getOperand(1) = Operand(i);
-      coord_args[i] = {ctx->program->allocateId(), v1};
-      tmp->getDefinition(0) = Definition(coord_args[i]);
-      ctx->block->instructions.emplace_back(std::move(tmp));
-   }
+   for (unsigned i = 0; i < 3; i++)
+      coord_args[i] = emit_extract_vector(ctx, *coords, i, v1);
+
    tmp.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cubema_f32, Format::VOP3A, 3, 1));
    for (unsigned i = 0; i < 3; i++)
       tmp->getOperand(i) = Operand(coord_args[i]);
@@ -1808,14 +1786,7 @@ Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
 {
    Temp coord_vec[3];
    for (unsigned i = 0; i < 3; i++)
-   {
-      std::unique_ptr<Instruction> extract{create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1)};
-      extract->getOperand(0) = Operand(coords);
-      extract->getOperand(1) = Operand(i);
-      coord_vec[i] = {ctx->program->allocateId(), v1};
-      extract->getDefinition(0) = Definition(coord_vec[i]);
-      ctx->block->instructions.emplace_back(std::move(extract));
-   }
+      coord_vec[i] = emit_extract_vector(ctx, coords, i, v1);
 
    std::unique_ptr<VOP1_instruction> rne{create_instruction<VOP1_instruction>(aco_opcode::v_rndne_f32, Format::VOP1, 1, 1)};
    rne->getOperand(0) = Operand(coord_vec[idx]);
@@ -1899,12 +1870,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       std::unique_ptr<Instruction> tmp_instr;
       Temp acc, pack = Temp();
       for (unsigned i = 0; i < offset.size(); i++) {
-         tmp_instr.reset(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-         tmp_instr->getOperand(0) = Operand(offset);
-         tmp_instr->getOperand(1) = Operand((uint32_t) i);
-         acc = {ctx->program->allocateId(), s1};
-         tmp_instr->getDefinition(0) = Definition(acc);
-         ctx->block->instructions.emplace_back(std::move(tmp_instr));
+         acc = emit_extract_vector(ctx, offset, i, s1);
 
          tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_and_b32, Format::SOP2, 2, 1));
          tmp_instr->getOperand(0) = Operand(acc);
