@@ -112,6 +112,25 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       out.push_back(encoding);
       break;
    }
+   case Format::DS: {
+      DS_instruction* ds = static_cast<DS_instruction*>(instr);
+      uint32_t encoding = (0b110110 << 26);
+      encoding |= opcode_infos[(int)instr->opcode].opcode << 17;
+      encoding |= (ds->gds ? 1 : 0) << 16;
+      encoding |= (0xFFFF & ds->offset1 << 8);
+      encoding |= (0xFF & ds->offset0);
+      out.push_back(encoding);
+      encoding = 0;
+      unsigned reg = instr->num_definitions ? instr->getDefinition(0).physReg().reg : 0;
+      encoding |= (0xFF & reg) << 24;
+      reg = instr->num_operands >= 3 ? instr->getOperand(2).physReg().reg : 0;
+      encoding |= (0xFF & reg) << 16;
+      reg = instr->num_operands >= 2 ? instr->getOperand(1).physReg().reg : 0;
+      encoding |= (0xFF & reg) << 8;
+      encoding |= instr->getOperand(0).physReg().reg;
+      out.push_back(encoding);
+      break;
+   }
    case Format::MUBUF: {
       MUBUF_instruction* mubuf = static_cast<MUBUF_instruction*>(instr);
       uint32_t encoding = (0b111000 << 26);
