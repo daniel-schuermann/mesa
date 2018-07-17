@@ -117,6 +117,14 @@ void validate(Program* program, FILE * output)
             }
             break;
          }
+         case Format::DS: {
+            for (unsigned i = 0; i < instr->num_operands; i++)
+               check(instr->getOperand(i).isTemp() && instr->getOperand(i).getTemp().type() == vgpr,
+                     "Only VGPRs are valid DS instruction operands", instr.get());
+            if (instr->num_definitions)
+               check(instr->getDefinition(0).getTemp().type() == vgpr, "DS instruction must return VGPR", instr.get());
+            break;
+         }
          case Format::EXP: {
             for (unsigned i = 0; i < 4; i++)
                check((!instr->getOperand(i).isConstant() && !instr->getOperand(i).isTemp()) || instr->getOperand(i).getTemp().type() == vgpr,
