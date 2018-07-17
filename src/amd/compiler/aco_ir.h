@@ -559,6 +559,20 @@ struct Interp_instruction : public Instruction {
 };
 
 /**
+ * Local and Global Data Sharing instructions
+ * Operand(0): ADDR - VGPR which supplies the address.
+ * Operand(1): DATA0 - First data VGPR.
+ * Operand(2): DATA1 - Second data VGPR.
+ * Definition(0): VDST - Destination VGPR when results returned to VGPRs.
+ *
+ */
+struct DS_instruction : public Instruction {
+   int16_t offset0;
+   int8_t offset1;
+   bool gds;
+};
+
+/**
  * Vector Memory Untyped-buffer Instructions
  * Operand(0): VADDR - Address source. Can carry an index and/or offset
  * Operand(1): SRSRC - Specifies which SGPR supplies T# (resource constant)
