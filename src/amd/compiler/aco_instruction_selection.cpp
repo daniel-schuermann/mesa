@@ -1204,28 +1204,38 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
    } else
       stride = layout->binding[binding].size;
 
+   nir_const_value* nir_const_index = nir_src_as_const_value(instr->src[0]);
+   unsigned const_index = nir_const_index ? nir_const_index->u32[0] : 0;
    if (stride != 1) {
-      std::unique_ptr<Instruction> tmp;
-      tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1));
-      tmp->getOperand(0) = Operand(stride);
-      tmp->getOperand(1) = Operand(index);
-      index = {ctx->program->allocateId(), index.regClass()};
-      tmp->getDefinition(0) = Definition(index);
-      ctx->block->instructions.emplace_back(std::move(tmp));
+      if (nir_const_index) {
+         const_index = const_index * stride;
+      } else {
+         std::unique_ptr<Instruction> tmp;
+         tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1));
+         tmp->getOperand(0) = Operand(stride);
+         tmp->getOperand(1) = Operand(index);
+         index = {ctx->program->allocateId(), index.regClass()};
+         tmp->getDefinition(0) = Definition(index);
+         ctx->block->instructions.emplace_back(std::move(tmp));
+      }
    }
    if (offset) {
-      std::unique_ptr<Instruction> tmp;
-      tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1));
-      tmp->getOperand(0) = Operand(offset);
-      tmp->getOperand(1) = Operand(index);
-      index = {ctx->program->allocateId(), index.regClass()};
-      tmp->getDefinition(0) = Definition(index);
-      ctx->block->instructions.emplace_back(std::move(tmp));
+      if (nir_const_index) {
+         const_index = const_index + offset;
+      } else {
+         std::unique_ptr<Instruction> tmp;
+         tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1));
+         tmp->getOperand(0) = Operand(offset);
+         tmp->getOperand(1) = Operand(index);
+         index = {ctx->program->allocateId(), index.regClass()};
+         tmp->getDefinition(0) = Definition(index);
+         ctx->block->instructions.emplace_back(std::move(tmp));
+      }
    }
 
    std::unique_ptr<Instruction> tmp;
    tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1));
-   tmp->getOperand(0) = Operand(index);
+   tmp->getOperand(0) = nir_const_index ? Operand(const_index) : Operand(index);
    tmp->getOperand(1) = Operand(desc_ptr);
    index = {ctx->program->allocateId(), index.regClass()};
    tmp->getDefinition(0) = Definition(index);
