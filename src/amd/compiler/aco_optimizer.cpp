@@ -297,6 +297,41 @@ void to_VOP3(opt_ctx& ctx, std::unique_ptr<Instruction>& instr)
       instr->getDefinition(i) = tmp->getDefinition(i);
 }
 
+bool is_untyped_instruction(aco_opcode opcode)
+{
+   switch(opcode) {
+      case aco_opcode::v_cndmask_b32:
+      case aco_opcode::v_lshrrev_b32:
+      case aco_opcode::v_lshlrev_b32:
+      case aco_opcode::v_and_b32:
+      case aco_opcode::v_or_b32:
+      case aco_opcode::v_xor_b32:
+      case aco_opcode::v_mov_b32:
+      case aco_opcode::v_readfirstlane_b32:
+      case aco_opcode::v_not_b32:
+      case aco_opcode::v_bfrev_b32:
+      case aco_opcode::v_ffbl_b32:
+      case aco_opcode::v_swap_b32:
+      case aco_opcode::v_bfi_b32:
+      case aco_opcode::v_alignbit_b32:
+      case aco_opcode::v_alignbyte_b32:
+      case aco_opcode::v_perm_b32:
+      case aco_opcode::v_lshl_or_b32:
+      case aco_opcode::v_and_or_b32:
+      case aco_opcode::v_or3_b32:
+      case aco_opcode::v_readlane_b32:
+      case aco_opcode::v_writelane_b32:
+      case aco_opcode::v_bcnt_u32_b32:
+      case aco_opcode::v_mbcnt_lo_u32_b32:
+      case aco_opcode::v_mbcnt_hi_u32_b32:
+      case aco_opcode::v_lshlrev_b64:
+      case aco_opcode::v_lshrrev_b64:
+      case aco_opcode::v_bfm_b32:
+         return true;
+      default:
+         return false;
+   }
+}
 
 void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
 {
@@ -331,13 +366,13 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
          if (info.is_temp())
             info = ctx.info[info.temp.id()];
 
-         if (info.is_neg() && can_use_VOP3(instr)) {
+         if (info.is_neg() && can_use_VOP3(instr) && !is_untyped_instruction(instr->opcode)) {
             to_VOP3(ctx, instr);
             instr->getOperand(i) = Operand(info.temp);
             static_cast<VOP3A_instruction*>(instr.get())->neg[i] = true;
             info = ctx.info[info.temp.id()];
          }
-         if (info.is_abs() && can_use_VOP3(instr)) {
+         if (info.is_abs() && can_use_VOP3(instr) && !is_untyped_instruction(instr->opcode)) {
             to_VOP3(ctx, instr);
             instr->getOperand(i) = Operand(info.temp);
             static_cast<VOP3A_instruction*>(instr.get())->abs[i] = true;
@@ -408,7 +443,6 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       }
       break;
    case aco_opcode::v_mul_f32: /* omod */
-      break; // FIXME: only instructions with explicit floating point result can have this modifier.
       if (instr->getOperand(0).isConstant()) {
          assert(instr->getOperand(1).isTemp());
          if (instr->getOperand(0).constantValue() == 0x40000000) { /* 2.0 */
@@ -429,7 +463,6 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
          ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(1).getTemp());
       break;
    case aco_opcode::v_med3_f32: { /* clamp */
-      break; // FIXME: only instructions with explicit floating point result can have this modifier.
       unsigned idx = 0;
       bool found_zero = false, found_one = false;
       for (unsigned i = 0; i < 3; i++)
@@ -594,32 +627,25 @@ void combine_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       }
    }
 
-   /* apply omod / clamp modifiers if the def is used only once */
-   if (instr->num_definitions && ctx.info[instr->getDefinition(0).tempId()].uses == 1) {
+   /* apply omod / clamp modifiers if the def is used only once and the instruction can have modifiers */
+   if (instr->num_definitions && ctx.info[instr->getDefinition(0).tempId()].uses == 1 &&
+       can_use_VOP3(instr) && !is_untyped_instruction(instr->opcode)) {
       if(ctx.info[instr->getDefinition(0).tempId()].is_omod2()) {
-         if (can_use_VOP3(instr)) {
-            to_VOP3(ctx, instr);
-            static_cast<VOP3A_instruction*>(instr.get())->omod = 1;
-            ctx.info[instr->getDefinition(0).tempId()].set_omod_success(instr.get());
-         }
+         to_VOP3(ctx, instr);
+         static_cast<VOP3A_instruction*>(instr.get())->omod = 1;
+         ctx.info[instr->getDefinition(0).tempId()].set_omod_success(instr.get());
       } else if (ctx.info[instr->getDefinition(0).tempId()].is_omod4()) {
-         if (can_use_VOP3(instr)) {
-            to_VOP3(ctx, instr);
-            static_cast<VOP3A_instruction*>(instr.get())->omod = 2;
-            ctx.info[instr->getDefinition(0).tempId()].set_omod_success(instr.get());
-         }
+         to_VOP3(ctx, instr);
+         static_cast<VOP3A_instruction*>(instr.get())->omod = 2;
+         ctx.info[instr->getDefinition(0).tempId()].set_omod_success(instr.get());
       } else if (ctx.info[instr->getDefinition(0).tempId()].is_omod5()) {
-         if (can_use_VOP3(instr)) {
-            to_VOP3(ctx, instr);
-            static_cast<VOP3A_instruction*>(instr.get())->omod = 3;
-            ctx.info[instr->getDefinition(0).tempId()].set_omod_success(instr.get());
-         }
+         to_VOP3(ctx, instr);
+         static_cast<VOP3A_instruction*>(instr.get())->omod = 3;
+         ctx.info[instr->getDefinition(0).tempId()].set_omod_success(instr.get());
       } else if (ctx.info[instr->getDefinition(0).tempId()].is_clamp()) {
-         if (can_use_VOP3(instr)) {
-            to_VOP3(ctx, instr);
-            static_cast<VOP3A_instruction*>(instr.get())->clamp = true;
-            ctx.info[instr->getDefinition(0).tempId()].set_clamp_success(instr.get());
-         }
+         to_VOP3(ctx, instr);
+         static_cast<VOP3A_instruction*>(instr.get())->clamp = true;
+         ctx.info[instr->getDefinition(0).tempId()].set_clamp_success(instr.get());
       }
    }
 
