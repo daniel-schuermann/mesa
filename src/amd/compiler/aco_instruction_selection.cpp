@@ -38,6 +38,7 @@ enum fs_input {
 struct loop_info {
    Block* loop_header;
    Block* loop_footer;
+   Temp continues;
 };
 
 struct isel_context {
@@ -48,7 +49,20 @@ struct isel_context {
    std::unique_ptr<RegClass[]> reg_class;
    std::unordered_map<unsigned, unsigned> allocated;
    gl_shader_stage stage;
-   std::stack<loop_info> loop_infos;
+   struct {
+      bool is_divergent_region;
+      bool has_continue;
+      struct {
+         Block* entry;
+         Block* exit;
+         Temp continues;
+      } parent_loop;
+      struct {
+         Block* else_block;
+         Block* cont_block;
+         Temp condition;
+      } parent_if;
+   } cf_info;
 
    /* FS inputs */
    bool fs_vgpr_args[fs_input::max_inputs];
@@ -73,6 +87,58 @@ struct isel_context {
    Temp vs_prim_id;
 
    uint32_t input_mask;
+};
+
+class loop_info_RAII {
+   isel_context* ctx;
+   Temp continues_old;
+   Block* entry_old;
+   Block* exit_old;
+   bool is_divergent_old;
+
+public:
+   loop_info_RAII(isel_context* ctx, Block* loop_entry, Block* loop_exit, Temp continues)
+      : ctx(ctx), continues_old(ctx->cf_info.parent_loop.continues),
+        entry_old(ctx->cf_info.parent_loop.entry), exit_old(ctx->cf_info.parent_loop.exit),
+        is_divergent_old(ctx->cf_info.is_divergent_region)
+   {
+      ctx->cf_info.parent_loop.entry = loop_entry;
+      ctx->cf_info.parent_loop.exit = loop_exit;
+      ctx->cf_info.parent_loop.continues = continues;
+      ctx->cf_info.is_divergent_region = false;
+   }
+
+   ~loop_info_RAII()
+   {
+      ctx->cf_info.parent_loop.entry = entry_old;
+      ctx->cf_info.parent_loop.exit = exit_old;
+      ctx->cf_info.parent_loop.continues = continues_old;
+      ctx->cf_info.is_divergent_region = is_divergent_old;
+   }
+};
+
+class if_info_RAII {
+   isel_context* ctx;
+   Temp cond_old;
+   Block* else_old;
+   Block* cont_old;
+
+public:
+   if_info_RAII(isel_context* ctx, Block* else_block, Block* cont_block, Temp cond)
+      : ctx(ctx), cond_old(ctx->cf_info.parent_if.condition),
+      else_old(ctx->cf_info.parent_if.else_block), cont_old(ctx->cf_info.parent_if.cont_block)
+   {
+      ctx->cf_info.parent_if.else_block = else_block;
+      ctx->cf_info.parent_if.cont_block = cont_block;
+      ctx->cf_info.parent_if.condition = cond;
+   }
+
+   ~if_info_RAII()
+   {
+      ctx->cf_info.parent_if.else_block = else_old;
+      ctx->cf_info.parent_if.cont_block = cont_old;
+      ctx->cf_info.parent_if.condition = cond_old;
+   }
 };
 
 static void visit_cf_list(struct isel_context *ctx,
@@ -2204,19 +2270,25 @@ static void add_edge(Block *pred, Block *succ)
 
 void visit_jump(isel_context *ctx, nir_jump_instr *instr)
 {
+   assert(!ctx->cf_info.has_branched);
+   ctx->cf_info.has_branched = true;
+   Block* logical_target;
    switch (instr->type) {
    case nir_jump_break:
-      add_logical_edge(ctx->block, ctx->loop_infos.top().loop_footer);
+      logical_target = ctx->cf_info.parent_loop.exit;
       break;
    case nir_jump_continue:
-      add_logical_edge(ctx->block, ctx->loop_infos.top().loop_header);
-     // break;
+      logical_target = ctx->cf_info.parent_loop.entry;
+      break;
    default:
       fprintf(stderr, "Unknown NIR jump instr: ");
       nir_print_instr(&instr->instr, stderr);
       fprintf(stderr, "\n");
       abort();
    }
+   Block* linear_target = ctx->cf_info.is_divergent_region ? ctx->cf_info.parent_if.else_block : logical_target;
+   add_logical_edge(ctx->block, logical_target);
+   add_linear_edge(ctx->block, linear_target);
 }
 
 void visit_block(isel_context *ctx, nir_block *block)
@@ -2284,14 +2356,28 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    save_exec->getDefinition(0) = Definition(orig_exec);
    ctx->block->instructions.emplace_back(std::move(save_exec));
 
-   ctx->loop_infos.push({loop_header, loop_footer.get()});
-
    ctx->block = loop_header;
+
+   /* initialize continues with zero */
+   Temp cont = {ctx->program->allocateId(), s2};
+   std::unique_ptr<Instruction> init_cont{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
+   init_cont->getOperand(0) = Operand(0);
+   init_cont->getDefinition(0) = Definition(cont);
+   ctx->block->instructions.emplace_back(std::move(init_cont));
+
+   loop_info_RAII loop_raii(ctx, loop_header, loop_footer.get(), cont);
    append_logical_start(ctx->block);
    visit_cf_list(ctx, &loop->body);
    append_logical_end(ctx->block);
 
-   /* TODO: restore all 'continue' lanes */
+   /* restore all 'continue' lanes */
+   if (cont.id() != ctx->cf_info.parent_loop.continues.id()) {
+      std::unique_ptr<Instruction> restore{create_instruction<SOP1_instruction>(aco_opcode::s_or_b64, Format::SOP1, 2, 1)};
+      restore->getOperand(0) = Operand{exec, s2};
+      restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.continues);
+      restore->getDefinition(0) = Definition{exec, s2};
+      ctx->block->instructions.emplace_back(std::move(restore));
+   }
 
    /* jump back to loop_header */
    std::unique_ptr<Pseudo_branch_instruction> branch{create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0)};
@@ -2312,7 +2398,6 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    restore_exec->getDefinition(0) = Definition{exec, s2};
    ctx->block->instructions.emplace_back(std::move(restore_exec));
 
-   ctx->loop_infos.pop();
    append_logical_start(ctx->block);
 }
 
@@ -2434,9 +2519,11 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
 
       ctx->block = aco_cont;
 
-      /* restore original exec mask except there is a break at the end of the then-branch */
+      /* restore original exec mask except there is a continue/break at the end of the then-branch */
       nir_instr *instr = nir_block_last_instr(nir_if_last_then_block(if_stmt));
-      if (!instr || instr->type != nir_instr_type_jump || (nir_instr_as_jump(instr)->type != nir_jump_break)) {
+      if (!(instr && instr->type == nir_instr_type_jump &&
+            (nir_instr_as_jump(instr)->type == nir_jump_break ||
+             nir_instr_as_jump(instr)->type == nir_jump_continue))) {
          std::unique_ptr<SOP1_instruction> restore{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
          restore->getOperand(0) = Operand(orig_exec);
          restore->getDefinition(0) = Definition(exec, s2);
