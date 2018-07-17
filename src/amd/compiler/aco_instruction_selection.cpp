@@ -293,6 +293,18 @@ Temp extract_divergent_cond32(isel_context *ctx, Temp cond32)
    return cond;
 }
 
+void emit_quad_swizzle(isel_context *ctx, Temp src, Temp dst,
+                       unsigned lane0, unsigned lane1, unsigned lane2, unsigned lane3)
+{
+   // TODO: we can do better using DPP instructions
+   unsigned quad_mask = lane0 | (lane1 << 2) | (lane2 << 4) | (lane3 << 6);
+   std::unique_ptr<DS_instruction> ds{create_instruction<DS_instruction>(aco_opcode::ds_swizzle_b32, Format::DS, 1, 1)};
+   ds->getOperand(0) = Operand(src);
+   ds->getDefinition(0) = Definition(dst);
+   ds->offset0 = (1 << 15) | quad_mask;
+   ctx->block->instructions.emplace_back(std::move(ds));
+}
+
 void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
 {
    Temp cond32 = get_alu_src(ctx, instr->src[0]);
@@ -895,6 +907,22 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             ctx->block->instructions.emplace_back(std::move(to_sgpr));
          }
       }
+      break;
+   }
+   case nir_op_fddx:
+   case nir_op_fddy: {
+      Temp tl = {ctx->program->allocateId(), v1};
+      Temp trbl = {ctx->program->allocateId(), v1};
+      emit_quad_swizzle(ctx, get_alu_src(ctx, instr->src[0]), tl, 0, 0, 0, 0);
+      if (instr->op == nir_op_fddx)
+         emit_quad_swizzle(ctx, get_alu_src(ctx, instr->src[0]), trbl, 1, 1, 1, 1);
+      else
+         emit_quad_swizzle(ctx, get_alu_src(ctx, instr->src[0]), trbl, 2, 2, 2, 2);
+      std::unique_ptr<Instruction> sub{create_instruction<VOP2_instruction>(aco_opcode::v_sub_f32, Format::VOP2, 2, 1)};
+      sub->getOperand(0) = Operand(trbl);
+      sub->getOperand(1) = Operand(tl);
+      sub->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(sub));
       break;
    }
    default:
