@@ -1098,33 +1098,35 @@ DS_WRITE2 = [
    "ds_write2st64_b64"
 ]
 
-DS_VARIOUS = [
-   "ds_nop",
-   "ds_read_b32",
-   "ds_read2_b32",
-   "ds_read2st64_b32",
-   "ds_read_i8",
-   "ds_read_u8",
-   "ds_read_i16",
-   "ds_read_u16",
-   "ds_swizzle_b32", #data1 & offset, no addr/data2
-   "ds_read_u8_d16",
-   "ds_read_u8_d16_hi",
-   "ds_read_i8_d16",
-   "ds_read_i8_d16_hi",
-   "ds_read_u16_d16",
-   "ds_read_u16_d16_hi",
-   "ds_read_b64",
-   "ds_read2_b64",
-   "ds_read2st64_b64",
-   "ds_condxchg32_rtn_b64",
-   "ds_read_addtid_b32",
-   "ds_consume",
-   "ds_append",
-   "ds_ordered_count",
-   "ds_read_b96",
-   "ds_read_b128"
-]
+DS_VARIOUS = {
+   (20, "ds_nop"),
+   (54, "ds_read_b32"),
+   (55, "ds_read2_b32"),
+   (56, "ds_read2st64_b32"),
+   (57, "ds_read_i8"),
+   (58, "ds_read_u8"),
+   (59, "ds_read_i16"),
+   (60, "ds_read_u16"),
+   (61, "ds_swizzle_b32"), #data1 & offset, no addr/data2
+   (86, "ds_read_u8_d16"),
+   (87, "ds_read_u8_d16_hi"),
+   (88, "ds_read_i8_d16"),
+   (89, "ds_read_i8_d16_hi"),
+   (90, "ds_read_u16_d16"),
+   (91, "ds_read_u16_d16_hi"),
+   (118, "ds_read_b64"),
+   (119, "ds_read2_b64"),
+   (120, "ds_read2st64_b64"),
+   (126, "ds_condxchg32_rtn_b64"),
+   (182, "ds_read_addtid_b32"),
+   (189, "ds_consume"),
+   (190, "ds_append"),
+   (191, "ds_ordered_count"),
+   (254, "ds_read_b96"),
+   (255, "ds_read_b128"),
+}
+for (code, name) in DS_VARIOUS:
+    opcode(name, 0, [], code, Format.DS)
 
 DS_0 = [ # 0 input, 0 output
    "ds_add_src2_u32",
