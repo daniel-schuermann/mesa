@@ -743,7 +743,16 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_f2i32: {
-      emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_i32_f32, dst);
+      if (dst.regClass() == s1) {
+         Temp tmp = {ctx->program->allocateId(), v1};
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_i32_f32, tmp);
+         std::unique_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+         readlane->getOperand(0) = Operand(tmp);
+         readlane->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(readlane));
+      } else {
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_i32_f32, dst);
+      }
       break;
    }
    case nir_op_b2f: {
