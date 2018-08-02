@@ -2,116 +2,12 @@
 
 #include <algorithm>
 #include <map>
-#include <set>
-#include <vector>
 #include <unordered_map>
 #include <set>
 
 #include "sid.h"
 
 namespace aco {
-// TODO most of the functions here do not support multiple basic blocks yet.
-
-
-static
-void process_live_temps_per_block(std::vector<std::set<Temp>>& live_temps, Block* block, std::set<unsigned>& worklist)
-{
-   std::set<Temp> live_sgprs;
-   std::set<Temp> live_vgprs;
-   /* first, insert the live-outs from this block into our temporary sets */
-   for (std::set<Temp>::iterator it = live_temps[block->index].begin(); it != live_temps[block->index].end(); ++it)
-   {
-      if ((*it).type() == vgpr)
-         live_vgprs.insert(*it);
-      else
-         live_sgprs.insert(*it);
-   }
-
-   /* traverse the instructions backwards */
-   for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
-   {
-      Instruction *insn = it->get();
-      /* KILL */
-      for (unsigned i = 0; i < insn->definitionCount(); ++i)
-      {
-         auto& definition = insn->getDefinition(i);
-         if (definition.isTemp()) {
-            if (definition.getTemp().type() == vgpr)
-               live_vgprs.erase(definition.getTemp());
-            else
-               live_sgprs.erase(definition.getTemp());
-         }
-      }
-
-      /* GEN */
-      if (insn->opcode == aco_opcode::p_phi ||
-          insn->opcode == aco_opcode::p_linear_phi) {
-         /* directly insert into the predecessors live-out set */
-         bool is_vgpr = insn->getDefinition(0).getTemp().type() == vgpr;
-         std::vector<Block*>& preds = is_vgpr ? block->logical_predecessors : block->linear_predecessors;
-         for (unsigned i = 0; i < insn->operandCount(); ++i)
-         {
-            auto& operand = insn->getOperand(i);
-            if (operand.isTemp()) {
-               auto it = live_temps[preds[i]->index].insert(operand.getTemp());
-               /* check if we changed an already processed block */
-               if (it.second)
-                  worklist.insert(preds[i]->index);
-            }
-         }
-         continue;
-      }
-
-      for (unsigned i = 0; i < insn->operandCount(); ++i)
-      {
-         auto& operand = insn->getOperand(i);
-         if (operand.isTemp()) {
-            if (operand.getTemp().type() == vgpr)
-               live_vgprs.insert(operand.getTemp());
-            else
-               live_sgprs.insert(operand.getTemp());
-         }
-      }
-   }
-
-   /* now, we have the live-in sets and need to merge them into the live-out sets */
-   for (Block* predecessor : block->logical_predecessors) {
-      for (Temp vgpr : live_vgprs) {
-         auto it = live_temps[predecessor->index].insert(vgpr);
-         if (it.second)
-            worklist.insert(predecessor->index);
-      }
-   }
-
-   for (Block* predecessor : block->linear_predecessors) {
-      for (Temp sgpr : live_sgprs) {
-         auto it = live_temps[predecessor->index].insert(sgpr);
-         if (it.second)
-            worklist.insert(predecessor->index);
-      }
-   }
-
-   assert(block->linear_predecessors.size() != 0 || (live_vgprs.empty() && live_sgprs.empty()));
-
-}
-
-static
-std::vector<std::set<Temp>> live_temps_at_end_of_block(Program* program)
-{
-   std::vector<std::set<Temp>> result(program->blocks.size());
-   std::set<unsigned> worklist;
-   /* this implementation assumes that the block idx corresponds to the block's position in program->blocks vector */
-   for (auto& block : program->blocks)
-      worklist.insert(block->index);
-   while (!worklist.empty()) {
-      std::set<unsigned>::reverse_iterator b_it = worklist.rbegin();
-      unsigned block_idx = *b_it;
-      worklist.erase(block_idx);
-      process_live_temps_per_block(result, program->blocks[block_idx].get(), worklist);
-   }
-
-   return result;
-}
 
 /* Insert copies of all live temps before an instruction that uses any of
  * the temps at a fixed register. That way we avoid collisions where multiple
