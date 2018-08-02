@@ -114,6 +114,10 @@ void validate(Program* program, FILE * output)
                for (unsigned i = 0; i < instr->num_operands; i++)
                   check(instr->getDefinition(i).getTemp().type() == instr->getOperand(i).getTemp().type(),
                         "Operand and Definition types do not match", instr.get());
+            } else if (instr->opcode == aco_opcode::p_phi) {
+               check(instr->num_operands == block->logical_predecessors.size(), "Number of Operands does not match number of predecessors", instr.get());
+            } else if (instr->opcode == aco_opcode::p_linear_phi) {
+               check(instr->num_operands == block->linear_predecessors.size(), "Number of Operands does not match number of predecessors", instr.get());
             }
             break;
          }
