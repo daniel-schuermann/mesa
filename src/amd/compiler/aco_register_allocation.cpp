@@ -234,9 +234,8 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
    /* rename operands of each instruction */
    for (auto&& insn : block->instructions) {
       /* phi operand renames are found in the corresponding predecessor rename sets */
-      if (insn->opcode == aco_opcode::p_phi) {
-         bool is_vgpr = insn->getDefinition(0).getTemp().type() == vgpr;
-         std::vector<Block*> preds = is_vgpr ? block->logical_predecessors : block->linear_predecessors;
+      if (insn->opcode == aco_opcode::p_phi || insn->opcode == aco_opcode::p_linear_phi) {
+         std::vector<Block*> preds = insn->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
          for (unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
             std::map<unsigned, unsigned> phi_renames = renames_per_block[preds[i]->index];
@@ -274,10 +273,12 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
                continue;
             }
             /* the operand has been renamed differently in the predecessors. we have to insert a phi-node. */
-            std::unique_ptr<Instruction> phi{create_instruction<Instruction>(aco_opcode::p_phi, Format::PSEUDO, preds.size(), 1)};
+            aco_opcode opcode = temp.type() == vgpr ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
+            std::unique_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
             for (unsigned i = 0; i < preds.size(); i++)
                phi->getOperand(i) = Operand({operand_ids[i], temp.regClass()});
             phi->getDefinition(0) = Definition{Temp(program->allocateId(), temp.regClass())};
+            operand.setTemp(phi->getDefinition(0).getTemp());
             renames[temp.id()] = phi->getDefinition(0).tempId();
             renames[phi->getDefinition(0).tempId()] = phi->getDefinition(0).tempId();
             new_instructions.emplace_back(std::move(phi));
@@ -322,7 +323,8 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
          continue;
       }
       /* the live-out has been renamed differently in the predecessors. we have to insert a phi-node. */
-      std::unique_ptr<Instruction> phi{create_instruction<Instruction>(aco_opcode::p_phi, Format::PSEUDO, preds.size(), 1)};
+      aco_opcode opcode = temp.type() == vgpr ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
+      std::unique_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
       for (unsigned i = 0; i < preds.size(); i++)
          phi->getOperand(i) = Operand({operand_ids[i], temp.regClass()});
       phi->getDefinition(0) = Definition{Temp(program->allocateId(), temp.regClass())};
