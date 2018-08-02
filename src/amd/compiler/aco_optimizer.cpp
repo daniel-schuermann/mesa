@@ -481,25 +481,20 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       }
       break;
    }
-   case aco_opcode::p_phi:
-   case aco_opcode::p_linear_phi:
-      for (unsigned i = 0; i < instr->num_operands; i++)
-         if (instr->getOperand(i).isTemp())
-            ctx.info[instr->getOperand(i).tempId()].uses++;
-      break;
    default:
       break;
    }
 }
 
 
-void check_instruction_uses(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
+void check_instruction_uses(opt_ctx &ctx, std::unique_ptr<Instruction>& instr, std::set<Temp>& live_outs)
 {
    if (instr->num_definitions) {
       bool is_used = false;
       for (unsigned i = 0; i < instr->num_definitions; i++)
       {
-         if (instr->getDefinition(i).isFixed() || ctx.info[instr->getDefinition(i).tempId()].uses) {
+         if (instr->getDefinition(i).isFixed() || ctx.info[instr->getDefinition(i).tempId()].uses ||
+             live_outs.find(instr->getDefinition(i).getTemp()) != live_outs.end()) {
             is_used = true;
             break;
          }
@@ -507,10 +502,6 @@ void check_instruction_uses(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       if (!is_used)
          return;
    }
-
-   /* phi operand uses are handled in label_instruction as they can refer to definitions below */
-   if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi)
-      return;
 
    /* add operand uses to ssa info */
    for (unsigned i = 0; i < instr->num_operands; i++)
@@ -944,11 +935,13 @@ void optimize(Program* program)
    }
 
    /* Backward pass to calculate the number of uses for each instruction */
+   std::vector<std::set<Temp>> live_out_per_block = live_temps_at_end_of_block(program);
    for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it)
    {
       Block* block = it->get();
+      std::set<Temp> live_outs = live_out_per_block[block->index];
       for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
-         check_instruction_uses(ctx, *it);
+         check_instruction_uses(ctx, *it, live_outs);
    }
 
    /* 2. Combine v_mad, omod, clamp and propagate sgpr on VALU instructions */

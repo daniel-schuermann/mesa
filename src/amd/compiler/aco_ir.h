@@ -29,6 +29,8 @@
 #define ACO_IR_H
 
 #include <ostream>
+#include <vector>
+#include <set>
 
 #include "nir/nir.h"
 #include "common/ac_binary.h"
@@ -693,6 +695,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         ac_shader_config* config,
                                         struct radv_shader_variant_info *info,
                                         struct radv_nir_compiler_options *options);
+std::vector<std::set<Temp>> live_temps_at_end_of_block(Program* program);
 void optimize(Program* program);
 void register_allocation(Program *program);
 void eliminate_phis(Program* program);
