@@ -37,9 +37,8 @@ typedef std::map<uint32_t, std::vector<std::pair<Definition, Operand>>> phi_info
 
 void collect_phi_info(phi_info& ctx, std::unique_ptr<Instruction>& phi, std::unique_ptr<Block>& block)
 {
-   bool is_vgpr = phi->getDefinition(0).getTemp().type() == vgpr;
-   std::vector<Block*>& preds = is_vgpr ? block->logical_predecessors : block->linear_predecessors;
-   assert(phi->num_operands == preds.size());
+   std::vector<Block*>& preds = phi->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
+   assert(!(phi->opcode == aco_opcode::p_phi && phi->getDefinition(0).getTemp().type() == sgpr) && "smart merging for bools not yet implemented.");
    for (unsigned i = 0; i < phi->num_operands; i++)
    {
       const auto result = ctx.emplace(preds[i]->index, std::vector<std::pair<Definition, Operand>>());
@@ -56,7 +55,7 @@ void eliminate_phis(Program* program)
    for (auto&& block : program->blocks) {
       for (std::unique_ptr<Instruction>& instr : block->instructions)
       {
-         if (instr->opcode == aco_opcode::p_phi)
+         if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi)
             collect_phi_info(ctx, instr, block);
       }
    }
@@ -66,6 +65,7 @@ void eliminate_phis(Program* program)
       std::unique_ptr<Block>& block = program->blocks[entry.first];
       for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); ; ++it)
       {
+         assert(it != block->instructions.rend() && "Couldn't find a p_logical_end instruction");
          if ((*it)->opcode == aco_opcode::p_logical_end) {
             std::unique_ptr<Instruction> pc{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, entry.second.size(), entry.second.size())};
             unsigned idx = 0;
@@ -78,7 +78,6 @@ void eliminate_phis(Program* program)
             (*it).swap(pc);
             break;
          }
-         assert(it != block->instructions.rend() && "Couldn't find a p_logical_end instruction");
       }
    }
 }
