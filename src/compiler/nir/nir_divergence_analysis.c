@@ -259,54 +259,54 @@ bool* nir_divergence_analysis(nir_shader *shader)
 {
 
    nir_function_impl *impl = nir_shader_get_entrypoint(shader);
-
+   bool *t = rzalloc_array(shader, bool, impl->ssa_alloc);
    nir_block_worklist worklist;
    nir_block_worklist_init(&worklist, impl->num_blocks, NULL);
+
    /* we run this analysis twice as we do an optimistic approach
     * and assume all values to be uniform.
     * This algorithm converges after two passes. */
-   nir_block_worklist_add_all(&worklist, impl);
-   nir_block_worklist_add_all(&worklist, impl);
+   for (unsigned i = 0; i < 2; i++) {
+      nir_block_worklist_add_all(&worklist, impl);
 
-   bool *t = rzalloc_array(shader, bool, impl->ssa_alloc);
+      while (!nir_block_worklist_is_empty(&worklist)) {
 
-   while (!nir_block_worklist_is_empty(&worklist)) {
+         nir_block *block = nir_block_worklist_pop_head(&worklist);
 
-      nir_block *block = nir_block_worklist_pop_head(&worklist);
-
-      nir_foreach_instr(instr, block) {
-         switch (instr->type) {
-         case nir_instr_type_alu:
-            visit_alu(t, nir_instr_as_alu(instr));
-            break;
-         case nir_instr_type_intrinsic:
-            visit_intrinsic(t, nir_instr_as_intrinsic(instr));
-            break;
-         case nir_instr_type_tex:
-            visit_tex(t, nir_instr_as_tex(instr));
-            break;
-         case nir_instr_type_phi:
-            visit_phi(t, nir_instr_as_phi(instr));
-            break;
-         case nir_instr_type_parallel_copy:
-            visit_parallel_copy(t, nir_instr_as_parallel_copy(instr));
-            break;
-         case nir_instr_type_load_const:
-            visit_load_const(t, nir_instr_as_load_const(instr));
-            break;
-         case nir_instr_type_ssa_undef:
-            visit_ssa_undef(t, nir_instr_as_ssa_undef(instr));
-            break;
-         case nir_instr_type_deref:
-            visit_deref(t, nir_instr_as_deref(instr));
-            break;
-         case nir_instr_type_jump:
-            break;
-         case nir_instr_type_call:
-            assert(false);
-         default:
-            unreachable("Invalid instruction type");
-            break;
+         nir_foreach_instr(instr, block) {
+            switch (instr->type) {
+            case nir_instr_type_alu:
+               visit_alu(t, nir_instr_as_alu(instr));
+               break;
+            case nir_instr_type_intrinsic:
+               visit_intrinsic(t, nir_instr_as_intrinsic(instr));
+               break;
+            case nir_instr_type_tex:
+               visit_tex(t, nir_instr_as_tex(instr));
+               break;
+            case nir_instr_type_phi:
+               visit_phi(t, nir_instr_as_phi(instr));
+               break;
+            case nir_instr_type_parallel_copy:
+               visit_parallel_copy(t, nir_instr_as_parallel_copy(instr));
+               break;
+            case nir_instr_type_load_const:
+               visit_load_const(t, nir_instr_as_load_const(instr));
+               break;
+            case nir_instr_type_ssa_undef:
+               visit_ssa_undef(t, nir_instr_as_ssa_undef(instr));
+               break;
+            case nir_instr_type_deref:
+               visit_deref(t, nir_instr_as_deref(instr));
+               break;
+            case nir_instr_type_jump:
+               break;
+            case nir_instr_type_call:
+               assert(false);
+            default:
+               unreachable("Invalid instruction type");
+               break;
+            }
          }
       }
    }
