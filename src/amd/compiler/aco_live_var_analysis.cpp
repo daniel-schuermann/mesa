@@ -67,7 +67,7 @@
           insn->opcode == aco_opcode::p_linear_phi) {
          /* directly insert into the predecessors live-out set */
          std::vector<Block*>& preds = insn->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
-         for (unsigned i = 0; i < insn->operandCount(); ++i)
+         for (unsigned i = 0; i < preds.size(); ++i)
          {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp()) {
