@@ -712,6 +712,12 @@ void combine_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
 
          /* convert to mad */
          ctx.info[mul_instr->getDefinition(0).tempId()].uses--;
+         if (ctx.info[mul_instr->getDefinition(0).tempId()].uses) {
+            if (op[0].isTemp())
+               ctx.info[op[0].tempId()].uses++;
+            if (op[1].isTemp())
+               ctx.info[op[1].tempId()].uses++;
+         }
 
          if (instr->isVOP3()) {
             VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*> (instr.get());
