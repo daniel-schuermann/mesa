@@ -132,7 +132,7 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
       /* phi operand renames are found in the corresponding predecessor rename sets */
       if (insn->opcode == aco_opcode::p_phi || insn->opcode == aco_opcode::p_linear_phi) {
          std::vector<Block*> preds = insn->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
-         for (unsigned i = 0; i < insn->operandCount(); ++i) {
+         for (unsigned i = 0; i < preds.size(); ++i) {
             auto& operand = insn->getOperand(i);
             std::map<unsigned, unsigned> phi_renames = renames_per_block[preds[i]->index];
             if (operand.isTemp()) {
