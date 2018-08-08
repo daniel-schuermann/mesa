@@ -117,7 +117,10 @@ void validate(Program* program, FILE * output)
             } else if (instr->opcode == aco_opcode::p_phi) {
                check(instr->num_operands == block->logical_predecessors.size(), "Number of Operands does not match number of predecessors", instr.get());
             } else if (instr->opcode == aco_opcode::p_linear_phi) {
-               check(instr->num_operands == block->linear_predecessors.size(), "Number of Operands does not match number of predecessors", instr.get());
+               if (instr->num_operands == block->logical_predecessors.size())
+                  break;
+               for (unsigned i = 2; i < instr->num_operands; i++)
+                  check(instr->getOperand(i).tempId() == instr->getOperand(1).tempId(), "Number of Operands does not match number of predecessors", instr.get());
             }
             break;
          }
