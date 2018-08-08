@@ -118,6 +118,13 @@ unsigned detect_raw_hazard(Instruction* first, Instruction* second, unsigned op_
        second->opcode == aco_opcode::v_writelane_b32))
       return 4;
 
+   /* FIXME VEGA only: SALU write m0 / VINTERP */
+   if (second->format == Format::VINTRP && first->isSALU()) {
+      for (int i = 0; i < first->num_definitions; i++)
+         if (first->getDefinition(i).physReg() == m0)
+            return 1;
+   }
+
    if ((first->format == Format::VOPC) && // TODO: more general - everything that writes vcc implicitly and reads explicitly
        ((int) second->format & (int) Format::VOP3A)) {
       for (unsigned i = 0; i < second->num_operands; i++)
@@ -260,7 +267,7 @@ void schedule(Program* program)
          {
             /* create NOP */
             SOPP_instruction* nop = create_instruction<SOPP_instruction>(aco_opcode::s_nop, Format::SOPP, 0, 0);
-            nop->imm = next_instr->nops;
+            nop->imm = next_instr->nops - 1;
             new_instructions.emplace_back(std::unique_ptr<Instruction>(nop));
          }
          ctx.current_index = new_instructions.size();
