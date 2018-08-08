@@ -159,7 +159,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       encoding |= opcode_infos[(int)instr->opcode].opcode << 18;
       encoding |= mimg->lwe ? 1 << 17 : 0;
       encoding |= mimg->tfe ? 1 << 16 : 0;
-      encoding |= mimg->r128 ? 1 << 16 : 0;
+      encoding |= mimg->r128 ? 1 << 15 : 0;
       encoding |= mimg->da ? 1 << 14 : 0;
       encoding |= mimg->glc ? 1 << 13 : 0;
       encoding |= mimg->unrm ? 1 << 12 : 0;
