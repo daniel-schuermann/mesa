@@ -387,14 +387,8 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
    Temp then = get_alu_src(ctx, instr->src[1]);
    Temp els = get_alu_src(ctx, instr->src[2]);
 
-   Temp cond;
-   if (cond32.type() == vgpr) {
-      cond = extract_divergent_cond32(ctx, cond32);
-   } else {
-      cond = extract_uniform_cond32(ctx, cond32);
-   }
-
    if (ctx->divergent_vals[instr->dest.dest.ssa.index]) {
+      Temp cond = extract_divergent_cond32(ctx, cond32);
       if (dst.type() == vgpr) {
          if (dst.size() == 1) {
             if (then.type() != vgpr) {
@@ -446,6 +440,12 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
          ctx->block->instructions.emplace_back(std::move(sop2));
       }
    } else { /* condition is uniform */
+      Temp cond;
+      if (cond32.type() == vgpr) {
+         cond = extract_divergent_cond32(ctx, cond32);
+      } else {
+         cond = extract_uniform_cond32(ctx, cond32);
+      }
       if (cond.regClass() == s2) {
          cond = emit_extract_vector(ctx, cond, 0, s1);
          std::unique_ptr<SOPK_instruction> sopk{create_instruction<SOPK_instruction>(aco_opcode::s_cmpk_lg_u32, Format::SOPK, 1, 1)};
