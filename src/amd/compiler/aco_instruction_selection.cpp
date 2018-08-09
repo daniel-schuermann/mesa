@@ -2477,22 +2477,28 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
 
    /* restore all 'continue' lanes */
    std::unique_ptr<Instruction> restore;
+   std::unique_ptr<Pseudo_branch_instruction> branch;
    if (ctx->cf_info.parent_loop.has_divergent_break) {
       restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
       restore->getOperand(0) = Operand{exec, s2};
       restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.active_mask);
       restore->getDefinition(0) = Definition{exec, s2};
       ctx->block->instructions.emplace_back(std::move(restore));
-   }
 
-   /* jump back to loop_entry */
-   std::unique_ptr<Pseudo_branch_instruction> branch{create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0)};
-   branch->getOperand(0) = Operand{exec, s2};
-   branch->targets[0] = loop_entry;
-   branch->targets[1] = loop_exit;
-   ctx->block->instructions.emplace_back(std::move(branch));
-   add_edge(ctx->block, loop_entry);
-   add_linear_edge(ctx->block, loop_exit);
+      /* jump back to loop_entry */
+      branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0));
+      branch->getOperand(0) = Operand{exec, s2};
+      branch->targets[0] = loop_entry;
+      branch->targets[1] = loop_exit;
+      ctx->block->instructions.emplace_back(std::move(branch));
+      add_edge(ctx->block, loop_entry);
+      add_linear_edge(ctx->block, loop_exit);
+   } else {
+      branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
+      branch->targets[0] = loop_entry;
+      ctx->block->instructions.emplace_back(std::move(branch));
+      add_edge(ctx->block, loop_entry);
+   }
 
    /* emit loop successor block */
    loop_exit->index = ctx->program->blocks.size();
