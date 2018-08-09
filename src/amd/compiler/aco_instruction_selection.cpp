@@ -2327,6 +2327,7 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
          ctx->block->instructions.emplace_back(std::move(restore_exec));
 
       } else if (ctx->cf_info.parent_loop.has_divergent_continue) {
+         Block* break_block = ctx->program->createAndInsertBlock();
 
          /* there might be still active lanes due to previous continue */
          aco_instr.reset(create_instruction<SOP1_instruction>(aco_opcode::s_andn2_saveexec_b64, Format::SOP1, 2, 2));
@@ -2341,8 +2342,12 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
          branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0));
          branch->getOperand(0) = Operand(PhysReg{253}, b); /* scc */
          branch->targets[0] = ctx->cf_info.parent_loop.entry;
+         branch->targets[1] = break_block;
          ctx->block->instructions.emplace_back(std::move(branch));
          add_linear_edge(ctx->block, ctx->cf_info.parent_loop.entry);
+         add_linear_edge(ctx->block, break_block);
+
+         ctx->block = break_block;
 
          /* restore the exec mask and branch out of the loop */
          linear_target = ctx->cf_info.parent_loop.exit;
@@ -2448,6 +2453,7 @@ void visit_block(isel_context *ctx, nir_block *block)
 
 static void visit_loop(isel_context *ctx, nir_loop *loop)
 {
+   std::unique_ptr<Pseudo_branch_instruction> branch;
    append_logical_end(ctx->block);
    /* save original exec */
    std::unique_ptr<Instruction> save_exec;
@@ -2459,6 +2465,9 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
 
    Block* loop_entry = ctx->program->createAndInsertBlock();
    Block* loop_exit = new Block();
+   branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
+   branch->targets[0] = loop_entry;
+   ctx->block->instructions.emplace_back(std::move(branch));
    add_edge(ctx->block, loop_entry);
    ctx->block = loop_entry;
 
@@ -2477,7 +2486,7 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
 
    /* restore all 'continue' lanes */
    std::unique_ptr<Instruction> restore;
-   std::unique_ptr<Pseudo_branch_instruction> branch;
+
    if (ctx->cf_info.parent_loop.has_divergent_break) {
       restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
       restore->getOperand(0) = Operand{exec, s2};
@@ -2707,9 +2716,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       /** emit linear then block */
       BB_then_linear->index = ctx->program->blocks.size();
       ctx->program->blocks.emplace_back(BB_then_linear);
-      append_logical_start(BB_then_linear);
-      /* nothing in here */
-      append_logical_end(BB_then_linear);
 
       /* branch from linear then block to between block */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
@@ -2746,8 +2752,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       mov->getOperand(0) = Operand(else_mask);
       mov->getDefinition(0) = Definition(exec, s2);
       BB_between->instructions.push_back(std::move(mov));
-      append_logical_start(BB_between);
-      append_logical_end(BB_between);
 
       /* branch to linear else block (skip else) */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z, Format::PSEUDO_BRANCH, 1, 0));
@@ -2779,9 +2783,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       /** emit linear else block */
       BB_else_linear->index = ctx->program->blocks.size();
       ctx->program->blocks.emplace_back(BB_else_linear);
-      append_logical_start(BB_else_linear);
-      /* nothing in here */
-      append_logical_end(BB_else_linear);
 
       /* branch from linear else block to endif block */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
