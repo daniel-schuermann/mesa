@@ -226,7 +226,7 @@ void lower_to_hw_instr(Program* program)
          } else if (instr->format == Format::PSEUDO_BRANCH) {
             Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(instr.get());
             /* no need to emit branch to linear_successor */
-            if (branch->targets[0] == block->linear_successors[0])
+            if (branch->targets[0]->index == block->index + 1)
                continue;
 
             std::unique_ptr<SOPP_instruction> sopp;
