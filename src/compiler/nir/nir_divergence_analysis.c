@@ -62,23 +62,27 @@ static bool alu_src_is_divergent(bool *divergent, nir_alu_src src, unsigned num_
    return divergent[src.src.ssa->index];
 }
 
-static void visit_alu(bool *divergent, nir_alu_instr *instr)
+static bool visit_alu(bool *divergent, nir_alu_instr *instr)
 {
+   if (divergent[instr->dest.dest.ssa.index])
+      return false;
    unsigned num_src = nir_op_infos[instr->op].num_inputs;
    for (unsigned i = 0; i < num_src; i++) {
       if (alu_src_is_divergent(divergent, instr->src[i], nir_op_infos[instr->op].input_sizes[i])) {
          divergent[instr->dest.dest.ssa.index] = true;
-         return;
+         return true;
       }
    }
    divergent[instr->dest.dest.ssa.index] = false;
+   return false;
 }
 
-static void visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
+static bool visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
 {
    if (!nir_intrinsic_infos[instr->intrinsic].has_dest)
-      return;
-
+      return false;
+   if (divergent[instr->dest.ssa.index])
+      return false;
    bool is_divergent = false;
    switch (instr->intrinsic) {
    /* TODO: load_shared_var */
@@ -111,10 +115,13 @@ static void visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
       break;
    }
    divergent[instr->dest.ssa.index] = is_divergent;
+   return is_divergent;
 }
 
-static void visit_tex(bool *divergent, nir_tex_instr *instr)
+static bool visit_tex(bool *divergent, nir_tex_instr *instr)
 {
+   if (divergent[instr->dest.ssa.index])
+      return false;
    bool is_divergent = false;
    for (unsigned i = 0; i < instr->num_srcs; i++) {
       switch (instr->src[i].src_type) {
@@ -126,6 +133,7 @@ static void visit_tex(bool *divergent, nir_tex_instr *instr)
       }
    }
    divergent[instr->dest.ssa.index] = is_divergent;
+   return is_divergent;
 }
 
 
@@ -145,14 +153,16 @@ static void visit_tex(bool *divergent, nir_tex_instr *instr)
  *     The resulting value is divergent iff any loop exit condition
  *     or source value is divergent.
  */
-static void visit_phi(bool *divergent, nir_phi_instr *instr)
+static bool visit_phi(bool *divergent, nir_phi_instr *instr)
 {
+   if (divergent[instr->dest.ssa.index])
+      return false;
 
    /* if any source value is divergent, the resulting value is divergent */
    nir_foreach_phi_src(src, instr) {
       if (divergent[src->src.ssa->index]) {
          divergent[instr->dest.ssa.index] = true;
-         return;
+         return true;
       }
    }
 
@@ -186,7 +196,7 @@ static void visit_phi(bool *divergent, nir_phi_instr *instr)
                nir_if *if_node = nir_cf_node_as_if(current);
                if (divergent[if_node->condition.ssa->index]) {
                   divergent[instr->dest.ssa.index] = true;
-                  return;
+                  return true;
                }
             }
             current = current->parent;
@@ -199,7 +209,7 @@ static void visit_phi(bool *divergent, nir_phi_instr *instr)
       nir_if *if_node = nir_cf_node_as_if(prev);
       if (divergent[if_node->condition.ssa->index]) {
          divergent[instr->dest.ssa.index] = true;
-         return;
+         return true;
       }
    }
 
@@ -216,7 +226,7 @@ static void visit_phi(bool *divergent, nir_phi_instr *instr)
                nir_if *if_node = nir_cf_node_as_if(current);
                if (divergent[if_node->condition.ssa->index]) {
                   divergent[instr->dest.ssa.index] = true;
-                  return;
+                  return true;
                }
             }
             current = current->parent;
@@ -224,35 +234,46 @@ static void visit_phi(bool *divergent, nir_phi_instr *instr)
       }
    }
    divergent[instr->dest.ssa.index] = false;
+   return false;
 }
 
-static void visit_parallel_copy(bool *divergent, nir_parallel_copy_instr *instr)
+static bool visit_parallel_copy(bool *divergent, nir_parallel_copy_instr *instr)
 {
+   bool has_changed = false;
    nir_foreach_parallel_copy_entry(entry, instr) {
+      if (divergent[entry->dest.ssa.index])
+         continue;
       divergent[entry->dest.ssa.index] = divergent[entry->src.ssa->index];
+      if (divergent[entry->dest.ssa.index])
+         has_changed = true;
    }
+   return has_changed;
 }
 
-static void visit_load_const(bool *divergent, nir_load_const_instr *instr)
+static bool visit_load_const(bool *divergent, nir_load_const_instr *instr)
 {
    divergent[instr->def.index] = false;
+   return false;
 }
 
-static void visit_ssa_undef(bool *divergent, nir_ssa_undef_instr *instr)
+static bool visit_ssa_undef(bool *divergent, nir_ssa_undef_instr *instr)
 {
    divergent[instr->def.index] = false;
+   return false;
 }
 
-static void visit_deref(bool *divergent, nir_deref_instr *instr)
+static bool visit_deref(bool *divergent, nir_deref_instr *instr)
 {
    nir_foreach_use(src, &instr->dest.ssa)
    {
       if (src->parent_instr->type != nir_instr_type_tex) {
          divergent[instr->dest.ssa.index] = false;
-         return;
+         return false;
       }
    }
+   bool before = divergent[instr->dest.ssa.index];
    divergent[instr->dest.ssa.index] = true;
+   return !before;
 }
 
 bool* nir_divergence_analysis(nir_shader *shader)
@@ -262,52 +283,50 @@ bool* nir_divergence_analysis(nir_shader *shader)
    bool *t = rzalloc_array(shader, bool, impl->ssa_alloc);
    nir_block_worklist worklist;
    nir_block_worklist_init(&worklist, impl->num_blocks, NULL);
+   nir_block_worklist_add_all(&worklist, impl);
 
-   /* we run this analysis twice as we do an optimistic approach
-    * and assume all values to be uniform.
-    * This algorithm converges after two passes. */
-   for (unsigned i = 0; i < 2; i++) {
-      nir_block_worklist_add_all(&worklist, impl);
+   while (!nir_block_worklist_is_empty(&worklist)) {
+      nir_block *block = nir_block_worklist_pop_head(&worklist);
+      bool has_changed = false;
 
-      while (!nir_block_worklist_is_empty(&worklist)) {
-
-         nir_block *block = nir_block_worklist_pop_head(&worklist);
-
-         nir_foreach_instr(instr, block) {
-            switch (instr->type) {
-            case nir_instr_type_alu:
-               visit_alu(t, nir_instr_as_alu(instr));
-               break;
-            case nir_instr_type_intrinsic:
-               visit_intrinsic(t, nir_instr_as_intrinsic(instr));
-               break;
-            case nir_instr_type_tex:
-               visit_tex(t, nir_instr_as_tex(instr));
-               break;
-            case nir_instr_type_phi:
-               visit_phi(t, nir_instr_as_phi(instr));
-               break;
-            case nir_instr_type_parallel_copy:
-               visit_parallel_copy(t, nir_instr_as_parallel_copy(instr));
-               break;
-            case nir_instr_type_load_const:
-               visit_load_const(t, nir_instr_as_load_const(instr));
-               break;
-            case nir_instr_type_ssa_undef:
-               visit_ssa_undef(t, nir_instr_as_ssa_undef(instr));
-               break;
-            case nir_instr_type_deref:
-               visit_deref(t, nir_instr_as_deref(instr));
-               break;
-            case nir_instr_type_jump:
-               break;
-            case nir_instr_type_call:
-               assert(false);
-            default:
-               unreachable("Invalid instruction type");
-               break;
-            }
+      nir_foreach_instr(instr, block) {
+         switch (instr->type) {
+         case nir_instr_type_alu:
+            has_changed |= visit_alu(t, nir_instr_as_alu(instr));
+            break;
+         case nir_instr_type_intrinsic:
+            has_changed |= visit_intrinsic(t, nir_instr_as_intrinsic(instr));
+            break;
+         case nir_instr_type_tex:
+            has_changed |= visit_tex(t, nir_instr_as_tex(instr));
+            break;
+         case nir_instr_type_phi:
+            has_changed |= visit_phi(t, nir_instr_as_phi(instr));
+            break;
+         case nir_instr_type_parallel_copy:
+            has_changed |= visit_parallel_copy(t, nir_instr_as_parallel_copy(instr));
+            break;
+         case nir_instr_type_load_const:
+            has_changed |= visit_load_const(t, nir_instr_as_load_const(instr));
+            break;
+         case nir_instr_type_ssa_undef:
+            has_changed |= visit_ssa_undef(t, nir_instr_as_ssa_undef(instr));
+            break;
+         case nir_instr_type_deref:
+            has_changed |= visit_deref(t, nir_instr_as_deref(instr));
+            break;
+         case nir_instr_type_jump:
+            break;
+         case nir_instr_type_call:
+            assert(false);
+         default:
+            unreachable("Invalid instruction type");
+            break;
          }
+      }
+      if (has_changed) {
+         // FIXME: this is quite inefficient!
+         nir_block_worklist_add_all(&worklist, impl);
       }
    }
    return t;
