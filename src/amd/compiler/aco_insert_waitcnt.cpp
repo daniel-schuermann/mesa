@@ -431,6 +431,17 @@ bool gen(Instruction* instr, wait_ctx& ctx)
          return true;
       }
    }
+   case Format::DS: {
+      if (instr->num_definitions) {
+         for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
+         {
+            ctx.vgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
+            wait_entry(lgkm_type, max_vm_cnt, max_exp_cnt, 0));
+         }
+         ctx.lgkm_cnt++;
+         return true;
+      }
+   }
    case Format::MUBUF: {
       if (instr->num_definitions) {
          /* increase counter for all entries of same wait_type */
