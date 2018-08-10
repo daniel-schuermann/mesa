@@ -35,12 +35,6 @@ enum fs_input {
    max_inputs,
 };
 
-struct loop_info {
-   Block* loop_header;
-   Block* loop_footer;
-   Temp continues;
-};
-
 struct isel_context {
    struct radv_nir_compiler_options *options;
    Program *program;
@@ -2482,31 +2476,38 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    loop_info_RAII loop_raii(ctx, loop_entry, loop_exit, orig_exec, active_mask);
    append_logical_start(ctx->block);
    visit_cf_list(ctx, &loop->body);
-   append_logical_end(ctx->block); // FIXME the loop might end with a break?
 
-   /* restore all 'continue' lanes */
    std::unique_ptr<Instruction> restore;
 
-   if (ctx->cf_info.parent_loop.has_divergent_break) {
-      restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
-      restore->getOperand(0) = Operand{exec, s2};
-      restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.active_mask);
-      restore->getDefinition(0) = Definition{exec, s2};
-      ctx->block->instructions.emplace_back(std::move(restore));
+   if (ctx->cf_info.has_break) {
+      ctx->cf_info.has_break = false;
+   } else {
+      append_logical_end(ctx->block);
+      if (ctx->cf_info.parent_loop.has_divergent_continue) {
+         /* restore all 'continue' lanes */
+         restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
+         restore->getOperand(0) = Operand{exec, s2};
+         restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.active_mask);
+         restore->getDefinition(0) = Definition{exec, s2};
+         ctx->block->instructions.emplace_back(std::move(restore));
+      }
 
       /* jump back to loop_entry */
-      branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0));
-      branch->getOperand(0) = Operand{exec, s2};
-      branch->targets[0] = loop_entry;
-      branch->targets[1] = loop_exit;
-      ctx->block->instructions.emplace_back(std::move(branch));
-      add_edge(ctx->block, loop_entry);
-      add_linear_edge(ctx->block, loop_exit);
-   } else {
-      branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
-      branch->targets[0] = loop_entry;
-      ctx->block->instructions.emplace_back(std::move(branch));
-      add_edge(ctx->block, loop_entry);
+      if (ctx->cf_info.parent_loop.has_divergent_break) {
+         branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0));
+         branch->getOperand(0) = Operand{exec, s2};
+         branch->targets[0] = loop_entry;
+         branch->targets[1] = loop_exit;
+         ctx->block->instructions.emplace_back(std::move(branch));
+         add_edge(ctx->block, loop_entry);
+         add_linear_edge(ctx->block, loop_exit);
+      } else {
+         append_logical_end(ctx->block);
+         branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
+         branch->targets[0] = loop_entry;
+         ctx->block->instructions.emplace_back(std::move(branch));
+         add_edge(ctx->block, loop_entry);
+      }
    }
 
    /* emit loop successor block */
@@ -2521,6 +2522,29 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    ctx->block->instructions.emplace_back(std::move(restore));
 
    append_logical_start(ctx->block);
+
+   /* trim linear phis in loop header */
+   bool logical_start = false;
+   for (auto&& instr : loop_entry->instructions) {
+      if (logical_start) {
+         if (instr->opcode == aco_opcode::p_phi) {
+            continue;
+         } else if (instr->opcode == aco_opcode::p_linear_phi) {
+            std::unique_ptr<Instruction> new_phi{create_instruction<Instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, loop_entry->linear_predecessors.size(), 1)};
+            new_phi->getDefinition(0) = instr->getDefinition(0);
+            for (unsigned i = 0; i < new_phi->num_operands; i++)
+               new_phi->getOperand(i) = instr->getOperand(i);
+            /* check that the remaining operands are all the same */
+            for (unsigned i = new_phi->num_operands; i < instr->num_operands; i++)
+               assert(instr->getOperand(i).tempId() == instr->getOperand(new_phi->num_operands -1).tempId());
+            instr.swap(new_phi);
+         } else {
+            break;
+         }
+      } else if (instr->opcode == aco_opcode::p_logical_start) {
+         logical_start = true;
+      }
+   }
 }
 
 static void visit_if(isel_context *ctx, nir_if *if_stmt)
@@ -2555,8 +2579,8 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       bool break_then = false, break_else = false;
 
       /** emit conditional statement */
-      append_logical_end(BB_if);
       Temp cond = extract_uniform_cond32(ctx, cond32);
+      append_logical_end(BB_if);
 
       /* emit branch */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z, Format::PSEUDO_BRANCH, 1, 0));
@@ -2665,8 +2689,8 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       Block* BB_endif = new Block();
 
       /** emit conditional statement */
-      append_logical_end(BB_if);
       Temp cond = extract_divergent_cond32(ctx, cond32);
+      append_logical_end(BB_if);
 
       /* create the exec mask for then branch */
       std::unique_ptr<SOP1_instruction> set_exec{create_instruction<SOP1_instruction>(aco_opcode::s_and_saveexec_b64, Format::SOP1, 1, 1)};
