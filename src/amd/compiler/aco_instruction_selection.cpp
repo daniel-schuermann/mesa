@@ -2343,22 +2343,11 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
 
          ctx->block = break_block;
 
-         /* restore the exec mask and branch out of the loop */
+         /* branch out of the loop */
          linear_target = ctx->cf_info.parent_loop.exit;
-         aco_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
-         aco_instr->getOperand(0) = Operand(ctx->cf_info.parent_loop.orig_exec);
-         aco_instr->getOperand(1) = Operand(temp);
-         aco_instr->getDefinition(0) = Definition(exec, s2);
-         ctx->block->instructions.emplace_back(std::move(aco_instr));
-
       } else {
          /* uniform break - directly jump out of the loop */
          linear_target = ctx->cf_info.parent_loop.exit;
-         aco_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
-         aco_instr->getOperand(0) = Operand(ctx->cf_info.parent_loop.orig_exec);
-         aco_instr->getOperand(1) = Operand(exec, s2);
-         aco_instr->getDefinition(0) = Definition(exec, s2);
-         ctx->block->instructions.emplace_back(std::move(aco_instr));
       }
 
       break;
@@ -2487,7 +2476,10 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
          /* restore all 'continue' lanes */
          restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
          restore->getOperand(0) = Operand{exec, s2};
-         restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.active_mask);
+         if (ctx->cf_info.parent_loop.has_divergent_break)
+            restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.active_mask);
+         else
+            restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.orig_exec);
          restore->getDefinition(0) = Definition{exec, s2};
          ctx->block->instructions.emplace_back(std::move(restore));
       }
@@ -2502,7 +2494,6 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
          add_edge(ctx->block, loop_entry);
          add_linear_edge(ctx->block, loop_exit);
       } else {
-         append_logical_end(ctx->block);
          branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
          branch->targets[0] = loop_entry;
          ctx->block->instructions.emplace_back(std::move(branch));
