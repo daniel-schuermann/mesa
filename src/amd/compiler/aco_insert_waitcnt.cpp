@@ -107,6 +107,20 @@ struct wait_ctx {
             vgpr_map.insert(entry);
          }
       }
+      for (std::pair<uint8_t,wait_entry> entry : other->sgpr_map)
+      {
+         std::unordered_map<uint8_t,wait_entry>::iterator it = sgpr_map.find(entry.first);
+         if (it != sgpr_map.end())
+         {
+            /* update entry */
+            it->second.type = it->second.type | entry.second.type;
+            it->second.exp_cnt = std::min(it->second.exp_cnt, entry.second.exp_cnt);
+            it->second.vm_cnt = std::min(it->second.vm_cnt, entry.second.vm_cnt);
+            it->second.lgkm_cnt = std::min(it->second.lgkm_cnt, entry.second.vm_cnt);
+         } else {
+            sgpr_map.insert(entry);
+         }
+      }
    }
 
    bool operator==(const wait_ctx& rhs) const
