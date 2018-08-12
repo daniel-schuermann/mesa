@@ -2236,7 +2236,7 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
       phi->getOperand(std::distance(block_idx.begin(), block_idx.find(src->pred->index))) = Operand(get_ssa_temp(ctx, src->src.ssa));
 
    phi->getDefinition(0) = Definition(dst);
-   ctx->block->instructions.emplace_back(std::move(phi));
+   ctx->block->instructions.emplace(ctx->block->instructions.begin(), std::move(phi));
 }
 
 
@@ -2515,25 +2515,20 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    append_logical_start(ctx->block);
 
    /* trim linear phis in loop header */
-   bool logical_start = false;
    for (auto&& instr : loop_entry->instructions) {
-      if (logical_start) {
-         if (instr->opcode == aco_opcode::p_phi) {
-            continue;
-         } else if (instr->opcode == aco_opcode::p_linear_phi) {
-            std::unique_ptr<Instruction> new_phi{create_instruction<Instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, loop_entry->linear_predecessors.size(), 1)};
-            new_phi->getDefinition(0) = instr->getDefinition(0);
-            for (unsigned i = 0; i < new_phi->num_operands; i++)
-               new_phi->getOperand(i) = instr->getOperand(i);
-            /* check that the remaining operands are all the same */
-            for (unsigned i = new_phi->num_operands; i < instr->num_operands; i++)
-               assert(instr->getOperand(i).tempId() == instr->getOperand(new_phi->num_operands -1).tempId());
-            instr.swap(new_phi);
-         } else {
-            break;
-         }
-      } else if (instr->opcode == aco_opcode::p_logical_start) {
-         logical_start = true;
+      if (instr->opcode == aco_opcode::p_linear_phi) {
+         std::unique_ptr<Instruction> new_phi{create_instruction<Instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, loop_entry->linear_predecessors.size(), 1)};
+         new_phi->getDefinition(0) = instr->getDefinition(0);
+         for (unsigned i = 0; i < new_phi->num_operands; i++)
+            new_phi->getOperand(i) = instr->getOperand(i);
+         /* check that the remaining operands are all the same */
+         for (unsigned i = new_phi->num_operands; i < instr->num_operands; i++)
+            assert(instr->getOperand(i).tempId() == instr->getOperand(new_phi->num_operands -1).tempId());
+         instr.swap(new_phi);
+      } else if (instr->opcode == aco_opcode::p_phi) {
+         continue;
+      } else {
+         break;
       }
    }
 }
