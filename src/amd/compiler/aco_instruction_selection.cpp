@@ -2576,11 +2576,13 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    ctx->block = loop_exit;
    ctx->program->blocks.emplace_back(loop_exit);
    /* restore original exec */
-   restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
-   restore->getOperand(0) = Operand{exec, s2};
-   restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.orig_exec);
-   restore->getDefinition(0) = Definition{exec, s2};
-   ctx->block->instructions.emplace_back(std::move(restore));
+   if (ctx->cf_info.parent_loop.has_divergent_break || ctx->cf_info.parent_loop.has_divergent_continue) {
+      restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
+      restore->getOperand(0) = Operand{exec, s2};
+      restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.orig_exec);
+      restore->getDefinition(0) = Definition{exec, s2};
+      ctx->block->instructions.emplace_back(std::move(restore));
+   }
 
    append_logical_start(ctx->block);
 
@@ -2932,163 +2934,169 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
    std::unique_ptr<RegClass[]> reg_class{new RegClass[impl->ssa_alloc]};
    memset(&ctx->fs_vgpr_args, false, sizeof(ctx->fs_vgpr_args));
 
-   nir_foreach_block(block, impl) {
-      nir_foreach_instr(instr, block) {
-         switch(instr->type) {
-         case nir_instr_type_alu: {
-            nir_alu_instr *alu_instr = nir_instr_as_alu(instr);
-            unsigned size =  alu_instr->dest.dest.ssa.num_components;
-            if (alu_instr->dest.dest.ssa.bit_size == 64)
-               size *= 2;
-            RegType type = sgpr;
-            switch(alu_instr->op) {
-               case nir_op_fmul:
-               case nir_op_fadd:
-               case nir_op_fsub:
-               case nir_op_fmax:
-               case nir_op_fmin:
-               case nir_op_fneg:
-               case nir_op_fabs:
-               case nir_op_fsign:
-               case nir_op_frcp:
-               case nir_op_frsq:
-               case nir_op_fsqrt:
-               case nir_op_fexp2:
-               case nir_op_flog2:
-               case nir_op_ffract:
-               case nir_op_ffloor:
-               case nir_op_fsin:
-               case nir_op_fcos:
-               case nir_op_u2f32:
-               case nir_op_i2f32:
-               case nir_op_b2f:
-                  type = vgpr;
-                  break;
-               case nir_op_flt:
-               case nir_op_fge:
-               case nir_op_feq:
-               case nir_op_fne:
-               case nir_op_ilt:
-               case nir_op_ige:
-               case nir_op_ieq:
-               case nir_op_ine:
-               case nir_op_ult:
-               case nir_op_uge:
-               case nir_op_bcsel:
-                  type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
-                  break;
-               default:
-                  for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
-                     if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr)
-                        type = vgpr;
-                  }
-                  break;
-            }
-            reg_class[alu_instr->dest.dest.ssa.index] = getRegClass(type, size);
-            break;
-         }
-         case nir_instr_type_load_const: {
-            unsigned size = nir_instr_as_load_const(instr)->def.num_components;
-            if (nir_instr_as_load_const(instr)->def.bit_size == 64)
-               size *= 2;
-            reg_class[nir_instr_as_load_const(instr)->def.index] = getRegClass(sgpr, size);
-            break;
-         }
-         case nir_instr_type_intrinsic: {
-            nir_intrinsic_instr *intrinsic = nir_instr_as_intrinsic(instr);
-            unsigned size =  intrinsic->dest.ssa.num_components;
-            if (intrinsic->dest.ssa.bit_size == 64)
-               size *= 2;
-            RegType type = sgpr;
-            switch(intrinsic->intrinsic) {
-               case nir_intrinsic_load_front_face:
-                  type = sgpr;
-                  size = 2;
-                  break;
-               case nir_intrinsic_load_input:
-               case nir_intrinsic_load_vertex_id:
-               case nir_intrinsic_load_vertex_id_zero_base:
-               case nir_intrinsic_load_barycentric_pixel:
-               case nir_intrinsic_load_interpolated_input:
-                  type = vgpr;
-                  break;
-               case nir_intrinsic_vulkan_resource_index:
-                  type = sgpr;
-                  size = 2;
-                  break;
-               case nir_intrinsic_load_ubo:
-                  type = ctx->divergent_vals[intrinsic->dest.ssa.index] ? vgpr : sgpr;
-                  break;
-               default:
-                  for (unsigned i = 0; i < nir_intrinsic_infos[intrinsic->intrinsic].num_srcs; i++) {
-                     if (typeOf(reg_class[intrinsic->src[i].ssa->index]) == vgpr)
-                        type = vgpr;
-                  }
-                  break;
-            }
-            if (nir_intrinsic_infos[intrinsic->intrinsic].has_dest)
-               reg_class[intrinsic->dest.ssa.index] = getRegClass(type, size);
-
-            switch(intrinsic->intrinsic) {
-               case nir_intrinsic_load_barycentric_pixel:
-                  ctx->fs_vgpr_args[fs_input::persp_center_p1] = true;
-                  break;
-               case nir_intrinsic_load_front_face:
-                  ctx->fs_vgpr_args[fs_input::front_face] = true;
-                  break;
-               case nir_intrinsic_load_interpolated_input:
-                  if (nir_intrinsic_base(intrinsic) == VARYING_SLOT_POS) {
-                     for (unsigned i = 0; i < intrinsic->dest.ssa.num_components; i++)
-                        ctx->fs_vgpr_args[fs_input::frag_pos_0 + i] = true;
-                  }
-                  break;
-               default:
-                  break;
-            }
-
-            break;
-         }
-         case nir_instr_type_tex: {
-            unsigned size = nir_instr_as_tex(instr)->dest.ssa.num_components;
-            if (nir_instr_as_tex(instr)->dest.ssa.bit_size == 64)
-               size *= 2;
-            reg_class[nir_instr_as_tex(instr)->dest.ssa.index] = getRegClass(vgpr, size);
-            break;
-         }
-         case nir_instr_type_parallel_copy: {
-            nir_foreach_parallel_copy_entry(entry, nir_instr_as_parallel_copy(instr)) {
-               reg_class[entry->dest.ssa.index] = reg_class[entry->src.ssa->index];
-            }
-            break;
-         }
-         case nir_instr_type_ssa_undef: {
-            unsigned size = nir_instr_as_ssa_undef(instr)->def.num_components;
-            if (nir_instr_as_ssa_undef(instr)->def.bit_size == 64)
-               size *= 2;
-            reg_class[nir_instr_as_ssa_undef(instr)->def.index] = getRegClass(sgpr, size);
-            break;
-         }
-         case nir_instr_type_phi: {
-            nir_phi_instr* phi = nir_instr_as_phi(instr);
-            unsigned size = phi->dest.ssa.num_components;
-            if (phi->dest.ssa.bit_size == 64)
-               size *= 2;
-            RegType type;
-            if (ctx->divergent_vals[phi->dest.ssa.index]) {
-               type = vgpr;
-            } else {
-               type = sgpr;
-               nir_foreach_phi_src (src, phi) {
-                  if (reg_class[src->src.ssa->index] == getRegClass(vgpr, size))
+   bool done = false;
+   while (!done) {
+      done = true;
+      nir_foreach_block(block, impl) {
+         nir_foreach_instr(instr, block) {
+            switch(instr->type) {
+            case nir_instr_type_alu: {
+               nir_alu_instr *alu_instr = nir_instr_as_alu(instr);
+               unsigned size =  alu_instr->dest.dest.ssa.num_components;
+               if (alu_instr->dest.dest.ssa.bit_size == 64)
+                  size *= 2;
+               RegType type = sgpr;
+               switch(alu_instr->op) {
+                  case nir_op_fmul:
+                  case nir_op_fadd:
+                  case nir_op_fsub:
+                  case nir_op_fmax:
+                  case nir_op_fmin:
+                  case nir_op_fneg:
+                  case nir_op_fabs:
+                  case nir_op_fsign:
+                  case nir_op_frcp:
+                  case nir_op_frsq:
+                  case nir_op_fsqrt:
+                  case nir_op_fexp2:
+                  case nir_op_flog2:
+                  case nir_op_ffract:
+                  case nir_op_ffloor:
+                  case nir_op_fsin:
+                  case nir_op_fcos:
+                  case nir_op_u2f32:
+                  case nir_op_i2f32:
+                  case nir_op_b2f:
                      type = vgpr;
+                     break;
+                  case nir_op_flt:
+                  case nir_op_fge:
+                  case nir_op_feq:
+                  case nir_op_fne:
+                  case nir_op_ilt:
+                  case nir_op_ige:
+                  case nir_op_ieq:
+                  case nir_op_ine:
+                  case nir_op_ult:
+                  case nir_op_uge:
+                  case nir_op_bcsel:
+                     type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
+                     break;
+                  default:
+                     for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
+                        if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr)
+                           type = vgpr;
+                     }
+                     break;
                }
+               reg_class[alu_instr->dest.dest.ssa.index] = getRegClass(type, size);
+               break;
             }
+            case nir_instr_type_load_const: {
+               unsigned size = nir_instr_as_load_const(instr)->def.num_components;
+               if (nir_instr_as_load_const(instr)->def.bit_size == 64)
+                  size *= 2;
+               reg_class[nir_instr_as_load_const(instr)->def.index] = getRegClass(sgpr, size);
+               break;
+            }
+            case nir_instr_type_intrinsic: {
+               nir_intrinsic_instr *intrinsic = nir_instr_as_intrinsic(instr);
+               unsigned size =  intrinsic->dest.ssa.num_components;
+               if (intrinsic->dest.ssa.bit_size == 64)
+                  size *= 2;
+               RegType type = sgpr;
+               switch(intrinsic->intrinsic) {
+                  case nir_intrinsic_load_front_face:
+                     type = sgpr;
+                     size = 2;
+                     break;
+                  case nir_intrinsic_load_input:
+                  case nir_intrinsic_load_vertex_id:
+                  case nir_intrinsic_load_vertex_id_zero_base:
+                  case nir_intrinsic_load_barycentric_pixel:
+                  case nir_intrinsic_load_interpolated_input:
+                     type = vgpr;
+                     break;
+                  case nir_intrinsic_vulkan_resource_index:
+                     type = sgpr;
+                     size = 2;
+                     break;
+                  case nir_intrinsic_load_ubo:
+                     type = ctx->divergent_vals[intrinsic->dest.ssa.index] ? vgpr : sgpr;
+                     break;
+                  default:
+                     for (unsigned i = 0; i < nir_intrinsic_infos[intrinsic->intrinsic].num_srcs; i++) {
+                        if (typeOf(reg_class[intrinsic->src[i].ssa->index]) == vgpr)
+                           type = vgpr;
+                     }
+                     break;
+               }
+               if (nir_intrinsic_infos[intrinsic->intrinsic].has_dest)
+                  reg_class[intrinsic->dest.ssa.index] = getRegClass(type, size);
 
-            reg_class[phi->dest.ssa.index] = getRegClass(type, size);
-            break;
-         }
-         default:
-            break;
+               switch(intrinsic->intrinsic) {
+                  case nir_intrinsic_load_barycentric_pixel:
+                     ctx->fs_vgpr_args[fs_input::persp_center_p1] = true;
+                     break;
+                  case nir_intrinsic_load_front_face:
+                     ctx->fs_vgpr_args[fs_input::front_face] = true;
+                     break;
+                  case nir_intrinsic_load_interpolated_input:
+                     if (nir_intrinsic_base(intrinsic) == VARYING_SLOT_POS) {
+                        for (unsigned i = 0; i < intrinsic->dest.ssa.num_components; i++)
+                           ctx->fs_vgpr_args[fs_input::frag_pos_0 + i] = true;
+                     }
+                     break;
+                  default:
+                     break;
+               }
+
+               break;
+            }
+            case nir_instr_type_tex: {
+               unsigned size = nir_instr_as_tex(instr)->dest.ssa.num_components;
+               if (nir_instr_as_tex(instr)->dest.ssa.bit_size == 64)
+                  size *= 2;
+               reg_class[nir_instr_as_tex(instr)->dest.ssa.index] = getRegClass(vgpr, size);
+               break;
+            }
+            case nir_instr_type_parallel_copy: {
+               nir_foreach_parallel_copy_entry(entry, nir_instr_as_parallel_copy(instr)) {
+                  reg_class[entry->dest.ssa.index] = reg_class[entry->src.ssa->index];
+               }
+               break;
+            }
+            case nir_instr_type_ssa_undef: {
+               unsigned size = nir_instr_as_ssa_undef(instr)->def.num_components;
+               if (nir_instr_as_ssa_undef(instr)->def.bit_size == 64)
+                  size *= 2;
+               reg_class[nir_instr_as_ssa_undef(instr)->def.index] = getRegClass(sgpr, size);
+               break;
+            }
+            case nir_instr_type_phi: {
+               nir_phi_instr* phi = nir_instr_as_phi(instr);
+               unsigned size = phi->dest.ssa.num_components;
+               if (phi->dest.ssa.bit_size == 64)
+                  size *= 2;
+               RegType type;
+               if (ctx->divergent_vals[phi->dest.ssa.index]) {
+                  type = vgpr;
+               } else {
+                  type = sgpr;
+                  nir_foreach_phi_src (src, phi) {
+                     if (reg_class[src->src.ssa->index] == getRegClass(vgpr, size))
+                        type = vgpr;
+                     else if (reg_class[src->src.ssa->index] != getRegClass(sgpr, size))
+                        done = false;
+                  }
+               }
+
+               reg_class[phi->dest.ssa.index] = getRegClass(type, size);
+               break;
+            }
+            default:
+               break;
+            }
          }
       }
    }
