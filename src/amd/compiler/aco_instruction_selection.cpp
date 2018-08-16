@@ -357,6 +357,11 @@ Temp extract_divergent_cond32(isel_context *ctx, Temp cond32)
 
    std::unique_ptr<Instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_lg_u32, Format::VOPC, 2, 1)};
    cmp->getOperand(0) = Operand{0};
+   if (cond32.type() == sgpr) {
+      Temp vgpr_cond = {ctx->program->allocateId(), v1};
+      emit_v_mov(ctx, cond32, vgpr_cond);
+      cond32 = vgpr_cond;
+   }
    cmp->getOperand(1) = Operand{cond32};
    cmp->getDefinition(0) = Definition{cond};
    cmp->getDefinition(0).setHint(vcc);
