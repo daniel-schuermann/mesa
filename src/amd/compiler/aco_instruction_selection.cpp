@@ -2292,7 +2292,7 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
    std::unique_ptr<Instruction> phi;
    unsigned num_src = exec_list_length(&instr->srcs);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-   aco_opcode opcode = dst.type() == vgpr ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
+   aco_opcode opcode = ctx->divergent_vals[instr->dest.ssa.index] ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
    phi.reset(create_instruction<Instruction>(opcode, Format::PSEUDO, num_src, 1));
    std::set<unsigned> block_idx;
 
@@ -3070,14 +3070,20 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
          }
          case nir_instr_type_phi: {
             nir_phi_instr* phi = nir_instr_as_phi(instr);
-            RegType type;
-            if (ctx->divergent_vals[phi->dest.ssa.index])
-               type = vgpr;
-            else
-               type = sgpr;
             unsigned size = phi->dest.ssa.num_components;
             if (phi->dest.ssa.bit_size == 64)
                size *= 2;
+            RegType type;
+            if (ctx->divergent_vals[phi->dest.ssa.index]) {
+               type = vgpr;
+            } else {
+               type = sgpr;
+               nir_foreach_phi_src (src, phi) {
+                  if (reg_class[src->src.ssa->index] == getRegClass(vgpr, size))
+                     type = vgpr;
+               }
+            }
+
             reg_class[phi->dest.ssa.index] = getRegClass(type, size);
             break;
          }
