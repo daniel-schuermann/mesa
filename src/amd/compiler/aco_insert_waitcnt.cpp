@@ -134,7 +134,7 @@ struct wait_ctx {
 
 uint16_t create_waitcnt_imm(uint16_t vm, uint16_t exp, uint16_t lgkm)
 {
-   return ((vm & 0xF0) << 8) | ((lgkm & 0x1F) << 7) | ((exp & 0x7) << 4) | (vm & 0xF);
+   return ((vm & 0x30) << 10) | ((lgkm & 0xF) << 8) | ((exp & 0x7) << 4) | (vm & 0xF);
 }
 
 SOPP_instruction* create_waitcnt(uint16_t imm)
