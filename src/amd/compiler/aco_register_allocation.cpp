@@ -230,7 +230,7 @@ bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& rena
       new_instructions.emplace_back(std::move(phi));
    }
 
-   renames_per_block[block->index] = renames;
+   renames_per_block[block->index].insert(renames.begin(), renames.end());
    if (new_instructions.size()) {
       new_instructions.insert(new_instructions.end(),
                               std::make_move_iterator(block->instructions.begin()),
