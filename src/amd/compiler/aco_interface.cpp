@@ -63,6 +63,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    aco::validate(program.get(), stderr);
 
    /* Optimization: doesn't work yet with control flow */
+   aco::opt_lvn(program.get());
    aco::optimize(program.get());
    std::cerr << "After Opt:\n";
    aco_print_program(program.get(), stderr);
