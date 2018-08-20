@@ -555,6 +555,21 @@ struct VOP3A_instruction : public Instruction {
    bool neg[3];
 };
 
+/**
+ * Data Parallel Primitives Format:
+ * This format can be used for VOP1, VOP2 or VOPC instructions.
+ * The swizzle applies to the src0 operand.
+ *
+ */
+struct DPP_instruction : public Instruction {
+   uint16_t dpp_ctrl;
+   uint8_t row_mask;
+   uint8_t bank_mask;
+   bool abs[2];
+   bool neg[2];
+   bool bound_ctrl;
+};
+
 struct Interp_instruction : public Instruction {
    unsigned attribute;
    unsigned component;

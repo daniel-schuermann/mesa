@@ -437,6 +437,8 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
             ctx.info[instr->getDefinition(0).tempId()].set_literal(instr->getOperand(0).constantValue());
          else
             ctx.info[instr->getDefinition(0).tempId()].set_constant(instr->getOperand(0).constantValue());
+      } else if (instr->isDPP()) {
+         // TODO
       } else {
          assert(instr->getOperand(0).isTemp());
          ctx.info[instr->getDefinition(0).tempId()].set_temp(instr->getOperand(0).getTemp());
