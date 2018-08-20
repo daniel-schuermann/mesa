@@ -373,13 +373,16 @@ Temp extract_divergent_cond32(isel_context *ctx, Temp cond32)
 void emit_quad_swizzle(isel_context *ctx, Temp src, Temp dst,
                        unsigned lane0, unsigned lane1, unsigned lane2, unsigned lane3)
 {
-   // TODO: we can do better using DPP instructions
    unsigned quad_mask = lane0 | (lane1 << 2) | (lane2 << 4) | (lane3 << 6);
-   std::unique_ptr<DS_instruction> ds{create_instruction<DS_instruction>(aco_opcode::ds_swizzle_b32, Format::DS, 1, 1)};
-   ds->getOperand(0) = Operand(src);
-   ds->getDefinition(0) = Definition(dst);
-   ds->offset0 = (1 << 15) | quad_mask;
-   ctx->block->instructions.emplace_back(std::move(ds));
+   std::unique_ptr<DPP_instruction> dpp;
+   Format format = (Format) ((uint32_t) Format::VOP1 | (uint32_t) Format::DPP);
+   dpp.reset(create_instruction<DPP_instruction>(aco_opcode::v_mov_b32, format, 1, 1));
+   dpp->dpp_ctrl = quad_mask;
+   dpp->row_mask = 0xF;
+   dpp->bank_mask = 0xF;
+   dpp->getOperand(0) = Operand(src);
+   dpp->getDefinition(0) = Definition(dst);
+   ctx->block->instructions.emplace_back(std::move(dpp));
 }
 
 void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
