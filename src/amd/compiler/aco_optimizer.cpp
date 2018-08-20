@@ -600,7 +600,7 @@ void combine_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
          } else
             idx = i;
       }
-      if (found_zero && found_one && !ctx.info[instr->getOperand(idx).tempId()].is_clamp_success()) {
+      if (found_zero && found_one && ctx.info[instr->getOperand(idx).tempId()].is_clamp_success()) {
          /* clamp was successfully applied */
          /* if the clamp instruction is v_mad, we also have to change the original add */
          if (ctx.info[instr->getOperand(idx).tempId()].is_mad()) {
