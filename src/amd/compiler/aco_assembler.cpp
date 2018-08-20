@@ -223,6 +223,25 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
             encoding |= vop3->neg[i] << (29+i);
          out.push_back(encoding);
          return;
+
+      } else if (instr->isDPP()){
+         /* first emit the instruction without the DPP operand */
+         Operand dpp_op = instr->getOperand(0);
+         instr->getOperand(0) = Operand(PhysReg{250}, v1);
+         instr->format = (Format) ((uint32_t) instr->format & ~(1 << 14));
+         emit_instruction(ctx, out, instr);
+         DPP_instruction* dpp = static_cast<DPP_instruction*>(instr);
+         uint32_t encoding = (0xF & dpp->row_mask) << 28;
+         encoding |= (0xF & dpp->bank_mask) << 24;
+         encoding |= dpp->abs[1] << 23;
+         encoding |= dpp->neg[1] << 22;
+         encoding |= dpp->abs[0] << 21;
+         encoding |= dpp->neg[0] << 20;
+         encoding |= dpp->bound_ctrl << 19;
+         encoding |= dpp->dpp_ctrl << 8;
+         encoding |= (0xFF) & dpp_op.physReg().reg;
+         out.push_back(encoding);
+         return;
       } else {
          unreachable("unimplemented instruction format");
       }
