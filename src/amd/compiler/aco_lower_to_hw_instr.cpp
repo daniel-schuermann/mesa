@@ -139,8 +139,10 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<st
 
 void lower_to_hw_instr(Program* program)
 {
-   for (auto&& block : program->blocks)
+   //for (auto&& block : program->blocks)
+   for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it)
    {
+      Block* block = it->get();
       std::vector<std::unique_ptr<Instruction>> new_instructions;
       for (auto&& instr : block->instructions)
       {
@@ -225,8 +227,15 @@ void lower_to_hw_instr(Program* program)
             }
          } else if (instr->format == Format::PSEUDO_BRANCH) {
             Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(instr.get());
-            /* no need to emit branch to linear_successor */
-            if (branch->targets[0]->index == block->index + 1)
+            /* check if all blocks from current to target are empty */
+            bool can_remove = block->index < branch->targets[0]->index;
+            for (unsigned i = block->index + 1; i < branch->targets[0]->index; i++) {
+               if (!program->blocks[i]->instructions.empty()) {
+                  can_remove = false;
+                  break;
+               }
+            }
+            if (can_remove)
                continue;
 
             std::unique_ptr<SOPP_instruction> sopp;
