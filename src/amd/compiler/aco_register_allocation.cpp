@@ -413,7 +413,7 @@ void register_allocation(Program *program)
                unsigned count = reg_count(definition.regClass());
                unsigned alignment = 1;
                unsigned start = 0;
-               unsigned end = 256;
+               unsigned end = 102;
                unsigned alloc_reg = 0;
                bool allocated = false;
 
