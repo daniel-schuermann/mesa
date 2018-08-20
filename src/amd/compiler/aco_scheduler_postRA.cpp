@@ -87,7 +87,8 @@ unsigned detect_pipeline_hazard(Instruction* first, Instruction* second)
 unsigned detect_raw_hazard(Instruction* first, Instruction* second, unsigned op_idx)
 {
    /* VALU writes vgpr / VALU DPP reads vgpr */
-   if (second->isDPP() && first->isVALU() && op_idx == 0)
+   if (second->isDPP() && op_idx == 0 &&
+       (first->isVALU() || first->format == Format::VINTRP))
          return 2;
 
    /* s_setreg / s_getreg */
@@ -120,7 +121,7 @@ unsigned detect_raw_hazard(Instruction* first, Instruction* second, unsigned op_
 
    /* FIXME VEGA only: SALU write m0 / VINTERP */
    if (second->format == Format::VINTRP && first->isSALU()) {
-      for (int i = 0; i < first->num_definitions; i++)
+      for (unsigned i = 0; i < first->num_definitions; i++)
          if (first->getDefinition(i).physReg() == m0)
             return 1;
    }
