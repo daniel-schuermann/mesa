@@ -95,6 +95,18 @@ struct InstrPred {
          return a3->clamp == b3->clamp &&
                 a3->omod == b3->omod;
       }
+      if (a->isDPP()) {
+         DPP_instruction* aDPP = static_cast<DPP_instruction*>(a);
+         DPP_instruction* bDPP = static_cast<DPP_instruction*>(b);
+         return aDPP->dpp_ctrl == bDPP->dpp_ctrl &&
+                aDPP->bank_mask == bDPP->bank_mask &&
+                aDPP->row_mask == bDPP->row_mask &&
+                aDPP->bound_ctrl == bDPP->bound_ctrl &&
+                aDPP->abs[0] == bDPP->abs[0] &&
+                aDPP->abs[1] == bDPP->abs[1] &&
+                aDPP->neg[0] == bDPP->neg[0] &&
+                aDPP->neg[1] == bDPP->neg[1];
+      }
       switch (a->format) {
          case Format::SOPK: {
             SOPK_instruction* aK = static_cast<SOPK_instruction*>(a);
