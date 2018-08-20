@@ -795,6 +795,12 @@ static void visit_alu(struct ac_nir_context *ctx, const nir_alu_instr *instr)
 						      result);
 		}
 		break;
+	case nir_op_fsat:
+		result = emit_intrin_2f_param(&ctx->ac, "llvm.minnum",
+						ac_to_float_type(&ctx->ac, def_type), src[0], ctx->ac.f32_1);
+		result = emit_intrin_2f_param(&ctx->ac, "llvm.maxnum",
+						ac_to_float_type(&ctx->ac, def_type), result, ctx->ac.f32_0);
+		break;
 	case nir_op_ffma:
 		result = emit_intrin_3f_param(&ctx->ac, "llvm.fmuladd",
 		                              ac_to_float_type(&ctx->ac, def_type), src[0], src[1], src[2]);
