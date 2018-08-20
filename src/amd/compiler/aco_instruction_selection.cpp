@@ -701,6 +701,22 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_fsat: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      if (dst.size() == 1) {
+         std::unique_ptr<VOP3A_instruction> vop3{create_instruction<VOP3A_instruction>(aco_opcode::v_med3_f32, Format::VOP3A, 3, 1)};
+         vop3->getOperand(0) = Operand(0);
+         vop3->getOperand(1) = Operand(0x3f800000);
+         vop3->getOperand(2) = Operand(src);
+         vop3->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vop3));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_flog2: {
       if (dst.size() == 1) {
          emit_vop1_instruction(ctx, instr, aco_opcode::v_log_f32, dst);
@@ -1540,7 +1556,6 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp ptr = ctx->push_constants;
    if (ptr.size() == 1) {
       ptr = convert_pointer_to_64_bit(ctx, ptr);
-      ctx->push_constants = ptr;
    }
 
    unsigned range = nir_intrinsic_range(instr);
