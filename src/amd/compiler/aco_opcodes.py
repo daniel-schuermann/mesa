@@ -126,6 +126,7 @@ opcode("p_linear_phi", 0, [])
 
 opcode("p_create_vector", 0, [])
 opcode("p_extract_vector", 0, [])
+opcode("p_split_vector", 0, [])
 
 # start/end the parts where we can use exec based instructions
 # implicitly
