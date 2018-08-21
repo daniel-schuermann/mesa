@@ -402,6 +402,25 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
    case aco_opcode::p_create_vector:
       ctx.info[instr->getDefinition(0).tempId()].set_vec(instr.get());
       break;
+   case aco_opcode::p_split_vector: {
+      if (!ctx.info[instr->getOperand(0).tempId()].is_vec())
+         break;
+      Instruction* vec = ctx.info[instr->getOperand(0).tempId()].instr;
+      assert(instr->num_definitions == vec->num_operands);
+      for (unsigned i = 0; i < instr->num_definitions; i++) {
+         Operand vec_op = vec->getOperand(i);
+         if (vec_op.isConstant()) {
+            if (vec_op.isLiteral())
+               ctx.info[instr->getDefinition(i).tempId()].set_literal(vec_op.constantValue());
+            else
+               ctx.info[instr->getDefinition(i).tempId()].set_constant(vec_op.constantValue());
+         } else {
+            assert(vec_op.isTemp());
+            ctx.info[instr->getDefinition(i).tempId()].set_temp(vec_op.getTemp());
+         }
+      }
+      break;
+   }
    case aco_opcode::p_extract_vector: { /* mov */
       if (!ctx.info[instr->getOperand(0).tempId()].is_vec())
          break;
