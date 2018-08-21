@@ -42,6 +42,7 @@ struct isel_context {
    bool *divergent_vals;
    std::unique_ptr<RegClass[]> reg_class;
    std::unordered_map<unsigned, unsigned> allocated;
+   std::unordered_map<unsigned, std::array<Temp,4>> allocated_vec;
    gl_shader_stage stage;
    struct {
       bool has_continue;
@@ -185,6 +186,10 @@ Temp emit_extract_vector(isel_context* ctx, Temp src, uint32_t idx, RegClass dst
       return src;
    }
 
+   auto it = ctx->allocated_vec.find(src.id());
+   if (it != ctx->allocated_vec.end())
+      return it->second[idx];
+
    Temp dst = {ctx->program->allocateId(), dst_rc};
    if (src.size() == sizeOf(dst_rc)) {
       assert(idx == 0);
@@ -197,6 +202,21 @@ Temp emit_extract_vector(isel_context* ctx, Temp src, uint32_t idx, RegClass dst
       ctx->block->instructions.emplace_back(std::move(extract));
    }
    return dst;
+}
+
+void emit_split_vector(isel_context* ctx, Temp vec_src, unsigned num_components)
+{
+   if (num_components == 1)
+      return;
+   std::unique_ptr<Instruction> split{create_instruction<Instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, num_components)};
+   split->getOperand(0) = Operand(vec_src);
+   std::array<Temp,4> elems;
+   for (unsigned i = 0; i < num_components; i++) {
+      elems[i] = {ctx->program->allocateId(), getRegClass(vec_src.type(), vec_src.size() / num_components)};
+      split->getDefinition(i) = Definition(elems[i]);
+   }
+   ctx->block->instructions.emplace_back(std::move(split));
+   ctx->allocated_vec.emplace(vec_src.id(), elems);
 }
 
 Temp get_alu_src(struct isel_context *ctx, nir_alu_src src)
@@ -490,12 +510,15 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_vec2:
    case nir_op_vec3:
    case nir_op_vec4: {
+      std::array<Temp,4> elems;
       std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->dest.dest.ssa.num_components, 1)};
       for (unsigned i = 0; i < instr->dest.dest.ssa.num_components; ++i) {
-         vec->getOperand(i) = Operand{get_alu_src(ctx, instr->src[i])};
+         elems[i] = get_alu_src(ctx, instr->src[i]);
+         vec->getOperand(i) = Operand{elems[i]};
       }
       vec->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(vec));
+      ctx->allocated_vec.emplace(dst.id(), elems);
       break;
    }
    case nir_op_imov:
@@ -1240,8 +1263,13 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 
 void emit_interp_instr(isel_context *ctx, unsigned idx, unsigned component, Temp src, Temp dst)
 {
-   Temp coord1 = emit_extract_vector(ctx, src, 0, v1);
-   Temp coord2 = emit_extract_vector(ctx, src, 1, v1);
+   Temp coord1 = {ctx->program->allocateId(), v1};
+   Temp coord2 = {ctx->program->allocateId(), v1};
+   std::unique_ptr<Instruction> split{create_instruction<Instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, 2)};
+   split->getOperand(0) = Operand(src);
+   split->getDefinition(0) = Definition(coord1);
+   split->getDefinition(1) = Definition(coord2);
+   ctx->block->instructions.emplace_back(std::move(split));
 
    Temp tmp{ctx->program->allocateId(), v1};
    std::unique_ptr<Interp_instruction> p1{create_instruction<Interp_instruction>(aco_opcode::v_interp_p1_f32, Format::VINTRP, 2, 1)};
@@ -1495,9 +1523,9 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
          Temp vec = {ctx->program->allocateId(), s4};
          load->getDefinition(0) = Definition(vec);
          ctx->block->instructions.emplace_back(std::move(load));
+         emit_split_vector(ctx, vec, 4);
 
          std::unique_ptr<Instruction> trimmed{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1)};
-         std::unique_ptr<Instruction> extract;
          for (unsigned i = 0; i < 3; i++) {
             Temp tmp = emit_extract_vector(ctx, vec, i, s1);
             trimmed->getOperand(i) = Operand(tmp);
@@ -1542,6 +1570,7 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       ctx->block->instructions.emplace_back(std::move(mubuf));
       #endif
    }
+   emit_split_vector(ctx, dst, instr->dest.ssa.num_components);
 }
 
 void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
@@ -1581,6 +1610,8 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
    load->getOperand(1) = Operand(index);
    load->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
    ctx->block->instructions.emplace_back(std::move(load));
+
+   emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
 }
 
 void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
@@ -1929,6 +1960,7 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
 
    Temp coord_args[3], ma, tc, sc, id;
    std::unique_ptr<Instruction> tmp;
+   emit_split_vector(ctx, *coords, 3);
    for (unsigned i = 0; i < 3; i++)
       coord_args[i] = emit_extract_vector(ctx, *coords, i, v1);
 
@@ -1992,6 +2024,7 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
 Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
 {
    Temp coord_vec[3];
+   emit_split_vector(ctx, coords, 3);
    for (unsigned i = 0; i < 3; i++)
       coord_vec[i] = emit_extract_vector(ctx, coords, i, v1);
 
@@ -2293,6 +2326,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    tex->da = da;
    tex->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
    ctx->block->instructions.emplace_back(std::move(tex));
+
+   emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
 
    if (instr->op == nir_texop_query_levels)
       assert(false && "Unimplemented tex instr type\n");
