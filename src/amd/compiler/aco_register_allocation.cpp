@@ -348,6 +348,18 @@ void register_allocation(Program *program)
       std::set<Temp> live = live_out_per_block[(*b_it)->index];
       for(auto i_it = (*b_it)->instructions.rbegin(); i_it != (*b_it)->instructions.rend(); ++i_it) {
          auto& insn = *i_it;
+
+         // Add definitions that are not used to live
+         for (unsigned i = 0; i < insn->definitionCount(); ++i) {
+            auto& definition = insn->getDefinition(i);
+            if (definition.isTemp()) {
+               auto it = live.find(definition.getTemp());
+               if (it == live.end()) {
+                  live.insert(definition.getTemp());
+               }
+            }
+         }
+
          for (unsigned i = 0; i < insn->definitionCount(); ++i) {
             auto& definition = insn->getDefinition(i);
             if (definition.isTemp()) {
