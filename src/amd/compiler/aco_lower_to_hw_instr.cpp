@@ -198,6 +198,19 @@ void lower_to_hw_instr(Program* program)
                handle_operands(copy_operations, new_instructions);
                break;
             }
+            case aco_opcode::p_split_vector:
+            {
+               std::map<PhysReg, copy_operation> copy_operations;
+               for (unsigned i = 0; i < instr->num_definitions; i++)
+               {
+                  assert(instr->getDefinition(i).size() == 1 && "Unimplemented bit size");
+                  Operand op = Operand(PhysReg{instr->getOperand(0).physReg().reg + i}, instr->getDefinition(i).regClass());
+                  Definition def = instr->getDefinition(i);
+                  copy_operations[def.physReg()] = {op, def, 0};
+               }
+               handle_operands(copy_operations, new_instructions);
+               break;
+            }
             case aco_opcode::p_parallelcopy:
             {
                std::map<PhysReg, copy_operation> copy_operations;
