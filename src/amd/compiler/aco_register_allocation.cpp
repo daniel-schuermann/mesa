@@ -444,6 +444,14 @@ void register_allocation(Program *program)
                      alloc_reg = preferred_reg;
                      allocated = true;
                   }
+               } else if (insn->opcode == aco_opcode::p_split_vector && count == 1) {
+                  assert(assignments.find(insn->getOperand(0).tempId()) != assignments.end());
+                  unsigned preferred_reg = assignments.find(insn->getOperand(0).tempId())->second.first.reg;
+                  preferred_reg += i;
+                  if (can_allocate_register(&interfere, &assignments, id, preferred_reg, count)) {
+                     alloc_reg = preferred_reg;
+                     allocated = true;
+                  }
                }
 
                if (!allocated) {
