@@ -187,8 +187,16 @@ Temp emit_extract_vector(isel_context* ctx, Temp src, uint32_t idx, RegClass dst
    }
 
    auto it = ctx->allocated_vec.find(src.id());
-   if (it != ctx->allocated_vec.end())
-      return it->second[idx];
+   if (it != ctx->allocated_vec.end()) {
+      if (it->second[idx].regClass() == dst_rc) {
+         return it->second[idx];
+      } else {
+         assert(typeOf(dst_rc) == vgpr && it->second[idx].type() == sgpr);
+         Temp dst = {ctx->program->allocateId(), dst_rc};
+         emit_v_mov(ctx, it->second[idx], dst);
+         return dst;
+      }
+   }
 
    Temp dst = {ctx->program->allocateId(), dst_rc};
    if (src.size() == sizeOf(dst_rc)) {
@@ -1146,6 +1154,7 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
       mov->getOperand(0) = Operand{instr->value.u32[0]};
       ctx->block->instructions.emplace_back(std::move(mov));
    } else {
+      assert(false && "Vector load_const should be lowered to scalar.");
       std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->def.num_components, 1)};
       for (unsigned i = 0; i < instr->def.num_components; i++)
          vec->getOperand(i) = Operand{instr->value.u32[i]};
@@ -1263,13 +1272,8 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 
 void emit_interp_instr(isel_context *ctx, unsigned idx, unsigned component, Temp src, Temp dst)
 {
-   Temp coord1 = {ctx->program->allocateId(), v1};
-   Temp coord2 = {ctx->program->allocateId(), v1};
-   std::unique_ptr<Instruction> split{create_instruction<Instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, 2)};
-   split->getOperand(0) = Operand(src);
-   split->getDefinition(0) = Definition(coord1);
-   split->getDefinition(1) = Definition(coord2);
-   ctx->block->instructions.emplace_back(std::move(split));
+   Temp coord1 = emit_extract_vector(ctx, src, 0, v1);
+   Temp coord2 = emit_extract_vector(ctx, src, 1, v1);
 
    Temp tmp{ctx->program->allocateId(), v1};
    std::unique_ptr<Interp_instruction> p1{create_instruction<Interp_instruction>(aco_opcode::v_interp_p1_f32, Format::VINTRP, 2, 1)};
@@ -1666,8 +1670,10 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
       vec->getOperand(0) = Operand(ctx->fs_inputs[fs_input::persp_center_p1]);
       vec->getOperand(1) = Operand(ctx->fs_inputs[fs_input::persp_center_p2]);
-      vec->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      vec->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(vec));
+      emit_split_vector(ctx, dst, 2);
       break;
    }
    case nir_intrinsic_load_front_face: {
@@ -3012,6 +3018,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_fmin:
                   case nir_op_fneg:
                   case nir_op_fabs:
+                  case nir_op_fsat:
                   case nir_op_fsign:
                   case nir_op_frcp:
                   case nir_op_frsq:
@@ -3584,6 +3591,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    ctx.program = program.get();
    ctx.options = options;
    ctx.stage = nir->info.stage;
+   nir_lower_load_const_to_scalar(nir);
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
    nir_opt_cse(nir);
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
