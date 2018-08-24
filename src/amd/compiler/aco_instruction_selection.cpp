@@ -684,6 +684,26 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_fsub: {
+      Temp src0 = get_alu_src(ctx, instr->src[0]);
+      Temp src1 = get_alu_src(ctx, instr->src[1]);
+      if (dst.size() == 1) {
+         if (src1.type() == vgpr || src0.type() != vgpr) {
+            emit_vop2_instruction(ctx, instr, aco_opcode::v_sub_f32, dst, false);
+         } else {
+            std::unique_ptr<Instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_subrev_f32, Format::VOP2, 2, 1)};
+            vop2->getOperand(0) = Operand(src1);
+            vop2->getOperand(1) = Operand(src0);
+            vop2->getDefinition(0) = Definition(dst);
+            ctx->block->instructions.emplace_back(std::move(vop2));
+         }
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_fmax: {
       if (dst.size() == 1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_max_f32, dst, true);
