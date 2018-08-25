@@ -3593,7 +3593,9 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    ctx.stage = nir->info.stage;
    nir_lower_load_const_to_scalar(nir);
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
+   nir_copy_prop(nir);
    nir_opt_cse(nir);
+   nir_opt_dce(nir);
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
    nir_index_ssa_defs(func->impl);
    ctx.divergent_vals = nir_divergence_analysis(nir);
