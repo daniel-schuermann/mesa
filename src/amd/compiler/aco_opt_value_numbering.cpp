@@ -28,10 +28,14 @@
 
 #include <unordered_map>
 #include <unordered_set>
-#include <map>
 
 #include "aco_ir.h"
+#include "aco_dominance.cpp"
 
+/*
+ * Implements the algorithm for dominator-tree value numbering
+ * from "Value Numbering" by Briggs, Cooper, and Simpson.
+ */
 
 namespace aco {
 
@@ -80,9 +84,14 @@ struct InstrPred {
          return false;
       if (a->opcode != b->opcode)
          return false;
-      for (unsigned i = 0; i < a->num_operands; i++)
+      for (unsigned i = 0; i < a->num_operands; i++) {
          if (a->getOperand(i).constantValue() != b->getOperand(i).constantValue())
             return false;
+         if (a->getOperand(i).physReg() == exec)
+            return false;
+      }
+      if (a->format == Format::PSEUDO_BRANCH)
+         return false;
       if (a->isVOP3()) {
          VOP3A_instruction* a3 = static_cast<VOP3A_instruction*>(a);
          VOP3A_instruction* b3 = static_cast<VOP3A_instruction*>(b);
@@ -166,26 +175,26 @@ struct InstrPred {
    }
 };
 
-struct lvn_ctx {
-   std::unordered_set<Instruction*, InstrHash, InstrPred> expr_values;
-   std::map<uint32_t, Temp> renames;
-};
-
-
-void lookup_instruction(lvn_ctx& ctx, std::unique_ptr<Instruction>& instr)
+bool lookup_instruction(std::unique_ptr<Instruction>& instr,
+                        std::unordered_set<Instruction*, InstrHash, InstrPred>& expr_values,
+                        std::unordered_map<uint32_t, Temp>& renames,
+                        std::set<unsigned>& worklist)
 {
    for (unsigned i = 0; i < instr->num_operands; i++) {
       if (!instr->getOperand(i).isTemp())
          continue;
-      std::map<uint32_t, Temp>::iterator it = ctx.renames.find(instr->getOperand(i).tempId());
-      if (it != ctx.renames.end())
+      std::unordered_map<uint32_t, Temp>::iterator it = renames.find(instr->getOperand(i).tempId());
+      if (it != renames.end())
          instr->getOperand(i) = Operand(it->second);
    }
 
    if (!instr->num_definitions)
-      return;
+      return false;
 
-   std::pair<std::unordered_set<Instruction*, InstrHash, InstrPred>::iterator, bool> res = ctx.expr_values.emplace(instr.get());
+   // TODO: check if phi instructions are meaningless (i.e. all operands are the same)
+
+   bool process_successors = false;
+   std::pair<std::unordered_set<Instruction*, InstrHash, InstrPred>::iterator, bool> res = expr_values.emplace(instr.get());
 
    /* if there was already an expression with the same value number */
    if (!res.second) {
@@ -193,18 +202,39 @@ void lookup_instruction(lvn_ctx& ctx, std::unique_ptr<Instruction>& instr)
       assert(instr->num_definitions == orig_instr->num_definitions);
       for (unsigned i = 0; i < instr->num_definitions; i++) {
          assert(instr->getDefinition(i).regClass() == orig_instr->getDefinition(i).regClass());
-         ctx.renames.emplace(instr->getDefinition(i).tempId(), orig_instr->getDefinition(i).getTemp());
+         process_successors |= renames.emplace(instr->getDefinition(i).tempId(), orig_instr->getDefinition(i).getTemp()).second;
       }
+      aco_print_instr(instr.get(), stderr);
+      fprintf(stderr, "\n");
    }
+   return process_successors;
 }
 
-void opt_lvn(Program* program)
+
+void value_numbering(Program* program)
 {
-   lvn_ctx ctx;
-   for (auto&& block : program->blocks) {
-      for (std::unique_ptr<Instruction>& instr : block->instructions)
-         lookup_instruction(ctx, instr);
-      ctx.expr_values.clear();
+   std::vector<std::unordered_set<Instruction*, InstrHash, InstrPred>> expr_values(program->blocks.size());
+   std::unordered_map<uint32_t, Temp> renames;
+   /* we only process the logical cfg */
+   std::vector<int> doms = dominator_tree(program).first;
+
+   std::set<unsigned> worklist;
+   for (unsigned i = 0; i < doms.size(); i++)
+      if (doms[i] != -1)
+         worklist.insert(i);
+
+   while (!worklist.empty()) {
+      std::set<unsigned>::iterator it = worklist.begin();
+      unsigned block_idx = *it;
+      worklist.erase(it);
+      std::unique_ptr<Block>& block = program->blocks[block_idx];
+      /* initialize expr_values from idom */
+      expr_values[block_idx] = expr_values[doms[block_idx]];
+      for (std::unique_ptr<Instruction>& instr : block->instructions) {
+         if (lookup_instruction(instr, expr_values[block_idx], renames, worklist))
+            for (Block* succ : block->logical_successors)
+               worklist.insert(succ->index);
+      }
    }
 }
 
