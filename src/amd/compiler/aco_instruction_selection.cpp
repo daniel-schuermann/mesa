@@ -353,12 +353,14 @@ void emit_vopc_instruction_output32(isel_context *ctx, nir_alu_instr *instr, aco
       cmp->getOperand(0) = Operand{tmp};
       cmp->getOperand(1) = Operand{0};
       cmp->getDefinition(0) = Definition{scc_tmp};
+      cmp->getDefinition(0).setFixed({253}); /* scc */
       ctx->block->instructions.emplace_back(std::move(cmp));
 
       std::unique_ptr<Instruction> cselect{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
       cselect->getOperand(0) = Operand{0xFFFFFFFF};
       cselect->getOperand(1) = Operand{0};
       cselect->getOperand(2) = Operand{scc_tmp};
+      cselect->getOperand(2).setFixed({253}); /* scc */
       cselect->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(cselect));
    }
@@ -495,6 +497,7 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
          select->getOperand(0) = Operand(then);
          select->getOperand(1) = Operand(els);
          select->getOperand(2) = Operand(cond);
+         select->getOperand(2).setFixed({253}); /* scc */
          select->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(select));
       } else {
@@ -996,6 +999,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             to_sgpr->getOperand(0) = Operand(0xFFFFFFFF);
             to_sgpr->getOperand(1) = Operand(0);
             to_sgpr->getOperand(2) = Operand(scc);
+            to_sgpr->getOperand(2).setFixed({253}); /* scc */
             to_sgpr->getDefinition(0) = Definition(dst);
             ctx->block->instructions.emplace_back(std::move(to_sgpr));
          }
@@ -1032,6 +1036,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             to_sgpr->getOperand(0) = Operand(0xFFFFFFFF);
             to_sgpr->getOperand(1) = Operand(0);
             to_sgpr->getOperand(2) = Operand(scc);
+            to_sgpr->getOperand(2).setFixed({253}); /* scc */
             to_sgpr->getDefinition(0) = Definition(dst);
             ctx->block->instructions.emplace_back(std::move(to_sgpr));
          }
@@ -1068,6 +1073,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             to_sgpr->getOperand(0) = Operand(0xFFFFFFFF);
             to_sgpr->getOperand(1) = Operand(0);
             to_sgpr->getOperand(2) = Operand(scc);
+            to_sgpr->getOperand(2).setFixed({253}); /* scc */
             to_sgpr->getDefinition(0) = Definition(dst);
             ctx->block->instructions.emplace_back(std::move(to_sgpr));
          }
@@ -1104,6 +1110,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             to_sgpr->getOperand(0) = Operand(0xFFFFFFFF);
             to_sgpr->getOperand(1) = Operand(0);
             to_sgpr->getOperand(2) = Operand(scc);
+            to_sgpr->getOperand(2).setFixed({253}); /* scc */
             to_sgpr->getDefinition(0) = Definition(dst);
             ctx->block->instructions.emplace_back(std::move(to_sgpr));
          }
