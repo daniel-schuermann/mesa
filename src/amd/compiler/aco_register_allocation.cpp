@@ -318,6 +318,7 @@ void register_allocation(Program *program)
 
    std::unordered_map<unsigned, std::pair<PhysReg, unsigned>> assignments;
    std::unordered_map<unsigned, unsigned> temp_assignments;
+   std::unordered_map<unsigned, unsigned> preferences;
    /* First assign fixed regs. */
    for(auto&& block : program->blocks) {
       for (auto&& insn : block->instructions) {
@@ -332,6 +333,17 @@ void register_allocation(Program *program)
             auto& definition = insn->getDefinition(i);
             if (definition.isTemp() && definition.isFixed()) {
                assignments[definition.tempId()] = {definition.physReg(), reg_count(definition.regClass())};
+            }
+         }
+
+         if (insn->opcode == aco_opcode::p_phi || insn->opcode == aco_opcode::p_linear_phi) {
+            for (unsigned i = 0; i < insn->num_operands; i++) {
+               if (insn->getOperand(i).isTemp()) {
+                  for (unsigned j = i + 1; j < insn->num_operands; j++)
+                     preferences.emplace(insn->getOperand(j).tempId(), insn->getOperand(i).tempId());
+                  preferences.emplace(insn->getDefinition(0).tempId(), insn->getOperand(i).tempId());
+                  break;
+               }
             }
          }
       }
@@ -451,6 +463,15 @@ void register_allocation(Program *program)
                   if (can_allocate_register(&interfere, &assignments, id, preferred_reg, count)) {
                      alloc_reg = preferred_reg;
                      allocated = true;
+                  }
+               }
+               if (preferences.find(id) != preferences.end()) {
+                  if (assignments.find(preferences[id]) != assignments.end()) {
+                     unsigned preferred_reg = assignments.find(preferences[id])->second.first.reg;
+                     if (can_allocate_register(&interfere, &assignments, id, preferred_reg, count)) {
+                        alloc_reg = preferred_reg;
+                        allocated = true;
+                     }
                   }
                }
 
