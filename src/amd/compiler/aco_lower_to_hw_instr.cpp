@@ -39,7 +39,7 @@ struct copy_operation {
    unsigned uses;
 };
 
-void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<std::unique_ptr<Instruction>>& new_instructions)
+void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<std::unique_ptr<Instruction>>& new_instructions, chip_class chip_class)
 {
    std::unique_ptr<Instruction> mov;
    std::map<PhysReg, copy_operation>::iterator it = copy_map.begin();
@@ -107,23 +107,32 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<st
       assert(swap.op.regClass() == swap.def.regClass());
       Operand def_as_op = Operand(swap.def.physReg(), swap.def.regClass());
       Definition op_as_def = Definition(swap.op.physReg(), swap.op.regClass());
-      aco_opcode opcode = swap.def.getTemp().type() == RegType::sgpr ? aco_opcode::s_xor_b32 : aco_opcode::v_xor_b32;
-      Format format = swap.def.getTemp().type() == RegType::sgpr ? Format::SOP2 : Format::VOP2;
-      mov.reset(create_instruction<Instruction>(opcode, format, 2, 1));
-      mov->getOperand(0) = swap.op;
-      mov->getOperand(1) = def_as_op;
-      mov->getDefinition(0) = op_as_def;
-      new_instructions.emplace_back(std::move(mov));
-      mov.reset(create_instruction<Instruction>(opcode, format, 2, 1));
-      mov->getOperand(0) = swap.op;
-      mov->getOperand(1) = def_as_op;
-      mov->getDefinition(0) = swap.def;
-      new_instructions.emplace_back(std::move(mov));
-      mov.reset(create_instruction<Instruction>(opcode, format, 2, 1));
-      mov->getOperand(0) = swap.op;
-      mov->getOperand(1) = def_as_op;
-      mov->getDefinition(0) = op_as_def;
-      new_instructions.emplace_back(std::move(mov));
+      if (chip_class >= GFX9 && swap.def.getTemp().type() == RegType::vgpr) {
+         mov.reset(create_instruction<Instruction>(aco_opcode::v_swap_b32, Format::VOP1, 2, 2));
+         mov->getOperand(0) = swap.op;
+         mov->getOperand(1) = def_as_op;
+         mov->getDefinition(0) = swap.def;
+         mov->getDefinition(1) = op_as_def;
+         new_instructions.emplace_back(std::move(mov));
+      } else {
+         aco_opcode opcode = swap.def.getTemp().type() == RegType::sgpr ? aco_opcode::s_xor_b32 : aco_opcode::v_xor_b32;
+         Format format = swap.def.getTemp().type() == RegType::sgpr ? Format::SOP2 : Format::VOP2;
+         mov.reset(create_instruction<Instruction>(opcode, format, 2, 1));
+         mov->getOperand(0) = swap.op;
+         mov->getOperand(1) = def_as_op;
+         mov->getDefinition(0) = op_as_def;
+         new_instructions.emplace_back(std::move(mov));
+         mov.reset(create_instruction<Instruction>(opcode, format, 2, 1));
+         mov->getOperand(0) = swap.op;
+         mov->getOperand(1) = def_as_op;
+         mov->getDefinition(0) = swap.def;
+         new_instructions.emplace_back(std::move(mov));
+         mov.reset(create_instruction<Instruction>(opcode, format, 2, 1));
+         mov->getOperand(0) = swap.op;
+         mov->getOperand(1) = def_as_op;
+         mov->getDefinition(0) = op_as_def;
+         new_instructions.emplace_back(std::move(mov));
+      }
 
       /* change the operand reg of the target's use */
       assert(swap.uses == 1);
@@ -195,7 +204,7 @@ void lower_to_hw_instr(Program* program)
                      reg_idx++;
                   }
                }
-               handle_operands(copy_operations, new_instructions);
+               handle_operands(copy_operations, new_instructions, program->chip_class);
                break;
             }
             case aco_opcode::p_split_vector:
@@ -208,7 +217,7 @@ void lower_to_hw_instr(Program* program)
                   Definition def = instr->getDefinition(i);
                   copy_operations[def.physReg()] = {op, def, 0};
                }
-               handle_operands(copy_operations, new_instructions);
+               handle_operands(copy_operations, new_instructions, program->chip_class);
                break;
             }
             case aco_opcode::p_parallelcopy:
@@ -231,7 +240,7 @@ void lower_to_hw_instr(Program* program)
                      }
                   }
                }
-               handle_operands(copy_operations, new_instructions);
+               handle_operands(copy_operations, new_instructions, program->chip_class);
                break;
             }
             default:
