@@ -34,6 +34,7 @@
 
 #include "nir/nir.h"
 #include "common/ac_binary.h"
+#include "common/amd_family.h"
 #include "aco_opcodes.h"
 
 
@@ -679,6 +680,7 @@ public:
    std::vector<std::unique_ptr<Block>> blocks;
    ac_shader_config* config;
    struct radv_shader_variant_info *info;
+   enum chip_class chip_class;
 
    uint32_t allocateId()
    {
