@@ -87,7 +87,7 @@ void validate(Program* program, FILE * output)
             if (instr->format == Format::SOP1 || instr->format == Format::SOP2) {
                check(instr->getDefinition(0).getTemp().type() == sgpr, "Wrong Definition type for SALU instruction", instr.get());
                for (unsigned i = 0; i < instr->num_operands; i++)
-                 check(instr->getOperand(i).isConstant() || instr->getOperand(i).getTemp().type() <= sgpr,
+                 check(instr->getOperand(i).isConstant() || instr->getOperand(i).isUndefined() || instr->getOperand(i).getTemp().type() <= sgpr,
                        "Wrong Operand type for SALU instruction", instr.get());
             }
          }
@@ -101,7 +101,7 @@ void validate(Program* program, FILE * output)
                check(size == instr->getDefinition(0).size(), "Definition size does not match operand sizes", instr.get());
                if (instr->getDefinition(0).getTemp().type() == sgpr)
                   for (unsigned i = 0; i < instr->num_operands; i++)
-                     check(instr->getOperand(i).isConstant() || instr->getOperand(i).getTemp().type() == sgpr,
+                     check(instr->getOperand(i).isConstant() || instr->getOperand(i).isUndefined() || instr->getOperand(i).getTemp().type() == sgpr,
                            "Wrong Operand type for scalar vector", instr.get());
             } else if (instr->opcode == aco_opcode::p_extract_vector) {
                check(instr->getOperand(0).isTemp() && instr->getOperand(1).isConstant(), "Wrong Operand types", instr.get());

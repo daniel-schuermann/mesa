@@ -45,6 +45,8 @@ void collect_phi_info(phi_info& ctx, std::unique_ptr<Instruction>& phi, std::vec
    assert(!(phi->opcode == aco_opcode::p_phi && phi->getDefinition(0).getTemp().type() == sgpr) && "smart merging for bools not yet implemented.");
    for (unsigned i = 0; i < preds.size(); i++)
    {
+      if (phi->getOperand(i).isUndefined())
+         continue;
       const auto result = ctx.emplace(preds[i]->index, std::vector<std::pair<Definition, Operand>>());
       result.first->second.emplace_back(phi->getDefinition(0), phi->getOperand(i));
    }
