@@ -3588,6 +3588,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    std::unique_ptr<Program> program{new Program};
    program->config = config;
    program->info = info;
+   program->chip_class = options->chip_class;
 
    for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i)
       program->info->user_sgprs_locs.descriptor_sets[i].sgpr_idx = -1;
