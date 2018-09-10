@@ -230,7 +230,6 @@ static constexpr PhysReg exec{126};
 class Operand final
 {
 public:
-   Operand() = default;
    explicit Operand(Temp r) noexcept
    {
       data_.temp = r;
@@ -265,13 +264,10 @@ public:
       else /* Literal Constant */
          setFixed(PhysReg{255});
    };
-#if 0
-   explicit Operand(float v) noexcept
+   explicit Operand() noexcept
    {
-      data_.f = v;
-      control_[2] = 1; /* isConst */
+      control_[4] = 1; /* undefined */
    };
-#endif
    explicit Operand(PhysReg reg, RegClass type) noexcept
    {
       data_.temp = Temp(0, type);
@@ -335,6 +331,11 @@ public:
    bool isLiteral() const noexcept
    {
       return isConstant() && reg_.reg == 255;
+   }
+
+   bool isUndefined() const noexcept
+   {
+      return control_[4];
    }
 
    uint32_t constantValue() const noexcept
