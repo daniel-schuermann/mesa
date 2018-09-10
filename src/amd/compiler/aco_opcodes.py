@@ -731,7 +731,7 @@ VOP1_SPECIAL = [
 ]
 opcode("v_nop", 0, [])
 opcode("v_clrexcp", 0, [])
-opcode("v_swap_b32", 2, [v1,v1], kills_input = [1,1])
+opcode("v_swap_b32", 2, [v1,v1], 81, Format.VOP1, kills_input = [1,1])
 
 VOP1 = dict(VOP1_32).values() + VOP1_64 + VOP1_SPECIAL
 
