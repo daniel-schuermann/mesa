@@ -2389,7 +2389,7 @@ void visit_undef(isel_context *ctx, nir_ssa_undef_instr *instr)
       undef.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size(), 1));
    }
    for (unsigned i = 0; i < dst.size(); i++)
-      undef->getOperand(i) = Operand((unsigned) 0);
+      undef->getOperand(i) = Operand();
    undef->getDefinition(0) = Definition(dst);
    ctx->block->instructions.emplace_back(std::move(undef));
 }

@@ -227,6 +227,16 @@ struct ssa_info {
       return label.test(14);
    }
 
+   void set_undefined()
+   {
+      label.set(15,1);
+   }
+
+   bool is_undefined()
+   {
+      return label.test(15);
+   }
+
 };
 
 struct opt_ctx {
@@ -341,8 +351,11 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       if (!instr->getOperand(i).isTemp())
          continue;
 
-      /* propagate reg->reg of same type */
       ssa_info info = ctx.info[instr->getOperand(i).tempId()];
+      /* propagate undef */
+      if (info.is_undefined())
+         instr->getOperand(i) = Operand();
+      /* propagate reg->reg of same type */
       if (info.is_temp() && info.temp.regClass() == instr->getOperand(i).getTemp().regClass()) {
          instr->getOperand(i) = Operand(ctx.info[instr->getOperand(i).tempId()].temp);
          info = ctx.info[info.temp.id()];
@@ -458,6 +471,8 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
             ctx.info[instr->getDefinition(0).tempId()].set_constant(instr->getOperand(0).constantValue());
       } else if (instr->isDPP()) {
          // TODO
+      } else if (instr->getOperand(0).isUndefined()) {
+         ctx.info[instr->getDefinition(0).tempId()].set_undefined();
       } else {
          assert(instr->getOperand(0).isTemp());
          ctx.info[instr->getDefinition(0).tempId()].set_temp(instr->getOperand(0).getTemp());
