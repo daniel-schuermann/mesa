@@ -49,6 +49,7 @@ void schedule_block(Block* block)
    std::vector<Node> DG;
    DG.reserve(block->instructions.size());
    std::unordered_map<unsigned, Node*> map;
+   Node* latest_scc_write = nullptr;
 
    unsigned j = 0;
    while (j < block->instructions.size()) {
@@ -65,8 +66,19 @@ void schedule_block(Block* block)
    {
       DG.emplace_back(std::move(block->instructions[j]));
       Node* node = &DG.back();
-      for (unsigned i = 0; i < node->instr->num_definitions; i++)
+      for (unsigned i = 0; i < node->instr->num_definitions; i++) {
          map.emplace(node->instr->getDefinition(i).tempId(), node);
+         if (node->instr->getDefinition(i).isFixed() &&
+             node->instr->getDefinition(i).physReg().reg == 253) {
+            if (latest_scc_write) {
+               auto test = node->children.emplace(latest_scc_write);
+               if (test.second)
+                  latest_scc_write->succ_count++;
+            }
+
+            latest_scc_write = node;
+         }
+      }
 
       for (unsigned i = 0; i < node->instr->num_operands; i++) {
          Operand op = node->instr->getOperand(i);
@@ -78,8 +90,13 @@ void schedule_block(Block* block)
             if (test.second)
                it->second->succ_count++;
             /* that's a workaround to make the def of an scc temp the immediate predecessor */
-            if (op.isFixed())
-               node->imm_dep = it->second;
+            if (op.isFixed() && op.physReg().reg == 253) {
+               node->imm_dep = latest_scc_write;
+               auto test = node->children.emplace(latest_scc_write);
+               if (test.second)
+                  latest_scc_write->succ_count++;
+               latest_scc_write = node;
+            }
          }
       }
       j++;
@@ -162,14 +179,9 @@ void schedule_block(Block* block)
 
 void schedule_program(Program* program)
 {
-
-   for (auto&& block : program->blocks) {
+   for (auto&& block : program->blocks)
       schedule_block(block.get());
-
-   }
-
 }
-
 
 }
  
