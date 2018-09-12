@@ -62,8 +62,8 @@ struct ssa_info {
       uint32_t val;
    };
    Instruction* instr;
-   uint16_t uses;
-   std::bitset<16> label;
+   uint32_t uses;
+   std::bitset<32> label;
 
    void set_vec(Instruction* vec)
    {
@@ -235,6 +235,17 @@ struct ssa_info {
    bool is_undefined()
    {
       return label.test(15);
+   }
+
+   void set_vcc(Temp vcc)
+   {
+      label.set(16,1);
+      temp = vcc;
+   }
+
+   bool is_vcc()
+   {
+      return label.test(16);
    }
 
 };
@@ -517,6 +528,16 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       }
       break;
    }
+   case aco_opcode::v_cndmask_b32:
+      if (instr->getOperand(0).isConstant() && instr->getOperand(0).constantValue() == 0x0 &&
+          instr->getOperand(1).isConstant() && instr->getOperand(1).constantValue() == 0xFFFFFFFF)
+         ctx.info[instr->getDefinition(0).tempId()].set_vcc(instr->getOperand(2).getTemp());
+      break;
+   case aco_opcode::v_cmp_lg_u32:
+      if (instr->getOperand(0).isConstant() && instr->getOperand(0).constantValue() == 0 &&
+          instr->getOperand(1).isTemp() && ctx.info[instr->getOperand(1).tempId()].is_vcc())
+         ctx.info[instr->getDefinition(0).tempId()].set_temp(ctx.info[instr->getOperand(1).tempId()].temp);
+      break;
    default:
       break;
    }
