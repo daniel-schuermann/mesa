@@ -175,41 +175,66 @@ struct InstrPred {
    }
 };
 
-bool lookup_instruction(std::unique_ptr<Instruction>& instr,
-                        std::unordered_set<Instruction*, InstrHash, InstrPred>& expr_values,
-                        std::unordered_map<uint32_t, Temp>& renames,
-                        std::set<unsigned>& worklist)
+
+void process_block(std::unique_ptr<Block>& block,
+                   std::unordered_set<Instruction*, InstrHash, InstrPred>& expr_values,
+                   std::unordered_map<uint32_t, Temp>& renames,
+                   std::set<unsigned>& worklist)
 {
-   for (unsigned i = 0; i < instr->num_operands; i++) {
-      if (!instr->getOperand(i).isTemp())
-         continue;
-      std::unordered_map<uint32_t, Temp>::iterator it = renames.find(instr->getOperand(i).tempId());
-      if (it != renames.end())
-         instr->getOperand(i) = Operand(it->second);
-   }
-
-   if (!instr->num_definitions)
-      return false;
-
-   // TODO: check if phi instructions are meaningless (i.e. all operands are the same)
-
    bool process_successors = false;
-   std::pair<std::unordered_set<Instruction*, InstrHash, InstrPred>::iterator, bool> res = expr_values.emplace(instr.get());
+   Instruction* last_sopc = nullptr;
+   std::vector<std::unique_ptr<Instruction>>::iterator it = block->instructions.begin();
 
-   /* if there was already an expression with the same value number */
-   if (!res.second) {
-      Instruction* orig_instr = *(res.first);
-      assert(instr->num_definitions == orig_instr->num_definitions);
-      for (unsigned i = 0; i < instr->num_definitions; i++) {
-         assert(instr->getDefinition(i).regClass() == orig_instr->getDefinition(i).regClass());
-         process_successors |= renames.emplace(instr->getDefinition(i).tempId(), orig_instr->getDefinition(i).getTemp()).second;
+   while ((*it)->opcode != aco_opcode::p_logical_start)
+      ++it;
+
+   while ((*it)->opcode != aco_opcode::p_logical_end) {
+      std::unique_ptr<Instruction>& instr = *it;
+      /* first, rename operands */
+      for (unsigned i = 0; i < instr->num_operands; i++) {
+         if (!instr->getOperand(i).isTemp())
+            continue;
+         std::unordered_map<uint32_t, Temp>::iterator it = renames.find(instr->getOperand(i).tempId());
+         if (it != renames.end())
+            instr->getOperand(i) = Operand(it->second);
       }
-      aco_print_instr(instr.get(), stderr);
-      fprintf(stderr, "\n");
-   }
-   return process_successors;
-}
 
+      if (!instr->num_definitions) {
+         ++it;
+         continue;
+      }
+
+      // TODO: check if phi instructions are meaningless (i.e. all operands are the same)
+
+      std::pair<std::unordered_set<Instruction*, InstrHash, InstrPred>::iterator, bool> res = expr_values.emplace(instr.get());
+
+      /* if there was already an expression with the same value number */
+      if (!res.second) {
+         Instruction* orig_instr = *(res.first);
+         assert(instr->num_definitions == orig_instr->num_definitions);
+         for (unsigned i = 0; i < instr->num_definitions; i++) {
+            assert(instr->getDefinition(i).regClass() == orig_instr->getDefinition(i).regClass());
+            process_successors |= renames.emplace(instr->getDefinition(i).tempId(), orig_instr->getDefinition(i).getTemp()).second;
+         }
+      } else if (instr->isSALU() &&
+                 instr->getDefinition(instr->num_definitions - 1).isFixed() &&
+                 instr->getDefinition(instr->num_definitions - 1).physReg().reg == 253) { /* scc */
+         /* if the current instructions overwrites scc, we remove the previous scc instruction from the map */
+         if (last_sopc)
+            expr_values.erase(last_sopc);
+
+         last_sopc = instr->getDefinition(instr->num_definitions - 1).isTemp() ? instr.get() : nullptr;
+      }
+      ++it;
+   }
+   if (last_sopc)
+      expr_values.erase(last_sopc);
+
+   if (process_successors) {
+      for (Block* succ : block->logical_successors)
+         worklist.insert(succ->index);
+   }
+}
 
 void value_numbering(Program* program)
 {
@@ -230,11 +255,7 @@ void value_numbering(Program* program)
       std::unique_ptr<Block>& block = program->blocks[block_idx];
       /* initialize expr_values from idom */
       expr_values[block_idx] = expr_values[doms[block_idx]];
-      for (std::unique_ptr<Instruction>& instr : block->instructions) {
-         if (lookup_instruction(instr, expr_values[block_idx], renames, worklist))
-            for (Block* succ : block->logical_successors)
-               worklist.insert(succ->index);
-      }
+      process_block(block, expr_values[block_idx], renames, worklist);
    }
 }
 
