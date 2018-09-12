@@ -37,13 +37,20 @@
 {
    std::set<Temp> live_sgprs;
    std::set<Temp> live_vgprs;
+   unsigned vgpr_demand = 0;
+   unsigned sgpr_demand = 0;
+   block->vgpr_demand = 0;
+   block->sgpr_demand = 0;
    /* first, insert the live-outs from this block into our temporary sets */
    for (std::set<Temp>::iterator it = live_temps[block->index].begin(); it != live_temps[block->index].end(); ++it)
    {
-      if ((*it).type() == vgpr)
+      if ((*it).type() == vgpr) {
          live_vgprs.insert(*it);
-      else
+         vgpr_demand += (*it).size();
+      } else {
          live_sgprs.insert(*it);
+         sgpr_demand += (*it).size();
+      }
    }
 
    /* traverse the instructions backwards */
@@ -55,10 +62,11 @@
       {
          auto& definition = insn->getDefinition(i);
          if (definition.isTemp()) {
-            if (definition.getTemp().type() == vgpr)
-               live_vgprs.erase(definition.getTemp());
-            else
-               live_sgprs.erase(definition.getTemp());
+            if (definition.getTemp().type() == vgpr) {
+               vgpr_demand -= definition.size() * live_vgprs.erase(definition.getTemp());
+             } else {
+               sgpr_demand -= definition.size() * live_sgprs.erase(definition.getTemp());
+            }
          }
       }
 
@@ -84,12 +92,19 @@
       {
          auto& operand = insn->getOperand(i);
          if (operand.isTemp()) {
-            if (operand.getTemp().type() == vgpr)
-               live_vgprs.insert(operand.getTemp());
-            else
-               live_sgprs.insert(operand.getTemp());
+            if (operand.getTemp().type() == vgpr) {
+               auto d = live_vgprs.insert(operand.getTemp());
+               if (d.second)
+                  vgpr_demand += operand.size();
+            } else {
+               auto d = live_sgprs.insert(operand.getTemp());
+               if (d.second)
+                  sgpr_demand += operand.size();
+            }
          }
       }
+      block->vgpr_demand = std::max(block->vgpr_demand, vgpr_demand);
+      block->sgpr_demand = std::max(block->sgpr_demand, sgpr_demand);
    }
 
    /* now, we have the live-in sets and need to merge them into the live-out sets */
@@ -110,12 +125,15 @@
    }
 
    assert(block->linear_predecessors.size() != 0 || (live_vgprs.empty() && live_sgprs.empty()));
+   assert(block->linear_predecessors.size() != 0 || (vgpr_demand == 0 && sgpr_demand == 0));
 }
 
 std::vector<std::set<Temp>> live_temps_at_end_of_block(Program* program)
 {
    std::vector<std::set<Temp>> result(program->blocks.size());
    std::set<unsigned> worklist;
+   program->vgpr_demand = 0;
+   program->sgpr_demand = 0;
    /* this implementation assumes that the block idx corresponds to the block's position in program->blocks vector */
    for (auto& block : program->blocks)
       worklist.insert(block->index);
@@ -124,6 +142,8 @@ std::vector<std::set<Temp>> live_temps_at_end_of_block(Program* program)
       unsigned block_idx = *b_it;
       worklist.erase(block_idx);
       process_live_temps_per_block(result, program->blocks[block_idx].get(), worklist);
+      program->vgpr_demand = std::max(program->vgpr_demand, program->blocks[block_idx]->vgpr_demand);
+      program->sgpr_demand = std::max(program->sgpr_demand, program->blocks[block_idx]->sgpr_demand);
    }
 
    return result;
