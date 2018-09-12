@@ -178,7 +178,7 @@ struct InstrPred {
 
 void process_block(std::unique_ptr<Block>& block,
                    std::unordered_set<Instruction*, InstrHash, InstrPred>& expr_values,
-                   std::unordered_map<uint32_t, Temp>& renames,
+                   std::unordered_map<uint32_t, Operand>& renames,
                    std::set<unsigned>& worklist)
 {
    bool process_successors = false;
@@ -194,9 +194,9 @@ void process_block(std::unique_ptr<Block>& block,
       for (unsigned i = 0; i < instr->num_operands; i++) {
          if (!instr->getOperand(i).isTemp())
             continue;
-         std::unordered_map<uint32_t, Temp>::iterator it = renames.find(instr->getOperand(i).tempId());
+         std::unordered_map<uint32_t, Operand>::iterator it = renames.find(instr->getOperand(i).tempId());
          if (it != renames.end())
-            instr->getOperand(i) = Operand(it->second);
+            instr->getOperand(i) = it->second;
       }
 
       if (!instr->num_definitions) {
@@ -214,7 +214,10 @@ void process_block(std::unique_ptr<Block>& block,
          assert(instr->num_definitions == orig_instr->num_definitions);
          for (unsigned i = 0; i < instr->num_definitions; i++) {
             assert(instr->getDefinition(i).regClass() == orig_instr->getDefinition(i).regClass());
-            process_successors |= renames.emplace(instr->getDefinition(i).tempId(), orig_instr->getDefinition(i).getTemp()).second;
+            Operand new_op = Operand(orig_instr->getDefinition(i).getTemp());
+            if (orig_instr->getDefinition(i).isFixed())
+               new_op.setFixed(instr->getDefinition(i).physReg());
+            process_successors |= renames.emplace(instr->getDefinition(i).tempId(), new_op).second;
          }
       } else if (instr->isSALU() &&
                  instr->getDefinition(instr->num_definitions - 1).isFixed() &&
@@ -239,7 +242,7 @@ void process_block(std::unique_ptr<Block>& block,
 void value_numbering(Program* program)
 {
    std::vector<std::unordered_set<Instruction*, InstrHash, InstrPred>> expr_values(program->blocks.size());
-   std::unordered_map<uint32_t, Temp> renames;
+   std::unordered_map<uint32_t, Operand> renames;
    /* we only process the logical cfg */
    std::vector<int> doms = dominator_tree(program).first;
 
