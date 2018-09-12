@@ -247,12 +247,14 @@ Temp convert_pointer_to_64_bit(isel_context *ctx, Temp ptr)
       return ptr64;
 }
 
-void emit_sop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst)
+void emit_sop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst, bool scc)
 {
-   std::unique_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(op, Format::SOP2, 2, 1)};
+   std::unique_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(op, Format::SOP2, 2, scc ? 2 : 1)};
    sop2->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
    sop2->getOperand(1) = Operand(get_alu_src(ctx, instr->src[1]));
    sop2->getDefinition(0) = Definition(dst);
+   if (scc)
+      sop2->getDefinition(1) = Definition(PhysReg{253}, b);
    ctx->block->instructions.emplace_back(std::move(sop2));
 }
 
@@ -452,25 +454,28 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
          assert(cond.regClass() == s2 && then.regClass() == s2 && els.regClass() == s2);
 
          std::unique_ptr<SOP2_instruction> sop2;
-         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_and_b64, Format::SOP2, 2, 1));
+         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_and_b64, Format::SOP2, 2, 2));
          sop2->getOperand(0) = Operand(cond);
          sop2->getOperand(1) = Operand(then);
          then = Temp(ctx->program->allocateId(), s2);
          sop2->getDefinition(0) = Definition(then);
+         sop2->getDefinition(1) = Definition(PhysReg{253}, b);
          ctx->block->instructions.emplace_back(std::move(sop2));
 
-         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 1));
+         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2));
          sop2->getOperand(0) = Operand(els);
          sop2->getOperand(1) = Operand(cond);
          els = Temp(ctx->program->allocateId(), s2);
          sop2->getDefinition(0) = Definition(els);
+         sop2->getDefinition(1) = Definition(PhysReg{253}, b);
          ctx->block->instructions.emplace_back(std::move(sop2));
 
-         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
+         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 2));
          sop2->getOperand(0) = Operand(then);
          sop2->getOperand(1) = Operand(els);
          then = Temp(ctx->program->allocateId(), s2);
          sop2->getDefinition(0) = Definition(dst);
+         sop2->getDefinition(1) = Definition(PhysReg{253}, b);
          ctx->block->instructions.emplace_back(std::move(sop2));
       }
    } else { /* condition is uniform */
@@ -554,9 +559,10 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          emit_vop1_instruction(ctx, instr, aco_opcode::v_not_b32, dst);
       } else if (dst.type() == sgpr) {
          aco_opcode opcode = dst.size() == 1 ? aco_opcode::s_not_b32 : aco_opcode::s_not_b64;
-         std::unique_ptr<Instruction> sop1{create_instruction<SOP1_instruction>(opcode, Format::SOP1, 1, 1)};
+         std::unique_ptr<Instruction> sop1{create_instruction<SOP1_instruction>(opcode, Format::SOP1, 1, 2)};
          sop1->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
          sop1->getDefinition(0) = Definition(dst);
+         sop1->getDefinition(1) = Definition(PhysReg{253}, b);
          ctx->block->instructions.emplace_back(std::move(sop1));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
@@ -569,9 +575,9 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (dst.regClass() == v1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_or_b32, dst, true);
       } else if (dst.regClass() == s1) {
-         emit_sop2_instruction(ctx, instr, aco_opcode::s_or_b32, dst);
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_or_b32, dst, true);
       } else if (dst.regClass() == s2) {
-         emit_sop2_instruction(ctx, instr, aco_opcode::s_or_b64, dst);
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_or_b64, dst, true);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -583,9 +589,9 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (dst.regClass() == v1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_and_b32, dst, true);
       } else if (dst.regClass() == s1) {
-         emit_sop2_instruction(ctx, instr, aco_opcode::s_and_b32, dst);
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_and_b32, dst, true);
       } else if (dst.regClass() == s2) {
-         emit_sop2_instruction(ctx, instr, aco_opcode::s_and_b64, dst);
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_and_b64, dst, true);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -620,7 +626,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (dst.regClass() == v1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_add_u32, dst, true);
       } else if (dst.regClass() == s1) {
-         emit_sop2_instruction(ctx, instr, aco_opcode::s_add_i32, dst);
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_add_i32, dst, true);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -636,7 +642,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          mul->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(mul));
       } else if (dst.regClass() == s1) {
-         emit_sop2_instruction(ctx, instr, aco_opcode::s_mul_i32, dst);
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_mul_i32, dst, false);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -1461,21 +1467,23 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
          const_index = const_index + offset;
       } else {
          std::unique_ptr<Instruction> tmp;
-         tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1));
+         tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 2));
          tmp->getOperand(0) = Operand(offset);
          tmp->getOperand(1) = Operand(index);
          index = {ctx->program->allocateId(), index.regClass()};
          tmp->getDefinition(0) = Definition(index);
+         tmp->getDefinition(1) = Definition(PhysReg{253}, b);
          ctx->block->instructions.emplace_back(std::move(tmp));
       }
    }
 
    std::unique_ptr<Instruction> tmp;
-   tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1));
+   tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 2));
    tmp->getOperand(0) = nir_const_index ? Operand(const_index) : Operand(index);
    tmp->getOperand(1) = Operand(desc_ptr);
    index = {ctx->program->allocateId(), index.regClass()};
    tmp->getDefinition(0) = Definition(index);
+   tmp->getDefinition(1) = Definition(PhysReg{253}, b);
    ctx->block->instructions.emplace_back(std::move(tmp));
 
    index = convert_pointer_to_64_bit(ctx, index);
@@ -1589,11 +1597,12 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp index = get_ssa_temp(ctx, instr->src[0].ssa);
    unsigned offset = nir_intrinsic_base(instr);
    if (offset != 0) { // TODO check if index != 0 as well
-      std::unique_ptr<SOP2_instruction> add{create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1)};
+      std::unique_ptr<SOP2_instruction> add{create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 2)};
       add->getOperand(0) = Operand(offset);
       add->getOperand(1) = Operand(index);
       index = {ctx->program->allocateId(), s1};
       add->getDefinition(0) = Definition(index);
+      add->getDefinition(1) = Definition(PhysReg{253}, b);
       ctx->block->instructions.emplace_back(std::move(add));
    }
    Temp ptr = ctx->push_constants;
@@ -1645,10 +1654,11 @@ void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
     cmp->getDefinition(0).setHint(vcc);
     ctx->block->instructions.emplace_back(std::move(cmp));
 
-   std::unique_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 1)};
+   std::unique_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2)};
    sop2->getOperand(0) = Operand(exec, s2);
    sop2->getOperand(1) = Operand(cond);
    sop2->getDefinition(0) = Definition(exec, s2);
+   sop2->getDefinition(1) = Definition(PhysReg{253}, b);
    ctx->block->instructions.emplace_back(std::move(sop2));
 
    std::unique_ptr<SOPP_instruction> branch{create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_execnz, Format::SOPP, 1, 0)};
@@ -1821,8 +1831,9 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
                index = indirect;
                index_set = true;
             } else {
-               std::unique_ptr<Instruction> add{create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1)};
+               std::unique_ptr<Instruction> add{create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 2)};
                add->getDefinition(0) = Definition{ctx->program->allocateId(), s1};
+               add->getDefinition(1) = Definition(PhysReg{253}, b);
                add->getOperand(0) = Operand(index);
                add->getOperand(1) = Operand(indirect);
                ctx->block->instructions.emplace_back(std::move(add));
@@ -1904,11 +1915,12 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
       Temp t = {ctx->program->allocateId(), s1};
       mul->getDefinition(0) = Definition(t);
       ctx->block->instructions.emplace_back(std::move(mul));
-      std::unique_ptr<SOP2_instruction> add{create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 1)};
+      std::unique_ptr<SOP2_instruction> add{create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 2)};
       add->getOperand(0) = Operand(offset);
       add->getOperand(1) = Operand(t);
       t = {ctx->program->allocateId(), s1};
       add->getDefinition(0) = Definition(t);
+      add->getDefinition(1) = Definition(PhysReg{253}, b);
       ctx->block->instructions.emplace_back(std::move(add));
       off = Operand(t);
    }
@@ -2125,28 +2137,31 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       for (unsigned i = 0; i < offset.size(); i++) {
          acc = emit_extract_vector(ctx, offset, i, s1);
 
-         tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_and_b32, Format::SOP2, 2, 1));
+         tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_and_b32, Format::SOP2, 2, 2));
          tmp_instr->getOperand(0) = Operand(acc);
          tmp_instr->getOperand(1) = Operand((uint32_t) 0x3F);
          acc = {ctx->program->allocateId(), s1};
          tmp_instr->getDefinition(0) = Definition(acc);
+         tmp_instr->getDefinition(1) = Definition(PhysReg{253}, b);
          ctx->block->instructions.emplace_back(std::move(tmp_instr));
 
          if (i == 0) {
             pack = acc;
          } else {
-            tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_lshl_b32, Format::SOP2, 2, 1));
+            tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_lshl_b32, Format::SOP2, 2, 2));
             tmp_instr->getOperand(0) = Operand(pack);
             tmp_instr->getOperand(1) = Operand((uint32_t) 8 * i);
             acc = {ctx->program->allocateId(), s1};
             tmp_instr->getDefinition(0) = Definition(acc);
+            tmp_instr->getDefinition(1) = Definition(PhysReg{253}, b);
             ctx->block->instructions.emplace_back(std::move(tmp_instr));
 
-            tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b32, Format::SOP2, 2, 1));
+            tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b32, Format::SOP2, 2, 2));
             tmp_instr->getOperand(0) = Operand(pack);
             tmp_instr->getOperand(1) = Operand(acc);
             pack = {ctx->program->allocateId(), s1};
             tmp_instr->getDefinition(0) = Definition(pack);
+            tmp_instr->getDefinition(1) = Definition(PhysReg{253}, b);
             ctx->block->instructions.emplace_back(std::move(tmp_instr));
          }
       }
@@ -2444,11 +2459,12 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
          ctx->cf_info.parent_loop.has_divergent_break = true;
 
          /* remove current exec mask from active */
-         aco_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 1));
+         aco_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2));
          aco_instr->getOperand(0) = Operand(ctx->cf_info.parent_loop.active_mask);
          aco_instr->getOperand(1) = Operand(exec, s2);
          ctx->cf_info.parent_loop.active_mask = {ctx->program->allocateId(), s2};
          aco_instr->getDefinition(0) = Definition(ctx->cf_info.parent_loop.active_mask);
+         aco_instr->getDefinition(1) = Definition(PhysReg{253}, b);
          ctx->block->instructions.emplace_back(std::move(aco_instr));
 
          /* set exec zero */
@@ -2612,13 +2628,14 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
       append_logical_end(ctx->block);
       if (ctx->cf_info.parent_loop.has_divergent_continue) {
          /* restore all 'continue' lanes */
-         restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
+         restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 2));
          restore->getOperand(0) = Operand{exec, s2};
          if (ctx->cf_info.parent_loop.has_divergent_break)
             restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.active_mask);
          else
             restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.orig_exec);
          restore->getDefinition(0) = Definition{exec, s2};
+         restore->getDefinition(1) = Definition(PhysReg{253}, b);
          ctx->block->instructions.emplace_back(std::move(restore));
       }
 
@@ -2648,10 +2665,11 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    ctx->program->blocks.emplace_back(loop_exit);
    /* restore original exec */
    if (ctx->cf_info.parent_loop.has_divergent_break || ctx->cf_info.parent_loop.has_divergent_continue) {
-      restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1));
+      restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 2));
       restore->getOperand(0) = Operand{exec, s2};
       restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.orig_exec);
       restore->getDefinition(0) = Definition{exec, s2};
+      restore->getDefinition(1) = Definition(PhysReg{253}, b);
       ctx->block->instructions.emplace_back(std::move(restore));
    }
 
@@ -2823,18 +2841,20 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       append_logical_end(BB_if);
 
       /* create the exec mask for then branch */
-      std::unique_ptr<SOP1_instruction> set_exec{create_instruction<SOP1_instruction>(aco_opcode::s_and_saveexec_b64, Format::SOP1, 1, 1)};
+      std::unique_ptr<SOP1_instruction> set_exec{create_instruction<SOP1_instruction>(aco_opcode::s_and_saveexec_b64, Format::SOP1, 1, 2)};
       set_exec->getOperand(0) = Operand(cond);
       Temp orig_exec = {ctx->program->allocateId(), s2};
       set_exec->getDefinition(0) = Definition(orig_exec);
+      set_exec->getDefinition(1) = Definition(PhysReg{253}, b);
       BB_if->instructions.push_back(std::move(set_exec));
 
       /* create the exec mask for else branch */
-      std::unique_ptr<SOP2_instruction> nand{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 1)};
+      std::unique_ptr<SOP2_instruction> nand{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2)};
       nand->getOperand(0) = Operand(orig_exec);
       nand->getOperand(1) = Operand(cond);
       Temp else_mask = {ctx->program->allocateId(), s2};
       nand->getDefinition(0) = Definition(else_mask);
+      nand->getDefinition(1) = Definition(PhysReg{253}, b);
       BB_if->instructions.push_back(std::move(nand));
 
       /* branch to linear then block */
@@ -2968,10 +2988,11 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       ctx->cf_info.has_continue = false;
 
       /* restore original exec mask */
-      std::unique_ptr<SOP2_instruction> restore{create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 1)};
+      std::unique_ptr<SOP2_instruction> restore{create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 2)};
       restore->getOperand(0) = Operand(exec, s2);
       restore->getOperand(1) = Operand(then_mask);
       restore->getDefinition(0) = Definition(exec, s2);
+      restore->getDefinition(1) = Definition(PhysReg{253}, b);
       BB_endif->instructions.emplace_back(std::move(restore));
 
       append_logical_start(BB_endif);
@@ -3564,9 +3585,10 @@ void add_startpgm(struct isel_context *ctx)
 
    ctx->block->instructions.push_back(std::move(startpgm));
 
-   std::unique_ptr<Instruction> wqm{create_instruction<Instruction>(aco_opcode::s_wqm_b64, Format::SOP1, 1, 1)};
+   std::unique_ptr<Instruction> wqm{create_instruction<Instruction>(aco_opcode::s_wqm_b64, Format::SOP1, 1, 2)};
    wqm->getOperand(0) = Operand(PhysReg{126}, s2);
    wqm->getDefinition(0) = Definition(PhysReg{126}, s2);
+   wqm->getDefinition(1) = Definition(PhysReg{253}, b);
    ctx->block->instructions.push_back(std::move(wqm));
 
    append_logical_start(ctx->block);
