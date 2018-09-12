@@ -673,12 +673,16 @@ struct Block {
    std::vector<Block*> linear_predecessors;
    std::vector<Block*> logical_successors;
    std::vector<Block*> linear_successors;
+   unsigned vgpr_demand;
+   unsigned sgpr_demand;
 };
 
 
 class Program final {
 public:
    std::vector<std::unique_ptr<Block>> blocks;
+   unsigned vgpr_demand = 0;
+   unsigned sgpr_demand = 0;
    ac_shader_config* config;
    struct radv_shader_variant_info *info;
    enum chip_class chip_class;
