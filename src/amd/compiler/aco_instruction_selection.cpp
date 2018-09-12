@@ -424,7 +424,21 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
    Temp els = get_alu_src(ctx, instr->src[2]);
 
    if (ctx->divergent_vals[instr->dest.dest.ssa.index]) {
-      Temp cond = extract_divergent_cond32(ctx, cond32);
+      Temp cond;
+      if (cond32.type() == vgpr) {
+         cond = extract_divergent_cond32(ctx, cond32);
+      } else {
+         Temp scc_tmp = extract_uniform_cond32(ctx, cond32);
+         std::unique_ptr<Instruction> cselect{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b64, Format::SOP2, 3, 1)};
+         cselect->getOperand(0) = Operand{0xFFFFFFFF};
+         cselect->getOperand(1) = Operand{0};
+         cselect->getOperand(2) = Operand{scc_tmp};
+         cselect->getOperand(2).setFixed({253});
+         cond = Temp{ctx->program->allocateId(), s2};
+         cselect->getDefinition(0) = Definition(cond);
+         cselect->getDefinition(0).setHint(vcc);
+         ctx->block->instructions.emplace_back(std::move(cselect));
+      }
       if (dst.type() == vgpr) {
          if (dst.size() == 1) {
             if (then.type() != vgpr) {
