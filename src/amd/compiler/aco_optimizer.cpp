@@ -811,7 +811,8 @@ void select_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       bool is_used = false;
       for (unsigned i = 0; i < instr->num_definitions; i++)
       {
-         if (instr->getDefinition(i).isFixed() || ctx.info[instr->getDefinition(i).tempId()].uses) {
+         if ((instr->getDefinition(i).isFixed() && instr->getDefinition(i).physReg().reg != 253)
+             || ctx.info[instr->getDefinition(i).tempId()].uses) {
             is_used = true;
             break;
          }
