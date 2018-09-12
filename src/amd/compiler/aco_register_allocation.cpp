@@ -339,7 +339,7 @@ void register_allocation(Program *program)
          /* also add some affinities */
          if (insn->opcode == aco_opcode::p_phi || insn->opcode == aco_opcode::p_linear_phi) {
             unsigned preferred = insn->getDefinition(0).tempId();
-            unsigned op_idx = -1;
+            unsigned op_idx = insn->num_operands;
             std::vector<Block*>& preds = insn->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
             for (unsigned i = 0; i < insn->num_operands; i++) {
                if (preds[i]->index < block->index && insn->getOperand(i).isTemp()) {
@@ -352,7 +352,7 @@ void register_allocation(Program *program)
                if (insn->getOperand(i).isTemp() && i != op_idx)
                   preferences.emplace(insn->getOperand(i).tempId(), preferred);
             }
-            if (op_idx != -1)
+            if (op_idx < insn->num_operands)
                preferences.emplace(insn->getDefinition(0).tempId(), preferred);
          }
       }
