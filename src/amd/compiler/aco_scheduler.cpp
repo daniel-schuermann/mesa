@@ -122,14 +122,15 @@ void schedule_block(Block* block)
       /* calculate EST */
       node.est = 1;
       for (Node* child : node.children) {
-         int time = child->instr->format == Format::SMEM ? 5 : 1;
+         int time = child->instr->format == Format::SMEM ? 15 : 1;
          time = child->instr->format == Format::MIMG ? 8 : time;
          time = child->instr->format == Format::MUBUF ? 8 : time;
          node.est = std::max(node.est, time + child->est);
       }
+      node.est -= (uint32_t) node.instr->format & (uint32_t) Format::DPP ? -2 : 0;
 
       /* calculate latency */
-      node.latency = node.instr->format == Format::SMEM ? 5 : 1;
+      node.latency = node.instr->format == Format::SMEM ? 15 : 1;
       node.latency = node.instr->format == Format::MIMG ? 8 : node.latency;
       node.latency = node.instr->format == Format::MUBUF ? 8 : node.latency;
       node.latency = node.instr->isSALU() ? 0 : node.latency;
