@@ -73,10 +73,14 @@ void validate(Program* program, FILE * output)
                      instr->opcode == aco_opcode::v_readlane_b32,
                      "Wrong Definition type for VALU instruction", instr.get());
                unsigned num_sgpr = 0;
+               unsigned sgpr_idx = instr->num_operands;
                for (unsigned i = 0; i < instr->num_operands; i++)
                {
-                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).getTemp().type() == sgpr)
-                     num_sgpr++;
+                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).getTemp().type() == sgpr) {
+                     if (sgpr_idx == instr->num_operands || instr->getOperand(sgpr_idx).tempId() != instr->getOperand(i).tempId())
+                        num_sgpr++;
+                     sgpr_idx = i;
+                  }
 
                   if (instr->getOperand(i).isConstant() && !instr->getOperand(i).isLiteral())
                      check(i == 0 || (int) instr->format & (int) Format::VOP3A, "Wrong source position for SGPR argument", instr.get());
