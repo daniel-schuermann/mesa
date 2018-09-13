@@ -321,7 +321,8 @@ void register_allocation(Program *program)
    std::unordered_map<unsigned, unsigned> preferences;
    /* First assign fixed regs. */
    for(auto&& block : program->blocks) {
-      for (auto&& insn : block->instructions) {
+      for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
+         std::unique_ptr<Instruction>& insn = *it;
          for(unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp() && operand.isFixed()) {
@@ -473,8 +474,7 @@ void register_allocation(Program *program)
                      alloc_reg = preferred_reg;
                      allocated = true;
                   }
-               }
-               if (preferences.find(id) != preferences.end()) {
+               } else if (preferences.find(id) != preferences.end()) {
                   if (assignments.find(preferences[id]) != assignments.end()) {
                      unsigned preferred_reg = assignments.find(preferences[id])->second.first.reg;
                      if (can_allocate_register(&interfere, &assignments, id, preferred_reg, count)) {
