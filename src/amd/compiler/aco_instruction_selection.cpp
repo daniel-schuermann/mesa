@@ -1140,16 +1140,15 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_fddx:
    case nir_op_fddy: {
       Temp tl = {ctx->program->allocateId(), v1};
-      Temp trbl = {ctx->program->allocateId(), v1};
       emit_quad_swizzle(ctx, get_alu_src(ctx, instr->src[0]), tl, 0, 0, 0, 0);
-      if (instr->op == nir_op_fddx)
-         emit_quad_swizzle(ctx, get_alu_src(ctx, instr->src[0]), trbl, 1, 1, 1, 1);
-      else
-         emit_quad_swizzle(ctx, get_alu_src(ctx, instr->src[0]), trbl, 2, 2, 2, 2);
-      std::unique_ptr<Instruction> sub{create_instruction<VOP2_instruction>(aco_opcode::v_sub_f32, Format::VOP2, 2, 1)};
-      sub->getOperand(0) = Operand(trbl);
+      Format format = (Format) ((uint32_t) Format::VOP2 | (uint32_t) Format::DPP);
+      std::unique_ptr<DPP_instruction> sub{create_instruction<DPP_instruction>(aco_opcode::v_sub_f32, format, 2, 1)};
+      sub->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
       sub->getOperand(1) = Operand(tl);
       sub->getDefinition(0) = Definition(dst);
+      sub->dpp_ctrl = instr->op == nir_op_fddx ? 0x55 : 0xAA;
+      sub->row_mask = 0xF;
+      sub->bank_mask = 0xF;
       ctx->block->instructions.emplace_back(std::move(sub));
       break;
    }
