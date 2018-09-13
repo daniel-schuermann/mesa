@@ -580,6 +580,7 @@ void combine_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
    uint32_t sgpr_idx = 0;
    ssa_info* sgpr_info = nullptr;
    bool has_sgpr = false;
+   uint32_t sgpr_ssa_id = 0;
    /* find 'best' possible sgpr */
    for (unsigned i = 0; i < instr->num_operands; i++)
    {
@@ -591,7 +592,8 @@ void combine_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
          continue;
       if (instr->getOperand(i).getTemp().type() == sgpr) {
          has_sgpr = true;
-         break;
+         sgpr_ssa_id = instr->getOperand(i).tempId();
+         continue;
       }
       ssa_info* info = &ctx.info[instr->getOperand(i).tempId()];
       if (info->is_temp() && info->temp.type() == sgpr) {
@@ -610,6 +612,14 @@ void combine_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
          instr->getOperand(0) = Operand(sgpr_info->temp);
          sgpr_info->uses--;
       }
+   /* we can have two sgprs on one instruction if it is the same sgpr! */
+   } else if (sgpr_info &&
+              sgpr_ssa_id == sgpr_info->temp.id() &&
+              sgpr_info->uses == 1 &&
+              can_use_VOP3(instr)) {
+      to_VOP3(ctx, instr);
+      instr->getOperand(sgpr_idx) = Operand(sgpr_info->temp);
+      sgpr_info->uses--;
    }
 
    /* check if we could apply omod on predecessor */
