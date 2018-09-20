@@ -4,6 +4,7 @@
 #include <map>
 #include <unordered_map>
 #include <set>
+#include <functional>
 
 #include "sid.h"
 
@@ -39,9 +40,7 @@ void insert_copies(Program *program, std::vector<std::set<Temp>> live_out_per_bl
          for (unsigned i = 0; i < insn->operandCount(); ++i) {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp()) {
-            if (operand.tempId() == 0) {
-            aco_print_instr(insn, stderr);
-               assert(operand.tempId() != 0);}
+               assert(operand.tempId() != 0);
                live.insert(operand.getTemp());
                if (operand.isFixed())
                   (operand.getTemp().type() == vgpr ? need_vgpr_move : need_sgpr_move) = true;
@@ -77,189 +76,223 @@ void insert_copies(Program *program, std::vector<std::set<Temp>> live_out_per_bl
 }
 
 
-bool fix_ssa_block(Block* block, std::vector<std::map<unsigned, unsigned>>& renames_per_block, Program* program, std::vector<std::set<Temp>>& live_out_per_block)
+/**
+ * SSA Reconstruction Pass
+ * from Simple and Efficient Construction of Static Single Assignment Form
+ * by M. Braun, S. Buchwald, S. Hack, R. Leißa, C. Mallon, and A. Zwinkau
+ */
+void fix_ssa(Program *program)
 {
-   std::vector<std::unique_ptr<Instruction>> new_instructions;
-   bool reprocess = false;
+   struct phi_info {
+      Instruction* phi;
+      unsigned block_idx;
+      std::set<Instruction*> uses;
 
-   /* compute the live-in renames which is the intersection of the predecessor's renames */
-   std::map<unsigned, unsigned> renames;
-   if (block->logical_predecessors.size()) {
-      std::vector<Block*> preds = block->logical_predecessors;
-      for (Temp temp : live_out_per_block[preds[0]->index]) {
-         if (temp.type() != vgpr)
-            continue;
-         if (renames_per_block[preds[0]->index].find(temp.id()) == renames_per_block[preds[0]->index].end())
-            continue;
-         unsigned idx = renames_per_block[preds[0]->index][temp.id()];
-         bool has_different_def = false;
-         for (unsigned i = 1; i < preds.size(); i++) {
-            if (renames_per_block[preds[i]->index].find(temp.id()) == renames_per_block[preds[i]->index].end() ||
-                renames_per_block[preds[i]->index][temp.id()] != idx) {
-               has_different_def = true;
-               break;
-            }
-         }
-         if (has_different_def)
-            continue;
-         renames.insert({temp.id(), idx});
-      }
-   }
-   if (block->linear_predecessors.size()) {
-      std::vector<Block*> preds = block->linear_predecessors;
-      for (Temp temp : live_out_per_block[preds[0]->index]) {
-         if (temp.type() == vgpr)
-            continue;
-         if (renames_per_block[preds[0]->index].find(temp.id()) == renames_per_block[preds[0]->index].end())
-            continue;
-         unsigned idx = renames_per_block[preds[0]->index][temp.id()];
-         bool has_different_def = false;
-         for (unsigned i = 1; i < preds.size(); i++) {
-            if (renames_per_block[preds[i]->index].find(temp.id()) == renames_per_block[preds[i]->index].end() ||
-                renames_per_block[preds[i]->index][temp.id()] != idx) {
-               has_different_def = true;
-               break;
-            }
-         }
-         if (has_different_def)
-            continue;
-         renames.insert({temp.id(), idx});
-      }
-   }
+   };
+   bool filled[program->blocks.size()];
+   bool sealed[program->blocks.size()];
+   memset(filled, 0, sizeof filled);
+   memset(sealed, 0, sizeof sealed);
+   std::vector<std::unordered_map<unsigned, Temp>> renames(program->blocks.size());
+   std::vector<std::vector<std::unique_ptr<Instruction>>> phis(program->blocks.size());
+   std::vector<std::vector<std::unique_ptr<Instruction>>> incomplete_phis(program->blocks.size());
+   std::map<unsigned, phi_info> phi_map;
+   std::function<Temp(Temp,Block*)> read_variable;
+   std::function<Temp(Temp,Block*)> read_variable_recursive;
+   std::function<Temp(std::map<unsigned, phi_info>::iterator)> try_remove_trivial_phi;
 
-   /* rename operands of each instruction */
-   for (auto&& insn : block->instructions) {
-      /* phi operand renames are found in the corresponding predecessor rename sets */
-      if (insn->opcode == aco_opcode::p_phi || insn->opcode == aco_opcode::p_linear_phi) {
-         std::vector<Block*> preds = insn->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
-         for (unsigned i = 0; i < preds.size(); ++i) {
-            auto& operand = insn->getOperand(i);
-            std::map<unsigned, unsigned> phi_renames = renames_per_block[preds[i]->index];
-            if (operand.isTemp()) {
-               if (phi_renames.find(operand.tempId()) != phi_renames.end())
-                  operand.setTemp(Temp{phi_renames[operand.tempId()], operand.regClass()});
-               else /* if we didn't find the renamed id, we have not yet processed the predecessor block */
-                  reprocess = true;
-            }
-         }
+
+   read_variable = [&](Temp val, Block* block) -> Temp {
+      std::unordered_map<unsigned, Temp>::iterator it = renames[block->index].find(val.id());
+
+      /* check if the variable got a name in the current block */
+      if (it != renames[block->index].end()) {
+         return it->second;
+      /* if not, look up the predecessor blocks */
       } else {
-         for (unsigned i = 0; i < insn->operandCount(); ++i) {
-            auto& operand = insn->getOperand(i);
+         return read_variable_recursive(val, block);
+      }
+   };
+
+   read_variable_recursive = [&](Temp val, Block* block) -> Temp {
+      bool is_logical = val.type() == vgpr;
+      std::vector<Block*>& preds = is_logical ? block->logical_predecessors : block->linear_predecessors;
+      assert(preds.size() > 0);
+
+      Temp new_val;
+      if (!sealed[block->index]) {
+         /* if the block is not sealed yet, we create an incomplete phi (which might later get removed again) */
+         new_val = Temp{program->allocateId(), val.regClass()};
+         aco_opcode opcode = is_logical ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
+         std::unique_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
+         phi->getDefinition(0) = Definition(new_val);
+         for (unsigned i = 0; i < preds.size(); i++)
+            phi->getOperand(i) = Operand(val);
+
+         phi_map.emplace(new_val.id(), phi_info{phi.get(), block->index});
+         incomplete_phis[block->index].emplace_back(std::move(phi));
+
+      } else if (preds.size() == 1) {
+         /* if the block has only one predecessor, just look there for the name */
+         new_val = read_variable(val, preds[0]);
+      } else {
+         /* if there are more predecessors, we create a phi just in case */
+         new_val = Temp{program->allocateId(), val.regClass()};
+         renames[block->index][val.id()] = new_val;
+         aco_opcode opcode = is_logical ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
+         std::unique_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
+
+         phi->getDefinition(0) = Definition(new_val);
+         phi_map.emplace(new_val.id(), phi_info{phi.get(), block->index});
+         Instruction* instr = phi.get();
+
+         /* we look up the name in all predecessors */
+         for (unsigned i = 0; i < preds.size(); i++) {
+            Temp op_temp = read_variable(val, preds[i]);
+            instr->getOperand(i).setTemp(op_temp);
+            if (!(op_temp == new_val) && phi_map.find(op_temp.id()) != phi_map.end())
+               phi_map[op_temp.id()].uses.emplace(instr);
+         }
+         /* we check if the phi is trivial (in which case we return the original value) */
+         new_val = try_remove_trivial_phi(phi_map.find(new_val.id()));
+         // FIXME: that is quite inefficient, better keep temporaries because most phis are trivial
+         phis[block->index].push_back(std::move(phi));
+      }
+      renames[block->index][val.id()] = new_val;
+      return new_val;
+   };
+
+   try_remove_trivial_phi = [&] (std::map<unsigned, phi_info>::iterator info) -> Temp {
+      assert(info->second.block_idx != 0);
+      Instruction* instr = info->second.phi;
+      Temp same = Temp();
+      Temp def = instr->getDefinition(0).getTemp();
+      /* a phi node is trivial iff all operands are the same or the definition of the phi */
+      for (unsigned i = 0; i < instr->num_operands; i++) {
+         Temp op = instr->getOperand(i).getTemp();
+         if (op == same || op == def)
+            continue;
+         if (!(same == Temp())) {
+            /* phi is not trivial */
+            return def;
+         }
+         same = op;
+      }
+      assert(!(same == Temp()));
+
+      /* reroute all uses to same and remove phi */
+      std::vector<std::map<unsigned, phi_info>::iterator> phi_users;
+      for (Instruction* instr : info->second.uses) {
+         for (unsigned i = 0; i < instr->num_operands; i++) {
+            if (instr->getOperand(i).isTemp() && instr->getOperand(i).tempId() == def.id())
+               instr->getOperand(i).setTemp(same);
+         }
+         /* recursively try to remove trivial phis */
+         if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi) {
+            std::map<unsigned, phi_info>::iterator it = phi_map.find(instr->getDefinition(0).tempId());
+            if (it != phi_map.end())
+               phi_users.emplace_back(it);
+         }
+      }
+      renames[info->second.block_idx][same.id()] = same;
+      instr->num_definitions = 0; /* this indicates that the phi can be removed */
+      phi_map.erase(info);
+      for (auto it : phi_users)
+         try_remove_trivial_phi(it);
+
+      return same;
+   };
+
+   for (std::unique_ptr<Block>& block : program->blocks) {
+      for (std::unique_ptr<Instruction>& instr : block->instructions) {
+         /* this is a slight adjustment from the paper as we already have phi nodes */
+         if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi) {
+            Definition def = instr->getDefinition(0);
+            renames[block->index][def.tempId()] = def.getTemp();
+            continue;
+         }
+         /* rename operands */
+         for (unsigned i = 0; i < instr->num_operands; ++i) {
+            auto& operand = instr->getOperand(i);
             if (!operand.isTemp())
                continue;
-            if (renames.find(operand.tempId()) != renames.end()) {
-               operand.setTemp(Temp{renames[operand.tempId()], operand.regClass()});
+            operand.setTemp(read_variable(operand.getTemp(), block.get()));
+            std::map<unsigned, phi_info>::iterator phi = phi_map.find(operand.getTemp().id());
+            if (phi != phi_map.end())
+               phi->second.uses.emplace(instr.get());
+         }
+         /* if an id is already defined, get a new id */
+         for (unsigned i = 0; i < instr->num_definitions; ++i) {
+            auto& definition = instr->getDefinition(i);
+            if (!definition.isTemp())
                continue;
+            if (renames[block->index].find(definition.tempId()) != renames[block->index].end()) {
+               Temp new_temp = Temp{program->allocateId(), definition.regClass()};
+               renames[block->index][definition.tempId()] = new_temp;
+               definition.setTemp(new_temp);
+            } else {
+               renames[block->index][definition.tempId()] = definition.getTemp();
             }
-
-            /* if we didn't find the operand in the renames set, check if it has been processed in all predecessors */
-            Temp temp = operand.getTemp();
-            std::vector<Block*> preds = temp.type() == vgpr ? block->logical_predecessors : block->linear_predecessors;
-            unsigned operand_ids[preds.size()];
-            for (unsigned i = 0; i < preds.size(); i++) {
-               std::map<unsigned, unsigned> pred_renames = renames_per_block[preds[i]->index];
-               if (pred_renames.find(temp.id()) != pred_renames.end())
-                  operand_ids[i] = pred_renames[temp.id()];
-               else
-                  reprocess = true;
-            }
-            if (reprocess) {
-               /* we don't know all operand renames yet */
-               renames[temp.id()] = temp.id();
-               continue;
-            }
-            /* the operand has been renamed differently in the predecessors. we have to insert a phi-node. */
-            aco_opcode opcode = temp.type() == vgpr ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
-            std::unique_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
-            for (unsigned i = 0; i < preds.size(); i++)
-               phi->getOperand(i) = Operand({operand_ids[i], temp.regClass()});
-            phi->getDefinition(0) = Definition{Temp(program->allocateId(), temp.regClass())};
-            operand.setTemp(phi->getDefinition(0).getTemp());
-            renames[temp.id()] = phi->getDefinition(0).tempId();
-            renames[phi->getDefinition(0).tempId()] = phi->getDefinition(0).tempId();
-            new_instructions.emplace_back(std::move(phi));
          }
       }
-      /* rename re-definitions of the same id */
-      for (unsigned i = 0; i < insn->definitionCount(); ++i) {
-         auto& definition = insn->getDefinition(i);
-         unsigned id = definition.tempId();
-         if (renames.find(id) != renames.end()) {
-            id = program->allocateId();
-            renames[definition.tempId()] = id;
-            definition.setTemp(Temp{id, definition.regClass()});
+      filled[block->index] = true;
+      for (Block* succ : block->linear_successors) {
+         /* seal block if all predecessors are filled */
+         bool all_filled = true;
+         for (Block* pred : succ->linear_predecessors) {
+            if (!filled[pred->index]) {
+               all_filled = false;
+               break;
+            }
          }
-        renames[id] = id;
+         if (all_filled) {
+            /* finish incomplete phis and check if they become trivial */
+            for (std::unique_ptr<Instruction>& phi : incomplete_phis[succ->index]) {
+               std::vector<Block*> preds = phi->getDefinition(0).getTemp().type() == vgpr ? succ->logical_predecessors : succ->linear_predecessors;
+               for (unsigned i = 0; i < phi->num_operands; i++)
+                  phi->getOperand(i).setTemp(read_variable(phi->getOperand(i).getTemp(), preds[i]));
+               try_remove_trivial_phi(phi_map.find(phi->getDefinition(0).tempId()));
+            }
+            /* complete the original phi nodes, but no need to check triviality */
+            for (std::unique_ptr<Instruction>& instr : succ->instructions) {
+               if (instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi)
+                  break;
+               std::vector<Block*> preds = instr->opcode == aco_opcode::p_phi ? succ->logical_predecessors : succ->linear_predecessors;
+
+               for (unsigned i = 0; i < instr->num_operands; i++) {
+                  auto& operand = instr->getOperand(i);
+                  if (!operand.isTemp())
+                     continue;
+                  operand.setTemp(read_variable(operand.getTemp(), preds[i]));
+                  std::map<unsigned, phi_info>::iterator phi = phi_map.find(operand.getTemp().id());
+                  if (phi != phi_map.end())
+                     phi->second.uses.emplace(instr.get());
+               }
+            }
+            /* merge incomplete phis */
+            phis[succ->index].insert(phis[succ->index].end(),
+                                     std::make_move_iterator(incomplete_phis[succ->index].begin()),
+                                     std::make_move_iterator(incomplete_phis[succ->index].end()));
+            sealed[succ->index] = true;
+         }
       }
    }
 
-   /* check if there are live-outs of this block, which have not yet been renamed */
-   std::set<Temp>& live_out = live_out_per_block[block->index];
-   for (Temp temp : live_out) {
-      if (renames.find(temp.id()) != renames.end()) {
-         /* if we have a new name for this live_out, we add it to live_outs */
-         if (renames[temp.id()] != temp.id())
-            live_out.insert({renames[temp.id()], temp.regClass()});
-         continue;
+   /* merge phis with normal instructions */
+   for (std::unique_ptr<Block>& block : program->blocks) {
+      std::vector<std::unique_ptr<Instruction>> tmp;
+      std::vector<std::unique_ptr<Instruction>>::iterator it = phis[block->index].begin();
+      while (it != phis[block->index].end()) {
+         if ((*it)->num_definitions != 0)
+            tmp.emplace_back(std::move(*it));
+         ++it;
       }
-
-      /* the live-out has not yet been renamed. check, if we already processed all predecessors */
-      std::vector<Block*>& preds = temp.type() == vgpr ? block->logical_predecessors : block->linear_predecessors;
-      unsigned operand_ids[preds.size()];
-      for (unsigned i = 0; i < preds.size(); i++) {
-         std::map<unsigned, unsigned> pred_renames = renames_per_block[preds[i]->index];
-         if (pred_renames.find(temp.id()) != pred_renames.end())
-            operand_ids[i] = pred_renames[temp.id()];
-         else
-            reprocess = true;
-      }
-      if (reprocess) {
-         /* at least one predecessor has not yet been processed, thus we have to come back */
-         renames[temp.id()] = temp.id();
-         continue;
-      }
-      /* the live-out has been renamed differently in the predecessors. we have to insert a phi-node. */
-      aco_opcode opcode = temp.type() == vgpr ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
-      std::unique_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
-      for (unsigned i = 0; i < preds.size(); i++)
-         phi->getOperand(i) = Operand({operand_ids[i], temp.regClass()});
-      phi->getDefinition(0) = Definition{Temp(program->allocateId(), temp.regClass())};
-      renames[temp.id()] = phi->getDefinition(0).tempId();
-      renames[phi->getDefinition(0).tempId()] = phi->getDefinition(0).tempId();
-      live_out_per_block[block->index].insert(phi->getDefinition(0).getTemp());
-      new_instructions.emplace_back(std::move(phi));
+      block->instructions.insert(block->instructions.begin(),
+                                 std::make_move_iterator(tmp.begin()),
+                                 std::make_move_iterator(tmp.end()));
    }
-
-   renames_per_block[block->index].insert(renames.begin(), renames.end());
-   if (new_instructions.size()) {
-      new_instructions.insert(new_instructions.end(),
-                              std::make_move_iterator(block->instructions.begin()),
-                              std::make_move_iterator(block->instructions.end()));
-      block->instructions.swap(new_instructions);
-   }
-   return reprocess;
 }
 
-
-/* Splits temps with multiple defs into multiple temps according to
- * SSa constraints.
- */
-void fix_ssa(Program *program, std::vector<std::set<Temp>> live_out_per_block)
-{
-   std::vector<std::map<unsigned, unsigned>> renames_per_block(program->blocks.size());
-   bool reprocess = false;
-   std::deque<Block*> worklist;
-   for (auto& block : program->blocks)
-      reprocess |= fix_ssa_block(block.get(), renames_per_block, program, live_out_per_block);
-
-   if (reprocess) {
-      reprocess = false;
-      for (auto& block : program->blocks)
-         reprocess |= fix_ssa_block(block.get(), renames_per_block, program, live_out_per_block);
-   }
-
-   assert(!reprocess && "Fix ssa: this algorithm should have terminated in two interations.");
-}
 
 static unsigned reg_count(RegClass reg_class)
 {
@@ -314,7 +347,7 @@ void register_allocation(Program *program)
    unsigned num_accessed_vgpr = 0;
    std::vector<std::set<Temp>> live_out_per_block = live_temps_at_end_of_block(program);
    insert_copies(program, live_out_per_block);
-   fix_ssa(program, live_out_per_block);
+   fix_ssa(program);
 
    std::unordered_map<unsigned, std::pair<PhysReg, unsigned>> assignments;
    std::unordered_map<unsigned, unsigned> temp_assignments;
