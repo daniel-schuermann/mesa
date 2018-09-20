@@ -187,6 +187,11 @@ public:
       return id() < other.id();
    }
 
+   bool operator ==(Temp other) const noexcept
+   {
+      return id() == other.id();
+   }
+
 private:
    uint32_t id_;
    RegClass reg_class;
@@ -281,6 +286,7 @@ public:
 
    void setTemp(Temp t) {
       assert(!control_[2]);
+      control_[0] = 1; /* isTemp */
       data_.temp = t;
    }
 
