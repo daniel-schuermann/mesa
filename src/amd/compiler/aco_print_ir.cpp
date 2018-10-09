@@ -45,7 +45,10 @@ void aco_print_operand(const Operand *operand, FILE *output)
       fprintf(output, "0x%x", operand->constantValue());
       return;
    }
-
+   if (operand->isUndefined()) {
+      fprintf(output, "undef");
+      return;
+   }
    fprintf(output, "%%%d", operand->tempId());
 
    if (operand->isFixed())
