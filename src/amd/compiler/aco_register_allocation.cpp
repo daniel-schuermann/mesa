@@ -1,88 +1,283 @@
-#include "aco_ir.h"
+/*
+ * Copyright © 2018 Valve Corporation
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Daniel Schürmann (daniel.schuermann@campus.tu-berlin.de)
+ *    Bas Nieuwenhuizen (bas@basnieuwenhuizen.nl)
+ *
+ */
 
 #include <algorithm>
 #include <map>
 #include <unordered_map>
 #include <set>
 #include <functional>
+#include <bitset>
 
+#include "aco_ir.h"
 #include "sid.h"
+
 
 namespace aco {
 
-/* Insert copies of all live temps before an instruction that uses any of
- * the temps at a fixed register. That way we avoid collisions where multiple
- * temps are assigned the same fixed register. This does not properly keep
- * the SSA property, so this needs fix_ssa afterwards.
- */
-void insert_copies(Program *program, std::vector<std::set<Temp>> live_out_per_block)
+
+void register_allocation(Program *program)
 {
 
-   for (auto&& block : program->blocks) {
-      std::vector<std::unique_ptr<Instruction>> instructions;
-      std::set<Temp> live = live_out_per_block[block.get()->index];
+   /* calculate max register bounds */
+   unsigned max_sgpr = 0;
+   unsigned max_vgpr = 0;
+   std::vector<std::set<Temp>> live_out_per_block = live_temps_at_end_of_block(program);
 
-      for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
-         Instruction *insn = it->get();
-         bool need_sgpr_move = false;
-         bool need_vgpr_move = false;
-         for (unsigned i = 0; i < insn->definitionCount(); ++i) {
-            auto& definition = insn->getDefinition(i);
-            if (definition.isTemp()) {
-               auto temp = live.find(definition.getTemp());
-               if (temp != live.end())
-                  live.erase(temp);
-               if (definition.isFixed())
-                  (definition.getTemp().type() == vgpr ? need_vgpr_move : need_sgpr_move) = true;
+   assert(program->vgpr_demand <= 256 && program->sgpr_demand <= 100);
+   if (program->vgpr_demand <= 24 && program->sgpr_demand <= 46) {
+      max_sgpr = 46;
+      max_vgpr = 24;
+   } else if (program->vgpr_demand <= 28 && program->sgpr_demand <= 54) {
+      max_sgpr = 54;
+      max_vgpr = 28;
+   } else if (program->vgpr_demand <= 32 && program->sgpr_demand <= 62) {
+      max_sgpr = 62;
+      max_vgpr = 32;
+   } else if (program->vgpr_demand <= 36 && program->sgpr_demand <= 70) {
+      max_sgpr = 70;
+      max_vgpr = 36;
+   } else if (program->vgpr_demand <= 40 && program->sgpr_demand <= 78) {
+      max_sgpr = 78;
+      max_vgpr = 40;
+   } else if (program->vgpr_demand <= 48 && program->sgpr_demand <= 94) {
+      max_sgpr = 94;
+      max_vgpr = 48;
+   } else {
+      max_sgpr = 100;
+      if (program->vgpr_demand <= 64)
+         max_vgpr = 64;
+      else if (program->vgpr_demand <= 84)
+         max_vgpr = 84;
+      else if (program->vgpr_demand <= 128)
+         max_vgpr = 128;
+      else
+         max_vgpr = 256;
+   }
+   program->config->num_vgprs = max_vgpr;
+   program->config->num_sgprs = max_sgpr + 2;
+
+   std::unordered_map<unsigned, std::pair<PhysReg, RegClass>> assignments;
+   std::vector<std::unordered_map<unsigned, Temp>> renames(program->blocks.size());
+
+   std::function<std::pair<PhysReg, bool>(std::array<uint32_t, 512>&, std::vector<std::pair<Operand, Definition>>&,
+                                          uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)> _get_reg =
+                                      [&](std::array<uint32_t, 512>& reg_file, std::vector<std::pair<Operand, Definition>>& pc,
+                                          uint32_t lb, uint32_t ub, uint32_t size, uint32_t stride, uint32_t num_moves) {
+
+      assert(num_moves <= size); // FIXME: extend this algorithm
+      unsigned reg_lo = lb;
+      unsigned reg_hi = lb + size - 1;
+      /* trivial case: without moves */
+      if (num_moves == 0) {
+         bool found = false;
+         while (!found && reg_lo + size <= ub) {
+            if (reg_file[reg_lo] != 0) {
+               reg_lo += stride;
+               continue;
             }
+            found = true;
+            for (unsigned i = 1; i < size; i++) {
+               reg_hi = reg_lo + i;
+               if (reg_file[reg_hi] != 0) {
+                  found = false;
+                  break;
+               }
+            }
+            if (found) {
+
+               return std::make_pair(PhysReg{reg_lo}, true);
+            }
+            while (reg_lo <= reg_hi)
+               reg_lo += stride;
          }
+         return std::make_pair(PhysReg{0}, false);
+      }
 
-         for (unsigned i = 0; i < insn->operandCount(); ++i) {
-            auto& operand = insn->getOperand(i);
-            if (operand.isTemp()) {
-               assert(operand.tempId() != 0);
-               live.insert(operand.getTemp());
-               if (operand.isFixed())
-                  (operand.getTemp().type() == vgpr ? need_vgpr_move : need_sgpr_move) = true;
+      /* we use a sliding window to find potential positions */
+      for (reg_lo = lb, reg_hi = lb + size - 1; reg_hi < ub; reg_lo += stride, reg_hi += stride) {
+         /* first check the edges: this is what we have to fix to allow for num_moves > size */
+         if (reg_lo > lb + 1 && reg_file[reg_lo] == reg_file[reg_lo - 1])
+            continue;
+         if (reg_hi < ub - 1 && reg_file[reg_hi] == reg_file[reg_hi + 1])
+            continue;
+
+         /* second, check that we have at most k=num_moves elements in the window
+          * and no element is larger than the currently processed one */
+         unsigned k = 0;
+         std::set<unsigned> vars;
+         bool stop = false;
+         for (unsigned j = reg_lo; j <= reg_hi; j++) {
+            if (reg_file[j] == 0)
+               continue;
+            k++;
+            /* 0xFFFF signals that this area is already blocked! */
+            if (reg_file[j] == 0xFFFF || k > num_moves) {
+               stop = true;
+               break;
             }
+            if (sizeOf(assignments[reg_file[j]].second) >= size) {
+               stop = true;
+               break;
+            }
+            vars.emplace(reg_file[j]);
          }
+         if (stop)
+            continue;
 
-         instructions.push_back(std::move(*it));
+         /* now, we have a list of vars, we want to move away from the current slot */
+         /* copy the current register file */
+         std::array<uint32_t, 512> register_file = reg_file;
+         /* mark the area as blocked: [reg_lo, reg_hi] */
+         for (unsigned j = reg_lo; j <= reg_hi; j++)
+            register_file[j] = 0xFFFF;
 
-         if ((need_vgpr_move || need_sgpr_move) && !live.empty()) {
-            unsigned count = 0;
-            for (auto temp : live) {
-               if ((need_sgpr_move && temp.type() != vgpr) ||
-                   (need_vgpr_move && temp.type() == vgpr))
-                  ++count;
+         std::vector<std::pair<Operand, Definition>> parallelcopy;
+         bool success = true;
+         unsigned remaining_moves = num_moves - k;
+         for (unsigned id : vars) {
+            std::pair<PhysReg, RegClass> var = assignments[id];
+            uint32_t stride = 1;
+            if (typeOf(var.second) == sgpr) {
+               if (sizeOf(var.second) == 2)
+                  stride = 2;
+               if (sizeOf(var.second) > 3)
+                  stride = 4;
             }
-
-            std::unique_ptr<Instruction> move{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, count, count)};
-            int idx = 0;
-            for (auto temp : live) {
-               if ((need_sgpr_move && temp.type() == vgpr) ||
-                   (need_vgpr_move && temp.type() != vgpr))
-                  continue;
-               move->getOperand(idx) = Operand{temp};
-               move->getDefinition(idx) = Definition{temp};
-               ++idx;
+            unsigned num_moves = 0;
+            std::pair<PhysReg, bool> res = _get_reg(register_file, parallelcopy, lb, ub, sizeOf(var.second), stride, num_moves);
+            success &= res.second;
+            while (!success && remaining_moves > 0) {
+               remaining_moves--;
+               num_moves++;
+               res = _get_reg(register_file, parallelcopy, lb, ub, sizeOf(var.second), stride, num_moves);
+               success &= res.second;
             }
-            instructions.push_back(std::move(move));
+            if (!success)
+               break;
+            /* mark the area as blocked */
+            for (unsigned i = res.first.reg; i < res.first.reg + sizeOf(var.second); i++)
+               register_file[i] = 0xFFFF;
+
+            /* create parallelcopy pair (without definition id) */
+            Temp tmp = Temp(id, var.second);
+            Operand pc_op = Operand(tmp);
+            pc_op.setFixed(var.first);
+            Definition pc_def = Definition(res.first, pc_op.regClass());
+            parallelcopy.emplace_back(pc_op, pc_def);
+         }
+         if (success) {
+            /* if everything worked out: insert parallelcopies, release [reg_lo,reg_hi], copy back reg_file */
+            pc.insert(pc.end(), parallelcopy.begin(), parallelcopy.end());
+            reg_file = register_file;
+            for (unsigned i = reg_lo; i < reg_lo + size; i++)
+               reg_file[i] = 0;
+            return std::make_pair(PhysReg{reg_lo}, true);
          }
       }
-      std::reverse(instructions.begin(), instructions.end());
-      block->instructions = std::move(instructions);
-   }
-}
 
+      return std::make_pair(PhysReg{0}, false);
+   };
 
-/**
- * SSA Reconstruction Pass
- * from Simple and Efficient Construction of Static Single Assignment Form
- * by M. Braun, S. Buchwald, S. Hack, R. Leißa, C. Mallon, and A. Zwinkau
- */
-void fix_ssa(Program *program)
-{
+   std::function<PhysReg(std::array<uint32_t, 512>&, RegClass, std::vector<std::pair<Operand, Definition>>&,
+                         std::unique_ptr<Instruction>&, std::unordered_map<unsigned, Temp>&)> get_reg =
+                     [&](std::array<uint32_t, 512>& reg_file, RegClass rc, std::vector<std::pair<Operand, Definition>>& pc,
+                         std::unique_ptr<Instruction>& instr, std::unordered_map<unsigned, Temp>& renames) {
+      unsigned size = sizeOf(rc);
+      uint32_t stride = 1;
+      uint32_t lb, ub;
+      if (typeOf(rc) == vgpr) {
+         lb = 256;
+         ub = 256 + max_vgpr;
+      } else {
+         lb = 0;
+         ub = max_sgpr;
+         if (sizeOf(rc) == 2)
+            stride = 2;
+         else if (sizeOf(rc) >= 4)
+            stride = 4;
+      }
+      /* try without moves */
+      std::pair<PhysReg, bool> res = _get_reg(reg_file, pc, lb, ub, size, stride, 0);
+      if (res.second)
+         return res.first;
+
+      /* didn't work out: try with 1 .. n moves */
+      assert(size > 1);
+      for (unsigned k = 1; k <= size; k++) {
+         std::pair<PhysReg, bool> res = _get_reg(reg_file, pc, lb, ub, size, stride, k);
+         if (res.second) {
+            /* we set the definition regs == 0. the actual caller is responsible for correct setting */
+            for (unsigned i = 0; i < size; i++)
+               reg_file[res.first.reg + i] = 0;
+            /* allocate id's and rename operands: this is done transparently here */
+            for (std::pair<Operand, Definition>& copy : pc) {
+               /* the definitions with id are not from this function and already handled */
+               if (!copy.second.isTemp()) {
+                  copy.second.setTemp(Temp(program->allocateId(), copy.second.regClass()));
+                  assignments[copy.second.tempId()] = {copy.second.physReg(), copy.second.regClass()};
+                  for (unsigned i = copy.second.physReg().reg; i < copy.second.physReg().reg + copy.second.size(); i++)
+                     reg_file[i] = copy.second.tempId();
+                  renames[copy.first.tempId()] = copy.second.getTemp();
+                  /* check if we moved an operand */
+                  for (unsigned i = 0; i < instr->num_operands; i++) {
+                     if (!instr->getOperand(i).isTemp())
+                        continue;
+                     if (instr->getOperand(i).tempId() == copy.first.tempId()) {
+                        instr->getOperand(i).setTemp(copy.second.getTemp());
+                        instr->getOperand(i).setFixed(copy.second.physReg());
+                     }
+                  }
+               }
+            }
+            /* it might happen that something was moved to the position of an killed operand */
+            for (unsigned i = 0; i < instr->num_operands; i++) {
+               if (instr->getOperand(i).getTemp().type() == typeOf(rc) && instr->getOperand(i).isKill()) {
+                  for (unsigned j = 0; j < instr->getOperand(i).size(); j++) {
+                     /* if that is the case, we have to find another position for this operand */
+                     if (reg_file[instr->getOperand(i).physReg().reg + j] != 0) {
+                        Operand op = instr->getOperand(i);
+                        Definition def = Definition(program->allocateId(), op.regClass());
+                        PhysReg reg = get_reg(reg_file, op.regClass(), pc, instr, renames);
+                        def.setFixed(reg);
+                        pc.emplace_back(op, def);
+                        instr->getOperand(i).setTemp(def.getTemp());
+                        instr->getOperand(i).setFixed(reg);
+                        break;
+                     }
+                  }
+               }
+            }
+            return res.first;
+         }
+      }
+      assert(false);
+   };
+
    struct phi_info {
       Instruction* phi;
       unsigned block_idx;
@@ -93,14 +288,12 @@ void fix_ssa(Program *program)
    bool sealed[program->blocks.size()];
    memset(filled, 0, sizeof filled);
    memset(sealed, 0, sizeof sealed);
-   std::vector<std::unordered_map<unsigned, Temp>> renames(program->blocks.size());
    std::vector<std::vector<std::unique_ptr<Instruction>>> phis(program->blocks.size());
    std::vector<std::vector<std::unique_ptr<Instruction>>> incomplete_phis(program->blocks.size());
    std::map<unsigned, phi_info> phi_map;
    std::function<Temp(Temp,Block*)> read_variable;
    std::function<Temp(Temp,Block*)> read_variable_recursive;
    std::function<Temp(std::map<unsigned, phi_info>::iterator)> try_remove_trivial_phi;
-
 
    read_variable = [&](Temp val, Block* block) -> Temp {
       std::unordered_map<unsigned, Temp>::iterator it = renames[block->index].find(val.id());
@@ -126,6 +319,8 @@ void fix_ssa(Program *program)
          aco_opcode opcode = is_logical ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
          std::unique_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
          phi->getDefinition(0) = Definition(new_val);
+         phi->getDefinition(0).setFixed(assignments[val.id()].first);
+         assignments[new_val.id()] = {phi->getDefinition(0).physReg(), phi->getDefinition(0).regClass()};
          for (unsigned i = 0; i < preds.size(); i++)
             phi->getOperand(i) = Operand(val);
 
@@ -143,6 +338,8 @@ void fix_ssa(Program *program)
          std::unique_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
 
          phi->getDefinition(0) = Definition(new_val);
+         phi->getDefinition(0).setFixed(assignments[val.id()].first);
+         assignments[new_val.id()] = {phi->getDefinition(0).physReg(), phi->getDefinition(0).regClass()};
          phi_map.emplace(new_val.id(), phi_info{phi.get(), block->index});
          Instruction* instr = phi.get();
 
@@ -156,7 +353,7 @@ void fix_ssa(Program *program)
          /* we check if the phi is trivial (in which case we return the original value) */
          new_val = try_remove_trivial_phi(phi_map.find(new_val.id()));
          // FIXME: that is quite inefficient, better keep temporaries because most phis are trivial
-         phis[block->index].push_back(std::move(phi));
+         phis[block->index].emplace_back(std::move(phi));
       }
       renames[block->index][val.id()] = new_val;
       return new_val;
@@ -203,38 +400,189 @@ void fix_ssa(Program *program)
       return same;
    };
 
+
    for (std::unique_ptr<Block>& block : program->blocks) {
-      for (std::unique_ptr<Instruction>& instr : block->instructions) {
-         /* this is a slight adjustment from the paper as we already have phi nodes */
+
+      /* first, compute the death points of all live vars within the block */
+      std::set<Temp> live = live_out_per_block[block->index];
+      std::map<unsigned, Instruction*> kills;
+      /* create dummy kill points for live outs */
+      for (Temp t : live)
+         kills.emplace(t.id(), nullptr);
+
+      std::vector<std::unique_ptr<Instruction>>::reverse_iterator rit;
+      for (rit = block->instructions.rbegin(); rit != block->instructions.rend(); ++rit) {
+         std::unique_ptr<Instruction>& instr = *rit;
+         if (instr->opcode != aco_opcode::p_linear_phi && instr->opcode != aco_opcode::p_phi) {
+            for (unsigned i = 0; i < instr->num_operands; i++) {
+               if (instr->getOperand(i).isTemp() && live.emplace(instr->getOperand(i).getTemp()).second)
+                  kills.emplace(instr->getOperand(i).tempId(), instr.get());
+            }
+         }
+         for (unsigned i = 0; i < instr->num_definitions; i++) {
+            /* erase from live */
+            if (instr->getDefinition(i).isTemp())
+               live.erase(instr->getDefinition(i).getTemp());
+         }
+         // TODO: also find affinities: we might need a full backwards pass through the program
+      }
+
+      /* initialize register file */
+      assert(block->index != 0 || live.empty());
+      std::array<uint32_t, 512> register_file = {0};
+
+      for (Temp t : live) {
+         if (assignments.find(t.id()) == assignments.end()) fprintf(stderr, "%d has no assignment\n", t.id());
+         assert(assignments.find(t.id()) != assignments.end());
+         for (unsigned i = 0; i < t.size(); i++)
+            register_file[assignments[t.id()].first.reg + i] = t.id();
+      }
+
+      std::vector<std::unique_ptr<Instruction>> instructions;
+      std::unique_ptr<Instruction> pc;
+      std::vector<std::unique_ptr<Instruction>>::iterator it;
+      for (it = block->instructions.begin(); it != block->instructions.end(); ++it) {
+         std::unique_ptr<Instruction>& instr = *it;
+         std::vector<std::pair<Operand, Definition>> parallelcopy;
+         /* this is a slight adjustment from the paper as we already have phi nodes:
+          * We consider them incomplete phis. */
          if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi) {
             Definition def = instr->getDefinition(0);
             renames[block->index][def.tempId()] = def.getTemp();
-            continue;
+         } else {
+            /* handle operands */
+            for (unsigned i = 0; i < instr->num_operands; ++i) {
+               auto& operand = instr->getOperand(i);
+               if (!operand.isTemp())
+                  continue;
+
+               /* unset register file bits if it's the last use */
+               std::map<unsigned, Instruction*>::iterator it = kills.find(operand.tempId());
+               if (it != kills.end() && it->second == instr.get()) {
+                  operand.setKill(true);
+               }
+
+               /* rename operands */
+               operand.setTemp(read_variable(operand.getTemp(), block.get()));
+
+               /* check if the operand is fixed */
+               if (operand.isFixed()) {
+                  if (operand.physReg() == assignments[operand.tempId()].first) {
+                     /* we are fine: the operand is already assigned the correct reg */
+
+                  } else {
+                     /* check if target reg is blocked, and move away the blocking var */
+                     if (register_file[operand.physReg().reg]) {
+                        uint32_t blocking_id = register_file[operand.physReg().reg];
+                        Operand pc_op = Operand(Temp{blocking_id, assignments[blocking_id].second});
+                        pc_op.setFixed(operand.physReg());
+                        Definition pc_def = Definition(Temp{program->allocateId(), pc_op.regClass()});
+                        /* find free reg */
+                        PhysReg reg = get_reg(register_file, pc_op.regClass(), parallelcopy, instr, renames[block->index]);
+                        pc_def.setFixed(reg);
+                        assignments[pc_def.tempId()] = {reg, pc_def.regClass()};
+                        for (unsigned i = 0; i < operand.size(); i++) {
+                           register_file[pc_op.physReg().reg + i] = 0;
+                           register_file[pc_def.physReg().reg + i] = pc_def.tempId();
+                        }
+                        parallelcopy.emplace_back(pc_op, pc_def);
+                        renames[block->index][pc_op.tempId()] = pc_def.getTemp();
+                     }
+                     /* move operand to fixed reg and create parallelcopy pair */
+                     Operand pc_op = operand;
+                     Temp tmp = Temp{program->allocateId(), operand.regClass()};
+                     Definition pc_def = Definition(tmp);
+                     pc_def.setFixed(operand.physReg());
+                     pc_op.setFixed(assignments[operand.tempId()].first);
+                     operand = Operand(tmp);
+                     assignments[tmp.id()] = {pc_def.physReg(), pc_def.regClass()};
+                     operand.setFixed(pc_def.physReg());
+                     for (unsigned i = 0; i < operand.size(); i++) {
+                        register_file[pc_op.physReg().reg + i] = 0;
+                        register_file[pc_def.physReg().reg + i] = tmp.id();
+                     }
+                     parallelcopy.emplace_back(pc_op, pc_def);
+                     renames[block->index][pc_op.tempId()] = pc_def.getTemp();
+                  }
+               } else {
+                  assert(assignments.find(operand.tempId()) != assignments.end());
+                  operand.setFixed(assignments[operand.tempId()].first);
+               }
+               std::map<unsigned, phi_info>::iterator phi = phi_map.find(operand.getTemp().id());
+               if (phi != phi_map.end())
+                  phi->second.uses.emplace(instr.get());
+
+            }
+            /* remove dead vars from register file */
+            for (unsigned i = 0; i < instr->num_operands; i++)
+               if (instr->getOperand(i).isFixed() && instr->getOperand(i).isKill())
+                  for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
+                     register_file[instr->getOperand(i).physReg().reg + j] = 0;
          }
-         /* rename operands */
-         for (unsigned i = 0; i < instr->num_operands; ++i) {
-            auto& operand = instr->getOperand(i);
-            if (!operand.isTemp())
-               continue;
-            operand.setTemp(read_variable(operand.getTemp(), block.get()));
-            std::map<unsigned, phi_info>::iterator phi = phi_map.find(operand.getTemp().id());
-            if (phi != phi_map.end())
-               phi->second.uses.emplace(instr.get());
-         }
-         /* if an id is already defined, get a new id */
+
+         /* handle definitions */
          for (unsigned i = 0; i < instr->num_definitions; ++i) {
             auto& definition = instr->getDefinition(i);
             if (!definition.isTemp())
                continue;
-            if (renames[block->index].find(definition.tempId()) != renames[block->index].end()) {
-               Temp new_temp = Temp{program->allocateId(), definition.regClass()};
-               renames[block->index][definition.tempId()] = new_temp;
-               definition.setTemp(new_temp);
+            if (definition.isFixed()) {
+               /* check if target dst is blocked */
+               if (register_file[definition.physReg().reg] != 0) {
+                  /* create parallelcopy pair to move blocking var */
+                  Temp tmp = {register_file[definition.physReg().reg], assignments[register_file[definition.physReg().reg]].second};
+                  Operand pc_op = Operand(tmp);
+                  pc_op.setFixed(assignments[register_file[definition.physReg().reg]].first);
+                  tmp = Temp{program->allocateId(), pc_op.regClass()};
+                  Definition pc_def = Definition(tmp);
+                  PhysReg reg = get_reg(register_file, pc_op.regClass(), parallelcopy, instr, renames[block->index]);
+                  pc_def.setFixed(reg);
+                  assignments[pc_def.tempId()] = {reg, pc_def.regClass()};
+                  for (unsigned i = 0; i < pc_op.size(); i++) {
+                     register_file[pc_op.physReg().reg + i] = 0xFFFF;
+                     register_file[pc_def.physReg().reg + i] = pc_def.tempId();
+                  }
+                  parallelcopy.emplace_back(pc_op, pc_def);
+                  renames[block->index][pc_op.tempId()] = pc_def.getTemp();
+               }
             } else {
-               renames[block->index][definition.tempId()] = definition.getTemp();
+               /* find free reg */
+               if (instr->opcode == aco_opcode::v_interp_p2_f32 ||
+                   instr->opcode == aco_opcode::v_mac_f32)
+                  definition.setFixed(instr->getOperand(2).physReg());
+               else if (instr->opcode == aco_opcode::p_split_vector &&
+                        register_file[instr->getOperand(0).physReg().reg + i] == 0)
+                  definition.setFixed(PhysReg{instr->getOperand(0).physReg().reg + i});
+               else if (definition.hasHint() && register_file[definition.physReg().reg] == 0)
+                  definition.setFixed(definition.physReg());
+               else
+                  definition.setFixed(get_reg(register_file, definition.regClass(), parallelcopy, instr, renames[block->index]));
+            // TODO: check affinities
             }
+
+            assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
+            /* set live if it has a kill point */
+            if (kills.find(definition.tempId()) != kills.end()) {
+               for (unsigned i = 0; i < definition.size(); i++)
+                  register_file[definition.physReg().reg + i] = definition.tempId();
+               live.emplace(definition.getTemp());
+            }
+            /* add to renames table */
+            renames[block->index][definition.tempId()] = definition.getTemp();
          }
-      }
+
+         /* emit parallelcopy */
+         if (!parallelcopy.empty()) {
+            pc.reset(create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, parallelcopy.size(), parallelcopy.size()));
+            for (unsigned i = 0; i < parallelcopy.size(); i++) {
+               pc->getOperand(i) = parallelcopy[i].first;
+               pc->getDefinition(i) = parallelcopy[i].second;
+            }
+            instructions.emplace_back(std::move(pc));
+         }
+         instructions.emplace_back(std::move(*it));
+      } /* end for Instr */
+      block->instructions = std::move(instructions);
+
       filled[block->index] = true;
       for (Block* succ : block->linear_successors) {
          /* seal block if all predecessors are filled */
@@ -246,11 +594,13 @@ void fix_ssa(Program *program)
             }
          }
          if (all_filled) {
-            /* finish incomplete phis and check if they become trivial */
+            /* finish incomplete phis and check if they became trivial */
             for (std::unique_ptr<Instruction>& phi : incomplete_phis[succ->index]) {
                std::vector<Block*> preds = phi->getDefinition(0).getTemp().type() == vgpr ? succ->logical_predecessors : succ->linear_predecessors;
-               for (unsigned i = 0; i < phi->num_operands; i++)
+               for (unsigned i = 0; i < phi->num_operands; i++) {
                   phi->getOperand(i).setTemp(read_variable(phi->getOperand(i).getTemp(), preds[i]));
+                  phi->getOperand(i).setFixed(assignments[phi->getOperand(i).tempId()].first);
+               }
                try_remove_trivial_phi(phi_map.find(phi->getDefinition(0).tempId()));
             }
             /* complete the original phi nodes, but no need to check triviality */
@@ -264,6 +614,7 @@ void fix_ssa(Program *program)
                   if (!operand.isTemp())
                      continue;
                   operand.setTemp(read_variable(operand.getTemp(), preds[i]));
+                  operand.setFixed(assignments[operand.tempId()].first);
                   std::map<unsigned, phi_info>::iterator phi = phi_map.find(operand.getTemp().id());
                   if (phi != phi_map.end())
                      phi->second.uses.emplace(instr.get());
@@ -276,9 +627,9 @@ void fix_ssa(Program *program)
             sealed[succ->index] = true;
          }
       }
-   }
+   } /* end for BB */
 
-   /* merge phis with normal instructions */
+   /* merge new phis with normal instructions */
    for (std::unique_ptr<Block>& block : program->blocks) {
       std::vector<std::unique_ptr<Instruction>> tmp;
       std::vector<std::unique_ptr<Instruction>>::iterator it = phis[block->index].begin();
@@ -292,283 +643,5 @@ void fix_ssa(Program *program)
                                  std::make_move_iterator(tmp.end()));
    }
 }
-
-
-static unsigned reg_count(RegClass reg_class)
-{
-   switch (reg_class) {
-      case b:
-      case s1:
-      case v1:
-         return 1;
-      case s2:
-      case v2:
-         return 2;
-      case s3:
-      case v3:
-         return 3;
-      case s4:
-      case v4:
-         return 4;
-      case v6:
-         return 6;
-      case s8:
-         return 8;
-      case s16:
-         return 16;
-      default:
-         abort();
-   }
-}
-
-bool can_allocate_register(const std::set<std::pair<unsigned, unsigned>> *interfere,
-                           const std::unordered_map<unsigned, std::pair<PhysReg, unsigned>> *assignments,
-                           unsigned id, unsigned reg, unsigned count)
-{
-   for (auto it = interfere->lower_bound({id, 0}); it != interfere->end() && it->first == id; ++it) {
-      unsigned other_id = it->second;
-      auto other_it = assignments->find(other_id);
-      if (other_it == assignments->end())
-         continue;
-
-      unsigned other_count = other_it->second.second;
-      unsigned other_reg = other_it->second.first.reg;
-      if (other_reg + other_count <= reg || reg + count <= other_reg)
-         continue;
-
-      return false;
-   }
-   return true;
-}
-
-void register_allocation(Program *program)
-{
-   unsigned num_accessed_sgpr = 0;
-   unsigned num_accessed_vgpr = 0;
-   std::vector<std::set<Temp>> live_out_per_block = live_temps_at_end_of_block(program);
-   insert_copies(program, live_out_per_block);
-   fix_ssa(program);
-
-   std::unordered_map<unsigned, std::pair<PhysReg, unsigned>> assignments;
-   std::unordered_map<unsigned, unsigned> temp_assignments;
-   std::unordered_map<unsigned, unsigned> preferences;
-   /* First assign fixed regs. */
-   for(auto&& block : program->blocks) {
-      for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
-         std::unique_ptr<Instruction>& insn = *it;
-         for(unsigned i = 0; i < insn->operandCount(); ++i) {
-            auto& operand = insn->getOperand(i);
-            if (operand.isTemp() && operand.isFixed()) {
-               assignments[operand.tempId()] = {operand.physReg(), reg_count(operand.regClass())};
-            }
-         }
-
-         for (unsigned i = 0; i < insn->definitionCount(); ++i) {
-            auto& definition = insn->getDefinition(i);
-            if (definition.isTemp() && definition.isFixed()) {
-               assignments[definition.tempId()] = {definition.physReg(), reg_count(definition.regClass())};
-            }
-         }
-
-         /* also add some affinities */
-         if (insn->opcode == aco_opcode::p_phi || insn->opcode == aco_opcode::p_linear_phi) {
-            unsigned preferred = insn->getDefinition(0).tempId();
-            unsigned op_idx = insn->num_operands;
-            std::vector<Block*>& preds = insn->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
-            for (unsigned i = 0; i < insn->num_operands; i++) {
-               if (preds[i]->index < block->index && insn->getOperand(i).isTemp()) {
-                  preferred = insn->getOperand(i).tempId();
-                  op_idx = i;
-                  break;
-               }
-            }
-            for (unsigned i = 0; i < insn->num_operands; i++) {
-               if (insn->getOperand(i).isTemp() && i != op_idx)
-                  preferences.emplace(insn->getOperand(i).tempId(), preferred);
-            }
-            if (op_idx < insn->num_operands)
-               preferences.emplace(insn->getDefinition(0).tempId(), preferred);
-         }
-      }
-   }
-
-   std::set<void*> kills;
-   std::set<std::pair<unsigned, unsigned>> interfere;
-   std::vector<Definition*> simplicial_order;
-
-   /* Determine operands & defs which are the last use of a temp. */
-   /* Also create an interference graph. */
-   live_out_per_block = live_temps_at_end_of_block(program);
-   for(auto b_it = program->blocks.rbegin(); b_it != program->blocks.rend(); ++b_it) {
-      std::set<Temp> live = live_out_per_block[(*b_it)->index];
-      for(auto i_it = (*b_it)->instructions.rbegin(); i_it != (*b_it)->instructions.rend(); ++i_it) {
-         auto& insn = *i_it;
-
-         // Add definitions that are not used to live
-         for (unsigned i = 0; i < insn->definitionCount(); ++i) {
-            auto& definition = insn->getDefinition(i);
-            if (definition.isTemp()) {
-               auto it = live.find(definition.getTemp());
-               if (it == live.end()) {
-                  live.insert(definition.getTemp());
-               }
-            }
-         }
-
-         for (unsigned i = 0; i < insn->definitionCount(); ++i) {
-            auto& definition = insn->getDefinition(i);
-            if (definition.isTemp()) {
-               simplicial_order.push_back(&definition);
-
-               auto it = live.find(definition.getTemp());
-               if (it != live.end())
-                  live.erase(it);
-               else
-                  kills.insert(&definition);
-               for(auto temp : live) {
-                  if (temp.id() != definition.tempId()) {
-                     interfere.insert({definition.tempId(), temp.id()});
-                     interfere.insert({temp.id(), definition.tempId()});
-                  }
-               }
-            }
-         }
-
-         if (insn->opcode == aco_opcode::v_interp_p1_f32 ||
-             insn->opcode == aco_opcode::v_interp_p2_f32) {
-            auto& definition = insn->getDefinition(0);
-            auto& operand = insn->getOperand(0);
-            interfere.insert({definition.tempId(), operand.tempId()});
-            interfere.insert({operand.tempId(), definition.tempId()});
-         }
-
-         if (insn->opcode == aco_opcode::v_interp_p2_f32 ||
-             insn->opcode == aco_opcode::v_mac_f32)
-            temp_assignments[insn->getDefinition(0).tempId()] = insn->getOperand(2).tempId();
-
-         if (insn->opcode == aco_opcode::p_phi || insn->opcode == aco_opcode::p_linear_phi)
-            continue;
-
-         for(unsigned i = 0; i < insn->operandCount(); ++i) {
-            auto& operand = insn->getOperand(i);
-            if (operand.isTemp()) {
-               auto it = live.find(operand.getTemp());
-               if (it == live.end()) {
-                  live.insert(operand.getTemp());
-                  kills.insert(&operand);
-               }
-            }
-         }
-      }
-   }
-
-   /* Finish the assignment */
-   for(auto b_it = program->blocks.begin(); b_it != program->blocks.end(); ++b_it) {
-      for(auto i_it = (*b_it)->instructions.begin(); i_it != (*b_it)->instructions.end(); ++i_it) {
-         auto& insn = *i_it;
-         for (unsigned i = 0; i < insn->definitionCount(); ++i) {
-            auto& definition = insn->getDefinition(i);
-            if (definition.isTemp()) {
-               auto id = definition.tempId();
-               if (assignments.find(id) != assignments.end())
-                  continue;
-               if (temp_assignments.find(id) != temp_assignments.end()){
-                  assignments[id] = assignments[temp_assignments.find(id)->second];
-                  continue;
-               }
-
-               unsigned count = reg_count(definition.regClass());
-               unsigned alignment = 1;
-               unsigned start = 0;
-               unsigned end = 102;
-               unsigned alloc_reg = 0;
-               bool allocated = false;
-
-               if (definition.getTemp().type() == RegType::vgpr) {
-                  start = 256;
-                  end = 512;
-               } else {
-                  if (!((count - 1) & count))
-                     alignment = count;
-               }
-
-               if (insn->opcode == aco_opcode::p_parallelcopy) {
-                  assert(assignments.find(insn->getOperand(i).tempId()) != assignments.end());
-                  unsigned preferred_reg = assignments.find(insn->getOperand(i).tempId())->second.first.reg;
-                  if (can_allocate_register(&interfere, &assignments, id, preferred_reg, count)) {
-                     alloc_reg = preferred_reg;
-                     allocated = true;
-                  }
-               } else if (insn->opcode == aco_opcode::p_split_vector && count == 1) {
-                  assert(assignments.find(insn->getOperand(0).tempId()) != assignments.end());
-                  unsigned preferred_reg = assignments.find(insn->getOperand(0).tempId())->second.first.reg;
-                  preferred_reg += i;
-                  if (can_allocate_register(&interfere, &assignments, id, preferred_reg, count)) {
-                     alloc_reg = preferred_reg;
-                     allocated = true;
-                  }
-               } else if (preferences.find(id) != preferences.end()) {
-                  if (assignments.find(preferences[id]) != assignments.end()) {
-                     unsigned preferred_reg = assignments.find(preferences[id])->second.first.reg;
-                     if (can_allocate_register(&interfere, &assignments, id, preferred_reg, count)) {
-                        alloc_reg = preferred_reg;
-                        allocated = true;
-                     }
-                  }
-               }
-
-               if (!allocated) {
-                  /* try hint first if available */
-                  if (definition.hasHint() && can_allocate_register(&interfere, &assignments, id, definition.physReg().reg, count)) {
-                     alloc_reg = definition.physReg().reg;
-
-                  } else {
-                     for(unsigned reg = start; reg + count <= end; reg += alignment) {
-                        if (can_allocate_register(&interfere, &assignments, id, reg, count)) {
-                           alloc_reg = reg;
-                           allocated = true;
-                           break;
-                        }
-                     }
-                     assert(allocated && "Couldn't find free register!");
-                  }
-               }
-
-               assignments[id] = {PhysReg{alloc_reg}, count};
-               if (definition.getTemp().type() == RegType::vgpr)
-                  num_accessed_vgpr = std::max(num_accessed_vgpr, alloc_reg - 256 + definition.getTemp().size());
-               else if (alloc_reg <= 102)
-                  num_accessed_sgpr = std::max(num_accessed_sgpr, alloc_reg + definition.getTemp().size());
-            }
-         }
-      }
-   }
-
-   program->config->num_vgprs = num_accessed_vgpr;
-   program->config->num_sgprs = num_accessed_sgpr + 2;
-
-   for(auto&& block : program->blocks) {
-      for (auto&& insn : block->instructions) {
-         for(unsigned i = 0; i < insn->operandCount(); ++i) {
-            auto& operand = insn->getOperand(i);
-            if (operand.isTemp()) {
-               auto it = assignments.find(operand.tempId());
-               assert(it != assignments.end());
-               operand.setFixed(it->second.first);
-            }
-         }
-
-         for (unsigned i = 0; i < insn->definitionCount(); ++i) {
-            auto& definition = insn->getDefinition(i);
-            if (definition.isTemp()) {
-               auto it = assignments.find(definition.tempId());
-               assert(it != assignments.end());
-               definition.setFixed(it->second.first);
-            }
-         }
-      }
-   }
-}
-
 
 }

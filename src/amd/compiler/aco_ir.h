@@ -354,7 +354,7 @@ public:
       control_[3] = 1;
    }
 
-   bool kill() const noexcept
+   bool isKill() const noexcept
    {
       return control_[3];
    }
