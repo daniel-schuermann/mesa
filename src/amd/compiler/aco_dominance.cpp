@@ -67,6 +67,7 @@ std::pair<std::vector<int>, std::vector<int>> dominator_tree(Program* program)
    bool changed = true;
    while (changed)
    {
+      changed = false;
       for (std::vector<std::unique_ptr<Block>>::iterator it = ++program->blocks.begin(); it != program->blocks.end(); ++it) {
          int new_logical_idom = -1;
          int new_linear_idom = -1;
