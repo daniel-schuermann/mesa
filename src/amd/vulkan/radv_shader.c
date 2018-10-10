@@ -1123,6 +1123,14 @@ radv_dump_nir_shaders(struct nir_shader * const *shaders,
 	return ret;
 }
 
+#include <time.h>
+#define NANOS 1000000000LL
+// FIXME the llvm ir & disasm strings prevent disabling llvm compilation
+#define ACO_COMPILE_TIME 1
+static double total_llvm = 0;
+static double total_aco = 0;
+static unsigned num = 0;
+
 static struct radv_shader_variant *
 shader_variant_compile(struct radv_device *device,
 		       struct radv_shader_module *module,
@@ -1184,11 +1192,34 @@ shader_variant_compile(struct radv_device *device,
 		radv_compile_gs_copy_shader(&ac_llvm, *shaders, &binary,
 					    &variant_info, options);
 	} else {
-		radv_compile_nir_shader(&ac_llvm, &binary, &variant_info,
-					shaders, shader_count, options);
-		if (!module->nir)
+		if (shaders[0]->info.stage == MESA_SHADER_FRAGMENT || shaders[0]->info.stage == MESA_SHADER_COMPUTE) {
+#if ACO_COMPILE_TIME
+			struct timespec user1,user2;
+			clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &user1);
+			radv_compile_nir_shader(&ac_llvm, &binary, &variant_info,
+						shaders, shader_count, options);
+			clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &user2);
+
+
+			fprintf(stderr, "%3d: ", num++);
+			double user_elapsed = (user2.tv_sec*NANOS + user2.tv_nsec - (user1.tv_sec*NANOS + user1.tv_nsec)) / (double) (NANOS / 1000);
+			total_llvm += user_elapsed;
+			fprintf(stderr, "LLVM CPU time: %8.4fms\t|\ttotal: %8.4fms\t\t||\t", user_elapsed, total_llvm);
+			clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &user1);
+#endif
 			aco_compile_shader(shaders[0], &variant->config,
-			                   &binary, &variant->info, options);
+				           &binary, &variant->info, options);
+
+#if ACO_COMPILE_TIME
+			clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &user2);
+			user_elapsed = (user2.tv_sec*NANOS + user2.tv_nsec - (user1.tv_sec*NANOS + user1.tv_nsec)) / (double) (NANOS / 1000);
+			total_aco += user_elapsed;
+			fprintf(stderr, "ACO CPU time:  %8.4fms\t|\ttotal: %8.4fms\n", user_elapsed, total_aco);
+#endif
+		} else {
+			radv_compile_nir_shader(&ac_llvm, &binary, &variant_info,
+						shaders, shader_count, options);
+		}
 	}
 	binary->variant_info = variant_info;
 

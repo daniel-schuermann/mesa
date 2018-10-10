@@ -5017,7 +5017,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    ctx.divergent_vals = nir_divergence_analysis(nir);
    init_context(&ctx, func->impl);
 
-   nir_print_shader(nir, stderr);
+   //nir_print_shader(nir, stderr);
 
    ctx.program->blocks.push_back(std::unique_ptr<Block>{new Block});
    ctx.block = ctx.program->blocks.back().get();
