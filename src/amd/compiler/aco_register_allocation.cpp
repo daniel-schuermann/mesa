@@ -83,6 +83,7 @@ void register_allocation(Program *program)
 
    std::unordered_map<unsigned, std::pair<PhysReg, RegClass>> assignments;
    std::vector<std::unordered_map<unsigned, Temp>> renames(program->blocks.size());
+   std::map<unsigned, Temp> orig_names;
 
    std::function<std::pair<PhysReg, bool>(std::array<uint32_t, 512>&, std::vector<std::pair<Operand, Definition>>&,
                                           uint32_t, uint32_t, uint32_t, uint32_t, uint32_t)> _get_reg =
@@ -242,7 +243,6 @@ void register_allocation(Program *program)
                   assignments[copy.second.tempId()] = {copy.second.physReg(), copy.second.regClass()};
                   for (unsigned i = copy.second.physReg().reg; i < copy.second.physReg().reg + copy.second.size(); i++)
                      reg_file[i] = copy.second.tempId();
-                  renames[copy.first.tempId()] = copy.second.getTemp();
                   /* check if we moved an operand */
                   for (unsigned i = 0; i < instr->num_operands; i++) {
                      if (!instr->getOperand(i).isTemp())
@@ -347,6 +347,7 @@ void register_allocation(Program *program)
          for (unsigned i = 0; i < preds.size(); i++) {
             Temp op_temp = read_variable(val, preds[i]);
             instr->getOperand(i).setTemp(op_temp);
+            instr->getOperand(i).setFixed(assignments[op_temp.id()].first);
             if (!(op_temp == new_val) && phi_map.find(op_temp.id()) != phi_map.end())
                phi_map[op_temp.id()].uses.emplace(instr);
          }
@@ -356,6 +357,7 @@ void register_allocation(Program *program)
          phis[block->index].emplace_back(std::move(phi));
       }
       renames[block->index][val.id()] = new_val;
+      orig_names[new_val.id()] = val;
       return new_val;
    };
 
@@ -486,7 +488,6 @@ void register_allocation(Program *program)
                            register_file[pc_def.physReg().reg + i] = pc_def.tempId();
                         }
                         parallelcopy.emplace_back(pc_op, pc_def);
-                        renames[block->index][pc_op.tempId()] = pc_def.getTemp();
                      }
                      /* move operand to fixed reg and create parallelcopy pair */
                      Operand pc_op = operand;
@@ -502,7 +503,6 @@ void register_allocation(Program *program)
                         register_file[pc_def.physReg().reg + i] = tmp.id();
                      }
                      parallelcopy.emplace_back(pc_op, pc_def);
-                     renames[block->index][pc_op.tempId()] = pc_def.getTemp();
                   }
                } else {
                   assert(assignments.find(operand.tempId()) != assignments.end());
@@ -542,7 +542,6 @@ void register_allocation(Program *program)
                      register_file[pc_def.physReg().reg + i] = pc_def.tempId();
                   }
                   parallelcopy.emplace_back(pc_op, pc_def);
-                  renames[block->index][pc_op.tempId()] = pc_def.getTemp();
                }
             } else {
                /* find free reg */
@@ -576,6 +575,19 @@ void register_allocation(Program *program)
             for (unsigned i = 0; i < parallelcopy.size(); i++) {
                pc->getOperand(i) = parallelcopy[i].first;
                pc->getDefinition(i) = parallelcopy[i].second;
+
+               /* it might happen that the operand is already renamed. we have to restore the original name. */
+               std::map<unsigned, Temp>::iterator it = orig_names.find(pc->getOperand(i).tempId());
+               if (it != orig_names.end())
+                  pc->getOperand(i).setTemp(it->second);
+               unsigned orig_id = pc->getOperand(i).tempId();
+               orig_names[pc->getDefinition(i).tempId()] = pc->getOperand(i).getTemp();
+
+               pc->getOperand(i).setTemp(read_variable(pc->getOperand(i).getTemp(), block.get()));
+               renames[block->index][orig_id] = pc->getDefinition(i).getTemp();
+               std::map<unsigned, phi_info>::iterator phi = phi_map.find(pc->getOperand(i).tempId());
+               if (phi != phi_map.end())
+                  phi->second.uses.emplace(instr.get());
             }
             instructions.emplace_back(std::move(pc));
          }
