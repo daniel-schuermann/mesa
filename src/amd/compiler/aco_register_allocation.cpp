@@ -402,12 +402,14 @@ void register_allocation(Program *program)
       return same;
    };
 
-
-   for (std::unique_ptr<Block>& block : program->blocks) {
+   std::map<unsigned, unsigned> affinities;
+   std::vector<std::map<unsigned, Instruction*>> kills_per_block(program->blocks.size());
+   for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); it++) {
+      std::unique_ptr<Block>& block = *it;
 
       /* first, compute the death points of all live vars within the block */
-      std::set<Temp> live = live_out_per_block[block->index];
-      std::map<unsigned, Instruction*> kills;
+      std::set<Temp>& live = live_out_per_block[block->index];
+      std::map<unsigned, Instruction*>& kills = kills_per_block[block->index];
       /* create dummy kill points for live outs */
       for (Temp t : live)
          kills.emplace(t.id(), nullptr);
@@ -420,21 +422,41 @@ void register_allocation(Program *program)
                if (instr->getOperand(i).isTemp() && live.emplace(instr->getOperand(i).getTemp()).second)
                   kills.emplace(instr->getOperand(i).tempId(), instr.get());
             }
+         } else {
+            /* add affinities */
+            unsigned preferred = instr->getDefinition(0).tempId();
+            unsigned op_idx = instr->num_operands;
+            std::vector<Block*>& preds = instr->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
+            for (unsigned i = 0; i < instr->num_operands; i++) {
+               if (preds[i]->index < block->index && instr->getOperand(i).isTemp() && instr->getOperand(i).tempId() < preferred) {
+                  assert(!instr->getOperand(i).isUndefined());
+                  preferred = instr->getOperand(i).tempId();
+                  op_idx = i;
+               }
+            }
+            for (unsigned i = 0; i < instr->num_operands; i++) {
+               if (instr->getOperand(i).isTemp() && i != op_idx)
+                  affinities.emplace(instr->getOperand(i).tempId(), preferred);
+            }
+            if (op_idx < instr->num_operands)
+               affinities.emplace(instr->getDefinition(0).tempId(), preferred);
          }
          for (unsigned i = 0; i < instr->num_definitions; i++) {
             /* erase from live */
             if (instr->getDefinition(i).isTemp())
                live.erase(instr->getDefinition(i).getTemp());
          }
-         // TODO: also find affinities: we might need a full backwards pass through the program
       }
+   }
 
+   for (std::unique_ptr<Block>& block : program->blocks) {
+      std::set<Temp>& live = live_out_per_block[block->index];
+      std::map<unsigned, Instruction*>& kills = kills_per_block[block->index];
       /* initialize register file */
       assert(block->index != 0 || live.empty());
       std::array<uint32_t, 512> register_file = {0};
 
       for (Temp t : live) {
-         if (assignments.find(t.id()) == assignments.end()) fprintf(stderr, "%d has no assignment\n", t.id());
          assert(assignments.find(t.id()) != assignments.end());
          for (unsigned i = 0; i < t.size(); i++)
             register_file[assignments[t.id()].first.reg + i] = t.id();
@@ -553,9 +575,19 @@ void register_allocation(Program *program)
                   definition.setFixed(PhysReg{instr->getOperand(0).physReg().reg + i});
                else if (definition.hasHint() && register_file[definition.physReg().reg] == 0)
                   definition.setFixed(definition.physReg());
-               else
+               else if (affinities.find(definition.tempId()) != affinities.end() &&
+                        assignments.find(affinities[definition.tempId()]) != assignments.end()) {
+                  PhysReg reg = assignments[affinities[definition.tempId()]].first;
+                  for (unsigned i = 0; i < definition.size(); i++) {
+                     if (register_file[reg.reg + i] != 0) {
+                        definition.setFixed(get_reg(register_file, definition.regClass(), parallelcopy, instr, renames[block->index]));
+                        break;
+                     }
+                  }
+                  if (!definition.isFixed())
+                     definition.setFixed(reg);
+               } else
                   definition.setFixed(get_reg(register_file, definition.regClass(), parallelcopy, instr, renames[block->index]));
-            // TODO: check affinities
             }
 
             assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
