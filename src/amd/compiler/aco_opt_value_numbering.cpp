@@ -85,10 +85,36 @@ struct InstrPred {
       if (a->opcode != b->opcode)
          return false;
       for (unsigned i = 0; i < a->num_operands; i++) {
-         if (a->getOperand(i).constantValue() != b->getOperand(i).constantValue())
+         if (a->getOperand(i).isConstant()) {
+            if (!b->getOperand(i).isConstant())
+               return false;
+            if (a->getOperand(i).constantValue() != b->getOperand(i).constantValue())
+               return false;
+         }
+         else if (a->getOperand(i).isTemp()) {
+            if (!b->getOperand(i).isTemp())
+               return false;
+            if (a->getOperand(i).tempId() != b->getOperand(i).tempId())
+               return false;
+         }
+         else if (a->getOperand(i).isUndefined() ^ b->getOperand(i).isUndefined())
             return false;
          if (a->getOperand(i).physReg() == exec)
             return false;
+         if (a->getOperand(i).isFixed()) {
+            if (!b->getOperand(i).isFixed())
+               return false;
+            if (!(a->getOperand(i).physReg() == b->getOperand(i).physReg()))
+               return false;
+         }
+      }
+      for (unsigned i = 0; i < a->num_definitions; i++) {
+         if (a->getDefinition(i).isFixed()) {
+            if (!b->getDefinition(i).isFixed())
+               return false;
+            if (!(a->getDefinition(i).physReg() == b->getDefinition(i).physReg()))
+               return false;
+         }
       }
       if (a->format == Format::PSEUDO_BRANCH)
          return false;
@@ -182,13 +208,13 @@ void process_block(std::unique_ptr<Block>& block,
                    std::set<unsigned>& worklist)
 {
    bool process_successors = false;
+   bool run = false;
    Instruction* last_sopc = nullptr;
    std::vector<std::unique_ptr<Instruction>>::iterator it = block->instructions.begin();
+   std::vector<std::unique_ptr<Instruction>> new_instructions;
+   new_instructions.reserve(block->instructions.size());
 
-   while ((*it)->opcode != aco_opcode::p_logical_start)
-      ++it;
-
-   while ((*it)->opcode != aco_opcode::p_logical_end) {
+   while (it != block->instructions.end()) {
       std::unique_ptr<Instruction>& instr = *it;
       /* first, rename operands */
       for (unsigned i = 0; i < instr->num_operands; i++) {
@@ -199,7 +225,13 @@ void process_block(std::unique_ptr<Block>& block,
             instr->getOperand(i) = it->second;
       }
 
-      if (!instr->num_definitions) {
+      if (instr->opcode == aco_opcode::p_logical_start)
+         run = true;
+      if (instr->opcode == aco_opcode::p_logical_end)
+         run = false;
+
+      if (!instr->num_definitions || !run) {
+         new_instructions.emplace_back(std::move(instr));
          ++it;
          continue;
       }
@@ -228,6 +260,8 @@ void process_block(std::unique_ptr<Block>& block,
 
          last_sopc = instr->getDefinition(instr->num_definitions - 1).isTemp() ? instr.get() : nullptr;
       }
+      if (res.second)
+         new_instructions.emplace_back(std::move(instr));
       ++it;
    }
    if (last_sopc)
@@ -237,6 +271,8 @@ void process_block(std::unique_ptr<Block>& block,
       for (Block* succ : block->logical_successors)
          worklist.insert(succ->index);
    }
+
+   block->instructions.swap(new_instructions);
 }
 
 void value_numbering(Program* program)
