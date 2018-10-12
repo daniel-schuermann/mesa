@@ -438,6 +438,8 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
                ctx.info[instr->getDefinition(i).tempId()].set_literal(vec_op.constantValue());
             else
                ctx.info[instr->getDefinition(i).tempId()].set_constant(vec_op.constantValue());
+         } else if (vec_op.isUndefined()) {
+            ctx.info[instr->getDefinition(i).tempId()].set_undefined();
          } else {
             assert(vec_op.isTemp());
             ctx.info[instr->getDefinition(i).tempId()].set_temp(vec_op.getTemp());
@@ -466,6 +468,8 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
                ctx.info[instr->getDefinition(0).tempId()].set_literal(vec_op.constantValue());
             else
                ctx.info[instr->getDefinition(0).tempId()].set_constant(vec_op.constantValue());
+         } else if (vec_op.isUndefined()) {
+            ctx.info[instr->getDefinition(0).tempId()].set_undefined();
          } else {
             assert(vec_op.isTemp());
             ctx.info[instr->getDefinition(0).tempId()].set_temp(vec_op.getTemp());
