@@ -281,6 +281,58 @@ uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
    }
 }
 
+uint16_t writes_sgpr(Instruction* instr, wait_ctx& ctx)
+{
+   bool needs_waitcnt = false;
+   uint16_t new_lgkm_cnt = max_lgkm_cnt;
+   for (unsigned i = 0; i < instr->definitionCount(); i++)
+   {
+      if (instr->getDefinition(i).getTemp().type() != RegType::sgpr)
+         continue;
+
+      /* check consecutively written sgprs */
+      for (unsigned j = 0; j < instr->getDefinition(i).getTemp().size(); j++)
+      {
+         uint8_t reg = (uint8_t) instr->getDefinition(i).physReg().reg + j;
+
+         std::unordered_map<uint8_t,wait_entry>::iterator it;
+         it = ctx.sgpr_map.find(reg);
+         if (it == ctx.sgpr_map.end())
+            continue;
+
+         needs_waitcnt = true;
+         wait_entry entry = it->second;
+
+         /* remove all vgprs with higher counter from map */
+         it = ctx.sgpr_map.begin();
+         while (it != ctx.sgpr_map.end())
+         {
+            if (entry.type & it->second.type) {
+               if ((entry.type & lgkm_type) && entry.lgkm_cnt <= it->second.lgkm_cnt)
+               {
+                  it->second.lgkm_cnt = max_lgkm_cnt;
+                  it->second.type = it->second.type &= ~lgkm_type;
+               }
+               if (it->second.type == done)
+                  it = ctx.sgpr_map.erase(it);
+               else
+                  it++;
+            } else {
+               it++;
+            }
+         }
+         new_lgkm_cnt = std::min(new_lgkm_cnt, entry.lgkm_cnt);
+      }
+   }
+   if (needs_waitcnt) {
+      /* reset counter */
+      ctx.lgkm_cnt = std::min(ctx.lgkm_cnt, new_lgkm_cnt);
+      return create_waitcnt_imm(max_vm_cnt, max_exp_cnt, new_lgkm_cnt);
+   } else {
+      return -1;
+   }
+}
+
 uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
 {
    bool needs_waitcnt = false;
@@ -389,6 +441,7 @@ Instruction* kill(Instruction* instr, wait_ctx& ctx)
    if (ctx.exp_cnt || ctx.vm_cnt || ctx.lgkm_cnt)
    {
       imm &= writes_vgpr(instr, ctx);
+      imm &= writes_sgpr(instr, ctx);
       imm &= uses_gpr(instr, ctx);
    }
    if (imm != 0xFFFF)
