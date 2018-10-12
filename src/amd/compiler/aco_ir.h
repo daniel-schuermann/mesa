@@ -272,6 +272,7 @@ public:
    explicit Operand() noexcept
    {
       control_[4] = 1; /* undefined */
+      setFixed(PhysReg{128});
    };
    explicit Operand(PhysReg reg, RegClass type) noexcept
    {
@@ -307,7 +308,7 @@ public:
 
    unsigned size() const noexcept
    {
-      if (isConstant())
+      if (isConstant() || isUndefined())
          return 1;
       else
          return data_.temp.size();
