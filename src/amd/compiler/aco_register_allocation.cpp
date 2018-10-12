@@ -205,9 +205,9 @@ void register_allocation(Program *program)
    };
 
    std::function<PhysReg(std::array<uint32_t, 512>&, RegClass, std::vector<std::pair<Operand, Definition>>&,
-                         std::unique_ptr<Instruction>&, std::unordered_map<unsigned, Temp>&)> get_reg =
+                         std::unique_ptr<Instruction>&)> get_reg =
                      [&](std::array<uint32_t, 512>& reg_file, RegClass rc, std::vector<std::pair<Operand, Definition>>& pc,
-                         std::unique_ptr<Instruction>& instr, std::unordered_map<unsigned, Temp>& renames) {
+                         std::unique_ptr<Instruction>& instr) {
       unsigned size = sizeOf(rc);
       uint32_t stride = 1;
       uint32_t lb, ub;
@@ -262,7 +262,7 @@ void register_allocation(Program *program)
                      if (reg_file[instr->getOperand(i).physReg().reg + j] != 0) {
                         Operand op = instr->getOperand(i);
                         Definition def = Definition(program->allocateId(), op.regClass());
-                        PhysReg reg = get_reg(reg_file, op.regClass(), pc, instr, renames);
+                        PhysReg reg = get_reg(reg_file, op.regClass(), pc, instr);
                         def.setFixed(reg);
                         pc.emplace_back(op, def);
                         instr->getOperand(i).setTemp(def.getTemp());
@@ -347,13 +347,16 @@ void register_allocation(Program *program)
          for (unsigned i = 0; i < preds.size(); i++) {
             Temp op_temp = read_variable(val, preds[i]);
             instr->getOperand(i).setTemp(op_temp);
+            assert(assignments.find(op_temp.id()) != assignments.end());
             instr->getOperand(i).setFixed(assignments[op_temp.id()].first);
             if (!(op_temp == new_val) && phi_map.find(op_temp.id()) != phi_map.end())
                phi_map[op_temp.id()].uses.emplace(instr);
          }
          /* we check if the phi is trivial (in which case we return the original value) */
          new_val = try_remove_trivial_phi(phi_map.find(new_val.id()));
-         // FIXME: that is quite inefficient, better keep temporaries because most phis are trivial
+         // TODO: that is quite inefficient, better keep temporaries because most phis are trivial
+         // see the paper: we can mark visited blocks, and only emit a phi on second visit.
+         // or better: we can try to detect cycles and only emit phi on loop headers
          phis[block->index].emplace_back(std::move(phi));
       }
       renames[block->index][val.id()] = new_val;
@@ -377,7 +380,7 @@ void register_allocation(Program *program)
          }
          same = op;
       }
-      assert(!(same == Temp()));
+      assert(!(same == Temp() || same == def));
 
       /* reroute all uses to same and remove phi */
       std::vector<std::map<unsigned, phi_info>::iterator> phi_users;
@@ -393,13 +396,22 @@ void register_allocation(Program *program)
                phi_users.emplace_back(it);
          }
       }
-      renames[info->second.block_idx][same.id()] = same;
+
+      auto it = orig_names.find(same.id());
+      unsigned orig_var = it != orig_names.end() ? it->second.id() : same.id();
+      for (unsigned i = 0; i < program->blocks.size(); i++) {
+         auto it = renames[i].find(orig_var);
+         if (it != renames[i].end() && it->second == def)
+            renames[i][orig_var] = same;
+      }
+
       instr->num_definitions = 0; /* this indicates that the phi can be removed */
       phi_map.erase(info);
       for (auto it : phi_users)
          try_remove_trivial_phi(it);
 
-      return same;
+      /* do to the removal of other phis, the name might have changed once again! */
+      return renames[info->second.block_idx][orig_var];
    };
 
    std::map<unsigned, unsigned> affinities;
@@ -502,7 +514,7 @@ void register_allocation(Program *program)
                         pc_op.setFixed(operand.physReg());
                         Definition pc_def = Definition(Temp{program->allocateId(), pc_op.regClass()});
                         /* find free reg */
-                        PhysReg reg = get_reg(register_file, pc_op.regClass(), parallelcopy, instr, renames[block->index]);
+                        PhysReg reg = get_reg(register_file, pc_op.regClass(), parallelcopy, instr);
                         pc_def.setFixed(reg);
                         assignments[pc_def.tempId()] = {reg, pc_def.regClass()};
                         for (unsigned i = 0; i < operand.size(); i++) {
@@ -556,7 +568,7 @@ void register_allocation(Program *program)
                   pc_op.setFixed(assignments[register_file[definition.physReg().reg]].first);
                   tmp = Temp{program->allocateId(), pc_op.regClass()};
                   Definition pc_def = Definition(tmp);
-                  PhysReg reg = get_reg(register_file, pc_op.regClass(), parallelcopy, instr, renames[block->index]);
+                  PhysReg reg = get_reg(register_file, pc_op.regClass(), parallelcopy, instr);
                   pc_def.setFixed(reg);
                   assignments[pc_def.tempId()] = {reg, pc_def.regClass()};
                   for (unsigned i = 0; i < pc_op.size(); i++) {
@@ -580,14 +592,14 @@ void register_allocation(Program *program)
                   PhysReg reg = assignments[affinities[definition.tempId()]].first;
                   for (unsigned i = 0; i < definition.size(); i++) {
                      if (register_file[reg.reg + i] != 0) {
-                        definition.setFixed(get_reg(register_file, definition.regClass(), parallelcopy, instr, renames[block->index]));
+                        definition.setFixed(get_reg(register_file, definition.regClass(), parallelcopy, instr));
                         break;
                      }
                   }
                   if (!definition.isFixed())
                      definition.setFixed(reg);
                } else
-                  definition.setFixed(get_reg(register_file, definition.regClass(), parallelcopy, instr, renames[block->index]));
+                  definition.setFixed(get_reg(register_file, definition.regClass(), parallelcopy, instr));
             }
 
             assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
