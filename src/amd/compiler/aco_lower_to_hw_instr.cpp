@@ -157,8 +157,6 @@ void lower_to_hw_instr(Program* program)
       {
          std::unique_ptr<Instruction> mov;
          if (instr->format == Format::PSEUDO) {
-            if (instr->num_definitions == 0)
-               continue;
             switch (instr->opcode)
             {
             case aco_opcode::p_extract_vector:
@@ -241,6 +239,35 @@ void lower_to_hw_instr(Program* program)
                   }
                }
                handle_operands(copy_operations, new_instructions, program->chip_class);
+               break;
+            }
+            case aco_opcode::p_discard_if:
+            {
+               assert(instr->getOperand(0).regClass() == s2);
+               std::unique_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2)};
+               sop2->getOperand(0) = Operand(exec, s2);
+               sop2->getOperand(1) = instr->getOperand(0);
+               sop2->getDefinition(0) = Definition(exec, s2);
+               sop2->getDefinition(1) = Definition(PhysReg{253}, b);
+               new_instructions.emplace_back(std::move(sop2));
+
+               std::unique_ptr<SOPP_instruction> branch{create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc1, Format::SOPP, 1, 0)};
+               branch->getOperand(0) = Operand(exec, s2);
+               branch->imm = 3; /* (8 + 4 dwords) / 4 */
+               new_instructions.emplace_back(std::move(branch));
+
+               std::unique_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
+               for (unsigned i = 0; i < 4; i++)
+                  exp->getOperand(i) = Operand();
+               exp->enabled_mask = 0;
+               exp->compressed = false;
+               exp->done = true;
+               exp->valid_mask = true;
+               exp->dest = 9; /* NULL */
+               new_instructions.emplace_back(std::move(exp));
+
+               std::unique_ptr<SOPP_instruction> endpgm{create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)};
+               new_instructions.emplace_back(std::move(endpgm));
                break;
             }
             default:
