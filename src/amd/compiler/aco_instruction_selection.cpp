@@ -1755,6 +1755,19 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_discard_if:
       visit_discard_if(ctx, instr);
       break;
+   case nir_intrinsic_load_work_group_id:
+   case nir_intrinsic_load_local_invocation_id: {
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1)};
+      Temp* ids = instr->intrinsic == nir_intrinsic_load_work_group_id ? ctx->workgroup_ids : ctx->local_invocation_ids;
+      vec->getOperand(0) = Operand(ids[0]);
+      vec->getOperand(1) = Operand(ids[1]);
+      vec->getOperand(2) = Operand(ids[2]);
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      vec->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(vec));
+      emit_split_vector(ctx, dst, 3);
+      break;
+   }
    default:
       fprintf(stderr, "Unimplemented intrinsic instr: ");
       nir_print_instr(&instr->instr, stderr);
@@ -3137,17 +3150,18 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   size *= 2;
                RegType type = sgpr;
                switch(intrinsic->intrinsic) {
-                  case nir_intrinsic_load_front_face:
+                  case nir_intrinsic_load_work_group_id:
                      type = sgpr;
-                     size = 2;
                      break;
                   case nir_intrinsic_load_input:
                   case nir_intrinsic_load_vertex_id:
                   case nir_intrinsic_load_vertex_id_zero_base:
                   case nir_intrinsic_load_barycentric_pixel:
                   case nir_intrinsic_load_interpolated_input:
+                  case nir_intrinsic_load_local_invocation_id:
                      type = vgpr;
                      break;
+                  case nir_intrinsic_load_front_face:
                   case nir_intrinsic_vulkan_resource_index:
                      type = sgpr;
                      size = 2;
@@ -3625,8 +3639,8 @@ void add_startpgm(struct isel_context *ctx)
          add_arg(&args, s1, &ctx->tg_size, idx++);
 
       add_arg(&args, v1, &ctx->local_invocation_ids[0], vgpr_idx++);
-      add_arg(&args, v1, &ctx->local_invocation_ids[0], vgpr_idx++);
-      add_arg(&args, v1, &ctx->local_invocation_ids[0], vgpr_idx++);
+      add_arg(&args, v1, &ctx->local_invocation_ids[1], vgpr_idx++);
+      add_arg(&args, v1, &ctx->local_invocation_ids[2], vgpr_idx++);
       break;
    }
    default:
