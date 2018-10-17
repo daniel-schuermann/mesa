@@ -638,7 +638,20 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_iadd: {
       if (dst.regClass() == v1) {
-         emit_vop2_instruction(ctx, instr, aco_opcode::v_add_u32, dst, true);
+         if (ctx->options->chip_class >= GFX9) {
+            emit_vop2_instruction(ctx, instr, aco_opcode::v_add_u32, dst, true);
+         } else {
+            std::unique_ptr<VOP2_instruction> add{create_instruction<VOP2_instruction>(aco_opcode::v_add_co_u32, Format::VOP2, 2, 2)};
+            Temp src0 = get_alu_src(ctx, instr->src[0]);
+            Temp src1 = get_alu_src(ctx, instr->src[1]);
+            add->getOperand(0) = Operand(src1.type() == sgpr ? src1 : src0);
+            add->getOperand(1) = Operand(src1.type() == sgpr ? src0 : src1);
+            add->getDefinition(0) = Definition(dst);
+            Temp tmp = {ctx->program->allocateId(), s2};
+            add->getDefinition(1) = Definition(tmp);
+            add->getDefinition(1).setHint(vcc);
+            ctx->block->instructions.emplace_back(std::move(add));
+         }
       } else if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_add_i32, dst, true);
       } else {
