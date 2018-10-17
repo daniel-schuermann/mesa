@@ -440,7 +440,9 @@ void register_allocation(Program *program)
             unsigned op_idx = instr->num_operands;
             std::vector<Block*>& preds = instr->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
             for (unsigned i = 0; i < instr->num_operands; i++) {
-               if (preds[i]->index < block->index && instr->getOperand(i).isTemp() && instr->getOperand(i).tempId() < preferred) {
+               if (preds[i]->index < block->index && instr->getOperand(i).isTemp() &&
+                   instr->getOperand(i).tempId() < preferred &&
+                   instr->getOperand(i).regClass() == instr->getDefinition(0).regClass()) {
                   assert(!instr->getOperand(i).isUndefined());
                   preferred = instr->getOperand(i).tempId();
                   op_idx = i;
