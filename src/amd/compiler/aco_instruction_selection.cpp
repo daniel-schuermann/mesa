@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <unordered_map>
+#include <map>
 #include <set>
 #include <stack>
 
@@ -2386,20 +2387,40 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
 void visit_phi(isel_context *ctx, nir_phi_instr *instr)
 {
-   // FIXME: are we sure that the order of phi src corresponds to our order of block predecessors?
    std::unique_ptr<Instruction> phi;
    unsigned num_src = exec_list_length(&instr->srcs);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    aco_opcode opcode = ctx->divergent_vals[instr->dest.ssa.index] ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
    phi.reset(create_instruction<Instruction>(opcode, Format::PSEUDO, num_src, 1));
-   std::set<unsigned> block_idx;
-
+   std::map<unsigned, nir_ssa_def*> phi_src;
    nir_foreach_phi_src(src, instr)
-      block_idx.insert(src->pred->index);
+      phi_src[src->pred->index] = src->src.ssa;
 
-   nir_foreach_phi_src(src, instr)
-      phi->getOperand(std::distance(block_idx.begin(), block_idx.find(src->pred->index))) = Operand(get_ssa_temp(ctx, src->src.ssa));
+   /* if we have a linear phi on a divergent if, we know that one src is undef */
+   if (opcode == aco_opcode::p_linear_phi && ctx->block->logical_predecessors[0] != ctx->block->linear_predecessors[0]) {
+      assert(num_src == 2);
+      Block* block;
+      /* we place the phi either in the between-block or in the current block */
+      if (phi_src.begin()->second->parent_instr->type != nir_instr_type_ssa_undef) {
+         assert((++phi_src.begin())->second->parent_instr->type == nir_instr_type_ssa_undef);
+         block = ctx->block->linear_predecessors[1]->linear_predecessors[0];
+         phi->getOperand(0) = Operand(get_ssa_temp(ctx, phi_src.begin()->second));
+      } else {
+         assert((++phi_src.begin())->second->parent_instr->type != nir_instr_type_ssa_undef);
+         block = ctx->block;
+         phi->getOperand(0) = Operand(get_ssa_temp(ctx, (++phi_src.begin())->second));
+      }
+      phi->getOperand(1) = Operand();
+      phi->getDefinition(0) = Definition(dst);
+      block->instructions.emplace(block->instructions.begin(), std::move(phi));
+      return;
+   }
 
+   std::map<unsigned, nir_ssa_def*>::iterator it = phi_src.begin();
+   for (unsigned i = 0; i < num_src; i++) {
+      phi->getOperand(i) = Operand(get_ssa_temp(ctx, it->second));
+      ++it;
+   }
    phi->getDefinition(0) = Definition(dst);
    ctx->block->instructions.emplace(ctx->block->instructions.begin(), std::move(phi));
 }
