@@ -635,6 +635,16 @@ void register_allocation(Program *program)
             }
             instructions.emplace_back(std::move(pc));
          }
+         if (instr->opcode == aco_opcode::v_add_co_u32 && !(instr->getDefinition(1).physReg() == vcc)) {
+            /* change the instruction to VOP3 to enable an arbitrary register pair as dst */
+            std::unique_ptr<Instruction> tmp = std::move(instr);
+            Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
+            instr.reset(create_instruction<VOP3A_instruction>(tmp->opcode, format, tmp->num_operands, tmp->num_definitions));
+            for (unsigned i = 0; i < instr->num_operands; i++)
+               instr->getOperand(i) = tmp->getOperand(i);
+            for (unsigned i = 0; i < instr->num_definitions; i++)
+               instr->getDefinition(i) = tmp->getDefinition(i);
+         }
          instructions.emplace_back(std::move(*it));
       } /* end for Instr */
       block->instructions = std::move(instructions);

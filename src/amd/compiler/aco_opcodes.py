@@ -612,12 +612,12 @@ for code, name in VOP2_LITERAL:
    opcode(name, 3, [v1], code)
 
 VOP2_VCCOUT = [
-   "v_add_co_u32",
-   "v_sub_co_u32",
-   "v_subrev_co_u32"
+   (25, "v_add_co_u32"),
+   (26, "v_sub_co_u32"),
+   (27, "v_subrev_co_u32")
 ]
-for name in VOP2_VCCOUT:
-   opcode(name, 2, [v1,s2], write_reg = VCC)
+for code, name in VOP2_VCCOUT:
+   opcode(name, 2, [v1,s2], code, write_reg = VCC)
 
 VOP2_VCCINOUT = [
    "v_addc_co_u32",
