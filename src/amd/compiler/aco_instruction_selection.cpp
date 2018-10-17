@@ -84,6 +84,12 @@ struct isel_context {
    Temp instance_id;
    Temp vs_prim_id;
 
+   /* CS inputs */
+   Temp num_workgroups[3];
+   Temp workgroup_ids[3];
+   Temp tg_size;
+   Temp local_invocation_ids[3];
+
    uint64_t input_mask;
 };
 
@@ -3270,6 +3276,10 @@ static void allocate_user_sgprs(isel_context *ctx,
    case MESA_SHADER_FRAGMENT:
       user_sgpr_count += ctx->program->info->info.ps.needs_sample_positions;
       break;
+   case MESA_SHADER_COMPUTE:
+      if (ctx->program->info->info.cs.uses_grid_size)
+         user_sgpr_count += 3;
+      break;
    default:
       unreachable("Shader stage not implemented");
    }
@@ -3592,6 +3602,31 @@ void add_startpgm(struct isel_context *ctx)
       unsigned interp_mode = needs_interp_mode ? S_0286CC_PERSP_CENTER_ENA(1) : 0;
       ctx->program->config->spi_ps_input_addr |= interp_mode;
       ctx->program->config->spi_ps_input_ena |= interp_mode;
+      break;
+   }
+   case MESA_SHADER_COMPUTE: {
+      declare_global_input_sgprs(ctx, &user_sgpr_info, &args, ctx->descriptor_sets);
+
+      assert(user_sgpr_info.user_sgpr_idx == user_sgpr_info.num_sgpr);
+      if (ctx->program->info->info.cs.uses_grid_size) {
+         add_arg(&args, s1, &ctx->num_workgroups[0], user_sgpr_info.user_sgpr_idx);
+         add_arg(&args, s1, &ctx->num_workgroups[1], user_sgpr_info.user_sgpr_idx + 1);
+         add_arg(&args, s1, &ctx->num_workgroups[2], user_sgpr_info.user_sgpr_idx + 2);
+         set_loc_shader(ctx, AC_UD_CS_GRID_SIZE, &user_sgpr_info.user_sgpr_idx, 3);
+      }
+
+      unsigned idx = user_sgpr_info.user_sgpr_idx;
+      for (unsigned i = 0; i < 3; i++) {
+         if (ctx->program->info->info.cs.uses_block_id[i])
+            add_arg(&args, s1, &ctx->workgroup_ids[i], idx++);
+      }
+
+      if (ctx->program->info->info.cs.uses_local_invocation_idx)
+         add_arg(&args, s1, &ctx->tg_size, idx++);
+
+      add_arg(&args, v1, &ctx->local_invocation_ids[0], vgpr_idx++);
+      add_arg(&args, v1, &ctx->local_invocation_ids[0], vgpr_idx++);
+      add_arg(&args, v1, &ctx->local_invocation_ids[0], vgpr_idx++);
       break;
    }
    default:
