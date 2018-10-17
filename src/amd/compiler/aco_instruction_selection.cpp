@@ -2282,46 +2282,32 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       return;
    }
 
-   Temp arg = coords;
+   std::vector<Operand> args;
+   if (has_offset)
+      args.emplace_back(Operand(offset));
+   if (has_bias)
+      args.emplace_back(Operand(bias));
+   if (has_compare)
+      args.emplace_back(Operand(compare));
+   if (has_derivs)
+      args.emplace_back(Operand(derivs));
+   args.emplace_back(Operand(coords));
 
-   if (has_derivs) {
-      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-      vec->getOperand(0) = Operand(derivs);
-      vec->getOperand(1) = Operand(arg);
-      RegClass rc = getRegClass(vgpr, derivs.size() + arg.size());
-      arg = Temp{ctx->program->allocateId(), rc};
-      vec->getDefinition(0) = Definition(arg);
+   Operand arg;
+   if (args.size() > 1) {
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, args.size(), 1)};
+      unsigned size = 0;
+      for (unsigned i = 0; i < args.size(); i++) {
+         size += args[i].size();
+         vec->getOperand(i) = args[i];
+      }
+      RegClass rc = getRegClass(vgpr, size);
+      Temp tmp = Temp{ctx->program->allocateId(), rc};
+      vec->getDefinition(0) = Definition(tmp);
       ctx->block->instructions.emplace_back(std::move(vec));
-   }
-
-   if (has_compare) {
-      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-      vec->getOperand(0) = Operand(compare);
-      vec->getOperand(1) = Operand(arg);
-      RegClass rc = (RegClass) ((int) compare.regClass() + arg.size());
-      arg = Temp{ctx->program->allocateId(), rc};
-      vec->getDefinition(0) = Definition(arg);
-      ctx->block->instructions.emplace_back(std::move(vec));
-   }
-
-   if (has_bias) {
-      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-      vec->getOperand(0) = Operand(bias);
-      vec->getOperand(1) = Operand(arg);
-      RegClass rc = (RegClass) ((int) bias.regClass() + arg.size());
-      arg = Temp{ctx->program->allocateId(), rc};
-      vec->getDefinition(0) = Definition(arg);
-      ctx->block->instructions.emplace_back(std::move(vec));
-   }
-
-   if (has_offset) {
-      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-      vec->getOperand(0) = Operand(offset);
-      vec->getOperand(1) = Operand(arg);
-      RegClass rc = (RegClass) ((int) arg.regClass() + offset.size());
-      arg = Temp{ctx->program->allocateId(), rc};
-      vec->getDefinition(0) = Definition(arg);
-      ctx->block->instructions.emplace_back(std::move(vec));
+      arg = Operand(tmp);
+   } else {
+      arg = args[0];
    }
 
    // TODO: would be better to do this by adding offsets, but needs the opcodes ordered.
@@ -2373,7 +2359,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    }
 
    tex.reset(create_instruction<MIMG_instruction>(opcode, Format::MIMG, 3, 1));
-   tex->getOperand(0) = Operand{arg};
+   tex->getOperand(0) = arg;
    tex->getOperand(1) = Operand(resource);
    tex->getOperand(2) = Operand(sampler);
    tex->dmask = dmask;
