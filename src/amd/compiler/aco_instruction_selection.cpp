@@ -84,7 +84,7 @@ struct isel_context {
    Temp instance_id;
    Temp vs_prim_id;
 
-   uint32_t input_mask;
+   uint64_t input_mask;
 };
 
 class loop_info_RAII {
@@ -1367,9 +1367,8 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
       return;
    }
 
-   unsigned base = nir_intrinsic_base(instr) / 4 - VARYING_SLOT_VAR0;
-   unsigned idx = util_bitcount(ctx->input_mask & ((1u << base) - 1));
-
+   uint64_t base = nir_intrinsic_base(instr) / 4;
+   unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
    unsigned component = nir_intrinsic_component(instr);
 
    if (instr->dest.ssa.num_components == 1) {
@@ -1456,8 +1455,8 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
       }
 
    } else if (ctx->stage == MESA_SHADER_FRAGMENT) {
-      unsigned base = nir_intrinsic_base(instr) / 4 - VARYING_SLOT_VAR0;
-      unsigned idx = util_bitcount(ctx->input_mask & ((1u << base) - 1));
+      unsigned base = nir_intrinsic_base(instr) / 4;
+      unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
       unsigned component = nir_intrinsic_component(instr);
 
       std::unique_ptr<Interp_instruction> mov{create_instruction<Interp_instruction>(aco_opcode::v_interp_mov_f32, Format::VINTRP, 2, 1)};
@@ -3673,11 +3672,14 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    if (ctx.stage == MESA_SHADER_FRAGMENT) {
       nir_foreach_variable(variable, &nir->inputs)
       {
-         int idx = variable->data.location - VARYING_SLOT_VAR0;
-         ctx.input_mask |= 1ull << idx;
+         int idx = variable->data.location;
+         unsigned attrib_count = glsl_count_attribute_slots(variable->type, false);
+         if (idx >= VARYING_SLOT_VAR0 || idx == VARYING_SLOT_PNTC ||
+             idx == VARYING_SLOT_PRIMITIVE_ID || idx == VARYING_SLOT_LAYER)
+            ctx.input_mask |= ((1ull << attrib_count) - 1ull) << idx;
       }
-      program->info->fs.num_interp = util_bitcount(ctx.input_mask);
-      program->info->fs.input_mask = ctx.input_mask;
+      program->info->fs.num_interp = util_bitcount64(ctx.input_mask);
+      program->info->fs.input_mask = ctx.input_mask >> VARYING_SLOT_VAR0;
    }
 
    add_startpgm(&ctx);
