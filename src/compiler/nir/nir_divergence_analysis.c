@@ -158,12 +158,20 @@ static bool visit_phi(bool *divergent, nir_phi_instr *instr)
    if (divergent[instr->dest.ssa.index])
       return false;
 
-   /* if any source value is divergent, the resulting value is divergent */
+   unsigned non_undef = 0;
    nir_foreach_phi_src(src, instr) {
+      /* if any source value is divergent, the resulting value is divergent */
       if (divergent[src->src.ssa->index]) {
          divergent[instr->dest.ssa.index] = true;
          return true;
       }
+      /* if all values but one are undef, the resulting value is uniform */
+      if (src->src.ssa->parent_instr->type != nir_instr_type_ssa_undef)
+         non_undef += 1;
+   }
+   if (non_undef <= 1) {
+      assert(divergent[instr->dest.ssa.index] == false);
+      return false;
    }
 
    nir_cf_node *prev = nir_cf_node_prev(&instr->instr.block->cf_node);
