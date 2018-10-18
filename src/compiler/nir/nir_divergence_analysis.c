@@ -98,9 +98,14 @@ static bool visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_reduce:
    case nir_intrinsic_load_push_constant:
    case nir_intrinsic_vulkan_resource_index:
+   case nir_intrinsic_load_work_group_id:
+   case nir_intrinsic_load_num_work_groups:
+   case nir_intrinsic_get_buffer_size:
       is_divergent = false;
       break;
    case nir_intrinsic_load_ubo:
+   case nir_intrinsic_image_deref_load:
+   case nir_intrinsic_load_ssbo:
       for (unsigned i = 0; i < nir_intrinsic_infos[instr->intrinsic].num_srcs; i++) {
          if (divergent[instr->src[i].ssa->index]) {
             is_divergent = true;
@@ -110,6 +115,8 @@ static bool visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_load_interpolated_input:
    case nir_intrinsic_load_barycentric_pixel:
+   case nir_intrinsic_load_invocation_id:
+   case nir_intrinsic_load_local_invocation_index:
    default:
       is_divergent = true;
       break;
