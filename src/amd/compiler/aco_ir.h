@@ -625,8 +625,8 @@ struct MUBUF_instruction : public Instruction {
  * Vector Memory Image Instructions
  * Operand(0): VADDR - Address source. Can carry an offset or an index.
  * Operand(1): SRSRC - Scalar GPR that specifies the resource constant.
- * Operand(2): SSAMP - Scalar GPR that specifies sampler constant.
- * Definition(0): VDATA - Vector GPR for write result.
+ * Operand(2) / Definition(0): VDATA - Vector GPR for read / write result.
+ * Operand(2 / 3): SSAMP - Scalar GPR that specifies sampler constant.
  *
  */
 struct MIMG_instruction : public Instruction {
