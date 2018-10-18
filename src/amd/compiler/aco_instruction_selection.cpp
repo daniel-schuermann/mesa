@@ -3666,11 +3666,13 @@ void add_startpgm(struct isel_context *ctx)
 
    ctx->block->instructions.push_back(std::move(startpgm));
 
-   std::unique_ptr<Instruction> wqm{create_instruction<Instruction>(aco_opcode::s_wqm_b64, Format::SOP1, 1, 2)};
-   wqm->getOperand(0) = Operand(PhysReg{126}, s2);
-   wqm->getDefinition(0) = Definition(PhysReg{126}, s2);
-   wqm->getDefinition(1) = Definition(PhysReg{253}, b);
-   ctx->block->instructions.push_back(std::move(wqm));
+   if (ctx->stage == MESA_SHADER_FRAGMENT) {
+      std::unique_ptr<Instruction> wqm{create_instruction<Instruction>(aco_opcode::s_wqm_b64, Format::SOP1, 1, 2)};
+      wqm->getOperand(0) = Operand(PhysReg{126}, s2);
+      wqm->getDefinition(0) = Definition(PhysReg{126}, s2);
+      wqm->getDefinition(1) = Definition(PhysReg{253}, b);
+      ctx->block->instructions.push_back(std::move(wqm));
+   }
 
    append_logical_start(ctx->block);
 }
@@ -3692,6 +3694,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    program->config = config;
    program->info = info;
    program->chip_class = options->chip_class;
+   program->stage = nir->info.stage;
 
    for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i)
       program->info->user_sgprs_locs.descriptor_sets[i].sgpr_idx = -1;

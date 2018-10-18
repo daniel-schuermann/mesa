@@ -693,6 +693,7 @@ public:
    ac_shader_config* config;
    struct radv_shader_variant_info *info;
    enum chip_class chip_class;
+   gl_shader_stage stage;
 
    uint32_t allocateId()
    {
