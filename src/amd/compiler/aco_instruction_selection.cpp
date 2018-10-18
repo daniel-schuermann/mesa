@@ -3730,6 +3730,11 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
       program->info->fs.num_interp = util_bitcount64(ctx.input_mask);
       program->info->fs.input_mask = ctx.input_mask >> VARYING_SLOT_VAR0;
    }
+   if (ctx.stage == MESA_SHADER_COMPUTE) {
+      ctx.program->info->cs.block_size[0] = nir->info.cs.local_size[0];
+      ctx.program->info->cs.block_size[1] = nir->info.cs.local_size[1];
+      ctx.program->info->cs.block_size[2] = nir->info.cs.local_size[2];
+   }
 
    add_startpgm(&ctx);
 
