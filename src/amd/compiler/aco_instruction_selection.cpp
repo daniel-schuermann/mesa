@@ -1712,71 +1712,6 @@ void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
    return;
 }
 
-void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
-{
-   switch(instr->intrinsic) {
-   case nir_intrinsic_load_barycentric_pixel: {
-      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-      vec->getOperand(0) = Operand(ctx->fs_inputs[fs_input::persp_center_p1]);
-      vec->getOperand(1) = Operand(ctx->fs_inputs[fs_input::persp_center_p2]);
-      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      vec->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(vec));
-      emit_split_vector(ctx, dst, 2);
-      break;
-   }
-   case nir_intrinsic_load_front_face: {
-      std::unique_ptr<VOPC_instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_lg_u32, Format::VOPC, 2, 1)};
-      cmp->getOperand(0) = Operand((uint32_t) 0);
-      cmp->getOperand(1) = Operand(ctx->fs_inputs[fs_input::front_face]);
-      cmp->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
-      cmp->getDefinition(0).setHint(vcc);
-      ctx->block->instructions.emplace_back(std::move(cmp));
-      break;
-   }
-   case nir_intrinsic_load_interpolated_input:
-      visit_load_interpolated_input(ctx, instr);
-      break;
-   case nir_intrinsic_store_output:
-      visit_store_output(ctx, instr);
-      break;
-   case nir_intrinsic_load_input:
-      visit_load_input(ctx, instr);
-      break;
-   case nir_intrinsic_load_ubo:
-      visit_load_ubo(ctx, instr);
-      break;
-   case nir_intrinsic_load_push_constant:
-      visit_load_push_constant(ctx, instr);
-      break;
-   case nir_intrinsic_vulkan_resource_index:
-      visit_load_resource(ctx, instr);
-      break;
-   case nir_intrinsic_discard_if:
-      visit_discard_if(ctx, instr);
-      break;
-   case nir_intrinsic_load_work_group_id:
-   case nir_intrinsic_load_local_invocation_id: {
-      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1)};
-      Temp* ids = instr->intrinsic == nir_intrinsic_load_work_group_id ? ctx->workgroup_ids : ctx->local_invocation_ids;
-      vec->getOperand(0) = Operand(ids[0]);
-      vec->getOperand(1) = Operand(ids[1]);
-      vec->getOperand(2) = Operand(ids[2]);
-      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      vec->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(vec));
-      emit_split_vector(ctx, dst, 3);
-      break;
-   }
-   default:
-      fprintf(stderr, "Unimplemented intrinsic instr: ");
-      nir_print_instr(&instr->instr, stderr);
-      fprintf(stderr, "\n");
-      abort();
-
-      break;
-   }
-}
 
 enum aco_descriptor_type {
    ACO_DESC_IMAGE,
@@ -1977,9 +1912,204 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
    Temp t = {ctx->program->allocateId(), type};
    load->getDefinition(0) = Definition(t);
    ctx->block->instructions.emplace_back(std::move(load));
-   //ctx->tex_desc.insert({(uint64_t) desc_type << 32 | deref_instr->dest.ssa.index, t});
    return t;
 }
+
+static int image_type_to_components_count(enum glsl_sampler_dim dim, bool array)
+{
+   switch (dim) {
+   case GLSL_SAMPLER_DIM_BUF:
+      return 1;
+   case GLSL_SAMPLER_DIM_1D:
+      return array ? 2 : 1;
+   case GLSL_SAMPLER_DIM_2D:
+      return array ? 3 : 2;
+   case GLSL_SAMPLER_DIM_MS:
+      return array ? 4 : 3;
+   case GLSL_SAMPLER_DIM_3D:
+   case GLSL_SAMPLER_DIM_CUBE:
+      return 3;
+   case GLSL_SAMPLER_DIM_RECT:
+   case GLSL_SAMPLER_DIM_SUBPASS:
+      return 2;
+   case GLSL_SAMPLER_DIM_SUBPASS_MS:
+      return 3;
+   default:
+      break;
+   }
+   return 0;
+}
+
+static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr, const struct glsl_type *type)
+{
+
+   Temp src0 = get_ssa_temp(ctx, instr->src[1].ssa);
+   enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
+   bool is_array = glsl_sampler_type_is_array(type);
+   bool add_frag_pos = (dim == GLSL_SAMPLER_DIM_SUBPASS || dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
+   bool is_ms = (dim == GLSL_SAMPLER_DIM_MS || dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
+   bool gfx9_1d = ctx->options->chip_class >= GFX9 && dim == GLSL_SAMPLER_DIM_1D;
+   int count = image_type_to_components_count(dim, is_array);
+
+   if (count == 1 && !gfx9_1d)
+      return emit_extract_vector(ctx, src0, 0, v1);
+
+   std::vector<Operand> coords;
+
+   if (add_frag_pos) {
+      unreachable("add_frag_pos not implemented.");
+   }
+
+   if (gfx9_1d) {
+      coords.emplace_back(Operand(emit_extract_vector(ctx, src0, 0, v1)));
+      coords.emplace_back(Operand(0));
+      if (is_array)
+         coords.emplace_back(Operand(emit_extract_vector(ctx, src0, 1, v1)));
+   } else {
+      for (unsigned i = 0; i < count; i++)
+         coords.emplace_back(Operand(emit_extract_vector(ctx, src0, i, v1)));
+   }
+
+   if (is_ms) {
+      unreachable("is_ms not implemented.");
+   }
+
+   std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, coords.size(), 1)};
+   for (unsigned i = 0; i < coords.size(); i++)
+      vec->getOperand(i) = coords[i];
+   Temp res = {ctx->program->allocateId(), getRegClass(vgpr, coords.size())};
+   vec->getDefinition(0) = Definition(res);
+   ctx->block->instructions.emplace_back(std::move(vec));
+   return res;
+}
+
+
+void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   const nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
+   const struct glsl_type *type = glsl_without_array(var->type);
+   const enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
+
+   if (dim == GLSL_SAMPLER_DIM_BUF) {
+      unreachable("image load with GLSL_SAMPLER_DIM_BUF not yet implemented\n");
+      return;
+   }
+
+   Temp coords = get_image_coords(ctx, instr, type);
+   Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, nullptr, true, true);
+   //aco_image_dim img_dim = get_image_dim(ctx, glsl_get_sampler_dim(type), glsl_sampler_type_is_array(type));
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+
+   std::unique_ptr<MIMG_instruction> load{create_instruction<MIMG_instruction>(aco_opcode::image_load, Format::MIMG, 2, 1)};
+   load->getOperand(0) = Operand(coords);
+   load->getOperand(1) = Operand(resource);
+   load->getDefinition(0) = Definition(dst);
+   load->glc = var->data.image._volatile || var->data.image.coherent;
+   load->dmask = 0xF;
+   load->unrm = true;
+   ctx->block->instructions.emplace_back(std::move(load));
+   emit_split_vector(ctx, dst, 4);
+   return;
+}
+
+void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   const nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
+   const struct glsl_type *type = glsl_without_array(var->type);
+   const enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
+
+   if (dim == GLSL_SAMPLER_DIM_BUF) {
+      unreachable("image load with GLSL_SAMPLER_DIM_BUF not yet implemented\n");
+      return;
+   }
+
+   Temp data = get_ssa_temp(ctx, instr->src[3].ssa);
+   Temp coords = get_image_coords(ctx, instr, type);
+   Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, nullptr, true, true);
+
+   std::unique_ptr<MIMG_instruction> store{create_instruction<MIMG_instruction>(aco_opcode::image_store, Format::MIMG, 3, 0)};
+   store->getOperand(0) = Operand(coords);
+   store->getOperand(1) = Operand(resource);
+   store->getOperand(2) = Operand(data);
+   store->glc = ctx->options->chip_class == SI || var->data.image._volatile || var->data.image.coherent;
+   store->dmask = 0xF;
+   store->unrm = true;
+   ctx->block->instructions.emplace_back(std::move(store));
+   return;
+}
+
+void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   switch(instr->intrinsic) {
+   case nir_intrinsic_load_barycentric_pixel: {
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      vec->getOperand(0) = Operand(ctx->fs_inputs[fs_input::persp_center_p1]);
+      vec->getOperand(1) = Operand(ctx->fs_inputs[fs_input::persp_center_p2]);
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      vec->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(vec));
+      emit_split_vector(ctx, dst, 2);
+      break;
+   }
+   case nir_intrinsic_load_front_face: {
+      std::unique_ptr<VOPC_instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_lg_u32, Format::VOPC, 2, 1)};
+      cmp->getOperand(0) = Operand((uint32_t) 0);
+      cmp->getOperand(1) = Operand(ctx->fs_inputs[fs_input::front_face]);
+      cmp->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      cmp->getDefinition(0).setHint(vcc);
+      ctx->block->instructions.emplace_back(std::move(cmp));
+      break;
+   }
+   case nir_intrinsic_load_interpolated_input:
+      visit_load_interpolated_input(ctx, instr);
+      break;
+   case nir_intrinsic_store_output:
+      visit_store_output(ctx, instr);
+      break;
+   case nir_intrinsic_load_input:
+      visit_load_input(ctx, instr);
+      break;
+   case nir_intrinsic_load_ubo:
+      visit_load_ubo(ctx, instr);
+      break;
+   case nir_intrinsic_load_push_constant:
+      visit_load_push_constant(ctx, instr);
+      break;
+   case nir_intrinsic_vulkan_resource_index:
+      visit_load_resource(ctx, instr);
+      break;
+   case nir_intrinsic_discard_if:
+      visit_discard_if(ctx, instr);
+      break;
+   case nir_intrinsic_image_deref_load:
+      visit_image_load(ctx, instr);
+      break;
+   case nir_intrinsic_image_deref_store:
+      visit_image_store(ctx, instr);
+      break;
+   case nir_intrinsic_load_work_group_id:
+   case nir_intrinsic_load_local_invocation_id: {
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1)};
+      Temp* ids = instr->intrinsic == nir_intrinsic_load_work_group_id ? ctx->workgroup_ids : ctx->local_invocation_ids;
+      vec->getOperand(0) = Operand(ids[0]);
+      vec->getOperand(1) = Operand(ids[1]);
+      vec->getOperand(2) = Operand(ids[2]);
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      vec->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(vec));
+      emit_split_vector(ctx, dst, 3);
+      break;
+   }
+   default:
+      fprintf(stderr, "Unimplemented intrinsic instr: ");
+      nir_print_instr(&instr->instr, stderr);
+      fprintf(stderr, "\n");
+      abort();
+
+      break;
+   }
+}
+
 
 void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
                            Temp *res_ptr, Temp *samp_ptr, Temp *fmask_ptr)
@@ -3159,6 +3289,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_barycentric_pixel:
                   case nir_intrinsic_load_interpolated_input:
                   case nir_intrinsic_load_local_invocation_id:
+                  case nir_intrinsic_image_deref_load:
                      type = vgpr;
                      break;
                   case nir_intrinsic_load_front_face:
