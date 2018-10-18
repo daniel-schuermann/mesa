@@ -185,6 +185,16 @@ void emit_v_mov(isel_context *ctx, Temp src, Temp dst)
    }
 }
 
+void emit_extract_vector(isel_context* ctx, Temp src, uint32_t idx, Temp dst)
+{
+   std::unique_ptr<Instruction> extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
+   extract->getOperand(0) = Operand(src);
+   extract->getOperand(1) = Operand(idx);
+   extract->getDefinition(0) = Definition(dst);
+   ctx->block->instructions.emplace_back(std::move(extract));
+}
+
+
 Temp emit_extract_vector(isel_context* ctx, Temp src, uint32_t idx, RegClass dst_rc)
 {
    /* no need to extract the whole vector */
@@ -210,11 +220,7 @@ Temp emit_extract_vector(isel_context* ctx, Temp src, uint32_t idx, RegClass dst
       assert(idx == 0);
       emit_v_mov(ctx, src, dst);
    } else {
-      std::unique_ptr<Instruction> extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-      extract->getOperand(0) = Operand(src);
-      extract->getOperand(1) = Operand(idx);
-      extract->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(extract));
+      emit_extract_vector(ctx, src, idx, dst);
    }
    return dst;
 }
@@ -263,6 +269,24 @@ void emit_sop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
    if (scc)
       sop2->getDefinition(1) = Definition(PhysReg{253}, b);
    ctx->block->instructions.emplace_back(std::move(sop2));
+}
+
+void emit_sopc_instruction_output32(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst)
+{
+   std::unique_ptr<SOPC_instruction> cmp{create_instruction<SOPC_instruction>(op, Format::SOPC, 2, 1)};
+   cmp->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
+   cmp->getOperand(1) = Operand(get_alu_src(ctx, instr->src[1]));
+   Temp scc = {ctx->program->allocateId(), b};
+   cmp->getDefinition(0) = Definition(scc);
+   cmp->getDefinition(0).setFixed({253}); /* scc */
+   ctx->block->instructions.emplace_back(std::move(cmp));
+   std::unique_ptr<SOP2_instruction> to_sgpr{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
+   to_sgpr->getOperand(0) = Operand(0xFFFFFFFF);
+   to_sgpr->getOperand(1) = Operand(0);
+   to_sgpr->getOperand(2) = Operand(scc);
+   to_sgpr->getOperand(2).setFixed({253}); /* scc */
+   to_sgpr->getDefinition(0) = Definition(dst);
+   ctx->block->instructions.emplace_back(std::move(to_sgpr));
 }
 
 void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst, bool commutative)
@@ -323,6 +347,13 @@ void emit_vopc_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
                break;
             case aco_opcode::v_cmp_ge_i32:
                op = aco_opcode::v_cmp_le_i32;
+               break;
+            case aco_opcode::v_cmp_lt_u32:
+               op = aco_opcode::v_cmp_gt_u32;
+               break;
+            case aco_opcode::v_cmp_ge_u32:
+               op = aco_opcode::v_cmp_le_u32;
+               break;
             default: /* eq and ne are commutative */
                break;
          }
@@ -1037,31 +1068,10 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          Temp src1 = get_alu_src(ctx, instr->src[1]);
          if (src0.regClass() == v1 || src1.regClass() == v1) {
             Temp dst_tmp = {ctx->program->allocateId(), s2};
-            std::unique_ptr<Instruction> cmp{create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_eq_i32, (Format) ((int) Format::VOP3A | (int) Format::VOPC), 2, 1)};
-            cmp->getOperand(0) = Operand(src0);
-            cmp->getOperand(1) = Operand(src1);
-            cmp->getDefinition(0) = Definition(dst_tmp);
-            ctx->block->instructions.emplace_back(std::move(cmp));
-            cmp.reset(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-            cmp->getOperand(0) = Operand(dst_tmp);
-            cmp->getOperand(1) = Operand{0};
-            cmp->getDefinition(0) = Definition(dst);
-            ctx->block->instructions.emplace_back(std::move(cmp));
+            emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_eq_i32, dst_tmp);
+            emit_extract_vector(ctx, dst_tmp, 0, dst);
          } else {
-            std::unique_ptr<SOPC_instruction> cmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_eq_i32, Format::SOPC, 2, 1)};
-            cmp->getOperand(0) = Operand(src0);
-            cmp->getOperand(1) = Operand(src1);
-            Temp scc = {ctx->program->allocateId(), b};
-            cmp->getDefinition(0) = Definition(scc);
-            cmp->getDefinition(0).setFixed({253}); /* scc */
-            ctx->block->instructions.emplace_back(std::move(cmp));
-            std::unique_ptr<SOP2_instruction> to_sgpr{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
-            to_sgpr->getOperand(0) = Operand(0xFFFFFFFF);
-            to_sgpr->getOperand(1) = Operand(0);
-            to_sgpr->getOperand(2) = Operand(scc);
-            to_sgpr->getOperand(2).setFixed({253}); /* scc */
-            to_sgpr->getDefinition(0) = Definition(dst);
-            ctx->block->instructions.emplace_back(std::move(to_sgpr));
+            emit_sopc_instruction_output32(ctx, instr, aco_opcode::s_cmp_eq_i32, dst);
          }
       }
       break;
@@ -1074,31 +1084,10 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          Temp src1 = get_alu_src(ctx, instr->src[1]);
          if (src0.regClass() == v1 || src1.regClass() == v1) {
             Temp dst_tmp = {ctx->program->allocateId(), s2};
-            std::unique_ptr<Instruction> cmp{create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_lg_i32, (Format) ((int) Format::VOP3A | (int) Format::VOPC), 2, 1)};
-            cmp->getOperand(0) = Operand(src0);
-            cmp->getOperand(1) = Operand(src1);
-            cmp->getDefinition(0) = Definition(dst_tmp);
-            ctx->block->instructions.emplace_back(std::move(cmp));
-            cmp.reset(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-            cmp->getOperand(0) = Operand(dst_tmp);
-            cmp->getOperand(1) = Operand{0};
-            cmp->getDefinition(0) = Definition(dst);
-            ctx->block->instructions.emplace_back(std::move(cmp));
+            emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_lg_i32, dst_tmp);
+            emit_extract_vector(ctx, dst_tmp, 0, dst);
          } else {
-            std::unique_ptr<SOPC_instruction> cmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_i32, Format::SOPC, 2, 1)};
-            cmp->getOperand(0) = Operand(src0);
-            cmp->getOperand(1) = Operand(src1);
-            Temp scc = {ctx->program->allocateId(), b};
-            cmp->getDefinition(0) = Definition(scc);
-            cmp->getDefinition(0).setFixed({253}); /* scc */
-            ctx->block->instructions.emplace_back(std::move(cmp));
-            std::unique_ptr<SOP2_instruction> to_sgpr{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
-            to_sgpr->getOperand(0) = Operand(0xFFFFFFFF);
-            to_sgpr->getOperand(1) = Operand(0);
-            to_sgpr->getOperand(2) = Operand(scc);
-            to_sgpr->getOperand(2).setFixed({253}); /* scc */
-            to_sgpr->getDefinition(0) = Definition(dst);
-            ctx->block->instructions.emplace_back(std::move(to_sgpr));
+            emit_sopc_instruction_output32(ctx, instr, aco_opcode::s_cmp_lg_i32, dst);
          }
       }
       break;
@@ -1111,31 +1100,10 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          Temp src1 = get_alu_src(ctx, instr->src[1]);
          if (src0.regClass() == v1 || src1.regClass() == v1) {
             Temp dst_tmp = {ctx->program->allocateId(), s2};
-            std::unique_ptr<Instruction> cmp{create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_lt_i32, (Format) ((int) Format::VOP3A | (int) Format::VOPC), 2, 1)};
-            cmp->getOperand(0) = Operand(src0);
-            cmp->getOperand(1) = Operand(src1);
-            cmp->getDefinition(0) = Definition(dst_tmp);
-            ctx->block->instructions.emplace_back(std::move(cmp));
-            cmp.reset(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-            cmp->getOperand(0) = Operand(dst_tmp);
-            cmp->getOperand(1) = Operand{0};
-            cmp->getDefinition(0) = Definition(dst);
-            ctx->block->instructions.emplace_back(std::move(cmp));
+            emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_lt_i32, dst_tmp);
+            emit_extract_vector(ctx, dst_tmp, 0, dst);
          } else {
-            std::unique_ptr<SOPC_instruction> cmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lt_i32, Format::SOPC, 2, 1)};
-            cmp->getOperand(0) = Operand(src0);
-            cmp->getOperand(1) = Operand(src1);
-            Temp scc = {ctx->program->allocateId(), b};
-            cmp->getDefinition(0) = Definition(scc);
-            cmp->getDefinition(0).setFixed({253}); /* scc */
-            ctx->block->instructions.emplace_back(std::move(cmp));
-            std::unique_ptr<SOP2_instruction> to_sgpr{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
-            to_sgpr->getOperand(0) = Operand(0xFFFFFFFF);
-            to_sgpr->getOperand(1) = Operand(0);
-            to_sgpr->getOperand(2) = Operand(scc);
-            to_sgpr->getOperand(2).setFixed({253}); /* scc */
-            to_sgpr->getDefinition(0) = Definition(dst);
-            ctx->block->instructions.emplace_back(std::move(to_sgpr));
+            emit_sopc_instruction_output32(ctx, instr, aco_opcode::s_cmp_lt_i32, dst);
          }
       }
       break;
@@ -1148,31 +1116,42 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          Temp src1 = get_alu_src(ctx, instr->src[1]);
          if (src0.regClass() == v1 || src1.regClass() == v1) {
             Temp dst_tmp = {ctx->program->allocateId(), s2};
-            std::unique_ptr<Instruction> cmp{create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_ge_i32, (Format) ((int) Format::VOP3A | (int) Format::VOPC), 2, 1)};
-            cmp->getOperand(0) = Operand(src0);
-            cmp->getOperand(1) = Operand(src1);
-            cmp->getDefinition(0) = Definition(dst_tmp);
-            ctx->block->instructions.emplace_back(std::move(cmp));
-            cmp.reset(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
-            cmp->getOperand(0) = Operand(dst_tmp);
-            cmp->getOperand(1) = Operand{0};
-            cmp->getDefinition(0) = Definition(dst);
-            ctx->block->instructions.emplace_back(std::move(cmp));
+            emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_ge_i32, dst_tmp);
+            emit_extract_vector(ctx, dst_tmp, 0, dst);
          } else {
-            std::unique_ptr<SOPC_instruction> cmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_ge_i32, Format::SOPC, 2, 1)};
-            cmp->getOperand(0) = Operand(src0);
-            cmp->getOperand(1) = Operand(src1);
-            Temp scc = {ctx->program->allocateId(), b};
-            cmp->getDefinition(0) = Definition(scc);
-            cmp->getDefinition(0).setFixed({253}); /* scc */
-            ctx->block->instructions.emplace_back(std::move(cmp));
-            std::unique_ptr<SOP2_instruction> to_sgpr{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
-            to_sgpr->getOperand(0) = Operand(0xFFFFFFFF);
-            to_sgpr->getOperand(1) = Operand(0);
-            to_sgpr->getOperand(2) = Operand(scc);
-            to_sgpr->getOperand(2).setFixed({253}); /* scc */
-            to_sgpr->getDefinition(0) = Definition(dst);
-            ctx->block->instructions.emplace_back(std::move(to_sgpr));
+            emit_sopc_instruction_output32(ctx, instr, aco_opcode::s_cmp_ge_i32, dst);
+         }
+      }
+      break;
+   }
+   case nir_op_ult: {
+      if (dst.regClass() == v1) {
+         emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_lt_u32, dst);
+      } else if (dst.regClass() == s1) {
+         Temp src0 = get_alu_src(ctx, instr->src[0]);
+         Temp src1 = get_alu_src(ctx, instr->src[1]);
+         if (src0.regClass() == v1 || src1.regClass() == v1) {
+            Temp dst_tmp = {ctx->program->allocateId(), s2};
+            emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_lt_u32, dst_tmp);
+            emit_extract_vector(ctx, dst_tmp, 0, dst);
+         } else {
+            emit_sopc_instruction_output32(ctx, instr, aco_opcode::s_cmp_lt_u32, dst);
+         }
+      }
+      break;
+   }
+   case nir_op_uge: {
+      if (dst.regClass() == v1) {
+         emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_ge_u32, dst);
+      } else if (dst.regClass() == s1) {
+         Temp src0 = get_alu_src(ctx, instr->src[0]);
+         Temp src1 = get_alu_src(ctx, instr->src[1]);
+         if (src0.regClass() == v1 || src1.regClass() == v1) {
+            Temp dst_tmp = {ctx->program->allocateId(), s2};
+            emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_ge_u32, dst_tmp);
+            emit_extract_vector(ctx, dst_tmp, 0, dst);
+         } else {
+            emit_sopc_instruction_output32(ctx, instr, aco_opcode::s_cmp_ge_u32, dst);
          }
       }
       break;
