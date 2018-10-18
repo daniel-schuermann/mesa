@@ -238,7 +238,10 @@ public:
    explicit Operand(Temp r) noexcept
    {
       data_.temp = r;
-      control_[0] = 1; /* isTemp */
+      if (r.id())
+         control_[0] = 1; /* isTemp */
+      else
+         control_[4] = 1; /* undef */
    };
    explicit Operand(uint32_t v) noexcept
    {
