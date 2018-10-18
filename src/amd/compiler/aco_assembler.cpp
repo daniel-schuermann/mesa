@@ -314,7 +314,8 @@ std::vector<uint32_t> emit_program(Program* program)
    asm_context ctx;
    ctx.block_offset.resize(program->blocks.size());
    std::vector<uint32_t> out;
-   fix_exports(ctx, out, program);
+   if (program->stage == MESA_SHADER_FRAGMENT)
+      fix_exports(ctx, out, program);
    for (auto const& block : program->blocks)
    {
       ctx.block_offset[block->index] = out.size();
