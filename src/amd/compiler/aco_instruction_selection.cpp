@@ -2017,6 +2017,122 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    return;
 }
 
+void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   unsigned num_components = instr->num_components;
+   unsigned num_bytes = num_components * instr->dest.ssa.bit_size / 8;
+
+   Temp offset = get_ssa_temp(ctx, instr->src[1].ssa);
+   Temp rsrc = {ctx->program->allocateId(), s4};
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+
+   std::unique_ptr<Instruction> load;
+   load.reset(create_instruction<SMEM_instruction>(aco_opcode::s_load_dwordx4, Format::SMEM, 2, 1));
+   load->getOperand(0) = Operand(get_ssa_temp(ctx, instr->src[0].ssa));
+   load->getOperand(1) = Operand(0);
+   load->getDefinition(0) = Definition(rsrc);
+   ctx->block->instructions.emplace_back(std::move(load));
+
+   aco_opcode op;
+   switch (num_bytes) {
+      case 4:
+         op = aco_opcode::buffer_load_dword;
+         break;
+      case 8:
+         op = aco_opcode::buffer_load_dwordx2;
+         break;
+      case 12:
+         op = aco_opcode::buffer_load_dwordx3;
+         break;
+      case 16:
+         op = aco_opcode::buffer_load_dwordx4;
+         break;
+      default:
+         unreachable("Load SSBO not implemented for this size.");
+   }
+   std::unique_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 3, 1)};
+   mubuf->getOperand(0) = Operand(offset);
+   mubuf->getOperand(1) = Operand(rsrc);
+   mubuf->getOperand(2) = Operand(0);
+   mubuf->getDefinition(0) = Definition(dst);
+   mubuf->offen = true;
+   mubuf->glc = false;// TODO after rebase: nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
+   ctx->block->instructions.emplace_back(std::move(mubuf));
+   emit_split_vector(ctx, dst, num_components);
+}
+
+void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+
+   Temp data = get_ssa_temp(ctx, instr->src[0].ssa);
+   unsigned elem_size_bytes = instr->src[0].ssa->bit_size / 8;
+   unsigned writemask = nir_intrinsic_write_mask(instr);
+
+   Temp offset = get_ssa_temp(ctx, instr->src[2].ssa);
+   assert(offset.type() == vgpr);
+   Temp rsrc = {ctx->program->allocateId(), s4};
+
+   std::unique_ptr<Instruction> load;
+   load.reset(create_instruction<SMEM_instruction>(aco_opcode::s_load_dwordx4, Format::SMEM, 2, 1));
+   load->getOperand(0) = Operand(get_ssa_temp(ctx, instr->src[1].ssa));
+   load->getOperand(1) = Operand(0);
+   load->getDefinition(0) = Definition(rsrc);
+   ctx->block->instructions.emplace_back(std::move(load));
+
+   while (writemask) {
+      int start, count;
+      u_bit_scan_consecutive_range(&writemask, &start, &count);
+      int num_bytes = count * elem_size_bytes;
+
+      // TODO: we can only store 4 DWords at the same time. Fix for 64bit vectors
+      // TODO: check alignment of sub-dword stores
+      // TODO: split 3 bytes. there is no store instruction for that
+
+      Temp write_data;
+      if (count != instr->num_components) {
+         std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, count, 1)};
+         for (unsigned i = 0; i < count; i++)
+            vec->getOperand(i) = Operand(emit_extract_vector(ctx, data, start + i, v1));
+         write_data = {ctx->program->allocateId(), getRegClass(vgpr, count)};
+         vec->getDefinition(0) = Definition(write_data);
+         ctx->block->instructions.emplace_back(std::move(vec));
+      } else if (data.type() != vgpr) {
+         write_data = {ctx->program->allocateId(), getRegClass(vgpr, count)};
+         emit_v_mov(ctx, data, write_data);
+      } else {
+         write_data = data;
+      }
+
+      aco_opcode op;
+      switch (num_bytes) {
+         case 4:
+            op = aco_opcode::buffer_store_dword;
+            break;
+         case 8:
+            op = aco_opcode::buffer_store_dwordx2;
+            break;
+         case 12:
+            op = aco_opcode::buffer_store_dwordx3;
+            break;
+         case 16:
+            op = aco_opcode::buffer_store_dwordx4;
+            break;
+         default:
+            unreachable("Store SSBO not implemented for this size.");
+      }
+
+      std::unique_ptr<MUBUF_instruction> store{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 4, 0)};
+      store->getOperand(0) = Operand(offset);
+      store->getOperand(1) = Operand(rsrc);
+      store->getOperand(2) = Operand(0);
+      store->getOperand(3) = Operand(write_data);
+      store->offset = start;
+      store->offen = true;
+      store->glc = false;// TODO after rebase: nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
+      ctx->block->instructions.emplace_back(std::move(store));
+   }
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
@@ -2065,6 +2181,12 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_image_deref_store:
       visit_image_store(ctx, instr);
+      break;
+   case nir_intrinsic_load_ssbo:
+      visit_load_ssbo(ctx, instr);
+      break;
+   case nir_intrinsic_store_ssbo:
+      visit_store_ssbo(ctx, instr);
       break;
    case nir_intrinsic_load_work_group_id:
    case nir_intrinsic_load_local_invocation_id: {
@@ -3268,6 +3390,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_barycentric_pixel:
                   case nir_intrinsic_load_interpolated_input:
                   case nir_intrinsic_load_local_invocation_id:
+                  case nir_intrinsic_load_ssbo:
                   case nir_intrinsic_image_deref_load:
                      type = vgpr;
                      break;
@@ -3731,14 +3854,13 @@ void add_startpgm(struct isel_context *ctx)
    case MESA_SHADER_COMPUTE: {
       declare_global_input_sgprs(ctx, &user_sgpr_info, &args, ctx->descriptor_sets);
 
-      assert(user_sgpr_info.user_sgpr_idx == user_sgpr_info.num_sgpr);
       if (ctx->program->info->info.cs.uses_grid_size) {
          add_arg(&args, s1, &ctx->num_workgroups[0], user_sgpr_info.user_sgpr_idx);
          add_arg(&args, s1, &ctx->num_workgroups[1], user_sgpr_info.user_sgpr_idx + 1);
          add_arg(&args, s1, &ctx->num_workgroups[2], user_sgpr_info.user_sgpr_idx + 2);
          set_loc_shader(ctx, AC_UD_CS_GRID_SIZE, &user_sgpr_info.user_sgpr_idx, 3);
       }
-
+      assert(user_sgpr_info.user_sgpr_idx == user_sgpr_info.num_sgpr);
       unsigned idx = user_sgpr_info.user_sgpr_idx;
       for (unsigned i = 0; i < 3; i++) {
          if (ctx->program->info->info.cs.uses_block_id[i])
