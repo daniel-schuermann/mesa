@@ -699,6 +699,41 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_isub: {
+      if (dst.regClass() == v1) {
+         Temp src0 = get_alu_src(ctx, instr->src[0]);
+         Temp src1 = get_alu_src(ctx, instr->src[1]);
+         if (ctx->options->chip_class >= GFX9) {
+            if (src1.type() == vgpr)
+               emit_vop2_instruction(ctx, instr, aco_opcode::v_sub_u32, dst, false);
+            else
+               emit_vop2_instruction(ctx, instr, aco_opcode::v_subrev_u32, dst, true);
+         } else {
+            aco_opcode op = aco_opcode::v_sub_co_u32;
+            if (src1.type() != vgpr) {
+               op = aco_opcode::v_subrev_co_u32;
+               Temp t = src0;
+               src0 = src1;
+               src1 = t;
+            }
+            std::unique_ptr<VOP2_instruction> sub{create_instruction<VOP2_instruction>(op, Format::VOP2, 2, 2)};
+            sub->getOperand(0) = Operand(src0);
+            sub->getOperand(1) = Operand(src1);
+            sub->getDefinition(0) = Definition(dst);
+            Temp tmp = {ctx->program->allocateId(), s2};
+            sub->getDefinition(1) = Definition(tmp);
+            sub->getDefinition(1).setHint(vcc);
+            ctx->block->instructions.emplace_back(std::move(sub));
+         }
+      } else if (dst.regClass() == s1) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_sub_i32, dst, false);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_imul: {
       if (dst.regClass() == v1) {
          std::unique_ptr<VOP3A_instruction> mul{create_instruction<VOP3A_instruction>(aco_opcode::v_mul_lo_u32, Format::VOP3A, 2, 1)};
@@ -739,15 +774,10 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       Temp src0 = get_alu_src(ctx, instr->src[0]);
       Temp src1 = get_alu_src(ctx, instr->src[1]);
       if (dst.size() == 1) {
-         if (src1.type() == vgpr || src0.type() != vgpr) {
+         if (src1.type() == vgpr || src0.type() != vgpr)
             emit_vop2_instruction(ctx, instr, aco_opcode::v_sub_f32, dst, false);
-         } else {
-            std::unique_ptr<Instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_subrev_f32, Format::VOP2, 2, 1)};
-            vop2->getOperand(0) = Operand(src1);
-            vop2->getOperand(1) = Operand(src0);
-            vop2->getDefinition(0) = Definition(dst);
-            ctx->block->instructions.emplace_back(std::move(vop2));
-         }
+         else
+            emit_vop2_instruction(ctx, instr, aco_opcode::v_subrev_f32, dst, true);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -3362,6 +3392,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_ult:
                   case nir_op_uge:
                   case nir_op_bcsel:
+                  case nir_op_f2i32:
+                  case nir_op_f2u32:
                      type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
                      break;
                   default:
