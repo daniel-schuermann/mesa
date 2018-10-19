@@ -233,6 +233,11 @@ uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
          if (it == ctx.vgpr_map.end())
             continue;
 
+         /* Vector Memory reads and writes return in the order they were issued */
+         if (instr->isVMEM() && it->second.type == vm_type) {
+            it->second.vm_cnt = 0;
+            continue;
+         }
          writes_vgpr = true;
          wait_entry entry = it->second;
 
