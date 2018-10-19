@@ -2188,10 +2188,17 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_store_ssbo:
       visit_store_ssbo(ctx, instr);
       break;
+   case nir_intrinsic_load_num_work_groups:
    case nir_intrinsic_load_work_group_id:
    case nir_intrinsic_load_local_invocation_id: {
       std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1)};
-      Temp* ids = instr->intrinsic == nir_intrinsic_load_work_group_id ? ctx->workgroup_ids : ctx->local_invocation_ids;
+      Temp* ids;
+      if (instr->intrinsic == nir_intrinsic_load_num_work_groups)
+         ids = ctx->num_workgroups;
+      else if (instr->intrinsic == nir_intrinsic_load_work_group_id)
+         ids = ctx->workgroup_ids;
+      else
+         ids = ctx->local_invocation_ids;
       vec->getOperand(0) = Operand(ids[0]);
       vec->getOperand(1) = Operand(ids[1]);
       vec->getOperand(2) = Operand(ids[2]);
@@ -3382,6 +3389,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                RegType type = sgpr;
                switch(intrinsic->intrinsic) {
                   case nir_intrinsic_load_work_group_id:
+                  case nir_intrinsic_load_num_work_groups:
                      type = sgpr;
                      break;
                   case nir_intrinsic_load_input:
