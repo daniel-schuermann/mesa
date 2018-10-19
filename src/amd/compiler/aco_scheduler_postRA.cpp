@@ -153,6 +153,17 @@ unsigned detect_waw_hazard(Instruction* first, Instruction* second)
 
 unsigned detect_war_hazard(Instruction* first, Instruction* second)
 {
+   if (first->opcode == aco_opcode::buffer_store_dwordx3 ||
+       first->opcode == aco_opcode::buffer_store_dwordx4) {
+      if (second->isVMEM())
+         return 0;
+      for (unsigned i = 0; i < second->num_definitions; i++)
+         for (unsigned j = 0; j < second->getDefinition(i).size(); j++)
+            for (unsigned k = 0; k < first->getOperand(3).size(); k++)
+               if (first->getOperand(3).physReg().reg + k == second->getDefinition(i).physReg().reg + j)
+                  return 1;
+   }
+
    return 0;
    // TODO: store instr > 64bit / write data vgpr
 }

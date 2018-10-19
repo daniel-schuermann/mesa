@@ -169,32 +169,10 @@ struct InstrPred {
                    aDS->offset1 == bDS->offset1 &&
                    aDS->gds == bDS->gds;
          }
-         case Format::MUBUF: {
-            MUBUF_instruction* aMU = static_cast<MUBUF_instruction*>(a);
-            MUBUF_instruction* bMU = static_cast<MUBUF_instruction*>(b);
-            return aMU->dfmt == bMU->dfmt &&
-                   aMU->nfmt == bMU->nfmt &&
-                   aMU->offset == bMU->offset &&
-                   aMU->offen == bMU->offen &&
-                   aMU->idxen == bMU->idxen &&
-                   aMU->glc == bMU->glc &&
-                   aMU->slc == bMU->slc &&
-                   aMU->tfe == bMU->tfe &&
-                   aMU->lds == bMU->lds;
-         }
-         case Format::MIMG: {
-            MIMG_instruction* aMI = static_cast<MIMG_instruction*>(a);
-            MIMG_instruction* bMI = static_cast<MIMG_instruction*>(b);
-            return aMI->dmask == bMI->dmask &&
-                   aMI->unrm == bMI->unrm &&
-                   aMI->glc == bMI->glc &&
-                   aMI->slc == bMI->slc &&
-                   aMI->tfe == bMI->tfe &&
-                   aMI->da == bMI->da &&
-                   aMI->lwe == bMI->lwe &&
-                   aMI->a16 == bMI->a16 &&
-                   aMI->d16 == bMI->d16;
-         }
+         /* we want to optimize these in NIR and don't hassle with load-store dependencies */
+         case Format::MUBUF:
+         case Format::MIMG:
+            return false;
          default:
             return true;
       }
