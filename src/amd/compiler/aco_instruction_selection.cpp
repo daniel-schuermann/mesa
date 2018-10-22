@@ -2238,6 +2238,33 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       emit_split_vector(ctx, dst, 3);
       break;
    }
+   case nir_intrinsic_load_local_invocation_index: {
+      std::unique_ptr<Instruction> mbcnt{create_instruction<VOP3A_instruction>(aco_opcode::v_mbcnt_lo_u32_b32, Format::VOP3A, 2, 1)};
+      mbcnt->getOperand(0) = Operand(-1);
+      mbcnt->getOperand(1) = Operand(0);
+      Temp tmp = {ctx->program->allocateId(), v1};
+      mbcnt->getDefinition(0) = Definition(tmp);
+      ctx->block->instructions.emplace_back(std::move(mbcnt));
+      mbcnt.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_mbcnt_hi_u32_b32, Format::VOP3A, 2, 1));
+      mbcnt->getOperand(0) = Operand(-1);
+      mbcnt->getOperand(1) = Operand(tmp);
+      Temp id = {ctx->program->allocateId(), v1};
+      mbcnt->getDefinition(0) = Definition(id);
+      ctx->block->instructions.emplace_back(std::move(mbcnt));
+      mbcnt.reset(create_instruction<SOP2_instruction>(aco_opcode::s_and_b32, Format::SOP2, 2, 1));
+      mbcnt->getOperand(0) = Operand(0xfc0);
+      mbcnt->getOperand(1) = Operand(ctx->tg_size);
+      Temp tg_num = {ctx->program->allocateId(), s1};
+      mbcnt->getDefinition(0) = Definition(tg_num);
+      ctx->block->instructions.emplace_back(std::move(mbcnt));
+      mbcnt.reset(create_instruction<VOP2_instruction>(aco_opcode::v_or_b32, Format::VOP2, 2, 1));
+      mbcnt->getOperand(0) = Operand(tg_num);
+      mbcnt->getOperand(1) = Operand(id);
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      mbcnt->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(mbcnt));
+      break;
+   }
    default:
       fprintf(stderr, "Unimplemented intrinsic instr: ");
       nir_print_instr(&instr->instr, stderr);
@@ -3430,6 +3457,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_barycentric_pixel:
                   case nir_intrinsic_load_interpolated_input:
                   case nir_intrinsic_load_local_invocation_id:
+                  case nir_intrinsic_load_local_invocation_index:
                   case nir_intrinsic_load_ssbo:
                   case nir_intrinsic_image_deref_load:
                      type = vgpr;
