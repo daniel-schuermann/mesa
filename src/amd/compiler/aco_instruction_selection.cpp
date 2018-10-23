@@ -660,6 +660,54 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_imax: {
+      if (dst.regClass() == v1) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_max_i32, dst, true);
+      } else if (dst.regClass() == s1) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_max_i32, dst, true);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_umax: {
+      if (dst.regClass() == v1) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_max_u32, dst, true);
+      } else if (dst.regClass() == s1) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_max_u32, dst, true);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_imin: {
+      if (dst.regClass() == v1) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_min_i32, dst, true);
+      } else if (dst.regClass() == s1) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_min_i32, dst, true);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_umin: {
+      if (dst.regClass() == v1) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_min_u32, dst, true);
+      } else if (dst.regClass() == s1) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_min_u32, dst, true);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_ior: {
       if (dst.regClass() == v1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_or_b32, dst, true);
