@@ -1670,11 +1670,6 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       }
 
    } else { /* vgpr dst */
-      fprintf(stderr, "Unimplemented vector load\n");
-      nir_print_instr(&instr->instr, stderr);
-      fprintf(stderr, "\n");
-      abort();
-      #if 0
       aco_opcode op;
       switch(dst.size()) {
       case 1:
@@ -1701,8 +1696,8 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       mubuf->getDefinition(0) = Definition(dst);
       mubuf->offen = true;
       ctx->block->instructions.emplace_back(std::move(mubuf));
-      #endif
    }
+
    emit_split_vector(ctx, dst, instr->dest.ssa.num_components);
 }
 
