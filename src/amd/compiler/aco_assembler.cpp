@@ -218,6 +218,8 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
          encoding |= (vop3->clamp ? 1 : 0) << 15;
          for (unsigned i = 0; i < 3; i++)
             encoding |= vop3->abs[i] << (8+i);
+         if (instr->num_definitions == 2)
+            encoding |= instr->getDefinition(1).physReg().reg << 8;
          encoding |= (0xFF & instr->getDefinition(0).physReg().reg);
          out.push_back(encoding);
          encoding = 0;
