@@ -2211,6 +2211,20 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    }
 }
 
+void visit_get_buffer_size(isel_context *ctx, nir_intrinsic_instr *instr) {
+
+   Temp index = get_ssa_temp(ctx, instr->src[0].ssa);
+   std::unique_ptr<Instruction> load;
+   load.reset(create_instruction<SMEM_instruction>(aco_opcode::s_load_dwordx4, Format::SMEM, 2, 1));
+   load->getOperand(0) = Operand(index);
+   load->getOperand(1) = Operand(0);
+   Temp desc = {ctx->program->allocateId(), s4};
+   load->getDefinition(0) = Definition(desc);
+   ctx->block->instructions.emplace_back(std::move(load));
+
+   emit_extract_vector(ctx, desc, 2, get_ssa_temp(ctx, &instr->dest.ssa));
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
@@ -2265,6 +2279,9 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_store_ssbo:
       visit_store_ssbo(ctx, instr);
+      break;
+   case nir_intrinsic_get_buffer_size:
+      visit_get_buffer_size(ctx, instr);
       break;
    case nir_intrinsic_load_num_work_groups:
    case nir_intrinsic_load_work_group_id:
@@ -3497,6 +3514,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                switch(intrinsic->intrinsic) {
                   case nir_intrinsic_load_work_group_id:
                   case nir_intrinsic_load_num_work_groups:
+                  case nir_intrinsic_get_buffer_size:
                      type = sgpr;
                      break;
                   case nir_intrinsic_load_input:
