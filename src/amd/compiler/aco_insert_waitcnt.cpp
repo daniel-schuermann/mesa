@@ -435,6 +435,40 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
    }
 }
 
+// TODO: introduce more fine-grained counters to differenciate
+// the types of memory operations we want to wait for
+uint16_t emit_memory_barrier(Instruction* instr, wait_ctx& ctx) {
+   uint16_t vm_cnt, lgkm_cnt;
+   switch (instr->opcode) {
+      case aco_opcode::p_memory_barrier_all:
+         vm_cnt = ctx.vm_cnt ? 0 : -1;
+         lgkm_cnt = ctx.lgkm_cnt ? 0 : -1;
+         if (ctx.vm_cnt || ctx.lgkm_cnt) {
+            ctx.vm_cnt = 0;
+            ctx.lgkm_cnt = 0;
+            return create_waitcnt_imm(vm_cnt, lgkm_cnt, -1);
+         }
+         break;
+      case aco_opcode::p_memory_barrier_atomic:
+      case aco_opcode::p_memory_barrier_buffer:
+      case aco_opcode::p_memory_barrier_image:
+         if (ctx.vm_cnt) {
+            ctx.vm_cnt = 0;
+            return create_waitcnt_imm(0, -1, -1);
+         }
+         break;
+      case aco_opcode::p_memory_barrier_shared:
+         if (ctx.lgkm_cnt) {
+            ctx.lgkm_cnt = 0;
+            return create_waitcnt_imm(-1, -1, 0);
+         }
+         break;
+      default:
+         unreachable("emit_memory_barrier() should only be called with PSEUDO_BARRIER instructions.");
+   }
+   return -1;
+}
+
 Instruction* kill(Instruction* instr, wait_ctx& ctx)
 {
    uint16_t imm = 0xFFFF;
@@ -445,9 +479,13 @@ Instruction* kill(Instruction* instr, wait_ctx& ctx)
    }
    if (ctx.exp_cnt || ctx.vm_cnt || ctx.lgkm_cnt)
    {
-      imm &= writes_vgpr(instr, ctx);
-      imm &= writes_sgpr(instr, ctx);
-      imm &= uses_gpr(instr, ctx);
+      if (instr->format == Format::PSEUDO_BARRIER) {
+         imm &= emit_memory_barrier(instr, ctx);
+      } else {
+         imm &= writes_vgpr(instr, ctx);
+         imm &= writes_sgpr(instr, ctx);
+         imm &= uses_gpr(instr, ctx);
+      }
    }
    if (imm != 0xFFFF)
       return create_waitcnt(imm);
@@ -514,41 +552,24 @@ bool gen(Instruction* instr, wait_ctx& ctx)
          return true;
       }
    }
-   case Format::MUBUF: {
-      if (instr->num_definitions) {
-         /* increase counter for all entries of same wait_type */
-         for (std::pair<uint8_t,wait_entry> e : ctx.vgpr_map)
-         {
-            if (e.second.type == vm_type)
-               e.second.vm_cnt++;
-         }
-         for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
-         {
-            ctx.vgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
-            wait_entry(vm_type, 0, max_exp_cnt, max_lgkm_cnt));
-         }
-         ctx.vm_cnt++;
-         return true;
-      }
-   }
+   case Format::MUBUF:
    case Format::MIMG: {
+      /* increase counter for all entries of same wait_type */
+      for (std::pair<uint8_t,wait_entry> e : ctx.vgpr_map)
+      {
+         if (e.second.type == vm_type)
+            e.second.vm_cnt++;
+      }
+      ctx.vm_cnt++;
       if (instr->num_definitions) {
-         /* increase counter for all entries of same wait_type */
-         for (std::pair<uint8_t,wait_entry> e : ctx.vgpr_map)
-         {
-            if (e.second.type == vm_type)
-               e.second.vm_cnt++;
-         }
          for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
          {
             ctx.vgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
             wait_entry(vm_type, 0, max_exp_cnt, max_lgkm_cnt));
          }
-         ctx.vm_cnt++;
          return true;
       }
    }
-   // TODO: cases which generate vm_cnt and lgkm_cnt
    default:
       return false;
    }
