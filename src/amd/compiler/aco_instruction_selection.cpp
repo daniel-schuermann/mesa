@@ -2284,6 +2284,34 @@ void visit_get_buffer_size(isel_context *ctx, nir_intrinsic_instr *instr) {
    emit_extract_vector(ctx, desc, 2, get_ssa_temp(ctx, &instr->dest.ssa));
 }
 
+void emit_memory_barrier(isel_context *ctx, nir_intrinsic_instr *instr) {
+   std::unique_ptr<Instruction> barrier;
+   aco_opcode op;
+   switch(instr->intrinsic) {
+      case nir_intrinsic_group_memory_barrier:
+      case nir_intrinsic_memory_barrier:
+         op = aco_opcode::p_memory_barrier_all;
+         break;
+      case nir_intrinsic_memory_barrier_atomic_counter:
+         op = aco_opcode::p_memory_barrier_atomic;
+         break;
+      case nir_intrinsic_memory_barrier_buffer:
+         op = aco_opcode::p_memory_barrier_buffer;
+         break;
+      case nir_intrinsic_memory_barrier_image:
+         op = aco_opcode::p_memory_barrier_image;
+         break;
+      case nir_intrinsic_memory_barrier_shared:
+         op = aco_opcode::p_memory_barrier_shared;
+         break;
+      default:
+         unreachable("Unimplemented memory barrier intrinsic");
+         break;
+   }
+   barrier.reset(create_instruction<Pseudo_barrier_instruction>(op, Format::PSEUDO_BARRIER, 0, 0));
+   ctx->block->instructions.emplace_back(std::move(barrier));
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
@@ -2341,6 +2369,19 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_get_buffer_size:
       visit_get_buffer_size(ctx, instr);
+      break;
+   case nir_intrinsic_barrier: {
+      std::unique_ptr<Instruction> barrier{create_instruction<SOPP_instruction>(aco_opcode::s_barrier, Format::SOPP, 0, 0)};
+      ctx->block->instructions.emplace_back(std::move(barrier));
+      break;
+   }
+   case nir_intrinsic_group_memory_barrier:
+   case nir_intrinsic_memory_barrier:
+   case nir_intrinsic_memory_barrier_atomic_counter:
+   case nir_intrinsic_memory_barrier_buffer:
+   case nir_intrinsic_memory_barrier_image:
+   case nir_intrinsic_memory_barrier_shared:
+      emit_memory_barrier(ctx, instr);
       break;
    case nir_intrinsic_load_num_work_groups:
    case nir_intrinsic_load_work_group_id:
