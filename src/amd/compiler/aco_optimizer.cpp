@@ -550,7 +550,7 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
 
 void check_instruction_uses(opt_ctx &ctx, std::unique_ptr<Instruction>& instr, std::set<Temp>& live_outs)
 {
-   if (instr->num_definitions) {
+   if (instr->num_definitions && !instr->isVMEM()) {
       bool is_used = false;
       for (unsigned i = 0; i < instr->num_definitions; i++)
       {
@@ -842,7 +842,7 @@ void select_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
 
    /* Dead Code Elimination:
     * We remove instructions if they define temporaries which all are unused */
-   if (instr->num_definitions) {
+   if (instr->num_definitions && !instr->isVMEM()) {
       bool is_used = false;
       for (unsigned i = 0; i < instr->num_definitions; i++)
       {
