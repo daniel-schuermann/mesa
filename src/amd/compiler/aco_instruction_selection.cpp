@@ -2148,7 +2148,13 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    unsigned num_components = instr->num_components;
    unsigned num_bytes = num_components * instr->dest.ssa.bit_size / 8;
 
-   Temp offset = get_ssa_temp(ctx, instr->src[1].ssa);
+   Temp offset;
+   if (ctx->options->chip_class < VI && offset.type() == sgpr) {
+      offset = {ctx->program->allocateId(), v1};
+      emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[1].ssa), offset);
+   } else {
+      offset = get_ssa_temp(ctx, instr->src[1].ssa);
+   }
    Temp rsrc = {ctx->program->allocateId(), s4};
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
 
@@ -2177,11 +2183,11 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
          unreachable("Load SSBO not implemented for this size.");
    }
    std::unique_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 3, 1)};
-   mubuf->getOperand(0) = Operand(offset);
+   mubuf->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand();
    mubuf->getOperand(1) = Operand(rsrc);
-   mubuf->getOperand(2) = Operand(0);
+   mubuf->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand(0);
    mubuf->getDefinition(0) = Definition(dst);
-   mubuf->offen = true;
+   mubuf->offen = (offset.type() == vgpr);
    mubuf->glc = false;// TODO after rebase: nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
    ctx->block->instructions.emplace_back(std::move(mubuf));
    emit_split_vector(ctx, dst, num_components);
@@ -2194,8 +2200,13 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    unsigned elem_size_bytes = instr->src[0].ssa->bit_size / 8;
    unsigned writemask = nir_intrinsic_write_mask(instr);
 
-   Temp offset = get_ssa_temp(ctx, instr->src[2].ssa);
-   assert(offset.type() == vgpr);
+   Temp offset;
+   if (ctx->options->chip_class < VI && offset.type() == sgpr) {
+      offset = {ctx->program->allocateId(), v1};
+      emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[2].ssa), offset);
+   } else {
+      offset = get_ssa_temp(ctx, instr->src[2].ssa);
+   }
    Temp rsrc = {ctx->program->allocateId(), s4};
 
    std::unique_ptr<Instruction> load;
@@ -2248,12 +2259,12 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       }
 
       std::unique_ptr<MUBUF_instruction> store{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 4, 0)};
-      store->getOperand(0) = Operand(offset);
+      store->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand();
       store->getOperand(1) = Operand(rsrc);
-      store->getOperand(2) = Operand(0);
+      store->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand(0);
       store->getOperand(3) = Operand(write_data);
       store->offset = start;
-      store->offen = true;
+      store->offen = (offset.type() == vgpr);
       store->glc = false;// TODO after rebase: nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
       ctx->block->instructions.emplace_back(std::move(store));
    }
