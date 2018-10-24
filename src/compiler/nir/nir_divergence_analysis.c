@@ -117,6 +117,16 @@ static bool visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_load_barycentric_pixel:
    case nir_intrinsic_load_invocation_id:
    case nir_intrinsic_load_local_invocation_index:
+   case nir_intrinsic_ssbo_atomic_add:
+   case nir_intrinsic_ssbo_atomic_imin:
+   case nir_intrinsic_ssbo_atomic_umin:
+   case nir_intrinsic_ssbo_atomic_imax:
+   case nir_intrinsic_ssbo_atomic_umax:
+   case nir_intrinsic_ssbo_atomic_and:
+   case nir_intrinsic_ssbo_atomic_or:
+   case nir_intrinsic_ssbo_atomic_xor:
+   case nir_intrinsic_ssbo_atomic_exchange:
+   case nir_intrinsic_ssbo_atomic_comp_swap:
    default:
       is_divergent = true;
       break;
