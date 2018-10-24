@@ -448,76 +448,76 @@ for (code, name, size) in SMEM_LOAD:
    opcode(name, 3, [size], code, Format.SMEM)
 
 SMEM_STORE = [
-   ("s_store_dword", 1),
-   ("s_store_dwordx2", 2),
-   ("s_store_dwordx4", 4),
-   ("s_scratch_store_dword", 1),
-   ("s_scratch_store_dwordx2", 2),
-   ("s_scratch_store_dwordx4", 4),
-   ("s_buffer_store_dword", 1),
-   ("s_buffer_store_dwordx2", 2),
-   ("s_buffer_store_dwordx4", 4)
+   (16, "s_store_dword", 1),
+   (17, "s_store_dwordx2", 2),
+   (18, "s_store_dwordx4", 4),
+   (21, "s_scratch_store_dword", 1),
+   (22, "s_scratch_store_dwordx2", 2),
+   (23, "s_scratch_store_dwordx4", 4),
+   (24, "s_buffer_store_dword", 1),
+   (25, "s_buffer_store_dwordx2", 2),
+   (26, "s_buffer_store_dwordx4", 4)
 ]
-for (name, size) in SMEM_STORE:
-   opcode(name, 4, [])
+for (code, name, size) in SMEM_STORE:
+   opcode(name, 4, [], code, Format.SMEM)
 
 SMEM_ATOMIC = [
-   "s_buffer_atomic_swap",
-   "s_buffer_atomic_add",
-   "s_buffer_atomic_sub",
-   "s_buffer_atomic_smin",
-   "s_buffer_atomic_umin",
-   "s_buffer_atomic_smax",
-   "s_buffer_atomic_umax",
-   "s_buffer_atomic_and",
-   "s_buffer_atomic_or",
-   "s_buffer_atomic_xor",
-   "s_buffer_atomic_inc",
-   "s_buffer_atomic_dec",
-   "s_atomic_swap",
-   "s_atomic_add",
-   "s_atomic_sub",
-   "s_atomic_smin",
-   "s_atomic_umin",
-   "s_atomic_smax",
-   "s_atomic_umax",
-   "s_atomic_and",
-   "s_atomic_or",
-   "s_atomic_xor",
-   "s_atomic_inc",
-   "s_atomic_dec",
+   (64, "s_buffer_atomic_swap"),
+   (66, "s_buffer_atomic_add"),
+   (67, "s_buffer_atomic_sub"),
+   (68, "s_buffer_atomic_smin"),
+   (69, "s_buffer_atomic_umin"),
+   (70, "s_buffer_atomic_smax"),
+   (71, "s_buffer_atomic_umax"),
+   (72, "s_buffer_atomic_and"),
+   (73, "s_buffer_atomic_or"),
+   (74, "s_buffer_atomic_xor"),
+   (75, "s_buffer_atomic_inc"),
+   (76, "s_buffer_atomic_dec"),
+   (128, "s_atomic_swap"),
+   (130, "s_atomic_add"),
+   (131, "s_atomic_sub"),
+   (132, "s_atomic_smin"),
+   (133, "s_atomic_umin"),
+   (134, "s_atomic_smax"),
+   (135, "s_atomic_umax"),
+   (136, "s_atomic_and"),
+   (137, "s_atomic_or"),
+   (138, "s_atomic_xor"),
+   (139, "s_atomic_inc"),
+   (140, "s_atomic_dec"),
 ]
-for name in SMEM_ATOMIC:
-   opcode(name, 4, [s1], kills_input = [0, 0, 0, 1])
+for code, name in SMEM_ATOMIC:
+   opcode(name, 4, [s1], code, Format.SMEM, kills_input = [0, 0, 0, 1])
 
 SMEM_ATOMIC_64 = [
-   "s_buffer_atomic_swap_x2",
-   "s_buffer_atomic_add_x2",
-   "s_buffer_atomic_sub_x2",
-   "s_buffer_atomic_smin_x2",
-   "s_buffer_atomic_umin_x2",
-   "s_buffer_atomic_smax_x2",
-   "s_buffer_atomic_umax_x2",
-   "s_buffer_atomic_and_x2",
-   "s_buffer_atomic_or_x2",
-   "s_buffer_atomic_xor_x2",
-   "s_buffer_atomic_inc_x2",
-   "s_buffer_atomic_dec_x2",
-   "s_atomic_swap_x2",
-   "s_atomic_add_x2",
-   "s_atomic_sub_x2",
-   "s_atomic_smin_x2",
-   "s_atomic_umin_x2",
-   "s_atomic_smax_x2",
-   "s_atomic_umax_x2",
-   "s_atomic_and_x2",
-   "s_atomic_or_x2",
-   "s_atomic_xor_x2",
-   "s_atomic_inc_x2",
-   "s_atomic_dec_x2",
+   (96, "s_buffer_atomic_swap_x2"),
+   (98, "s_buffer_atomic_add_x2"),
+   (99, "s_buffer_atomic_sub_x2"),
+   (100, "s_buffer_atomic_smin_x2"),
+   (101, "s_buffer_atomic_umin_x2"),
+   (102, "s_buffer_atomic_smax_x2"),
+   (103, "s_buffer_atomic_umax_x2"),
+   (104, "s_buffer_atomic_and_x2"),
+   (105, "s_buffer_atomic_or_x2"),
+   (106, "s_buffer_atomic_xor_x2"),
+   (107, "s_buffer_atomic_inc_x2"),
+   (108, "s_buffer_atomic_dec_x2"),
+   (160, "s_atomic_swap_x2"),
+   (162, "s_atomic_add_x2"),
+   (163, "s_atomic_sub_x2"),
+   (164, "s_atomic_smin_x2"),
+   (165, "s_atomic_umin_x2"),
+   (166, "s_atomic_smax_x2"),
+   (167, "s_atomic_umax_x2"),
+   (168, "s_atomic_and_x2"),
+   (169, "s_atomic_or_x2"),
+   (170, "s_atomic_xor_x2"),
+   (171, "s_atomic_inc_x2"),
+   (172, "s_atomic_dec_x2"),
 ]
-for name in SMEM_ATOMIC_64:
-   opcode(name, 4, [s2], kills_input = [0, 0, 0, 1])
+for code, name in SMEM_ATOMIC_64:
+   opcode(name, 4, [s2], code, Format.SMEM, kills_input = [0, 0, 0, 1])
 
 SMEM_DCACHE = [
    "s_dcache_inv",
@@ -843,6 +843,7 @@ VOP3b = [
    "v_mad_i64_i32"
 ]
 #TODO opcode("v_mad_u64_u32", 3, [1,1,2], 2, [2,2], [0, 1], 0, 1, 0, 0, [0, 0, 0])
+opcode("v_mad_u64_u32", 3, [v2], 488, Format.VOP3B)
 
 
 VOP3a_32 = {
@@ -945,18 +946,18 @@ for code, name in VOP3a_32_2:
    opcode(name, 2, [v1], code, Format.VOP3A)
 
 VOP3a_64_2 = [
-   "v_add_f64",
-   "v_mul_f64",
-   "v_min_f64",
-   "v_max_f64",
-   "v_ldexp_f64",
-   "v_lshlrev_b64",
-   "v_lshrrev_b64", #64bit
-   "v_ashrrev_i64", #64bit
-   "v_trig_preop_f64" #64bit
+   (640, "v_add_f64"),
+   (641, "v_mul_f64"),
+   (642, "v_min_f64"),
+   (643, "v_max_f64"),
+   (644, "v_ldexp_f64"),
+   (655, "v_lshlrev_b64"),
+   (656, "v_lshrrev_b64"), #64bit
+   (657, "v_ashrrev_i64"), #64bit
+   (658, "v_trig_preop_f64"), #64bit
 ]
-for name in VOP3a_64_2:
-   opcode(name, 2, [v2])
+for code, name in VOP3a_64_2:
+   opcode(name, 2, [v2], code, Format.VOP3A)
    
 VOP3a_SPECIAL = [
    "v_bcnt_u32_b32", # one input
@@ -1174,7 +1175,7 @@ DS_GWS = [
 ]
 
 
-# MUBUF instructions: TODO
+# MUBUF instructions:
 
 MUBUF = {
    (0, "buffer_load_format_x"),
@@ -1220,38 +1221,36 @@ MUBUF = {
    (61, "buffer_store_lds_dword"),
    (62, "buffer_wbinvl1"),
    (63, "buffer_wbinvl1_vol"),
+   (64, "buffer_atomic_swap"),
+   (65, "buffer_atomic_cmpswap"),
+   (66, "buffer_atomic_add"),
+   (67, "buffer_atomic_sub"),
+   (68, "buffer_atomic_smin"),
+   (69, "buffer_atomic_umin"),
+   (70, "buffer_atomic_smax"),
+   (71, "buffer_atomic_umax"),
+   (72, "buffer_atomic_and"),
+   (73, "buffer_atomic_or"),
+   (74, "buffer_atomic_xor"),
+   (75, "buffer_atomic_inc"),
+   (76, "buffer_atomic_dec"),
+   (96, "buffer_atomic_swap_x2"),
+   (97, "buffer_atomic_cmpswap_x2"),
+   (98, "buffer_atomic_add_x2"),
+   (99, "buffer_atomic_sub_x2"),
+   (100, "buffer_atomic_smin_x2"),
+   (101, "buffer_atomic_umin_x2"),
+   (102, "buffer_atomic_smax_x2"),
+   (103, "buffer_atomic_umax_x2"),
+   (104, "buffer_atomic_and_x2"),
+   (105, "buffer_atomic_or_x2"),
+   (106, "buffer_atomic_xor_x2"),
+   (107, "buffer_atomic_inc_x2"),
+   (108, "buffer_atomic_dec_x2"),
 }
 for (code, name) in MUBUF:
     opcode(name, 0, [], code, Format.MUBUF)
 
-MUBUF_ATOMIC = [
-   "buffer_atomic_swap",
-   "buffer_atomic_cmpswap",
-   "buffer_atomic_add",
-   "buffer_atomic_sub",
-   "buffer_atomic_smin",
-   "buffer_atomic_umin",
-   "buffer_atomic_smax",
-   "buffer_atomic_umax",
-   "buffer_atomic_and",
-   "buffer_atomic_or",
-   "buffer_atomic_xor",
-   "buffer_atomic_inc",
-   "buffer_atomic_dec",
-   "buffer_atomic_swap_x2",
-   "buffer_atomic_cmpswap_x2",
-   "buffer_atomic_add_x2",
-   "buffer_atomic_sub_x2",
-   "buffer_atomic_smin_x2",
-   "buffer_atomic_umin_x2",
-   "buffer_atomic_smax_x2",
-   "buffer_atomic_umax_x2",
-   "buffer_atomic_and_x2",
-   "buffer_atomic_or_x2",
-   "buffer_atomic_xor_x2",
-   "buffer_atomic_inc_x2",
-   "buffer_atomic_dec_x2"
-]
 
 MIMG = [
    (0, "image_load"),
