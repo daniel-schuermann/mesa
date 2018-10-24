@@ -62,6 +62,7 @@ class Format(Enum):
    GLOBAL = 14
    SCRATCH = 15
    PSEUDO_BRANCH = 16
+   PSEUDO_BARRIER = 17
    VOP1 = 1 << 8
    VOP2 = 1 << 9
    VOPC = 1 << 10
@@ -138,6 +139,12 @@ opcode("p_branch", 0, [], format=Format.PSEUDO_BRANCH)
 opcode("p_cbranch", 0, [], format=Format.PSEUDO_BRANCH)
 opcode("p_cbranch_z", 0, [], format=Format.PSEUDO_BRANCH)
 opcode("p_cbranch_nz", 0, [], format=Format.PSEUDO_BRANCH)
+
+opcode("p_memory_barrier_all", 0, [], format=Format.PSEUDO_BARRIER)
+opcode("p_memory_barrier_atomic", 0, [], format=Format.PSEUDO_BARRIER)
+opcode("p_memory_barrier_buffer", 0, [], format=Format.PSEUDO_BARRIER)
+opcode("p_memory_barrier_image", 0, [], format=Format.PSEUDO_BARRIER)
+opcode("p_memory_barrier_shared", 0, [], format=Format.PSEUDO_BARRIER)
 
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
 SOP2_SCC = {
