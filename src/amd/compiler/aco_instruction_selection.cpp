@@ -1298,9 +1298,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          readlane->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(readlane));
       }
-
       break;
-
    }
    default:
       fprintf(stderr, "Unknown NIR ALU instr: ");
@@ -2270,6 +2268,96 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    }
 }
 
+void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr) {
+
+   Temp data = get_ssa_temp(ctx, instr->src[2].ssa);
+   assert(data.size() == 1 && "64bit ssbo atomics not yet implemented.");
+   if (instr->intrinsic == nir_intrinsic_ssbo_atomic_comp_swap) {
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      vec->getOperand(0) = Operand(data);
+      vec->getOperand(1) = Operand(get_ssa_temp(ctx, instr->src[3].ssa));
+      data = {ctx->program->allocateId(), v2};
+      vec->getDefinition(0) = Definition(data);
+      ctx->block->instructions.emplace_back(std::move(vec));
+   }
+
+   Temp offset;
+   if (ctx->options->chip_class < VI && offset.type() == sgpr) {
+      offset = {ctx->program->allocateId(), v1};
+      emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[1].ssa), offset);
+   } else {
+      offset = get_ssa_temp(ctx, instr->src[1].ssa);
+   }
+
+   Temp rsrc = {ctx->program->allocateId(), s4};
+   std::unique_ptr<Instruction> load;
+   load.reset(create_instruction<SMEM_instruction>(aco_opcode::s_load_dwordx4, Format::SMEM, 2, 1));
+   load->getOperand(0) = Operand(get_ssa_temp(ctx, instr->src[0].ssa));
+   load->getOperand(1) = Operand(0);
+   load->getDefinition(0) = Definition(rsrc);
+   ctx->block->instructions.emplace_back(std::move(load));
+
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+   /* return the previous value if dest is ever used */
+   bool return_previous = false;
+   nir_foreach_use_safe(use_src, &instr->dest.ssa) {
+      return_previous = true;
+      break;
+   }
+   nir_foreach_if_use_safe(use_src, &instr->dest.ssa) {
+      return_previous = true;
+      break;
+   }
+
+   aco_opcode op;
+   switch (instr->intrinsic) {
+      case nir_intrinsic_ssbo_atomic_add:
+         op = aco_opcode::buffer_atomic_add;
+         break;
+      case nir_intrinsic_ssbo_atomic_imin:
+         op = aco_opcode::buffer_atomic_smin;
+         break;
+      case nir_intrinsic_ssbo_atomic_umin:
+         op = aco_opcode::buffer_atomic_umin;
+         break;
+      case nir_intrinsic_ssbo_atomic_imax:
+         op = aco_opcode::buffer_atomic_smax;
+         break;
+      case nir_intrinsic_ssbo_atomic_umax:
+         op = aco_opcode::buffer_atomic_umax;
+         break;
+      case nir_intrinsic_ssbo_atomic_and:
+         op = aco_opcode::buffer_atomic_and;
+         break;
+      case nir_intrinsic_ssbo_atomic_or:
+         op = aco_opcode::buffer_atomic_or;
+         break;
+      case nir_intrinsic_ssbo_atomic_xor:
+         op = aco_opcode::buffer_atomic_xor;
+         break;
+      case nir_intrinsic_ssbo_atomic_exchange:
+         op = aco_opcode::buffer_atomic_swap;
+         break;
+      case nir_intrinsic_ssbo_atomic_comp_swap:
+         op = aco_opcode::buffer_atomic_cmpswap;
+         break;
+      default:
+         unreachable("visit_atomic_ssbo should only be called with nir_intrinsic_ssbo_atomic_* instructions.");
+   }
+
+   std::unique_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 4, return_previous ? 1 : 0)};
+   mubuf->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand();
+   mubuf->getOperand(1) = Operand(rsrc);
+   mubuf->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand(0);
+   mubuf->getOperand(3) = Operand(data);
+   if (return_previous)
+      mubuf->getDefinition(0) = Definition(dst);
+   mubuf->offset = 0;
+   mubuf->offen = (offset.type() == vgpr);
+   mubuf->glc = return_previous;
+   ctx->block->instructions.emplace_back(std::move(mubuf));
+}
+
 void visit_get_buffer_size(isel_context *ctx, nir_intrinsic_instr *instr) {
 
    Temp index = get_ssa_temp(ctx, instr->src[0].ssa);
@@ -2366,6 +2454,18 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_store_ssbo:
       visit_store_ssbo(ctx, instr);
+      break;
+   case nir_intrinsic_ssbo_atomic_add:
+   case nir_intrinsic_ssbo_atomic_imin:
+   case nir_intrinsic_ssbo_atomic_umin:
+   case nir_intrinsic_ssbo_atomic_imax:
+   case nir_intrinsic_ssbo_atomic_umax:
+   case nir_intrinsic_ssbo_atomic_and:
+   case nir_intrinsic_ssbo_atomic_or:
+   case nir_intrinsic_ssbo_atomic_xor:
+   case nir_intrinsic_ssbo_atomic_exchange:
+   case nir_intrinsic_ssbo_atomic_comp_swap:
+      visit_atomic_ssbo(ctx, instr);
       break;
    case nir_intrinsic_get_buffer_size:
       visit_get_buffer_size(ctx, instr);
@@ -3625,6 +3725,16 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_local_invocation_id:
                   case nir_intrinsic_load_local_invocation_index:
                   case nir_intrinsic_load_ssbo:
+                  case nir_intrinsic_ssbo_atomic_add:
+                  case nir_intrinsic_ssbo_atomic_imin:
+                  case nir_intrinsic_ssbo_atomic_umin:
+                  case nir_intrinsic_ssbo_atomic_imax:
+                  case nir_intrinsic_ssbo_atomic_umax:
+                  case nir_intrinsic_ssbo_atomic_and:
+                  case nir_intrinsic_ssbo_atomic_or:
+                  case nir_intrinsic_ssbo_atomic_xor:
+                  case nir_intrinsic_ssbo_atomic_exchange:
+                  case nir_intrinsic_ssbo_atomic_comp_swap:
                   case nir_intrinsic_image_deref_load:
                      type = vgpr;
                      break;
