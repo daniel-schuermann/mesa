@@ -1798,7 +1798,6 @@ void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
     * s_endpgm
     * Label
     */
-   ctx->program->info->fs.can_discard = true;
    Temp cond32 = get_ssa_temp(ctx, instr->src[0].ssa);
    Temp cond = Temp{ctx->program->allocateId(), s2};
 
@@ -4441,11 +4440,13 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
       }
       program->info->fs.num_interp = util_bitcount64(ctx.input_mask);
       program->info->fs.input_mask = ctx.input_mask >> VARYING_SLOT_VAR0;
+      program->info->fs.can_discard = nir->info.fs.uses_discard;
    }
    if (ctx.stage == MESA_SHADER_COMPUTE) {
-      ctx.program->info->cs.block_size[0] = nir->info.cs.local_size[0];
-      ctx.program->info->cs.block_size[1] = nir->info.cs.local_size[1];
-      ctx.program->info->cs.block_size[2] = nir->info.cs.local_size[2];
+      program->info->cs.block_size[0] = nir->info.cs.local_size[0];
+      program->info->cs.block_size[1] = nir->info.cs.local_size[1];
+      program->info->cs.block_size[2] = nir->info.cs.local_size[2];
+      program->config->lds_size = nir->info.cs.shared_size;
    }
 
    add_startpgm(&ctx);
