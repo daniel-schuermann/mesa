@@ -2127,6 +2127,12 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    }
 
    Temp data = get_ssa_temp(ctx, instr->src[3].ssa);
+   if (data.type() != vgpr) {
+      Temp t = {ctx->program->allocateId(), getRegClass(vgpr, data.size())};
+      emit_v_mov(ctx, data, t);
+      data = t;
+   }
+   assert(data.type() == vgpr);
    Temp coords = get_image_coords(ctx, instr, type);
    Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, nullptr, true, true);
 
@@ -2138,6 +2144,111 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    store->dmask = 0xF;
    store->unrm = true;
    ctx->block->instructions.emplace_back(std::move(store));
+   return;
+}
+
+void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr) {
+
+   const nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
+   const struct glsl_type *type = glsl_without_array(var->type);
+   bool is_unsigned = glsl_get_sampler_result_type(type) == GLSL_TYPE_UINT;
+
+   Temp data = get_ssa_temp(ctx, instr->src[3].ssa);
+   assert(data.size() == 1 && "64bit ssbo atomics not yet implemented.");
+   if (instr->intrinsic == nir_intrinsic_image_deref_atomic_comp_swap) {
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      vec->getOperand(0) = Operand(data);
+      vec->getOperand(1) = Operand(get_ssa_temp(ctx, instr->src[4].ssa));
+      data = {ctx->program->allocateId(), v2};
+      vec->getDefinition(0) = Definition(data);
+      ctx->block->instructions.emplace_back(std::move(vec));
+   } else if (data.type() != vgpr) {
+      Temp t = {ctx->program->allocateId(), getRegClass(vgpr, data.size())};
+      emit_v_mov(ctx, data, t);
+      data = t;
+   }
+
+   aco_opcode buf_op, image_op;
+   switch (instr->intrinsic) {
+      case nir_intrinsic_image_deref_atomic_add:
+         buf_op = aco_opcode::buffer_atomic_add;
+         image_op = aco_opcode::image_atomic_add;
+         break;
+      case nir_intrinsic_image_deref_atomic_min:
+         buf_op = aco_opcode::buffer_atomic_umin;
+         image_op = is_unsigned ? aco_opcode::image_atomic_umin : aco_opcode::image_atomic_smin;
+         break;
+      case nir_intrinsic_image_deref_atomic_max:
+         buf_op = aco_opcode::buffer_atomic_umax;
+         image_op = is_unsigned ? aco_opcode::image_atomic_umax : aco_opcode::image_atomic_smax;
+         break;
+      case nir_intrinsic_image_deref_atomic_and:
+         buf_op = aco_opcode::buffer_atomic_and;
+         image_op = aco_opcode::image_atomic_and;
+         break;
+      case nir_intrinsic_image_deref_atomic_or:
+         buf_op = aco_opcode::buffer_atomic_or;
+         image_op = aco_opcode::image_atomic_or;
+         break;
+      case nir_intrinsic_image_deref_atomic_xor:
+         buf_op = aco_opcode::buffer_atomic_xor;
+         image_op = aco_opcode::image_atomic_xor;
+         break;
+      case nir_intrinsic_image_deref_atomic_exchange:
+         buf_op = aco_opcode::buffer_atomic_swap;
+         image_op = aco_opcode::image_atomic_swap;
+         break;
+      case nir_intrinsic_image_deref_atomic_comp_swap:
+         buf_op = aco_opcode::buffer_atomic_cmpswap;
+         image_op = aco_opcode::image_atomic_cmpswap;
+         break;
+      default:
+         unreachable("visit_image_atomic should only be called with nir_intrinsic_image_deref_atomic_* instructions.");
+   }
+
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+   /* return the previous value if dest is ever used */
+   bool return_previous = false;
+   nir_foreach_use_safe(use_src, &instr->dest.ssa) {
+      return_previous = true;
+      break;
+   }
+   nir_foreach_if_use_safe(use_src, &instr->dest.ssa) {
+      return_previous = true;
+      break;
+   }
+
+   Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, nullptr, true, true);
+
+   if (glsl_get_sampler_dim(type) == GLSL_SAMPLER_DIM_BUF) {
+      Temp vindex = emit_extract_vector(ctx, get_ssa_temp(ctx, instr->src[1].ssa), 0, v1);
+      Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, nullptr, true, true);
+      assert(ctx->options->chip_class < GFX9 && "GFX9 stride size workaround not yet implemented.");
+      std::unique_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(buf_op, Format::MUBUF, 4, return_previous ? 1 : 0)};
+      mubuf->getOperand(0) = Operand(vindex);
+      mubuf->getOperand(1) = Operand(resource);
+      mubuf->getOperand(2) = Operand((uint32_t)0);
+      mubuf->getOperand(3) = Operand(data);
+      if (return_previous)
+         mubuf->getDefinition(0) = Definition(dst);
+      mubuf->offset = 0;
+      mubuf->idxen = true;
+      mubuf->glc = return_previous;
+      ctx->block->instructions.emplace_back(std::move(mubuf));
+      return;
+   }
+
+   Temp coords = get_image_coords(ctx, instr, type);
+   std::unique_ptr<MIMG_instruction> mimg{create_instruction<MIMG_instruction>(image_op, Format::MIMG, 3, return_previous ? 1 : 0)};
+   mimg->getOperand(0) = Operand(coords);
+   mimg->getOperand(1) = Operand(resource);
+   mimg->getOperand(2) = Operand(data);
+   if (return_previous)
+      mimg->getDefinition(0) = Definition(dst);
+   mimg->glc = return_previous;
+   mimg->dmask = (1 << data.size()) - 1;
+   mimg->unrm = true;
+   ctx->block->instructions.emplace_back(std::move(mimg));
    return;
 }
 
@@ -2448,6 +2559,16 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_image_deref_store:
       visit_image_store(ctx, instr);
+      break;
+   case nir_intrinsic_image_deref_atomic_add:
+   case nir_intrinsic_image_deref_atomic_min:
+   case nir_intrinsic_image_deref_atomic_max:
+   case nir_intrinsic_image_deref_atomic_and:
+   case nir_intrinsic_image_deref_atomic_or:
+   case nir_intrinsic_image_deref_atomic_xor:
+   case nir_intrinsic_image_deref_atomic_exchange:
+   case nir_intrinsic_image_deref_atomic_comp_swap:
+      visit_image_atomic(ctx, instr);
       break;
    case nir_intrinsic_load_ssbo:
       visit_load_ssbo(ctx, instr);
@@ -3736,6 +3857,14 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_ssbo_atomic_exchange:
                   case nir_intrinsic_ssbo_atomic_comp_swap:
                   case nir_intrinsic_image_deref_load:
+                  case nir_intrinsic_image_deref_atomic_add:
+                  case nir_intrinsic_image_deref_atomic_min:
+                  case nir_intrinsic_image_deref_atomic_max:
+                  case nir_intrinsic_image_deref_atomic_and:
+                  case nir_intrinsic_image_deref_atomic_or:
+                  case nir_intrinsic_image_deref_atomic_xor:
+                  case nir_intrinsic_image_deref_atomic_exchange:
+                  case nir_intrinsic_image_deref_atomic_comp_swap:
                      type = vgpr;
                      break;
                   case nir_intrinsic_load_front_face:
