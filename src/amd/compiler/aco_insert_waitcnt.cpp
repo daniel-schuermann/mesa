@@ -125,9 +125,7 @@ struct wait_ctx {
 
    bool operator==(const wait_ctx& rhs) const
    {
-      return vm_cnt == rhs.vm_cnt &&
-             exp_cnt == rhs.exp_cnt &&
-             lgkm_cnt == rhs.lgkm_cnt &&
+      return sgpr_map == rhs.sgpr_map &&
              vgpr_map == rhs.vgpr_map;
    }
 };
