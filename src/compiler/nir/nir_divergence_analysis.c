@@ -50,11 +50,8 @@ static bool alu_src_is_divergent(bool *divergent, nir_alu_src src, unsigned num_
       switch(parent->op) {
          case nir_op_vec2:
          case nir_op_vec3:
-         case nir_op_vec4: {
-            if (divergent[parent->src[src.swizzle[0]].src.ssa->index])
-               return true;
-            return false;
-         }
+         case nir_op_vec4:
+            return divergent[parent->src[src.swizzle[0]].src.ssa->index];
          default:
             break;
       }
@@ -127,6 +124,14 @@ static bool visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_ssbo_atomic_xor:
    case nir_intrinsic_ssbo_atomic_exchange:
    case nir_intrinsic_ssbo_atomic_comp_swap:
+   case nir_intrinsic_image_deref_atomic_add:
+   case nir_intrinsic_image_deref_atomic_min:
+   case nir_intrinsic_image_deref_atomic_max:
+   case nir_intrinsic_image_deref_atomic_and:
+   case nir_intrinsic_image_deref_atomic_or:
+   case nir_intrinsic_image_deref_atomic_xor:
+   case nir_intrinsic_image_deref_atomic_exchange:
+   case nir_intrinsic_image_deref_atomic_comp_swap:
    default:
       is_divergent = true;
       break;
