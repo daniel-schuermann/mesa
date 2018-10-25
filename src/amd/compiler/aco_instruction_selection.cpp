@@ -2592,8 +2592,12 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       visit_get_buffer_size(ctx, instr);
       break;
    case nir_intrinsic_barrier: {
-      std::unique_ptr<Instruction> barrier{create_instruction<SOPP_instruction>(aco_opcode::s_barrier, Format::SOPP, 0, 0)};
-      ctx->block->instructions.emplace_back(std::move(barrier));
+      unsigned* bsize = ctx->program->info->cs.block_size;
+      unsigned workgroup_size = bsize[0] * bsize[1] * bsize[2];
+      if (workgroup_size > 64) {
+         std::unique_ptr<Instruction> barrier{create_instruction<SOPP_instruction>(aco_opcode::s_barrier, Format::SOPP, 0, 0)};
+         ctx->block->instructions.emplace_back(std::move(barrier));
+      }
       break;
    }
    case nir_intrinsic_group_memory_barrier:
