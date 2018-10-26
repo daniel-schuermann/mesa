@@ -593,6 +593,7 @@ struct Interp_instruction : public Instruction {
  * Operand(0): ADDR - VGPR which supplies the address.
  * Operand(1): DATA0 - First data VGPR.
  * Operand(2): DATA1 - Second data VGPR.
+ * Operand(n-1): M0 - LDS size.
  * Definition(0): VDST - Destination VGPR when results returned to VGPRs.
  *
  */
