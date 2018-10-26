@@ -20,9 +20,6 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *
- * Authors:
- *    Daniel Schürmann (daniel.schuermann@campus.tu-berlin.de)
- *
  */
 
 #include "nir.h"
@@ -39,7 +36,8 @@
  */
 
 
-static bool alu_src_is_divergent(bool *divergent, nir_alu_src src, unsigned num_input_components)
+static bool
+alu_src_is_divergent(bool *divergent, nir_alu_src src, unsigned num_input_components)
 {
    /* If the alu src is swizzled and defined by a vec-instruction,
     * we can check if the originating value is non-divergent. */
@@ -47,39 +45,49 @@ static bool alu_src_is_divergent(bool *divergent, nir_alu_src src, unsigned num_
        src.src.ssa->num_components != 1 &&
        src.src.parent_instr->type == nir_instr_type_alu) {
       nir_alu_instr *parent = nir_instr_as_alu(src.src.parent_instr);
+
       switch(parent->op) {
-         case nir_op_vec2:
-         case nir_op_vec3:
-         case nir_op_vec4:
-            return divergent[parent->src[src.swizzle[0]].src.ssa->index];
-         default:
-            break;
+      case nir_op_vec2:
+      case nir_op_vec3:
+      case nir_op_vec4:
+         return divergent[parent->src[src.swizzle[0]].src.ssa->index];
+
+      default:
+         break;
       }
    }
+
    return divergent[src.src.ssa->index];
 }
 
-static bool visit_alu(bool *divergent, nir_alu_instr *instr)
+static bool
+visit_alu(bool *divergent, nir_alu_instr *instr)
 {
    if (divergent[instr->dest.dest.ssa.index])
       return false;
+
    unsigned num_src = nir_op_infos[instr->op].num_inputs;
+
    for (unsigned i = 0; i < num_src; i++) {
       if (alu_src_is_divergent(divergent, instr->src[i], nir_op_infos[instr->op].input_sizes[i])) {
          divergent[instr->dest.dest.ssa.index] = true;
          return true;
       }
    }
+
    divergent[instr->dest.dest.ssa.index] = false;
    return false;
 }
 
-static bool visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
+static bool
+visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
 {
    if (!nir_intrinsic_infos[instr->intrinsic].has_dest)
       return false;
+
    if (divergent[instr->dest.ssa.index])
       return false;
+
    bool is_divergent = false;
    switch (instr->intrinsic) {
    /* TODO: load_shared_var */
@@ -100,6 +108,7 @@ static bool visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_get_buffer_size:
       is_divergent = false;
       break;
+
    case nir_intrinsic_load_ubo:
    case nir_intrinsic_image_deref_load:
    case nir_intrinsic_load_ssbo:
@@ -111,6 +120,7 @@ static bool visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
          }
       }
       break;
+
    case nir_intrinsic_load_deref: {
       nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
       switch (var->data.mode) {
@@ -159,15 +169,19 @@ static bool visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
       is_divergent = true;
       break;
    }
+
    divergent[instr->dest.ssa.index] = is_divergent;
    return is_divergent;
 }
 
-static bool visit_tex(bool *divergent, nir_tex_instr *instr)
+static bool
+visit_tex(bool *divergent, nir_tex_instr *instr)
 {
    if (divergent[instr->dest.ssa.index])
       return false;
+
    bool is_divergent = false;
+
    for (unsigned i = 0; i < instr->num_srcs; i++) {
       switch (instr->src[i].src_type) {
       case nir_tex_src_coord:
@@ -177,29 +191,31 @@ static bool visit_tex(bool *divergent, nir_tex_instr *instr)
          break;
       }
    }
+
    divergent[instr->dest.ssa.index] = is_divergent;
    return is_divergent;
 }
 
-
-/** There are 3 types of phi instructions:
- * (1) gamma: represent the joining point of different paths
- *     created by an “if-then-else” branch.
- *     The resulting value is divergent iff the branch condition
- *     or any of the source values is divergent.
- *
- * (2) mu: which only exist at loop headers,
- *     merge initial and loop-carried values.
- *     The resulting value is divergent iff any source value
- *     is divergent or a divergent loop continue condition
- *     is associated with a different ssa-def.
- *
- * (3) eta: represent values that leave a loop.
- *     The resulting value is divergent iff any loop exit condition
- *     or source value is divergent.
- */
-static bool visit_phi(bool *divergent, nir_phi_instr *instr)
+static bool
+visit_phi(bool *divergent, nir_phi_instr *instr)
 {
+   /* There are 3 types of phi instructions:
+    * (1) gamma: represent the joining point of different paths
+    *     created by an “if-then-else” branch.
+    *     The resulting value is divergent iff the branch condition
+    *     or any of the source values is divergent.
+    *
+    * (2) mu: which only exist at loop headers,
+    *     merge initial and loop-carried values.
+    *     The resulting value is divergent iff any source value
+    *     is divergent or a divergent loop continue condition
+    *     is associated with a different ssa-def.
+    *
+    * (3) eta: represent values that leave a loop.
+    *     The resulting value is divergent iff any loop exit condition
+    *     or source value is divergent.
+    */
+
    if (divergent[instr->dest.ssa.index])
       return false;
 
@@ -210,10 +226,12 @@ static bool visit_phi(bool *divergent, nir_phi_instr *instr)
          divergent[instr->dest.ssa.index] = true;
          return true;
       }
+
       /* if all values but one are undef, the resulting value is uniform */
       if (src->src.ssa->parent_instr->type != nir_instr_type_ssa_undef)
          non_undef += 1;
    }
+
    if (non_undef <= 1) {
       assert(divergent[instr->dest.ssa.index] == false);
       return false;
@@ -221,13 +239,15 @@ static bool visit_phi(bool *divergent, nir_phi_instr *instr)
 
    nir_cf_node *prev = nir_cf_node_prev(&instr->instr.block->cf_node);
 
-   /* mu: if no predecessor node exists, the phi must be at a loop header */
    if (!prev) {
-      /* find the two unconditional ssa-defs (the incoming value and the back-edge) */
+      /* mu: if no predecessor node exists, the phi must be at a loop header */
+
+      /* first, find the two unconditional ssa-defs (from incoming- and back-edge) */
       nir_loop *loop = nir_cf_node_as_loop(instr->instr.block->cf_node.parent);
       prev = nir_cf_node_prev(instr->instr.block->cf_node.parent);
       unsigned unconditional[2];
       unsigned idx = 0;
+
       nir_foreach_phi_src(src, instr) {
          if (src->pred == nir_loop_last_block(loop) ||
              src->pred == nir_cf_node_as_block(prev))
@@ -236,13 +256,15 @@ static bool visit_phi(bool *divergent, nir_phi_instr *instr)
       assert(idx == 2);
 
       /* check if the loop-carried values come from a different ssa-def
-       * and the corresponding condition is divergent. */
+       * and the corresponding condition is divergent.
+       */
       nir_foreach_phi_src(src, instr) {
          if (src->src.ssa->index == unconditional[0] ||
              src->src.ssa->index == unconditional[1])
             continue;
 
          nir_cf_node *current = src->pred->cf_node.parent;
+
          /* check recursively the conditions if any is divergent */
          while (current->type != nir_cf_node_loop) {
             if (current->type == nir_cf_node_if) {
@@ -255,19 +277,17 @@ static bool visit_phi(bool *divergent, nir_phi_instr *instr)
             current = current->parent;
          }
       }
-   }
 
-   /* gamma: check if the condition is divergent */
-   else if (prev->type == nir_cf_node_if) {
+   } else if (prev->type == nir_cf_node_if) {
+      /* gamma: check if the condition is divergent */
       nir_if *if_node = nir_cf_node_as_if(prev);
       if (divergent[if_node->condition.ssa->index]) {
          divergent[instr->dest.ssa.index] = true;
          return true;
       }
-   }
 
-   /* eta: check if any loop exit condition is divergent */
-   else {
+   } else {
+      /* eta: check if any loop exit condition is divergent */
       assert(prev->type == nir_cf_node_loop);
       nir_foreach_phi_src(src, instr) {
          nir_cf_node *current = src->pred->cf_node.parent;
@@ -286,13 +306,16 @@ static bool visit_phi(bool *divergent, nir_phi_instr *instr)
          }
       }
    }
+
    divergent[instr->dest.ssa.index] = false;
    return false;
 }
 
-static bool visit_parallel_copy(bool *divergent, nir_parallel_copy_instr *instr)
+static bool
+visit_parallel_copy(bool *divergent, nir_parallel_copy_instr *instr)
 {
    bool has_changed = false;
+
    nir_foreach_parallel_copy_entry(entry, instr) {
       if (divergent[entry->dest.ssa.index])
          continue;
@@ -300,22 +323,26 @@ static bool visit_parallel_copy(bool *divergent, nir_parallel_copy_instr *instr)
       if (divergent[entry->dest.ssa.index])
          has_changed = true;
    }
+
    return has_changed;
 }
 
-static bool visit_load_const(bool *divergent, nir_load_const_instr *instr)
+static bool
+visit_load_const(bool *divergent, nir_load_const_instr *instr)
 {
    divergent[instr->def.index] = false;
    return false;
 }
 
-static bool visit_ssa_undef(bool *divergent, nir_ssa_undef_instr *instr)
+static bool
+visit_ssa_undef(bool *divergent, nir_ssa_undef_instr *instr)
 {
    divergent[instr->def.index] = false;
    return false;
 }
 
-static bool visit_deref(bool *divergent, nir_deref_instr *instr)
+static bool
+visit_deref(bool *divergent, nir_deref_instr *instr)
 {
    nir_foreach_use(src, &instr->dest.ssa)
    {
@@ -324,14 +351,15 @@ static bool visit_deref(bool *divergent, nir_deref_instr *instr)
          return false;
       }
    }
+
    bool before = divergent[instr->dest.ssa.index];
    divergent[instr->dest.ssa.index] = true;
    return !before;
 }
 
-bool* nir_divergence_analysis(nir_shader *shader)
+bool*
+nir_divergence_analysis(nir_shader *shader)
 {
-
    nir_function_impl *impl = nir_shader_get_entrypoint(shader);
    bool *t = rzalloc_array(shader, bool, impl->ssa_alloc);
    nir_block_worklist worklist;
@@ -377,10 +405,12 @@ bool* nir_divergence_analysis(nir_shader *shader)
             break;
          }
       }
+
       if (has_changed) {
          // FIXME: this is quite inefficient!
          nir_block_worklist_add_all(&worklist, impl);
       }
    }
+
    return t;
 }
