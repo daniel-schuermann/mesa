@@ -103,6 +103,7 @@ static bool visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_load_ubo:
    case nir_intrinsic_image_deref_load:
    case nir_intrinsic_load_ssbo:
+   case nir_intrinsic_load_shared:
       for (unsigned i = 0; i < nir_intrinsic_infos[instr->intrinsic].num_srcs; i++) {
          if (divergent[instr->src[i].ssa->index]) {
             is_divergent = true;
@@ -110,6 +111,18 @@ static bool visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
          }
       }
       break;
+   case nir_intrinsic_load_deref: {
+      nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
+      switch (var->data.mode) {
+      case nir_var_shared:
+         is_divergent = divergent[instr->src[0].ssa->index];
+         break;
+      default:
+         is_divergent = true;
+         break;
+      }
+      break;
+   }
    case nir_intrinsic_load_interpolated_input:
    case nir_intrinsic_load_barycentric_pixel:
    case nir_intrinsic_load_invocation_id:
@@ -132,6 +145,16 @@ static bool visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_image_deref_atomic_xor:
    case nir_intrinsic_image_deref_atomic_exchange:
    case nir_intrinsic_image_deref_atomic_comp_swap:
+   case nir_intrinsic_shared_atomic_add:
+   case nir_intrinsic_shared_atomic_imin:
+   case nir_intrinsic_shared_atomic_umin:
+   case nir_intrinsic_shared_atomic_imax:
+   case nir_intrinsic_shared_atomic_umax:
+   case nir_intrinsic_shared_atomic_and:
+   case nir_intrinsic_shared_atomic_or:
+   case nir_intrinsic_shared_atomic_xor:
+   case nir_intrinsic_shared_atomic_exchange:
+   case nir_intrinsic_shared_atomic_comp_swap:
    default:
       is_divergent = true;
       break;
