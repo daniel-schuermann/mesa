@@ -2510,6 +2510,129 @@ void emit_memory_barrier(isel_context *ctx, nir_intrinsic_instr *instr) {
    ctx->block->instructions.emplace_back(std::move(barrier));
 }
 
+Temp load_lds_size_m0(isel_context *ctx)
+{
+   std::unique_ptr<Instruction> instr{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1)};
+   instr->getOperand(0) = Operand(0xFFFFFFFF);
+   Temp dst = {ctx->program->allocateId(), s1};
+   instr->getDefinition(0) = Definition(dst);
+   instr->getDefinition(0).setFixed(m0);
+   ctx->block->instructions.emplace_back(std::move(instr));
+   return dst;
+}
+
+
+void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   Temp m = load_lds_size_m0(ctx);
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+   assert(dst.size() == 1 && "Bitsize not supported in load_deref.");
+   Temp address = get_ssa_temp(ctx, instr->src[0].ssa);
+   assert(address.type() == vgpr && "address has to be in vgpr.");
+
+   std::unique_ptr<Instruction> shl{create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1)};
+   shl->getOperand(0) = Operand(2);
+   shl->getOperand(1) = Operand(address);
+   address = {ctx->program->allocateId(), v1};
+   shl->getDefinition(0) = Definition(address);
+   ctx->block->instructions.emplace_back(std::move(shl));
+
+   unsigned offset = instr->const_index[0];
+   aco_opcode op;
+   switch (instr->num_components) {
+      case 1:
+         op = aco_opcode::ds_read_b32;
+         break;
+      case 2:
+         op = aco_opcode::ds_read_b64;
+         break;
+      case 3:
+         op = aco_opcode::ds_read_b96;
+         break;
+      case 4:
+         op = aco_opcode::ds_read_b128;
+         break;
+      default:
+         unreachable("unreachable");
+   }
+
+   std::unique_ptr<DS_instruction> ds{create_instruction<DS_instruction>(op, Format::DS, 2, 1)};
+   ds->getOperand(0) = Operand(address);
+   ds->getOperand(1) = Operand(m);
+   ds->getOperand(1).setFixed(m0);
+   ds->getDefinition(0) = Definition(dst);
+   ds->offset0 = offset;
+   ctx->block->instructions.emplace_back(std::move(ds));
+   return;
+}
+
+void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   unsigned offset = instr->const_index[0];
+   unsigned writemask = instr->const_index[1];
+   Temp m = load_lds_size_m0(ctx);
+   Temp data = get_ssa_temp(ctx, instr->src[0].ssa);
+   Temp address = get_ssa_temp(ctx, instr->src[1].ssa);
+   unsigned elem_size_bytes = instr->src[0].ssa->bit_size / 8;
+   assert(elem_size_bytes == 4 && "Only 32bit store_shared currently supported.");
+
+   std::unique_ptr<Instruction> shl{create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1)};
+   shl->getOperand(0) = Operand(2);
+   shl->getOperand(1) = Operand(address);
+   address = {ctx->program->allocateId(), v1};
+   shl->getDefinition(0) = Definition(address);
+   ctx->block->instructions.emplace_back(std::move(shl));
+
+   /* we need at most two stores for 32bit variables */
+   int start[2], count[2];
+   u_bit_scan_consecutive_range(&writemask, &start[0], &count[0]);
+   u_bit_scan_consecutive_range(&writemask, &start[1], &count[1]);
+   assert(writemask == 0);
+
+   std::unique_ptr<DS_instruction> ds;
+   /* one combined store is sufficient */
+   if (count[0] == count[1]) {
+      assert(count[0] == 1);
+      ds.reset(create_instruction<DS_instruction>(aco_opcode::ds_write2_b32, Format::DS, 4, 0));
+      ds->getOperand(0) = Operand(address);
+      ds->getOperand(1) = Operand(emit_extract_vector(ctx, data, start[0], v1));
+      ds->getOperand(2) = Operand(emit_extract_vector(ctx, data, start[1], v1));
+      ds->getOperand(3) = Operand(m);
+      ds->getOperand(3).setFixed(m0);
+      ds->offset0 = (offset >> 2) + start[0];
+      ds->offset1 = (offset >> 2) + start[1];
+      ctx->block->instructions.emplace_back(std::move(ds));
+      return;
+   }
+
+   for (unsigned i = 0; i < 2; i++) {
+      if (count[i] == 0)
+         continue;
+
+      aco_opcode op;
+      if (count[i] == 1)
+         op = aco_opcode::ds_write_b32;
+      else if (count[i] == 2)
+         op = aco_opcode::ds_write_b64;
+      else if (count[i] == 3)
+         op = aco_opcode::ds_write_b96;
+      else if (count[i] == 4)
+         op = aco_opcode::ds_write_b128;
+      else
+         assert(false);
+
+      Temp write_data = emit_extract_vector(ctx, data, start[i], getRegClass(vgpr, count[i]));
+      ds.reset(create_instruction<DS_instruction>(op, Format::DS, 3, 0));
+      ds->getOperand(0) = Operand(address);
+      ds->getOperand(1) = Operand(write_data);
+      ds->getOperand(2) = Operand(m);
+      ds->getOperand(2).setFixed(m0);
+      ds->offset0 = offset + (start[i] * elem_size_bytes);
+      ctx->block->instructions.emplace_back(std::move(ds));
+   }
+   return;
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
@@ -2552,6 +2675,12 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_discard_if:
       visit_discard_if(ctx, instr);
+      break;
+   case nir_intrinsic_load_shared:
+      visit_load_shared(ctx, instr);
+      break;
+   case nir_intrinsic_store_shared:
+      visit_store_shared(ctx, instr);
       break;
    case nir_intrinsic_image_deref_load:
       visit_image_load(ctx, instr);
@@ -3849,6 +3978,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_local_invocation_id:
                   case nir_intrinsic_load_local_invocation_index:
                   case nir_intrinsic_load_ssbo:
+                  case nir_intrinsic_load_shared:
                   case nir_intrinsic_ssbo_atomic_add:
                   case nir_intrinsic_ssbo_atomic_imin:
                   case nir_intrinsic_ssbo_atomic_umin:
@@ -4414,8 +4544,9 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    ctx.options = options;
    ctx.stage = nir->info.stage;
    nir_lower_load_const_to_scalar(nir);
-   nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
+   nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out | nir_var_shared), type_size, (nir_lower_io_options)0);
    nir_copy_prop(nir);
+   nir_opt_shrink_load(nir);
    nir_opt_cse(nir);
    nir_opt_dce(nir);
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
