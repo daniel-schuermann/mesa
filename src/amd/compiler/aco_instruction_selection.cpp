@@ -2633,6 +2633,126 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    return;
 }
 
+void visit_shared_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   unsigned offset = instr->const_index[0];
+   Temp m = load_lds_size_m0(ctx);
+   Temp data = get_ssa_temp(ctx, instr->src[1].ssa);
+   if (data.type() != vgpr) {
+         data = {ctx->program->allocateId(), getRegClass(vgpr, data.size())};
+         emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[1].ssa), data);
+   }
+   Temp address = get_ssa_temp(ctx, instr->src[0].ssa);
+
+   std::unique_ptr<Instruction> shl{create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1)};
+   shl->getOperand(0) = Operand(2);
+   shl->getOperand(1) = Operand(address);
+   address = {ctx->program->allocateId(), v1};
+   shl->getDefinition(0) = Definition(address);
+   ctx->block->instructions.emplace_back(std::move(shl));
+
+   unsigned num_operands = 3;
+   aco_opcode op32, op64, op32_rtn, op64_rtn;
+   switch(instr->intrinsic) {
+      case nir_intrinsic_shared_atomic_add:
+         op32 = aco_opcode::ds_add_u32;
+         op64 = aco_opcode::ds_add_u64;
+         op32_rtn = aco_opcode::ds_add_rtn_u32;
+         op64_rtn = aco_opcode::ds_add_rtn_u64;
+         break;
+      case nir_intrinsic_shared_atomic_imin:
+         op32 = aco_opcode::ds_min_i32;
+         op64 = aco_opcode::ds_min_i64;
+         op32_rtn = aco_opcode::ds_min_rtn_i32;
+         op64_rtn = aco_opcode::ds_min_rtn_i64;
+         break;
+      case nir_intrinsic_shared_atomic_umin:
+         op32 = aco_opcode::ds_min_u32;
+         op64 = aco_opcode::ds_min_u64;
+         op32_rtn = aco_opcode::ds_min_rtn_u32;
+         op64_rtn = aco_opcode::ds_min_rtn_u64;
+         break;
+      case nir_intrinsic_shared_atomic_imax:
+         op32 = aco_opcode::ds_max_i32;
+         op64 = aco_opcode::ds_max_i64;
+         op32_rtn = aco_opcode::ds_max_rtn_i32;
+         op64_rtn = aco_opcode::ds_max_rtn_i64;
+         break;
+      case nir_intrinsic_shared_atomic_umax:
+         op32 = aco_opcode::ds_max_u32;
+         op64 = aco_opcode::ds_max_u64;
+         op32_rtn = aco_opcode::ds_max_rtn_u32;
+         op64_rtn = aco_opcode::ds_max_rtn_u64;
+         break;
+      case nir_intrinsic_shared_atomic_and:
+         op32 = aco_opcode::ds_and_b32;
+         op64 = aco_opcode::ds_and_b64;
+         op32_rtn = aco_opcode::ds_and_rtn_b32;
+         op64_rtn = aco_opcode::ds_and_rtn_b64;
+         break;
+      case nir_intrinsic_shared_atomic_or:
+         op32 = aco_opcode::ds_or_b32;
+         op64 = aco_opcode::ds_or_b64;
+         op32_rtn = aco_opcode::ds_or_rtn_b32;
+         op64_rtn = aco_opcode::ds_or_rtn_b64;
+         break;
+      case nir_intrinsic_shared_atomic_xor:
+         op32 = aco_opcode::ds_xor_b32;
+         op64 = aco_opcode::ds_xor_b64;
+         op32_rtn = aco_opcode::ds_xor_rtn_b32;
+         op64_rtn = aco_opcode::ds_xor_rtn_b64;
+         break;
+      case nir_intrinsic_shared_atomic_exchange:
+         op32 = aco_opcode::ds_write_b32;
+         op64 = aco_opcode::ds_write_b64;
+         op32_rtn = aco_opcode::ds_wrxchg_rtn_b32;
+         op64_rtn = aco_opcode::ds_wrxchg2_rtn_b64;
+         break;
+      case nir_intrinsic_shared_atomic_comp_swap:
+         op32 = aco_opcode::ds_cmpst_b32;
+         op64 = aco_opcode::ds_cmpst_b64;
+         op32_rtn = aco_opcode::ds_cmpst_rtn_b32;
+         op64_rtn = aco_opcode::ds_cmpst_rtn_b64;
+         num_operands = 4;
+         break;
+      default:
+         unreachable("unreachable.");
+   }
+
+   /* return the previous value if dest is ever used */
+   bool return_previous = false;
+   nir_foreach_use_safe(use_src, &instr->dest.ssa) {
+      return_previous = true;
+      break;
+   }
+   nir_foreach_if_use_safe(use_src, &instr->dest.ssa) {
+      return_previous = true;
+      break;
+   }
+
+   aco_opcode op;
+   if (data.size() == 1) {
+      assert(instr->dest.ssa.bit_size == 32);
+      op = return_previous ? op32_rtn : op32;
+   } else {
+      assert(instr->dest.ssa.bit_size == 64);
+      op = return_previous ? op64_rtn : op64;
+   }
+
+   std::unique_ptr<DS_instruction> ds;
+   ds.reset(create_instruction<DS_instruction>(op, Format::DS, num_operands, return_previous ? 1 : 0));
+   ds->getOperand(0) = Operand(address);
+   ds->getOperand(1) = Operand(data);
+   if (num_operands == 4)
+      ds->getOperand(2) = Operand(get_ssa_temp(ctx, instr->src[2].ssa));
+   ds->getOperand(num_operands - 1) = Operand(m);
+   ds->getOperand(num_operands - 1).setFixed(m0);
+   ds->offset0 = offset;
+   if (return_previous)
+      ds->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+   ctx->block->instructions.emplace_back(std::move(ds));
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
@@ -2681,6 +2801,18 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_store_shared:
       visit_store_shared(ctx, instr);
+      break;
+   case nir_intrinsic_shared_atomic_add:
+   case nir_intrinsic_shared_atomic_imin:
+   case nir_intrinsic_shared_atomic_umin:
+   case nir_intrinsic_shared_atomic_imax:
+   case nir_intrinsic_shared_atomic_umax:
+   case nir_intrinsic_shared_atomic_and:
+   case nir_intrinsic_shared_atomic_or:
+   case nir_intrinsic_shared_atomic_xor:
+   case nir_intrinsic_shared_atomic_exchange:
+   case nir_intrinsic_shared_atomic_comp_swap:
+      visit_shared_atomic(ctx, instr);
       break;
    case nir_intrinsic_image_deref_load:
       visit_image_load(ctx, instr);
@@ -3998,6 +4130,16 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_image_deref_atomic_xor:
                   case nir_intrinsic_image_deref_atomic_exchange:
                   case nir_intrinsic_image_deref_atomic_comp_swap:
+                  case nir_intrinsic_shared_atomic_add:
+                  case nir_intrinsic_shared_atomic_imin:
+                  case nir_intrinsic_shared_atomic_umin:
+                  case nir_intrinsic_shared_atomic_imax:
+                  case nir_intrinsic_shared_atomic_umax:
+                  case nir_intrinsic_shared_atomic_and:
+                  case nir_intrinsic_shared_atomic_or:
+                  case nir_intrinsic_shared_atomic_xor:
+                  case nir_intrinsic_shared_atomic_exchange:
+                  case nir_intrinsic_shared_atomic_comp_swap:
                      type = vgpr;
                      break;
                   case nir_intrinsic_load_front_face:
