@@ -529,26 +529,30 @@ bool gen(Instruction* instr, wait_ctx& ctx)
       return true;
    }
    case Format::SMEM: {
+      ctx.lgkm_cnt++;
       if (instr->num_definitions) {
          for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
          {
             ctx.sgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
             wait_entry(lgkm_type, max_vm_cnt, max_exp_cnt, 0));
          }
-         ctx.lgkm_cnt++;
          return true;
       }
+      break;
    }
    case Format::DS: {
+      // TODO: check if reads and writes are in-order
+      /* the counter is also used as check for membars, thus we need it also on writes */
+      ctx.lgkm_cnt++;
       if (instr->num_definitions) {
          for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
          {
             ctx.vgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
             wait_entry(lgkm_type, max_vm_cnt, max_exp_cnt, 0));
          }
-         ctx.lgkm_cnt++;
          return true;
       }
+      break;
    }
    case Format::MUBUF:
    case Format::MIMG: {
