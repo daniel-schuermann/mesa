@@ -123,9 +123,9 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       encoding = 0;
       unsigned reg = instr->num_definitions ? instr->getDefinition(0).physReg().reg : 0;
       encoding |= (0xFF & reg) << 24;
-      reg = instr->num_operands >= 3 ? instr->getOperand(2).physReg().reg : 0;
+      reg = instr->num_operands >= 3 && !(instr->getOperand(2).physReg() == m0)  ? instr->getOperand(2).physReg().reg : 0;
       encoding |= (0xFF & reg) << 16;
-      reg = instr->num_operands >= 2 ? instr->getOperand(1).physReg().reg : 0;
+      reg = instr->num_operands >= 2 && !(instr->getOperand(1).physReg() == m0) ? instr->getOperand(1).physReg().reg : 0;
       encoding |= (0xFF & reg) << 8;
       encoding |= (0xFF & instr->getOperand(0).physReg().reg);
       out.push_back(encoding);
