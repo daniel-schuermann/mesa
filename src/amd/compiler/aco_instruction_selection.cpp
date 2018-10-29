@@ -2389,6 +2389,10 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr) {
       data = {ctx->program->allocateId(), v2};
       vec->getDefinition(0) = Definition(data);
       ctx->block->instructions.emplace_back(std::move(vec));
+   } else if (data.type() != vgpr) {
+      Temp t = {ctx->program->allocateId(), v1};
+      emit_v_mov(ctx, data, t);
+      data = t;
    }
 
    Temp offset;
@@ -2526,7 +2530,7 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Temp m = load_lds_size_m0(ctx);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-   assert(dst.size() == 1 && "Bitsize not supported in load_deref.");
+   assert(instr->dest.ssa.bit_size == 32 && "Bitsize not supported in load_shared.");
    Temp address = get_ssa_temp(ctx, instr->src[0].ssa);
    assert(address.type() == vgpr && "address has to be in vgpr.");
 
