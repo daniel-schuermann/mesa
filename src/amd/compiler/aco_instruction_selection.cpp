@@ -3245,7 +3245,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tex->getOperand(0) = Operand(lod);
       tex->getOperand(1) = Operand(resource);
       tex->dmask = dmask;
-      tex->getDefinition(0) = get_ssa_temp(ctx, &instr->dest.ssa);
+      tex->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
       ctx->block->instructions.emplace_back(std::move(tex));
       return;
    }
@@ -3260,6 +3260,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (has_derivs)
       args.emplace_back(Operand(derivs));
    args.emplace_back(Operand(coords));
+   // TODO: LOD?
 
    Operand arg;
    if (args.size() > 1) {
@@ -3276,6 +3277,19 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       arg = Operand(tmp);
    } else {
       arg = args[0];
+   }
+
+   if (instr->op == nir_texop_txf ||
+       instr->op == nir_texop_txf_ms ||
+       instr->op == nir_texop_samples_identical) {
+      aco_opcode op = level_zero || instr->sampler_dim == GLSL_SAMPLER_DIM_MS ? aco_opcode::image_load : aco_opcode::image_load_mip;
+      tex.reset(create_instruction<MIMG_instruction>(op, Format::MIMG, 2, 1));
+      tex->getOperand(0) = Operand(arg);
+      tex->getOperand(1) = Operand(resource);
+      tex->dmask = dmask;
+      tex->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      ctx->block->instructions.emplace_back(std::move(tex));
+      return;
    }
 
    // TODO: would be better to do this by adding offsets, but needs the opcodes ordered.
