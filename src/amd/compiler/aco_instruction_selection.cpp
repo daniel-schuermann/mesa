@@ -2219,18 +2219,29 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    const nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
    const struct glsl_type *type = glsl_without_array(var->type);
    const enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
-
-   if (dim == GLSL_SAMPLER_DIM_BUF) {
-      unreachable("image load with GLSL_SAMPLER_DIM_BUF not yet implemented\n");
-      return;
-   }
-
    Temp data = get_ssa_temp(ctx, instr->src[3].ssa);
    if (data.type() != vgpr) {
       Temp t = {ctx->program->allocateId(), getRegClass(vgpr, data.size())};
       emit_v_mov(ctx, data, t);
       data = t;
    }
+   bool glc = ctx->options->chip_class == SI || var->data.image._volatile || var->data.image.coherent;
+
+   if (dim == GLSL_SAMPLER_DIM_BUF) {
+      Temp rsrc = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_BUFFER, nullptr, true, true);
+      Temp vindex = emit_extract_vector(ctx, get_ssa_temp(ctx, instr->src[1].ssa), 0, v1);
+
+      std::unique_ptr<MUBUF_instruction> store{create_instruction<MUBUF_instruction>(aco_opcode::buffer_store_format_xyzw, Format::MUBUF, 4, 0)};
+      store->getOperand(0) = Operand(vindex);
+      store->getOperand(1) = Operand(rsrc);
+      store->getOperand(2) = Operand(0);
+      store->getOperand(3) = Operand(data);
+      store->idxen = true;
+      store->glc = glc;
+      ctx->block->instructions.emplace_back(std::move(store));
+      return;
+   }
+
    assert(data.type() == vgpr);
    Temp coords = get_image_coords(ctx, instr, type);
    Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, nullptr, true, true);
@@ -2239,7 +2250,7 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    store->getOperand(0) = Operand(coords);
    store->getOperand(1) = Operand(resource);
    store->getOperand(2) = Operand(data);
-   store->glc = ctx->options->chip_class == SI || var->data.image._volatile || var->data.image.coherent;
+   store->glc = glc;
    store->dmask = 0xF;
    store->unrm = true;
    ctx->block->instructions.emplace_back(std::move(store));
