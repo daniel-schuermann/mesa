@@ -202,7 +202,7 @@ Temp emit_extract_vector(isel_context* ctx, Temp src, uint32_t idx, RegClass dst
       assert(idx == 0);
       return src;
    }
-
+   assert(src.size() > idx);
    auto it = ctx->allocated_vec.find(src.id());
    if (it != ctx->allocated_vec.end()) {
       if (it->second[idx].regClass() == dst_rc) {
@@ -2065,6 +2065,83 @@ static int image_type_to_components_count(enum glsl_sampler_dim dim, bool array)
    return 0;
 }
 
+
+/* Adjust the sample index according to FMASK.
+ *
+ * For uncompressed MSAA surfaces, FMASK should return 0x76543210,
+ * which is the identity mapping. Each nibble says which physical sample
+ * should be fetched to get that sample.
+ *
+ * For example, 0x11111100 means there are only 2 samples stored and
+ * the second sample covers 3/4 of the pixel. When reading samples 0
+ * and 1, return physical sample 0 (determined by the first two 0s
+ * in FMASK), otherwise return physical sample 1.
+ *
+ * The sample index should be adjusted as follows:
+ *   sample_index = (fmask >> (sample_index * 4)) & 0xF;
+ */
+static Temp adjust_sample_index_using_fmask(isel_context *ctx, Temp coords, Temp sample_index, Temp fmask_desc_ptr)
+{
+   Temp fmask = {ctx->program->allocateId(), v1};
+   assert(sample_index.regClass() == s1);
+
+   std::unique_ptr<MIMG_instruction> load{create_instruction<MIMG_instruction>(aco_opcode::image_load, Format::MIMG, 2, 1)};
+   load->getOperand(0) = Operand(coords);
+   load->getOperand(1) = Operand(fmask_desc_ptr);
+   load->getDefinition(0) = Definition(fmask);
+   load->glc = false;
+   load->dmask = 0x1;
+   load->unrm = true;
+   ctx->block->instructions.emplace_back(std::move(load));
+
+   std::unique_ptr<Instruction> instr;
+   instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_lshl_b32, Format::SOP2, 2, 2));
+   instr->getOperand(0) = Operand(sample_index);
+   instr->getOperand(1) = Operand(2);
+   Temp sample_index4 = {ctx->program->allocateId(), s1};
+   instr->getDefinition(0) = Definition(sample_index4);
+   Temp t = {ctx->program->allocateId(), b};
+   instr->getDefinition(1) = Definition(t);
+   instr->getDefinition(1).setFixed(PhysReg{253}); /* scc */
+   ctx->block->instructions.emplace_back(std::move(instr));
+
+   instr.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_bfe_u32, Format::VOP3A, 3, 1));
+   instr->getOperand(0) = Operand(fmask);
+   instr->getOperand(1) = Operand(sample_index4);
+   instr->getOperand(2) = Operand(4);
+   Temp final_sample = {ctx->program->allocateId(), v1};
+   instr->getDefinition(0) = Definition(final_sample);
+   ctx->block->instructions.emplace_back(std::move(instr));
+
+   /* Don't rewrite the sample index if WORD1.DATA_FORMAT of the FMASK
+    * resource descriptor is 0 (invalid),
+    */
+   Temp fmask_word1 = emit_extract_vector(ctx, fmask_desc_ptr, 1, s1);
+
+   Format format = (Format) ((uint32_t) Format::VOPC | (uint32_t) Format::VOP3A);
+   instr.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_lg_u32, format, 2, 1));
+   instr->getOperand(0) = Operand(0);
+   instr->getOperand(1) = Operand(fmask_word1);
+   Temp compare = {ctx->program->allocateId(), s2};
+   instr->getDefinition(0) = Definition(compare);
+   instr->getDefinition(0).setHint(vcc);
+   ctx->block->instructions.emplace_back(std::move(instr));
+
+   Temp sample_index_v = {ctx->program->allocateId(), v1};
+   emit_v_mov(ctx, sample_index, sample_index_v);
+
+   /* Replace the MSAA sample index. */
+   instr.reset(create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
+   instr->getOperand(0) = Operand(sample_index_v); // else
+   instr->getOperand(1) = Operand(final_sample);
+   instr->getOperand(2) = Operand(compare);
+   sample_index = {ctx->program->allocateId(), v1};
+   instr->getDefinition(0) = Definition(sample_index);
+   ctx->block->instructions.emplace_back(std::move(instr));
+
+   return sample_index;
+}
+
 static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr, const struct glsl_type *type)
 {
 
@@ -3066,8 +3143,8 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
 Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
 {
    Temp coord_vec[3];
-   emit_split_vector(ctx, coords, 3);
-   for (unsigned i = 0; i < 3; i++)
+   emit_split_vector(ctx, coords, coords.size());
+   for (unsigned i = 0; i < coords.size(); i++)
       coord_vec[i] = emit_extract_vector(ctx, coords, i, v1);
 
    std::unique_ptr<VOP1_instruction> rne{create_instruction<VOP1_instruction>(aco_opcode::v_rndne_f32, Format::VOP1, 1, 1)};
@@ -3076,10 +3153,10 @@ Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
    rne->getDefinition(0) = Definition(coord_vec[idx]);
    ctx->block->instructions.emplace_back(std::move(rne));
 
-   std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1)};
-   for (unsigned i = 0; i < 3; i++)
+   std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, coords.size(), 1)};
+   for (unsigned i = 0; i < coords.size(); i++)
       vec->getOperand(i) = Operand(coord_vec[i]);
-   Temp res = {ctx->program->allocateId(), v3};
+   Temp res = {ctx->program->allocateId(), coords.regClass()};
    vec->getDefinition(0) = Definition(res);
    ctx->block->instructions.emplace_back(std::move(vec));
    return res;
@@ -3088,8 +3165,8 @@ Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
 void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
    bool has_bias = false, has_lod = false, level_zero = false, has_compare = false,
-        has_offset = false, has_ddx = false, has_ddy = false, has_derivs = false;
-   Temp resource, sampler, fmask_ptr, bias, coords, compare, lod = Temp(), offset = Temp(), ddx, ddy, derivs;
+        has_offset = false, has_ddx = false, has_ddy = false, has_derivs = false, has_sample_index = false;
+   Temp resource, sampler, fmask_ptr, bias, coords, compare, lod = Temp(), offset = Temp(), ddx, ddy, derivs, sample_index;
    tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
 
    for (unsigned i = 0; i < instr->num_srcs; i++) {
@@ -3134,6 +3211,9 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          has_ddy = true;
          break;
       case nir_tex_src_ms_index:
+         sample_index = get_ssa_temp(ctx, instr->src[i].src.ssa);
+         has_sample_index = true;
+         break;
          assert(false && "Unimplemented tex instr type\n");
       case nir_tex_src_texture_offset:
       case nir_tex_src_sampler_offset:
@@ -3213,7 +3293,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
        instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
        instr->is_array &&
        instr->op != nir_texop_txf)
-      assert(false && "Unimplemented tex instr type\n");
+      coords = apply_round_slice(ctx, coords, 1);
 
    if (instr->coord_components > 2 &&
       (instr->sampler_dim == GLSL_SAMPLER_DIM_2D ||
@@ -3233,8 +3313,10 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       assert(false && "Unimplemented tex instr type\n");
 
    if (instr->sampler_dim == GLSL_SAMPLER_DIM_MS &&
-       instr->op != nir_texop_txs)
-      assert(false && "Unimplemented tex instr type\n");
+       instr->op != nir_texop_txs) {
+      assert(has_sample_index);
+      sample_index = adjust_sample_index_using_fmask(ctx, coords, sample_index, fmask_ptr);
+   }
 
    if (instr->op == nir_texop_tg4)
       assert(false && "Unimplemented tex instr type\n");
@@ -3283,6 +3365,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (has_derivs)
       args.emplace_back(Operand(derivs));
    args.emplace_back(Operand(coords));
+   if (has_sample_index)
+      args.emplace_back(Operand(sample_index));
    // TODO: LOD?
 
    Operand arg;
