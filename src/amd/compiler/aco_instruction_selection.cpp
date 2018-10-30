@@ -1788,16 +1788,16 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
       ptr = convert_pointer_to_64_bit(ctx, ptr);
    }
 
-   unsigned range = nir_intrinsic_range(instr);
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    aco_opcode op;
-   switch (range) {
-   case 4:
+   switch (dst.size()) {
+   case 1:
       op = aco_opcode::s_load_dword;
       break;
-   case 8:
+   case 2:
       op = aco_opcode::s_load_dwordx2;
       break;
-   case 16:
+   case 4:
       op = aco_opcode::s_load_dwordx4;
       break;
    default:
@@ -1806,7 +1806,7 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
    std::unique_ptr<SMEM_instruction> load{create_instruction<SMEM_instruction>(op, Format::SMEM, 2, 1)};
    load->getOperand(0) = Operand(ptr);
    load->getOperand(1) = Operand(index);
-   load->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+   load->getDefinition(0) = Definition(dst);
    ctx->block->instructions.emplace_back(std::move(load));
 
    emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
