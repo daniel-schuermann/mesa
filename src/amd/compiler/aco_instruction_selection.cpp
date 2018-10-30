@@ -3321,9 +3321,9 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       assert(false && "Unimplemented tex instr type\n");
 
    if (instr->op == nir_texop_samples_identical)
-      assert(false && "Unimplemented tex instr type\n");
+      resource = fmask_ptr;
 
-   if (instr->sampler_dim == GLSL_SAMPLER_DIM_MS &&
+   else if (instr->sampler_dim == GLSL_SAMPLER_DIM_MS &&
        instr->op != nir_texop_txs) {
       assert(has_sample_index);
       sample_index = adjust_sample_index_using_fmask(ctx, coords, sample_index, fmask_ptr);
