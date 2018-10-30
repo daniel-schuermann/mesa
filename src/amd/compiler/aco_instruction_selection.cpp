@@ -3346,6 +3346,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    }
 
    /* Build tex instruction */
+   // TODO: use nir_ssa_def_components_read(&instr->dest.ssa), but then dst size doesn't match the instruction's return value
    unsigned dmask = (1 << instr->dest.ssa.num_components) - 1;
 
    std::unique_ptr<MIMG_instruction> tex;
@@ -3397,6 +3398,36 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       arg = args[0];
    }
 
+   if (instr->sampler_dim == GLSL_SAMPLER_DIM_BUF) {
+      //FIXME: if (ctx->abi->gfx9_stride_size_workaround) return ac_build_buffer_load_format_gfx9_safe()
+
+      assert(coords.size() == 1);
+      unsigned last_bit = util_last_bit(dmask);
+      aco_opcode op;
+      switch (last_bit) {
+      case 1:
+         op = aco_opcode::buffer_load_format_x; break;
+      case 2:
+         op = aco_opcode::buffer_load_format_xy; break;
+      case 3:
+         op = aco_opcode::buffer_load_format_xyz; break;
+      case 4:
+         op = aco_opcode::buffer_load_format_xyzw; break;
+      default:
+         unreachable("Tex instruction loads more than 4 components.");
+      }
+      std::unique_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 3, 1)};
+      mubuf->getOperand(0) = Operand(coords);
+      mubuf->getOperand(1) = Operand(resource);
+      mubuf->getOperand(2) = Operand(0);
+      mubuf->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      mubuf->idxen = true;
+      ctx->block->instructions.emplace_back(std::move(mubuf));
+      emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
+      return;
+   }
+
+
    if (instr->op == nir_texop_txf ||
        instr->op == nir_texop_txf_ms ||
        instr->op == nir_texop_samples_identical) {
@@ -3407,6 +3438,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tex->dmask = dmask;
       tex->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
       ctx->block->instructions.emplace_back(std::move(tex));
+      emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
       return;
    }
 
