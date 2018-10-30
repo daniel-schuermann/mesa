@@ -514,6 +514,13 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
          ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(1).getTemp());
       break;
    case aco_opcode::v_med3_f32: { /* clamp */
+      VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr.get());
+      if (vop3->abs[0] || vop3->neg[0] || vop3->opsel[0] ||
+          vop3->abs[1] || vop3->neg[1] || vop3->opsel[1] ||
+          vop3->abs[2] || vop3->neg[2] || vop3->opsel[2] ||
+          vop3->omod != 0)
+         break;
+
       unsigned idx = 0;
       bool found_zero = false, found_one = false;
       for (unsigned i = 0; i < 3; i++)
