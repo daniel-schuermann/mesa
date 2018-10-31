@@ -31,7 +31,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
                         struct ac_shader_binary* binary, struct radv_shader_variant_info *info,
                         struct radv_nir_compiler_options *options)
 {
-   if (shader->info.stage != MESA_SHADER_FRAGMENT)
+   if (shader->info.stage != MESA_SHADER_FRAGMENT && shader->info.stage != MESA_SHADER_COMPUTE)
       return;
 
    struct ac_shader_config local_config = *config;
@@ -66,7 +66,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    aco::value_numbering(program.get());
    aco::optimize(program.get());
    aco::validate(program.get(), stderr);
-   aco::schedule_program(program.get());
+   //aco::schedule_program(program.get());
    //std::cerr << "After Opt:\n";
    //aco_print_program(program.get(), stderr);
    /* Register Allocation */
