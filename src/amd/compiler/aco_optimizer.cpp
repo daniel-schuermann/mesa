@@ -478,6 +478,7 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
       break;
    }
    case aco_opcode::s_mov_b32: /* propagate */
+   case aco_opcode::s_mov_b64:
    case aco_opcode::v_mov_b32:
       if (instr->getOperand(0).isConstant()) {
          if (instr->getOperand(0).isLiteral())
@@ -488,9 +489,10 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
          // TODO
       } else if (instr->getOperand(0).isUndefined()) {
          ctx.info[instr->getDefinition(0).tempId()].set_undefined();
-      } else {
-         assert(instr->getOperand(0).isTemp());
+      } else if (instr->getOperand(0).isTemp()) {
          ctx.info[instr->getDefinition(0).tempId()].set_temp(instr->getOperand(0).getTemp());
+      } else {
+         assert(instr->getOperand(0).isFixed());
       }
       break;
    case aco_opcode::v_mul_f32: /* omod */

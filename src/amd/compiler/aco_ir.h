@@ -273,6 +273,34 @@ public:
       else /* Literal Constant */
          setFixed(PhysReg{255});
    };
+   explicit Operand(uint64_t v) noexcept
+   {
+      control_[2] = 1; /* isConst */
+      if (v <= 64)
+         setFixed(PhysReg{128 + (uint32_t) v});
+      else if (v >= 0xFFFFFFFFFFFFFFF0) /* [-16 .. -1] */
+         setFixed(PhysReg{192 - (uint32_t) v});
+      else if (v == 0x3FE0000000000000) /* 0.5 */
+         setFixed(PhysReg{240});
+      else if (v == 0xBFE0000000000000) /* -0.5 */
+         setFixed(PhysReg{241});
+      else if (v == 0x3FF0000000000000) /* 1.0 */
+         setFixed(PhysReg{242});
+      else if (v == 0xBFF0000000000000) /* -1.0 */
+         setFixed(PhysReg{243});
+      else if (v == 0x4000000000000000) /* 2.0 */
+         setFixed(PhysReg{244});
+      else if (v == 0xC000000000000000) /* -2.0 */
+         setFixed(PhysReg{245});
+      else if (v == 0x4010000000000000) /* 4.0 */
+         setFixed(PhysReg{246});
+      else if (v == 0xC010000000000000) /* -4.0 */
+         setFixed(PhysReg{247});
+      else if (v == 0x3fc45f306dc9c882) /* 1/(2*PI) */
+         setFixed(PhysReg{248});
+      else /* Literal Constant: we don't know if it is a long or double.*/
+         control_[2] = 0;
+   };
    explicit Operand() noexcept
    {
       control_[4] = 1; /* undefined */
