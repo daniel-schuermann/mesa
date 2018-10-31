@@ -646,8 +646,11 @@ void register_allocation(Program *program)
             instructions.emplace_back(std::move(pc));
          }
          if ((instr->opcode == aco_opcode::v_add_co_u32 ||
+              instr->opcode == aco_opcode::v_addc_co_u32 ||
               instr->opcode == aco_opcode::v_sub_co_u32 ||
-              instr->opcode == aco_opcode::v_subrev_co_u32) &&
+              instr->opcode == aco_opcode::v_subb_co_u32 ||
+              instr->opcode == aco_opcode::v_subrev_co_u32 ||
+              instr->opcode == aco_opcode::v_subbrev_co_u32) &&
              !(instr->getDefinition(1).physReg() == vcc)) {
             /* change the instruction to VOP3 to enable an arbitrary register pair as dst */
             std::unique_ptr<Instruction> tmp = std::move(instr);
