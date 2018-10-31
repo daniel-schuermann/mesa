@@ -208,12 +208,14 @@ void lower_to_hw_instr(Program* program)
             case aco_opcode::p_split_vector:
             {
                std::map<PhysReg, copy_operation> copy_operations;
-               for (unsigned i = 0; i < instr->num_definitions; i++)
-               {
-                  assert(instr->getDefinition(i).size() == 1 && "Unimplemented bit size");
-                  Operand op = Operand(PhysReg{instr->getOperand(0).physReg().reg + i}, instr->getDefinition(i).regClass());
-                  Definition def = instr->getDefinition(i);
-                  copy_operations[def.physReg()] = {op, def, 0};
+               RegClass rc = getRegClass(typeOf(instr->getOperand(0).regClass()), 1);
+               for (unsigned i = 0; i < instr->num_definitions; i++) {
+                  unsigned k = instr->getDefinition(i).size();
+                  for (unsigned j = 0; j < k; j++) {
+                     Operand op = Operand(PhysReg{instr->getOperand(0).physReg().reg + (i*k+j)}, rc);
+                     Definition def = Definition(PhysReg{instr->getDefinition(i).physReg().reg + j}, rc);
+                     copy_operations[def.physReg()] = {op, def, 0};
+                  }
                }
                handle_operands(copy_operations, new_instructions, program->chip_class);
                break;
