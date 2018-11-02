@@ -3584,6 +3584,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tex->getOperand(0) = Operand(arg);
       tex->getOperand(1) = Operand(resource);
       tex->dmask = dmask;
+      tex->unrm = true;
       tex->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
       ctx->block->instructions.emplace_back(std::move(tex));
       emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
@@ -5035,7 +5036,13 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
       program->info->cs.block_size[0] = nir->info.cs.local_size[0];
       program->info->cs.block_size[1] = nir->info.cs.local_size[1];
       program->info->cs.block_size[2] = nir->info.cs.local_size[2];
-      program->config->lds_size = nir->info.cs.shared_size;
+      unsigned lds_size_bytes = 0;
+      nir_foreach_variable(variable, &nir->shared)
+      {
+         lds_size_bytes += variable->type->std430_size(0);
+      }
+      const unsigned lds_allocation_size_unit = 4 * 64;
+      program->config->lds_size = (lds_size_bytes + lds_allocation_size_unit - 1) / lds_allocation_size_unit;
    }
 
    add_startpgm(&ctx);
