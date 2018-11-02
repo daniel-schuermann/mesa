@@ -133,6 +133,7 @@ visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
       }
       break;
    }
+   case nir_intrinsic_load_front_face:
    case nir_intrinsic_load_interpolated_input:
    case nir_intrinsic_load_barycentric_pixel:
    case nir_intrinsic_load_invocation_id:
