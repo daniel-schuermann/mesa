@@ -3035,12 +3035,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    }
    case nir_intrinsic_load_front_face: {
-      std::unique_ptr<VOPC_instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_lg_u32, Format::VOPC, 2, 1)};
-      cmp->getOperand(0) = Operand((uint32_t) 0);
-      cmp->getOperand(1) = Operand(ctx->fs_inputs[fs_input::front_face]);
-      cmp->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
-      cmp->getDefinition(0).setHint(vcc);
-      ctx->block->instructions.emplace_back(std::move(cmp));
+      emit_v_mov(ctx, ctx->fs_inputs[fs_input::front_face], get_ssa_temp(ctx, &instr->dest.ssa));
       break;
    }
    case nir_intrinsic_load_interpolated_input:
@@ -4423,6 +4418,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_get_buffer_size:
                      type = sgpr;
                      break;
+                  case nir_intrinsic_load_front_face:
                   case nir_intrinsic_load_input:
                   case nir_intrinsic_load_vertex_id:
                   case nir_intrinsic_load_vertex_id_zero_base:
@@ -4463,7 +4459,6 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_shared_atomic_comp_swap:
                      type = vgpr;
                      break;
-                  case nir_intrinsic_load_front_face:
                   case nir_intrinsic_vulkan_resource_index:
                      type = sgpr;
                      size = 2;
