@@ -2796,14 +2796,10 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    assert(instr->dest.ssa.bit_size == 32 && "Bitsize not supported in load_shared.");
    Temp address = get_ssa_temp(ctx, instr->src[0].ssa);
-   assert(address.type() == vgpr && "address has to be in vgpr.");
-
-   std::unique_ptr<Instruction> shl{create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1)};
-   shl->getOperand(0) = Operand((uint32_t) 2);
-   shl->getOperand(1) = Operand(address);
-   address = {ctx->program->allocateId(), v1};
-   shl->getDefinition(0) = Definition(address);
-   ctx->block->instructions.emplace_back(std::move(shl));
+   if (address.type() != vgpr) {
+      address = {ctx->program->allocateId(), getRegClass(vgpr, address.size())};
+      emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[0].ssa), address);
+   }
 
    unsigned offset = instr->const_index[0];
    aco_opcode op;
@@ -2843,13 +2839,10 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp address = get_ssa_temp(ctx, instr->src[1].ssa);
    unsigned elem_size_bytes = instr->src[0].ssa->bit_size / 8;
    assert(elem_size_bytes == 4 && "Only 32bit store_shared currently supported.");
-
-   std::unique_ptr<Instruction> shl{create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1)};
-   shl->getOperand(0) = Operand((uint32_t) 2);
-   shl->getOperand(1) = Operand(address);
-   address = {ctx->program->allocateId(), v1};
-   shl->getDefinition(0) = Definition(address);
-   ctx->block->instructions.emplace_back(std::move(shl));
+   if (address.type() != vgpr) {
+      address = {ctx->program->allocateId(), getRegClass(vgpr, address.size())};
+      emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[1].ssa), address);
+   }
 
    /* we need at most two stores for 32bit variables */
    int start[2], count[2];
@@ -2911,13 +2904,10 @@ void visit_shared_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
          emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[1].ssa), data);
    }
    Temp address = get_ssa_temp(ctx, instr->src[0].ssa);
-
-   std::unique_ptr<Instruction> shl{create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1)};
-   shl->getOperand(0) = Operand((uint32_t) 2);
-   shl->getOperand(1) = Operand(address);
-   address = {ctx->program->allocateId(), v1};
-   shl->getDefinition(0) = Definition(address);
-   ctx->block->instructions.emplace_back(std::move(shl));
+   if (address.type() != vgpr) {
+      address = {ctx->program->allocateId(), getRegClass(vgpr, address.size())};
+      emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[0].ssa), address);
+   }
 
    unsigned num_operands = 3;
    aco_opcode op32, op64, op32_rtn, op64_rtn;
@@ -4982,6 +4972,74 @@ type_size(const struct glsl_type *type)
    return glsl_count_attribute_slots(type, false);
 }
 
+
+/* Taken from src/intel/compiler/brw_fs.cpp
+   TODO: this might better go to core */
+int
+type_size_scalar(const struct glsl_type *type)
+{
+   unsigned int size, i;
+
+   switch (type->base_type) {
+   case GLSL_TYPE_UINT:
+   case GLSL_TYPE_INT:
+   case GLSL_TYPE_FLOAT:
+   case GLSL_TYPE_BOOL:
+      return type->components();
+   case GLSL_TYPE_UINT16:
+   case GLSL_TYPE_INT16:
+   case GLSL_TYPE_FLOAT16:
+      return DIV_ROUND_UP(type->components(), 2);
+   case GLSL_TYPE_UINT8:
+   case GLSL_TYPE_INT8:
+      return DIV_ROUND_UP(type->components(), 4);
+   case GLSL_TYPE_DOUBLE:
+   case GLSL_TYPE_UINT64:
+   case GLSL_TYPE_INT64:
+      return type->components() * 2;
+   case GLSL_TYPE_ARRAY:
+      return type_size_scalar(type->fields.array) * type->length;
+   case GLSL_TYPE_STRUCT:
+      size = 0;
+      for (i = 0; i < type->length; i++) {
+	 size += type_size_scalar(type->fields.structure[i].type);
+      }
+      return size;
+   case GLSL_TYPE_SAMPLER:
+      /* Samplers take up no register space, since they're baked in at
+       * link time.
+       */
+      return 0;
+   case GLSL_TYPE_ATOMIC_UINT:
+      return 0;
+   case GLSL_TYPE_SUBROUTINE:
+      return 1;
+   case GLSL_TYPE_IMAGE:
+   case GLSL_TYPE_VOID:
+   case GLSL_TYPE_ERROR:
+   case GLSL_TYPE_INTERFACE:
+   case GLSL_TYPE_FUNCTION:
+      unreachable("not reached");
+   }
+
+   return 0;
+}
+
+int
+shared_var_size(const struct glsl_type *type)
+{
+   return type_size_scalar(type)*4;
+}
+
+unsigned
+total_shared_var_size(const struct glsl_type *type)
+{
+   if (type->is_array())
+      return type->arrays_of_arrays_size() * shared_var_size(type->without_array());
+   else
+      return shared_var_size(type);
+}
+
 std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         ac_shader_config* config,
                                         struct radv_shader_variant_info *info,
@@ -5003,7 +5061,8 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    ctx.options = options;
    ctx.stage = nir->info.stage;
    nir_lower_load_const_to_scalar(nir);
-   nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out | nir_var_shared), type_size, (nir_lower_io_options)0);
+   nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
+   nir_lower_io(nir, nir_var_shared, shared_var_size, (nir_lower_io_options)0);
    nir_copy_prop(nir);
    nir_opt_shrink_load(nir);
    nir_opt_cse(nir);
@@ -5039,7 +5098,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
       unsigned lds_size_bytes = 0;
       nir_foreach_variable(variable, &nir->shared)
       {
-         lds_size_bytes += variable->type->std430_size(0);
+         lds_size_bytes += total_shared_var_size(variable->type);
       }
       const unsigned lds_allocation_size_unit = 4 * 64;
       program->config->lds_size = (lds_size_bytes + lds_allocation_size_unit - 1) / lds_allocation_size_unit;
