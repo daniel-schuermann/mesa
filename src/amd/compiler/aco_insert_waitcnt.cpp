@@ -442,9 +442,9 @@ uint16_t emit_memory_barrier(Instruction* instr, wait_ctx& ctx) {
          vm_cnt = ctx.vm_cnt ? 0 : -1;
          lgkm_cnt = ctx.lgkm_cnt ? 0 : -1;
          if (ctx.vm_cnt || ctx.lgkm_cnt) {
-            ctx.vm_cnt = 0;
-            ctx.lgkm_cnt = 0;
-            return create_waitcnt_imm(vm_cnt, lgkm_cnt, -1);
+            ctx.vm_cnt &= vm_cnt;
+            ctx.lgkm_cnt &= lgkm_cnt;
+            return create_waitcnt_imm(vm_cnt, -1, lgkm_cnt);
          }
          break;
       case aco_opcode::p_memory_barrier_atomic:
