@@ -56,6 +56,7 @@ idep_aco_headers = declare_dependency(
 libaco_files = files(
   'aco_dominance.cpp',
   'aco_instruction_selection.cpp',
+  'aco_instruction_selection_setup.cpp',
   'aco_interface.cpp',
   'aco_interface.h',
   'aco_ir.h',
