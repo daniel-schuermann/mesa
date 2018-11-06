@@ -109,6 +109,33 @@ Temp get_ssa_temp(struct isel_context *ctx, nir_ssa_def *def)
    return Temp{id, rc};
 }
 
+Temp emit_v_add32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_out=false)
+{
+   if (b.isTemp() && typeOf(b.regClass()) != RegType::vgpr)
+      std::swap(a, b);
+   assert(typeOf(b.regClass()) == RegType::vgpr); // in case two SGPRs are given
+
+   if (ctx->options->chip_class < GFX9)
+      carry_out = true;
+
+   aco_opcode op = carry_out ? aco_opcode::v_add_co_u32 : aco_opcode::v_add_i32;
+   int num_defs = carry_out ? 2 : 1;
+
+   Temp carry;
+
+   std::unique_ptr<VOP2_instruction> add{create_instruction<VOP2_instruction>(op, Format::VOP2, 2, num_defs)};
+   add->getOperand(0) = Operand(a);
+   add->getOperand(1) = Operand(b);
+   add->getDefinition(0) = Definition(dst);
+   if (ctx->options->chip_class < GFX9) {
+      carry = {ctx->program->allocateId(), s2};
+      add->getDefinition(1) = Definition(carry);
+      add->getDefinition(1).setHint(vcc);
+   }
+   ctx->block->instructions.emplace_back(std::move(add));
+
+   return carry;
+}
 
 void emit_v_mov(isel_context *ctx, Temp src, Temp dst)
 {
@@ -785,29 +812,11 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          emit_sop2_instruction(ctx, instr, aco_opcode::s_add_i32, dst, true);
          break;
       }
-      if (dst.regClass() == v1 && ctx->options->chip_class >= GFX9) {
-         emit_vop2_instruction(ctx, instr, aco_opcode::v_add_u32, dst, true);
-         break;
-      }
       Temp src0 = get_alu_src(ctx, instr->src[0]);
       Temp src1 = get_alu_src(ctx, instr->src[1]);
-      if (src1.type() == sgpr) {
-         Temp t = src1;
-         src1 = src0;
-         src0 = t;
-      }
       std::unique_ptr<Instruction> add;
       if (dst.regClass() == v1) {
-         add.reset(create_instruction<VOP2_instruction>(aco_opcode::v_add_co_u32, Format::VOP2, 2, 2));
-         Temp src0 = get_alu_src(ctx, instr->src[0]);
-         Temp src1 = get_alu_src(ctx, instr->src[1]);
-         add->getOperand(0) = Operand(src0);
-         add->getOperand(1) = Operand(src1);
-         add->getDefinition(0) = Definition(dst);
-         Temp tmp = {ctx->program->allocateId(), s2};
-         add->getDefinition(1) = Definition(tmp);
-         add->getDefinition(1).setHint(vcc);
-         ctx->block->instructions.emplace_back(std::move(add));
+         emit_v_add32(ctx, dst, Operand(src0), Operand(src1));
       } else if (dst.regClass() == v2) {
          assert(src0.size() == 2 && src1.size() == 2);
          emit_split_vector(ctx, src0, 2);
@@ -815,25 +824,18 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          Temp src00 = emit_extract_vector(ctx, src0, 0, getRegClass(src0.type(), 1));
          Temp src10 = emit_extract_vector(ctx, src1, 0, getRegClass(src1.type(), 1));
 
-         add.reset(create_instruction<VOP2_instruction>(aco_opcode::v_add_co_u32, Format::VOP2, 2, 2));
-         add->getOperand(0) = Operand(src00);
-         add->getOperand(1) = Operand(src10);
          Temp dst0 = {ctx->program->allocateId(), v1};
-         add->getDefinition(0) = Definition(dst0);
-         Temp tmp = {ctx->program->allocateId(), s2};
-         add->getDefinition(1) = Definition(tmp);
-         add->getDefinition(1).setHint(vcc);
-         ctx->block->instructions.emplace_back(std::move(add));
+         Temp carry = emit_v_add32(ctx, dst0, Operand(src00), Operand(src10), true);
 
          add.reset(create_instruction<VOP2_instruction>(aco_opcode::v_addc_co_u32, Format::VOP2, 3, 2));
          Temp src01 = emit_extract_vector(ctx, src0, 1, getRegClass(src0.type(), 1));
          Temp src11 = emit_extract_vector(ctx, src1, 1, getRegClass(src1.type(), 1));
          add->getOperand(0) = Operand(src01);
          add->getOperand(1) = Operand(src11);
-         add->getOperand(2) = Operand(tmp);
+         add->getOperand(2) = Operand(carry);
          Temp dst1 = {ctx->program->allocateId(), v1};
          add->getDefinition(0) = Definition(dst1);
-         tmp = {ctx->program->allocateId(), s2};
+         Temp tmp = {ctx->program->allocateId(), s2};
          add->getDefinition(1) = Definition(tmp);
          add->getDefinition(1).setHint(vcc);
          ctx->block->instructions.emplace_back(std::move(add));
@@ -1645,11 +1647,7 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
          fprintf(stderr, "\n");
          abort();
       } else {
-         std::unique_ptr<VOP2_instruction> add{create_instruction<VOP2_instruction>(aco_opcode::v_add_u32, Format::VOP2, 2, 1)};
-         add->getOperand(0) = Operand(ctx->base_vertex);
-         add->getOperand(1) = Operand(ctx->vertex_id);
-         add->getDefinition(0) = Definition(index);
-         ctx->block->instructions.emplace_back(std::move(add));
+         emit_v_add32(ctx, index, Operand(ctx->base_vertex), Operand(ctx->vertex_id));
       }
 
       aco_opcode opcode;
