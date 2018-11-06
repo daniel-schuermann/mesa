@@ -154,6 +154,18 @@ void emit_v_mov(isel_context *ctx, Temp src, Temp dst)
    }
 }
 
+Temp as_vgpr(isel_context *ctx, Temp val)
+{
+   assert(val.size() == 1);
+   if (val.type() == RegType::sgpr) {
+      Temp tmp = {ctx->program->allocateId(), v1};
+      emit_v_mov(ctx, val, tmp);
+      return tmp;
+   }
+   assert(val.type() == RegType::vgpr);
+   return val;
+}
+
 void emit_extract_vector(isel_context* ctx, Temp src, uint32_t idx, Temp dst)
 {
    std::unique_ptr<Instruction> extract(create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1));
