@@ -1895,26 +1895,42 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
 
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    aco_opcode op;
+   RegClass rc;
    switch (dst.size()) {
    case 1:
       op = aco_opcode::s_load_dword;
+      rc = s1;
       break;
    case 2:
       op = aco_opcode::s_load_dwordx2;
+      rc = s2;
       break;
+   case 3:
    case 4:
       op = aco_opcode::s_load_dwordx4;
+      rc = s4;
       break;
    default:
       unreachable("unimplemented or forbidden load_push_constant.");
    }
+
    std::unique_ptr<SMEM_instruction> load{create_instruction<SMEM_instruction>(op, Format::SMEM, 2, 1)};
    load->getOperand(0) = Operand(ptr);
    load->getOperand(1) = Operand(index);
-   load->getDefinition(0) = Definition(dst);
+   Temp vec = dst.size() == 3 ? Temp{ctx->program->allocateId(), rc} : dst;
+   load->getDefinition(0) = Definition(vec);
    ctx->block->instructions.emplace_back(std::move(load));
 
-   emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
+   emit_split_vector(ctx, vec, vec.size());
+
+   if (dst.size() == 3) {
+      std::unique_ptr<Instruction> trimmed{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size(), 1)};
+      for (unsigned i = 0; i < dst.size(); i++) {
+         trimmed->getOperand(i) = Operand(emit_extract_vector(ctx, vec, i, s1));
+      }
+      trimmed->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(trimmed));
+   }
 }
 
 void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
