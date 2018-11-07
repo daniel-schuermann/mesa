@@ -1154,9 +1154,11 @@ shader_variant_compile(struct radv_device *device,
 				thread_compiler,
 				chip_family, tm_options);
 
+	bool llvm_vs = device->instance->perftest_flags & RADV_PERFTEST_LLVM_VS;
 	bool use_aco = device->physical_device->use_aco &&
-		       (shaders[0]->info.stage == MESA_SHADER_FRAGMENT ||
-		        shaders[0]->info.stage == MESA_SHADER_COMPUTE);
+		       ((shaders[0]->info.stage == MESA_SHADER_FRAGMENT) ||
+		        (shaders[0]->info.stage == MESA_SHADER_COMPUTE) ||
+		        (shaders[0]->info.stage == MESA_SHADER_VERTEX && !llvm_vs && !options->key.vs.out.as_ls && !options->key.vs.out.as_es));
 
 	if (gs_copy_shader) {
 		assert(shader_count == 1);
@@ -1185,6 +1187,9 @@ shader_variant_compile(struct radv_device *device,
 				total_llvm += user_elapsed;
 				fprintf(stderr, "LLVM CPU time: %8.4fms\t|\ttotal: %8.4fms\t\t||\t", user_elapsed, total_llvm);
 				clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &user1);
+
+				free(binary);
+				memset(&variant_info, 0, sizeof(variant_info));
 			}
 
 			assert(shader_count == 1);

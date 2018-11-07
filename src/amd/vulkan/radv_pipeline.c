@@ -180,6 +180,8 @@ static uint32_t get_hash_flags(struct radv_device *device)
 		hash_flags |= RADV_HASH_SHADER_SISCHED;
 	if (device->physical_device->use_aco)
 		hash_flags |= RADV_HASH_SHADER_ACO;
+	if (device->instance->perftest_flags & RADV_PERFTEST_LLVM_VS)
+		hash_flags |= RADV_HASH_SHADER_LLVM_VS;
 	return hash_flags;
 }
 

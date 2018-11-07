@@ -623,6 +623,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
       break;
    }
    case Format::MUBUF:
+   case Format::MTBUF:
    case Format::MIMG:
    case Format::GLOBAL: {
       /* increase counter for all entries of same wait_type */

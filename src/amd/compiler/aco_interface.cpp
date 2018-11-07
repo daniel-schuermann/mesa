@@ -34,7 +34,7 @@ void aco_compile_shader(struct nir_shader *shader,
                         struct radv_shader_variant_info *info,
                         struct radv_nir_compiler_options *options)
 {
-   if (shader->info.stage != MESA_SHADER_FRAGMENT && shader->info.stage != MESA_SHADER_COMPUTE)
+   if (shader->info.stage != MESA_SHADER_FRAGMENT && shader->info.stage != MESA_SHADER_VERTEX && shader->info.stage != MESA_SHADER_COMPUTE)
       return;
 
    ac_shader_config config = {0};
