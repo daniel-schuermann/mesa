@@ -693,9 +693,11 @@ struct Pseudo_barrier_instruction : public Instruction {
 template<typename T>
 T* create_instruction(aco_opcode opcode, Format format, uint32_t num_operands, uint32_t num_definitions)
 {
+   // FIXME: this might still leak and we likely need a custom deleter for the unique_ptr.
    std::size_t size = sizeof(T) + num_operands * sizeof(Operand) + num_definitions * sizeof(Definition);
-   char *data = (char*)calloc(1, size);
-   auto inst = (T*)data;
+   char *data = (char*)::operator new(size);
+   memset(data, 0, size);
+   T* inst = (T*) new (data)T;
 
    inst->opcode = opcode;
    inst->format = format;

@@ -208,12 +208,13 @@ void lower_to_hw_instr(Program* program)
             case aco_opcode::p_split_vector:
             {
                std::map<PhysReg, copy_operation> copy_operations;
-               RegClass rc = getRegClass(typeOf(instr->getOperand(0).regClass()), 1);
+               RegClass rc_op = instr->getOperand(0).isConstant() ? s1 : getRegClass(typeOf(instr->getOperand(0).regClass()), 1);
                for (unsigned i = 0; i < instr->num_definitions; i++) {
                   unsigned k = instr->getDefinition(i).size();
+                  RegClass rc_def = getRegClass(instr->getDefinition(i).getTemp().type(), 1);
                   for (unsigned j = 0; j < k; j++) {
-                     Operand op = Operand(PhysReg{instr->getOperand(0).physReg().reg + (i*k+j)}, rc);
-                     Definition def = Definition(PhysReg{instr->getDefinition(i).physReg().reg + j}, rc);
+                     Operand op = Operand(PhysReg{instr->getOperand(0).physReg().reg + (i*k+j)}, rc_op);
+                     Definition def = Definition(PhysReg{instr->getDefinition(i).physReg().reg + j}, rc_def);
                      copy_operations[def.physReg()] = {op, def, 0};
                   }
                }

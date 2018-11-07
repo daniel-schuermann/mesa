@@ -1449,15 +1449,14 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
    assert(instr->def.num_components == 1 && "Vector load_const should be lowered to scalar.");
    Temp dst = get_ssa_temp(ctx, &instr->def);
    assert(dst.type() == sgpr);
-   Operand src = dst.size() == 1 ? Operand(instr->value.u32[0]) : Operand(instr->value.u64[0]);
 
-   if (src.isConstant())
+   if (dst.size() == 1)
    {
       std::unique_ptr<Instruction> mov;
       aco_opcode op = dst.size() == 2 ? aco_opcode::s_mov_b64 : aco_opcode::s_mov_b32;
       mov.reset(create_instruction<Instruction>(op, Format::SOP1, 1, 1));
       mov->getDefinition(0) = Definition(dst);
-      mov->getOperand(0) = src;
+      mov->getOperand(0) = Operand(instr->value.u32[0]);
       ctx->block->instructions.emplace_back(std::move(mov));
    } else {
       assert(dst.size() != 1);
@@ -2289,7 +2288,7 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
       if (is_array)
          coords.emplace_back(Operand(emit_extract_vector(ctx, src0, 1, v1)));
    } else {
-      for (unsigned i = 0; i < count; i++)
+      for (int i = 0; i < count; i++)
          coords.emplace_back(Operand(emit_extract_vector(ctx, src0, i, v1)));
    }
 
@@ -2568,13 +2567,14 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       Temp write_data;
       if (count != instr->num_components) {
          std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, count, 1)};
-         for (unsigned i = 0; i < count; i++)
+         for (int i = 0; i < count; i++)
             vec->getOperand(i) = Operand(emit_extract_vector(ctx, data, start + i, v1));
          write_data = {ctx->program->allocateId(), getRegClass(vgpr, count)};
          vec->getDefinition(0) = Definition(write_data);
          ctx->block->instructions.emplace_back(std::move(vec));
       } else if (data.type() != vgpr) {
-         write_data = {ctx->program->allocateId(), getRegClass(vgpr, count)};
+         assert(num_bytes % 4 == 0);
+         write_data = {ctx->program->allocateId(), getRegClass(vgpr, num_bytes / 4)};
          emit_v_mov(ctx, data, write_data);
       } else {
          write_data = data;
@@ -3283,7 +3283,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
    bool has_bias = false, has_lod = false, level_zero = false, has_compare = false,
         has_offset = false, has_ddx = false, has_ddy = false, has_derivs = false, has_sample_index = false;
-   Temp resource, sampler, fmask_ptr, bias, coords, compare, lod = Temp(), offset = Temp(), ddx, ddy, derivs, sample_index;
+   Temp resource, sampler, fmask_ptr, bias, coords, compare, sample_index,
+        lod = Temp(), offset = Temp(), ddx = Temp(), ddy = Temp(), derivs = Temp();
    tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
 
    for (unsigned i = 0; i < instr->num_srcs; i++) {

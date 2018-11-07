@@ -343,12 +343,12 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
    uint16_t new_vm_cnt = max_vm_cnt;
    for (unsigned i = 0; i < instr->num_operands; i++)
    {
-      if (instr->getOperand(i).isConstant())
+      if (instr->getOperand(i).isConstant() || instr->getOperand(i).isUndefined())
          continue;
 
       if (instr->getOperand(i).getTemp().type() == RegType::sgpr) {
          /* check consecutively read sgprs */
-         for (unsigned j = 0; j < instr->getOperand(i).getTemp().size(); j++)
+         for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
          {
             uint8_t reg = (uint8_t) instr->getOperand(i).physReg().reg + j;
 
@@ -382,7 +382,7 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
          }
       } else {
          /* check consecutively read vgprs */
-         for (unsigned j = 0; j < instr->getOperand(i).getTemp().size(); j++)
+         for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
          {
             uint8_t reg = (uint8_t) instr->getOperand(i).physReg().reg + j;
 
