@@ -123,6 +123,9 @@ bool needs_exact(aco_ptr<Instruction>& instr) {
    if (instr->format == Format::MUBUF) {
       MUBUF_instruction *mubuf = static_cast<MUBUF_instruction *>(instr.get());
       return mubuf->disable_wqm;
+   } else if (instr->format == Format::MTBUF) {
+      MTBUF_instruction *mtbuf = static_cast<MTBUF_instruction *>(instr.get());
+      return mtbuf->disable_wqm;
    } else if (instr->format == Format::MIMG) {
       MIMG_instruction *mimg = static_cast<MIMG_instruction *>(instr.get());
       return mimg->disable_wqm;

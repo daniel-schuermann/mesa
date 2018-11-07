@@ -334,7 +334,8 @@ radv_physical_device_init(struct radv_physical_device *device,
 	uint64_t shader_env_flags =
 		(device->instance->perftest_flags & RADV_PERFTEST_SISCHED ? 0x1 : 0) |
 		(device->instance->debug_flags & RADV_DEBUG_UNSAFE_MATH ? 0x2 : 0) |
-		(device->use_aco ? 0x4 : 0);
+		(device->use_aco ? 0x4 : 0) |
+		(device->instance->perftest_flags & RADV_PERFTEST_LLVM_VS ? 0x8 : 0);
 
 	/* The gpu id is already embedded in the uuid so we just pass "radv"
 	 * when creating the cache.
@@ -526,6 +527,7 @@ static const struct debug_control radv_perftest_options[] = {
 	{"storagedcc", RADV_PERFTEST_STORAGE_DCC},
 	{"aco", RADV_PERFTEST_ACO},
 	{"llvm", RADV_PERFTEST_LLVM},
+	{"llvmvs", RADV_PERFTEST_LLVM_VS},
 	{NULL, 0}
 };
 

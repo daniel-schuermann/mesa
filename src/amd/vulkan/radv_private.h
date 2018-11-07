@@ -1430,6 +1430,7 @@ struct radv_shader_module;
 #define RADV_HASH_SHADER_PS_WAVE32           (1 << 5)
 #define RADV_HASH_SHADER_GE_WAVE32           (1 << 6)
 #define RADV_HASH_SHADER_ACO                 (1 << 7)
+#define RADV_HASH_SHADER_LLVM_VS             (1 << 8)
 
 void
 radv_hash_shaders(unsigned char *hash,
