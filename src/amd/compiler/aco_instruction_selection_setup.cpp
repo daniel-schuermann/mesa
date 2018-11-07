@@ -112,7 +112,7 @@ struct isel_context {
 
 void init_context(isel_context *ctx, nir_function_impl *impl)
 {
-   std::unique_ptr<RegClass[]> reg_class{new RegClass[impl->ssa_alloc]};
+   std::unique_ptr<RegClass[]> reg_class{new RegClass[impl->ssa_alloc]()};
    memset(&ctx->fs_vgpr_args, false, sizeof(ctx->fs_vgpr_args));
 
    bool done = false;
@@ -185,6 +185,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
             }
             case nir_instr_type_intrinsic: {
                nir_intrinsic_instr *intrinsic = nir_instr_as_intrinsic(instr);
+               if (!nir_intrinsic_infos[intrinsic->intrinsic].has_dest)
+                  break;
                unsigned size =  intrinsic->dest.ssa.num_components;
                if (intrinsic->dest.ssa.bit_size == 64)
                   size *= 2;
@@ -250,8 +252,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      }
                      break;
                }
-               if (nir_intrinsic_infos[intrinsic->intrinsic].has_dest)
-                  reg_class[intrinsic->dest.ssa.index] = getRegClass(type, size);
+               reg_class[intrinsic->dest.ssa.index] = getRegClass(type, size);
 
                switch(intrinsic->intrinsic) {
                   case nir_intrinsic_load_barycentric_pixel:
