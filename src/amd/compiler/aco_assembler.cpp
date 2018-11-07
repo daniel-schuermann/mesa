@@ -1,6 +1,7 @@
 #include <map>
 
 #include "aco_ir.h"
+#include "common/sid.h"
 
 namespace aco {
 
@@ -166,6 +167,28 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       encoding |= (mubuf->tfe ? 1 : 0) << 23;
       encoding |= (instr->getOperand(1).physReg() >> 2) << 16;
       unsigned reg = instr->num_operands > 3 ? instr->getOperand(3).physReg() : instr->getDefinition(0).physReg().reg;
+      encoding |= (0xFF & reg) << 8;
+      encoding |= (0xFF & instr->getOperand(0).physReg().reg);
+      out.push_back(encoding);
+      break;
+   }
+   case Format::MTBUF: {
+      MTBUF_instruction* mtbuf = static_cast<MTBUF_instruction*>(instr);
+      uint32_t encoding = (0b111010 << 26);
+      encoding |= opcode << 15;
+      encoding |= (mtbuf->glc ? 1 : 0) << 14;
+      encoding |= (mtbuf->idxen ? 1 : 0) << 13;
+      encoding |= (mtbuf->offen ? 1 : 0) << 12;
+      encoding |= 0x0FFF & mtbuf->offset;
+      encoding |= (0xF & mtbuf->dfmt) << 19;
+      encoding |= (0x7 & mtbuf->nfmt) << 23;
+      out.push_back(encoding);
+      encoding = 0;
+      encoding |= instr->getOperand(2).physReg().reg << 24;
+      encoding |= (mtbuf->tfe ? 1 : 0) << 23;
+      encoding |= (mtbuf->slc ? 1 : 0) << 22;
+      encoding |= (instr->getOperand(1).physReg().reg >> 2) << 16;
+      unsigned reg = instr->num_operands > 3 ? instr->getOperand(3).physReg().reg : instr->getDefinition(0).physReg().reg;
       encoding |= (0xFF & reg) << 8;
       encoding |= (0xFF & instr->getOperand(0).physReg().reg);
       out.push_back(encoding);
@@ -342,10 +365,18 @@ void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
       {
          if ((*it)->format == Format::EXP && endBlock) {
             Export_instruction* exp = static_cast<Export_instruction*>((*it).get());
-            exp->done = true;
-            exp->valid_mask = true;
-            exported = true;
-            break;
+            if (program->stage == MESA_SHADER_VERTEX) {
+               if (exp->dest >= V_008DFC_SQ_EXP_POS && exp->dest <= (V_008DFC_SQ_EXP_POS + 3)) {
+                  exp->done = true;
+                  exported = true;
+                  break;
+               }
+            } else {
+               exp->done = true;
+               exp->valid_mask = true;
+               exported = true;
+               break;
+            }
          } else if ((*it)->num_definitions && (*it)->getDefinition(0).physReg() == exec)
             break;
          else if ((*it)->opcode == aco_opcode::s_endpgm) {
@@ -364,8 +395,11 @@ void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
       exp->enabled_mask = 0;
       exp->compressed = false;
       exp->done = true;
-      exp->valid_mask = true;
-      exp->dest = 9; /* NULL */
+      exp->valid_mask = program->stage == MESA_SHADER_FRAGMENT;
+      if (program->stage == MESA_SHADER_FRAGMENT)
+         exp->dest = 9; /* NULL */
+      else
+         exp->dest = V_008DFC_SQ_EXP_POS;
       /* insert the null export 1 instruction before endpgm */
       block.instructions.insert(block.instructions.end() - 1, std::move(exp));
    }
@@ -385,7 +419,7 @@ std::vector<uint32_t> emit_program(Program* program)
    asm_context ctx(program);
    std::vector<uint32_t> out;
 
-   if (program->stage == MESA_SHADER_FRAGMENT)
+   if (program->stage == MESA_SHADER_FRAGMENT || program->stage == MESA_SHADER_VERTEX)
       fix_exports(ctx, out, program);
 
    for (Block& block : program->blocks) {

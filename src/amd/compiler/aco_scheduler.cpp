@@ -184,10 +184,11 @@ bool can_reorder(Instruction* candidate, bool allow_smem)
       return static_cast<MUBUF_instruction*>(candidate)->can_reorder;
    case Format::MIMG:
       return static_cast<MIMG_instruction*>(candidate)->can_reorder;
+   case Format::MTBUF:
+      return static_cast<MTBUF_instruction*>(candidate)->can_reorder;
    case Format::FLAT:
    case Format::GLOBAL:
    case Format::SCRATCH:
-   case Format::MTBUF:
       return false;
    default:
       return true;
@@ -673,6 +674,7 @@ void schedule_program(Program *program, live& live_vars)
     * improves performance of Thrones of Britannia significantly and doesn't
     * seem to hurt anything else. */
    //TODO: maybe use some sort of heuristic instead
+   //TODO: this also increases window-size/max-moves? did I realize that at the time?
    ctx.num_waves = std::min<uint16_t>(program->num_waves, 5);
    assert(ctx.num_waves);
    uint16_t total_sgpr_regs = program->chip_class >= GFX8 ? 800 : 512;
