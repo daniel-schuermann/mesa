@@ -27,6 +27,7 @@
 #include "nir.h"
 #include "vulkan/radv_shader.h"
 #include "sid.h"
+#include "ac_exp_param.h"
 
 #include "util/u_math.h"
 
@@ -60,6 +61,11 @@ enum fs_input {
    max_inputs,
 };
 
+struct vs_output_state {
+   uint8_t mask[VARYING_SLOT_VAR31 + 1];
+   Temp outputs[VARYING_SLOT_VAR31 + 1][4];
+};
+
 struct isel_context {
    struct radv_nir_compiler_options *options;
    Program *program;
@@ -73,6 +79,8 @@ struct isel_context {
    gl_shader_stage stage;
    struct {
       bool has_branch;
+      bool has_continue;
+      bool has_break;
       uint16_t loop_nest_depth = 0;
       struct {
          unsigned header_idx;
@@ -107,6 +115,7 @@ struct isel_context {
    Temp rel_auto_id = Temp(0, v1);
    Temp instance_id = Temp(0, v1);
    Temp vs_prim_id = Temp(0, v1);
+   bool needs_instance_id;
 
    /* CS inputs */
    Temp num_workgroups[3] = {Temp(0, s1), Temp(0, s1), Temp(0, s1)};
@@ -114,6 +123,10 @@ struct isel_context {
    Temp tg_size = Temp(0, s1);
    Temp local_invocation_ids[3] = {Temp(0, v1), Temp(0, v1), Temp(0, v1)};
 
+   /* VS output information */
+   unsigned num_clip_distances;
+   unsigned num_cull_distances;
+   vs_output_state vs_output;
 };
 
 fs_input get_interp_input(nir_intrinsic_op intrin, enum glsl_interp_mode interp)
@@ -327,6 +340,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_num_work_groups:
                   case nir_intrinsic_load_subgroup_id:
                   case nir_intrinsic_load_num_subgroups:
+                  case nir_intrinsic_load_first_vertex:
+                  case nir_intrinsic_load_base_instance:
                   case nir_intrinsic_get_buffer_size:
                   case nir_intrinsic_vote_all:
                   case nir_intrinsic_vote_any:
@@ -354,12 +369,12 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_frag_coord:
                   case nir_intrinsic_load_sample_pos:
                   case nir_intrinsic_load_layer_id:
-                  case nir_intrinsic_load_view_index:
                   case nir_intrinsic_load_local_invocation_id:
                   case nir_intrinsic_load_local_invocation_index:
                   case nir_intrinsic_load_subgroup_invocation:
                   case nir_intrinsic_write_invocation_amd:
                   case nir_intrinsic_mbcnt_amd:
+                  case nir_intrinsic_load_instance_id:
                   case nir_intrinsic_ssbo_atomic_add:
                   case nir_intrinsic_ssbo_atomic_imin:
                   case nir_intrinsic_ssbo_atomic_umin:
@@ -408,6 +423,9 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      } else {
                         type = vgpr;
                      }
+                     break;
+                  case nir_intrinsic_load_view_index:
+                     type = ctx->stage == MESA_SHADER_FRAGMENT ? vgpr : sgpr;
                      break;
                   case nir_intrinsic_load_front_face:
                   case nir_intrinsic_load_helper_invocation:
@@ -1125,6 +1143,101 @@ total_shared_var_size(const struct glsl_type *type)
 }
 
 void
+setup_vs_variables(isel_context *ctx, nir_shader *nir)
+{
+   assert(!ctx->program->info->vs.as_ls);
+   assert(!ctx->program->info->vs.as_es);
+
+   nir_foreach_variable(variable, &nir->inputs)
+   {
+      variable->data.driver_location = variable->data.location * 4;
+   }
+   nir_foreach_variable(variable, &nir->outputs)
+   {
+      variable->data.driver_location = variable->data.location * 4;
+   }
+
+   radv_vs_output_info *outinfo = &ctx->program->info->vs.outinfo;
+
+   memset(outinfo->vs_output_param_offset, AC_EXP_PARAM_UNDEFINED,
+          sizeof(outinfo->vs_output_param_offset));
+
+   ctx->num_clip_distances = 0;
+   ctx->num_cull_distances = 0;
+   ctx->needs_instance_id = ctx->program->info->info.vs.needs_instance_id;
+
+   bool export_clip_dists = ctx->options->key.vs_common_out.export_clip_dists;
+
+   outinfo->param_exports = 0;
+   outinfo->writes_pointsize = false;
+   outinfo->writes_layer = false;
+   outinfo->writes_viewport_index = false;
+   int pos_written = 0x1;
+
+   nir_foreach_variable(variable, &nir->outputs)
+   {
+      int idx = variable->data.location;
+      unsigned slots = variable->type->count_attribute_slots(false);
+	   if (variable->data.compact) {
+		   unsigned component_count = variable->data.location_frac + variable->type->length;
+		   slots = (component_count + 3) / 4;
+	   }
+
+      if (idx >= VARYING_SLOT_VAR0 || idx == VARYING_SLOT_LAYER || idx == VARYING_SLOT_PRIMITIVE_ID ||
+          ((idx == VARYING_SLOT_CLIP_DIST0 || idx == VARYING_SLOT_CLIP_DIST1) && export_clip_dists)) {
+         for (unsigned i = 0; i < slots; i++) {
+            if (outinfo->vs_output_param_offset[idx + i] == AC_EXP_PARAM_UNDEFINED)
+               outinfo->vs_output_param_offset[idx + i] = outinfo->param_exports++;
+         }
+      }
+
+      if (idx == VARYING_SLOT_PSIZ) {
+         outinfo->writes_pointsize = true;
+         pos_written |= 1 << 1;
+      } else if (idx == VARYING_SLOT_LAYER) {
+         outinfo->writes_layer = true;
+         pos_written |= 1 << 1;
+      } else if (idx == VARYING_SLOT_VIEWPORT) {
+         outinfo->writes_viewport_index = true;
+         pos_written |= 1 << 1;
+      } else if (idx == VARYING_SLOT_CLIP_DIST0) {
+         ctx->num_clip_distances = nir->info.clip_distance_array_size;
+         ctx->num_cull_distances = nir->info.cull_distance_array_size;
+      }
+   }
+   if (ctx->options->key.has_multiview_view_index) {
+      assert(!outinfo->writes_layer);
+      outinfo->writes_layer = true;
+      outinfo->vs_output_param_offset[VARYING_SLOT_LAYER] = outinfo->param_exports++;
+      pos_written |= 1 << 1;
+   }
+
+   assert(outinfo->vs_output_param_offset[VARYING_SLOT_PRIMITIVE_ID] == AC_EXP_PARAM_UNDEFINED);
+   outinfo->export_prim_id = false;
+   if (ctx->options->key.vs.out.export_prim_id) {
+		outinfo->export_prim_id = true;
+      outinfo->vs_output_param_offset[VARYING_SLOT_PRIMITIVE_ID] = outinfo->param_exports++;
+   }
+
+   assert(ctx->num_clip_distances + ctx->num_cull_distances <= 8);
+
+   if (ctx->num_clip_distances + ctx->num_cull_distances > 0)
+      pos_written |= 1 << 2;
+   if (ctx->num_clip_distances + ctx->num_cull_distances > 4)
+      pos_written |= 1 << 3;
+
+   outinfo->pos_exports = util_bitcount(pos_written);
+
+   outinfo->clip_dist_mask = (1 << ctx->num_clip_distances) - 1;
+   outinfo->cull_dist_mask = (1 << ctx->num_cull_distances) - 1;
+   outinfo->cull_dist_mask <<= ctx->num_clip_distances;
+
+   ctx->program->info->vs.export_prim_id = ctx->options->key.vs.out.export_prim_id;
+   ctx->program->info->vs.as_ls = false;
+   ctx->program->info->vs.as_es = false;
+}
+
+void
 setup_variables(isel_context *ctx, nir_shader *nir)
 {
    switch (ctx->stage) {
@@ -1153,6 +1266,10 @@ setup_variables(isel_context *ctx, nir_shader *nir)
       ctx->program->info->cs.block_size[0] = nir->info.cs.local_size[0];
       ctx->program->info->cs.block_size[1] = nir->info.cs.local_size[1];
       ctx->program->info->cs.block_size[2] = nir->info.cs.local_size[2];
+      break;
+   }
+   case MESA_SHADER_VERTEX: {
+      setup_vs_variables(ctx, nir);
       break;
    }
    default:
@@ -1194,6 +1311,10 @@ setup_isel_context(Program* program, nir_shader *nir,
       ctx.descriptor_sets[i] = Temp(0, s1);
    for (unsigned i = 0; i < MAX_INLINE_PUSH_CONSTS; ++i)
       ctx.inline_push_consts[i] = Temp(0, s1);
+   for (unsigned i = 0; i <= VARYING_SLOT_VAR31; ++i) {
+      for (unsigned j = 0; j < 4; ++j)
+         ctx.vs_output.outputs[i][j] = Temp(0, v1);
+   }
 
    /* the variable setup has to be done before lower_io / CSE */
    setup_variables(&ctx, nir);

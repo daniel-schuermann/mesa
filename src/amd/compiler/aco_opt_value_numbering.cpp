@@ -174,6 +174,20 @@ struct InstrPred {
          }
          case Format::PSEUDO_REDUCTION:
             return false;
+         case Format::MTBUF: {
+            /* this is fine since they are only used for vertex input fetches */
+            MTBUF_instruction* aM = static_cast<MTBUF_instruction *>(a);
+            MTBUF_instruction* bM = static_cast<MTBUF_instruction *>(b);
+            return aM->dfmt == bM->dfmt &&
+                   aM->nfmt == bM->nfmt &&
+                   aM->offset == bM->offset &&
+                   aM->offen == bM->offen &&
+                   aM->idxen == bM->idxen &&
+                   aM->glc == bM->glc &&
+                   aM->slc == bM->slc &&
+                   aM->tfe == bM->tfe &&
+                   aM->disable_wqm == bM->disable_wqm;
+         }
          /* we want to optimize these in NIR and don't hassle with load-store dependencies */
          case Format::MUBUF:
          case Format::FLAT:

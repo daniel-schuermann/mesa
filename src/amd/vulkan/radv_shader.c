@@ -1154,9 +1154,12 @@ shader_variant_compile(struct radv_device *device,
 				thread_compiler,
 				chip_family, tm_options);
 
+	bool aco_fscs = true; //getenv("ACO_FSCS");
+	bool aco_vs = device->instance->perftest_flags & RADV_PERFTEST_ACOVS;
 	bool use_aco = device->physical_device->use_aco &&
-		       (shaders[0]->info.stage == MESA_SHADER_FRAGMENT ||
-		        shaders[0]->info.stage == MESA_SHADER_COMPUTE);
+		       ((shaders[0]->info.stage == MESA_SHADER_FRAGMENT && aco_fscs) ||
+		        (shaders[0]->info.stage == MESA_SHADER_COMPUTE && aco_fscs) ||
+		        (shaders[0]->info.stage == MESA_SHADER_VERTEX && aco_vs && !options->key.vs.out.as_ls && !options->key.vs.out.as_es));
 
 	if (gs_copy_shader) {
 		assert(shader_count == 1);
@@ -1185,6 +1188,9 @@ shader_variant_compile(struct radv_device *device,
 				total_llvm += user_elapsed;
 				fprintf(stderr, "LLVM CPU time: %8.4fms\t|\ttotal: %8.4fms\t\t||\t", user_elapsed, total_llvm);
 				clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &user1);
+
+				free(binary);
+				memset(&variant_info, 0, sizeof(variant_info));
 			}
 
 			assert(shader_count == 1);
@@ -1199,8 +1205,29 @@ shader_variant_compile(struct radv_device *device,
 				fprintf(stderr, "ACO CPU time:  %8.4fms\t|\ttotal: %8.4fms\n", user_elapsed, total_aco);
 			}
 		} else {
+			#if 0
+			size_t size = 16 * sizeof(uint32_t) + sizeof(struct radv_shader_binary_legacy);
+			struct radv_shader_binary_legacy* legacy_binary = (struct radv_shader_binary_legacy*) malloc(size);
+
+			legacy_binary->base.type = RADV_BINARY_TYPE_LEGACY;
+			legacy_binary->base.stage = shaders[0]->info.stage;
+			legacy_binary->base.is_gs_copy_shader = false;
+			legacy_binary->base.total_size = size;
+
+			legacy_binary->code_size = 16 * sizeof(uint32_t);
+
+			struct ac_shader_config config = {0};
+			config.num_sgprs = 16;
+			config.num_vgprs = 16;
+			legacy_binary->config = config;
+			legacy_binary->disasm_size = 0;
+			legacy_binary->llvm_ir_size = 0;
+
+			binary = (struct radv_shader_binary*) legacy_binary;
+			#else
 			radv_compile_nir_shader(&ac_llvm, &binary, &variant_info,
 						shaders, shader_count, options);
+			#endif
 		}
 	}
 	binary->variant_info = variant_info;

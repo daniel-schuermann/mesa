@@ -309,7 +309,51 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
       break;
    }
    case Format::MTBUF: {
-      fprintf(output, " (printing unimplemented)");
+      MTBUF_instruction* mtbuf = static_cast<MTBUF_instruction*>(instr);
+      fprintf(output, " dfmt:");
+      switch (mtbuf->dfmt) {
+      case V_008F0C_BUF_DATA_FORMAT_8: fprintf(output, "8"); break;
+      case V_008F0C_BUF_DATA_FORMAT_16: fprintf(output, "16"); break;
+      case V_008F0C_BUF_DATA_FORMAT_8_8: fprintf(output, "8_8"); break;
+      case V_008F0C_BUF_DATA_FORMAT_32: fprintf(output, "32"); break;
+      case V_008F0C_BUF_DATA_FORMAT_16_16: fprintf(output, "16_16"); break;
+      case V_008F0C_BUF_DATA_FORMAT_10_11_11: fprintf(output, "10_11_11"); break;
+      case V_008F0C_BUF_DATA_FORMAT_11_11_10: fprintf(output, "11_11_10"); break;
+      case V_008F0C_BUF_DATA_FORMAT_10_10_10_2: fprintf(output, "10_10_10_2"); break;
+      case V_008F0C_BUF_DATA_FORMAT_2_10_10_10: fprintf(output, "2_10_10_10"); break;
+      case V_008F0C_BUF_DATA_FORMAT_8_8_8_8: fprintf(output, "8_8_8_8"); break;
+      case V_008F0C_BUF_DATA_FORMAT_32_32: fprintf(output, "32_32"); break;
+      case V_008F0C_BUF_DATA_FORMAT_16_16_16_16: fprintf(output, "16_16_16_16"); break;
+      case V_008F0C_BUF_DATA_FORMAT_32_32_32: fprintf(output, "32_32_32"); break;
+      case V_008F0C_BUF_DATA_FORMAT_32_32_32_32: fprintf(output, "32_32_32_32"); break;
+      case V_008F0C_BUF_DATA_FORMAT_RESERVED_15: fprintf(output, "reserved15"); break;
+      }
+      fprintf(output, " nfmt:");
+      switch (mtbuf->nfmt) {
+      case V_008F0C_BUF_NUM_FORMAT_UNORM: fprintf(output, "unorm"); break;
+      case V_008F0C_BUF_NUM_FORMAT_SNORM: fprintf(output, "snorm"); break;
+      case V_008F0C_BUF_NUM_FORMAT_USCALED: fprintf(output, "uscaled"); break;
+      case V_008F0C_BUF_NUM_FORMAT_SSCALED: fprintf(output, "sscaled"); break;
+      case V_008F0C_BUF_NUM_FORMAT_UINT: fprintf(output, "uint"); break;
+      case V_008F0C_BUF_NUM_FORMAT_SINT: fprintf(output, "sint"); break;
+      case V_008F0C_BUF_NUM_FORMAT_SNORM_OGL: fprintf(output, "snorm"); break;
+      case V_008F0C_BUF_NUM_FORMAT_FLOAT: fprintf(output, "float"); break;
+      }
+      if (mtbuf->offset)
+         fprintf(output, " offset:%u", mtbuf->offset);
+      if (mtbuf->offen)
+         fprintf(output, " offen");
+      if (mtbuf->idxen)
+         fprintf(output, " idxen");
+      if (mtbuf->glc)
+         fprintf(output, " glc");
+      if (mtbuf->slc)
+         fprintf(output, " slc");
+      if (mtbuf->tfe)
+         fprintf(output, " tfe");
+      if (mtbuf->disable_wqm)
+         fprintf(output, " disable_wqm");
+      aco_print_barrier_reorder(mtbuf->can_reorder, mtbuf->barrier, output);
       break;
    }
    default: {

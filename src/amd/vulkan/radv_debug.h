@@ -74,6 +74,7 @@ enum {
 	RADV_PERFTEST_TC_COMPAT_CMASK = 0x80,
 	RADV_PERFTEST_ACO            = 0x100,
 	RADV_PERFTEST_LLVM           = 0x200,
+	RADV_PERFTEST_ACOVS          = 0x400,
 };
 
 bool
