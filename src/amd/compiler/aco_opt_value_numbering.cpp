@@ -99,9 +99,9 @@ struct InstrPred {
          }
          else if (a->getOperand(i).isUndefined() ^ b->getOperand(i).isUndefined())
             return false;
-         if (a->getOperand(i).physReg() == exec)
-            return false;
          if (a->getOperand(i).isFixed()) {
+            if (a->getOperand(i).physReg() == exec)
+               return false;
             if (!b->getOperand(i).isFixed())
                return false;
             if (!(a->getOperand(i).physReg() == b->getOperand(i).physReg()))
