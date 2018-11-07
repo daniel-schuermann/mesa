@@ -693,6 +693,27 @@ struct DS_instruction : public Instruction {
  *
  */
 struct MUBUF_instruction : public Instruction {
+   unsigned offset; /* Unsigned byte offset - 12 bit */
+   bool offen; /* Supply an offset from VGPR (VADDR) */
+   bool idxen; /* Supply an index from VGPR (VADDR) */
+   bool glc; /* globally coherent */
+   bool slc; /* system level coherent */
+   bool tfe; /* texture fail enable */
+   bool lds; /* Return read-data to LDS instead of VGPRs */
+   bool disable_wqm; /* Require an exec mask without helper invocations */
+   bool can_reorder;
+   barrier_interaction barrier;
+};
+
+/**
+ * Vector Memory Typed-buffer Instructions
+ * Operand(0): VADDR - Address source. Can carry an index and/or offset
+ * Operand(1): SRSRC - Specifies which SGPR supplies T# (resource constant)
+ * Operand(2): SOFFSET - SGPR to supply unsigned byte offset. (SGPR, M0, or inline constant)
+ * Operand(3) / Definition(0): VDATA - Vector GPR for write result / read data
+ *
+ */
+struct MTBUF_instruction : public Instruction {
    unsigned dfmt; /* Data Format of data in memory buffer */
    unsigned nfmt; /* Numeric format of data in memory */
    unsigned offset; /* Unsigned byte offset - 12 bit */
@@ -701,7 +722,6 @@ struct MUBUF_instruction : public Instruction {
    bool glc; /* globally coherent */
    bool slc; /* system level coherent */
    bool tfe; /* texture fail enable */
-   bool lds; /* Return read-data to LDS instead of VGPRs */
    bool disable_wqm; /* Require an exec mask without helper invocations */
    bool can_reorder;
    barrier_interaction barrier;
