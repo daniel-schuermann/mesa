@@ -3424,8 +3424,18 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
    if (ctx->options->chip_class >= GFX9 &&
        instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
-       instr->op != nir_texop_lod)
-      assert(false && "Unimplemented tex instr type\n");
+       instr->op != nir_texop_lod) {
+      assert(coords.size() > 0 && coords.size() < 3);
+
+      std::unique_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, coords.size() + 1, 1)};
+      vec->getOperand(0) = Operand(emit_extract_vector(ctx, coords, 0, v1));
+      vec->getOperand(1) = instr->op == nir_texop_txf ? Operand((uint32_t) 0) : Operand((uint32_t) 0x3f000000);
+      if (coords.size() > 1)
+         vec->getOperand(2) = Operand(emit_extract_vector(ctx, coords, 1, v1));
+      coords = {ctx->program->allocateId(), getRegClass(RegType::vgpr, coords.size() + 1)};
+      vec->getDefinition(0) = Definition(coords);
+      ctx->block->instructions.emplace_back(std::move(vec));
+   }
 
    if (instr->op == nir_texop_samples_identical)
       resource = fmask_ptr;
