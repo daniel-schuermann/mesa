@@ -331,34 +331,38 @@ void register_allocation(Program *program)
          /* if the block has only one predecessor, just look there for the name */
          new_val = read_variable(val, preds[0]);
       } else {
-         /* if there are more predecessors, we create a phi just in case */
-         new_val = Temp{program->allocateId(), val.regClass()};
-         renames[block->index][val.id()] = new_val;
+         /* there are multiple predecessors and the block is sealed */
+         Temp ops[preds.size()];
+
+         /* we start assuming that the name is the same from all predecessors */
+         renames[block->index][val.id()] = val;
+         bool needs_phi = false;
+
+         /* get the rename from each predecessor and check if it equals the original name */
+         for (unsigned i = 0; i < preds.size(); i++) {
+            ops[i] = read_variable(val, preds[i]);
+            needs_phi |= !(ops[i] == val);
+         }
+
+         /* if all are the same, just return val */
+         if (!needs_phi)
+            return val;
+
+         /* the variable has been renamed differently in the predecessors: we need to insert a phi */
          aco_opcode opcode = is_logical ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
          std::unique_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
-
+         new_val = Temp{program->allocateId(), val.regClass()};
          phi->getDefinition(0) = Definition(new_val);
          phi->getDefinition(0).setFixed(assignments[val.id()].first);
          assignments[new_val.id()] = {phi->getDefinition(0).physReg(), phi->getDefinition(0).regClass()};
-         phi_map.emplace(new_val.id(), phi_info{phi.get(), block->index});
-         Instruction* instr = phi.get();
-
-         /* we look up the name in all predecessors */
          for (unsigned i = 0; i < preds.size(); i++) {
-            Temp op_temp = read_variable(val, preds[i]);
-            instr->getOperand(i).setTemp(op_temp);
-            assert(assignments.find(op_temp.id()) != assignments.end());
-            instr->getOperand(i).setFixed(assignments[op_temp.id()].first);
-            if (!(op_temp == new_val) && phi_map.find(op_temp.id()) != phi_map.end())
-               phi_map[op_temp.id()].uses.emplace(instr);
+            phi->getOperand(i) = Operand(ops[i]);
+            phi->getOperand(i).setFixed(assignments[ops[i].id()].first);
          }
-         /* we check if the phi is trivial (in which case we return the original value) */
-         new_val = try_remove_trivial_phi(phi_map.find(new_val.id()));
-         // TODO: that is quite inefficient, better keep temporaries because most phis are trivial
-         // see the paper: we can mark visited blocks, and only emit a phi on second visit.
-         // or better: we can try to detect cycles and only emit phi on loop headers
+         phi_map.emplace(new_val.id(), phi_info{phi.get(), block->index});
          phis[block->index].emplace_back(std::move(phi));
       }
+
       renames[block->index][val.id()] = new_val;
       orig_names[new_val.id()] = val;
       return new_val;
@@ -405,12 +409,12 @@ void register_allocation(Program *program)
             renames[i][orig_var] = same;
       }
 
-      instr->num_definitions = 0; /* this indicates that the phi can be removed */
+      instr->num_definitions = 0; /* this indicates that the phi can be removed */ // FIXME: this might cause memory leaks depending on how we implement the unique_ptr custom deleter
       phi_map.erase(info);
       for (auto it : phi_users)
          try_remove_trivial_phi(it);
 
-      /* do to the removal of other phis, the name might have changed once again! */
+      /* due to the removal of other phis, the name might have changed once again! */
       return renames[info->second.block_idx][orig_var];
    };
 
