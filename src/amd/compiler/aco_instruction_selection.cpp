@@ -118,7 +118,7 @@ Temp emit_v_add32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_
    if (ctx->options->chip_class < GFX9)
       carry_out = true;
 
-   aco_opcode op = carry_out ? aco_opcode::v_add_co_u32 : aco_opcode::v_add_i32;
+   aco_opcode op = carry_out ? aco_opcode::v_add_co_u32 : aco_opcode::v_add_u32;
    int num_defs = carry_out ? 2 : 1;
 
    Temp carry;
