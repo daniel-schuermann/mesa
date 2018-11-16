@@ -46,20 +46,12 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
       options = &local_options;
    }
 
-
-   struct radv_shader_info pre_info = info->info;
-
-   memset(info, 0, sizeof(*info));
-   memset(config, 0, sizeof(*config));
-
-   /* This is actually form a pass done by radv and w ewant to keep it, just need to clear all the
-    * nir_to_llvm stuff. */
-   info->info = pre_info;
-
    /* Instruction Selection */
    auto program = aco::select_program(shader, config, info, options);
-   //std::cerr << "After Instruction Selection:\n";
-   //aco_print_program(program.get(), stderr);
+   if (options->dump_preoptir) {
+      std::cerr << "After Instruction Selection:\n";
+      aco_print_program(program.get(), stderr);
+   }
    aco::validate(program.get(), stderr);
 
    /* Optimization: doesn't work yet with control flow */
@@ -71,8 +63,11 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    //aco_print_program(program.get(), stderr);
    /* Register Allocation */
    aco::register_allocation(program.get());
-   //std::cerr << "After RA:\n";
-   //aco_print_program(program.get(), stderr);
+   if (options->dump_shader) {
+      std::cerr << "After RA:\n";
+      aco_print_program(program.get(), stderr);
+   }
+
    aco::eliminate_phis(program.get());
    /* Lower to HW Instructions */
    aco::lower_to_hw_instr(program.get());
@@ -91,11 +86,14 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
 
    /* Assembly */
    std::vector<uint32_t> code = aco::emit_program(program.get());
-   //std::cerr << "After Assembly:\n";
-   //std::cerr << "Num VGPRs: " << program->config->num_vgprs << "\n";
-   //std::cerr << "Num SGPRs: " << program->config->num_sgprs << "\n";
+
    char llvm_mc[] = "/usr/bin/llvm-mc-7";
-   //aco::print_asm(code, llvm_mc, std::cerr);
+   if (options->dump_shader) {
+      std::cerr << "After Assembly:\n";
+      //std::cerr << "Num VGPRs: " << program->config->num_vgprs << "\n";
+      //std::cerr << "Num SGPRs: " << program->config->num_sgprs << "\n";
+      aco::print_asm(code, llvm_mc, std::cerr);
+   }
    //std::cerr << binary->disasm_string;
    uint32_t* bin = (uint32_t*) malloc(code.size() * sizeof(uint32_t));
    for (unsigned i = 0; i < code.size(); i++)
@@ -103,5 +101,8 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
 
    binary->code = (unsigned char*) bin;
    binary->code_size = code.size() * sizeof(uint32_t);
-
+   binary->disasm_string = (char*) malloc(1);
+   binary->disasm_string[0] = '\0';
+   binary->llvm_ir_string = (char*) malloc(1);
+   binary->llvm_ir_string[0] = '\0';
 }
