@@ -280,7 +280,7 @@ void schedule(Program* program)
    for (auto&& block : program->blocks)
    {
       sched_ctx ctx(block->instructions.size());
-      std::vector<std::unique_ptr<Instruction>> new_instructions;
+      std::vector<aco_ptr<Instruction>> new_instructions;
       build_dag(block.get(), ctx);
       while (!ctx.candidates.empty())
       {
@@ -290,7 +290,7 @@ void schedule(Program* program)
             /* create NOP */
             SOPP_instruction* nop = create_instruction<SOPP_instruction>(aco_opcode::s_nop, Format::SOPP, 0, 0);
             nop->imm = next_instr->nops - 1;
-            new_instructions.emplace_back(std::unique_ptr<Instruction>(nop));
+            new_instructions.emplace_back(aco_ptr<Instruction>(nop));
          }
          ctx.current_index = new_instructions.size();
          new_instructions.emplace_back(std::move(block->instructions[next_instr->index]));

@@ -690,14 +690,21 @@ struct Pseudo_branch_instruction : public Instruction {
 struct Pseudo_barrier_instruction : public Instruction {
 };
 
+struct instr_deleter_functor {
+   void operator()(void* p) {
+      free(p);
+   }
+};
+
+template<typename T>
+using aco_ptr = std::unique_ptr<T, instr_deleter_functor>;
+
 template<typename T>
 T* create_instruction(aco_opcode opcode, Format format, uint32_t num_operands, uint32_t num_definitions)
 {
-   // FIXME: this might still leak and we likely need a custom deleter for the unique_ptr.
    std::size_t size = sizeof(T) + num_operands * sizeof(Operand) + num_definitions * sizeof(Definition);
-   char *data = (char*)::operator new(size);
-   memset(data, 0, size);
-   T* inst = (T*) new (data)T;
+   char *data = (char*) calloc(1, size);
+   T* inst = (T*) data;
 
    inst->opcode = opcode;
    inst->format = format;
@@ -713,7 +720,7 @@ T* create_instruction(aco_opcode opcode, Format format, uint32_t num_operands, u
 /* CFG */
 struct Block {
    unsigned index;
-   std::vector<std::unique_ptr<Instruction>> instructions;
+   std::vector<aco_ptr<Instruction>> instructions;
    std::vector<Block*> logical_predecessors;
    std::vector<Block*> linear_predecessors;
    std::vector<Block*> logical_successors;

@@ -32,7 +32,7 @@
 namespace aco {
 
 struct Node {
-   std::unique_ptr<Instruction> instr;
+   aco_ptr<Instruction> instr;
    std::unordered_set<Node*> children;
    int succ_count = 0;
    int reg = 0;
@@ -41,7 +41,7 @@ struct Node {
    int latency = 0;
    Node* imm_dep = nullptr;
 
-   Node(std::unique_ptr<Instruction> instr) : instr(std::move(instr)) {};
+   Node(aco_ptr<Instruction> instr) : instr(std::move(instr)) {};
 };
 
 void schedule_block(Block* block)
