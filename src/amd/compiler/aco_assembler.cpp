@@ -279,7 +279,7 @@ void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
    for (std::vector<std::unique_ptr<Block>>::reverse_iterator block_it = program->blocks.rbegin(); block_it != program->blocks.rend(); ++block_it)
    {
       Block* block = block_it->get();
-      std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin();
+      std::vector<aco_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin();
       ++it;
       while ( it != block->instructions.rend())
       {
@@ -295,7 +295,7 @@ void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
          ++it;
       }
       /* we didn't find an Export instruction and have to insert a null export */
-      std::unique_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
+      aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
       for (unsigned i = 0; i < 4; i++)
          exp->getOperand(i) = Operand();
       exp->enabled_mask = 0;

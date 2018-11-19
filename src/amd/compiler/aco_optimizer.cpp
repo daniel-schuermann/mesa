@@ -46,13 +46,13 @@ namespace aco {
 
 
 struct mad_info {
-   std::unique_ptr<Instruction> add_instr;
+   aco_ptr<Instruction> add_instr;
    uint32_t mul_temp_id;
    uint32_t literal_idx;
    bool needs_vop3;
    bool check_literal;
 
-   mad_info(std::unique_ptr<Instruction> instr, uint32_t id, bool vop3)
+   mad_info(aco_ptr<Instruction> instr, uint32_t id, bool vop3)
    : add_instr(std::move(instr)), mul_temp_id(id), needs_vop3(vop3), check_literal(false) {}
 };
 
@@ -252,13 +252,13 @@ struct ssa_info {
 
 struct opt_ctx {
    Program* program;
-   std::vector<std::unique_ptr<Instruction>> instructions;
+   std::vector<aco_ptr<Instruction>> instructions;
    ssa_info* info;
    std::pair<uint32_t,Temp> last_literal;
    std::vector<mad_info> mad_infos;
 };
 
-bool can_swap_operands(std::unique_ptr<Instruction>& instr)
+bool can_swap_operands(aco_ptr<Instruction>& instr)
 {
    if (instr->getOperand(0).isConstant() ||
        (instr->getOperand(0).isTemp() && instr->getOperand(0).getTemp().type() == sgpr))
@@ -292,7 +292,7 @@ bool can_swap_operands(std::unique_ptr<Instruction>& instr)
    }
 }
 
-bool can_use_VOP3(std::unique_ptr<Instruction>& instr)
+bool can_use_VOP3(aco_ptr<Instruction>& instr)
 {
    if (instr->num_operands && instr->getOperand(0).isLiteral())
       return false;
@@ -303,13 +303,13 @@ bool can_use_VOP3(std::unique_ptr<Instruction>& instr)
           instr->opcode != aco_opcode::v_madak_f16;
 }
 
-void to_VOP3(opt_ctx& ctx, std::unique_ptr<Instruction>& instr)
+void to_VOP3(opt_ctx& ctx, aco_ptr<Instruction>& instr)
 {
    if (instr->isVOP3())
       return;
 
    assert(!instr->getOperand(0).isLiteral());
-   std::unique_ptr<Instruction> tmp = std::move(instr);
+   aco_ptr<Instruction> tmp = std::move(instr);
    Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
    instr.reset(create_instruction<VOP3A_instruction>(tmp->opcode, format, tmp->num_operands, tmp->num_definitions));
    for (unsigned i = 0; i < instr->num_operands; i++)
@@ -354,7 +354,7 @@ bool is_untyped_instruction(aco_opcode opcode)
    }
 }
 
-void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
+void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 {
 
    for (unsigned i = 0; i < instr->num_operands; i++)
@@ -557,7 +557,7 @@ void label_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
 }
 
 
-void check_instruction_uses(opt_ctx &ctx, std::unique_ptr<Instruction>& instr, std::set<Temp>& live_outs)
+void check_instruction_uses(opt_ctx &ctx, aco_ptr<Instruction>& instr, std::set<Temp>& live_outs)
 {
    if (instr->num_definitions && !instr->isVMEM()) {
       bool is_used = false;
@@ -584,7 +584,7 @@ void check_instruction_uses(opt_ctx &ctx, std::unique_ptr<Instruction>& instr, s
 // TODO: we could possibly move the whole label_instruction pass to combine_instruction:
 // this would mean that we'd have to fix the instruction uses while value propagation
 
-void combine_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
+void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 {
    if (!instr->isVALU())
       return;
@@ -824,7 +824,7 @@ void combine_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
             need_vop3 = true;
          }
 
-         std::unique_ptr<VOP3A_instruction> mad{create_instruction<VOP3A_instruction>(aco_opcode::v_mad_f32, Format::VOP3A, 3, 1)};
+         aco_ptr<VOP3A_instruction> mad{create_instruction<VOP3A_instruction>(aco_opcode::v_mad_f32, Format::VOP3A, 3, 1)};
          for (unsigned i = 0; i < 3; i++)
          {
             mad->getOperand(i) = op[i];
@@ -845,7 +845,7 @@ void combine_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
 }
 
 
-void select_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
+void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 {
    const uint32_t threshold = 4;
 
@@ -945,7 +945,7 @@ void select_instruction(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
 }
 
 
-void apply_literals(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
+void apply_literals(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 {
    /* Cleanup Dead Instructions */
    if (!instr)
@@ -976,7 +976,7 @@ void apply_literals(opt_ctx &ctx, std::unique_ptr<Instruction>& instr)
    /* apply literals on MAD */
    else if (instr->opcode == aco_opcode::v_mad_f32 && ctx.info[instr->getDefinition(0).tempId()].is_mad()) {
       mad_info* info = &ctx.mad_infos[ctx.info[instr->getDefinition(0).tempId()].val];
-      std::unique_ptr<Instruction> new_mad;
+      aco_ptr<Instruction> new_mad;
       if (info->check_literal && ctx.info[instr->getOperand(info->literal_idx).tempId()].uses == 0) {
          if (info->literal_idx == 2) { /* add literal -> madak */
             new_mad.reset(create_instruction<VOP2_instruction>(aco_opcode::v_madak_f32, Format::VOP2, 3, 1));
@@ -1017,7 +1017,7 @@ void optimize(Program* program)
 
    /* 1. Bottom-Up DAG pass (forward) to label all ssa-defs */
    for (auto&& block : program->blocks) {
-      for (std::unique_ptr<Instruction>& instr : block->instructions)
+      for (aco_ptr<Instruction>& instr : block->instructions)
          label_instruction(ctx, instr);
    }
 
@@ -1027,13 +1027,13 @@ void optimize(Program* program)
    {
       Block* block = it->get();
       std::set<Temp> live_outs = live_out_per_block[block->index];
-      for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
+      for (std::vector<aco_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
          check_instruction_uses(ctx, *it, live_outs);
    }
 
    /* 2. Combine v_mad, omod, clamp and propagate sgpr on VALU instructions */
    for (auto&& block : program->blocks) {
-      for (std::unique_ptr<Instruction>& instr : block->instructions)
+      for (aco_ptr<Instruction>& instr : block->instructions)
          combine_instruction(ctx, instr);
    }
 
@@ -1041,14 +1041,14 @@ void optimize(Program* program)
    for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it)
    {
       Block* block = it->get();
-      for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
+      for (std::vector<aco_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
          select_instruction(ctx, *it);
    }
 
    /* 4. Add literals to instructions */
    for (auto&& block : program->blocks) {
       ctx.instructions.clear();
-      for (std::unique_ptr<Instruction>& instr : block->instructions)
+      for (aco_ptr<Instruction>& instr : block->instructions)
          apply_literals(ctx, instr);
       block->instructions.swap(ctx.instructions);
    }
