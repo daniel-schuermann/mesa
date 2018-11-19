@@ -412,6 +412,7 @@ nir_divergence_analysis(nir_shader *shader)
          nir_block_worklist_add_all(&worklist, impl);
       }
    }
+   nir_block_worklist_fini(&worklist);
 
    return t;
 }
