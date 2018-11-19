@@ -39,9 +39,9 @@ struct copy_operation {
    unsigned uses;
 };
 
-void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<std::unique_ptr<Instruction>>& new_instructions, chip_class chip_class)
+void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<aco_ptr<Instruction>>& new_instructions, chip_class chip_class)
 {
-   std::unique_ptr<Instruction> mov;
+   aco_ptr<Instruction> mov;
    std::map<PhysReg, copy_operation>::iterator it = copy_map.begin();
    std::map<PhysReg, copy_operation>::iterator target;
 
@@ -152,10 +152,10 @@ void lower_to_hw_instr(Program* program)
    for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it)
    {
       Block* block = it->get();
-      std::vector<std::unique_ptr<Instruction>> new_instructions;
+      std::vector<aco_ptr<Instruction>> new_instructions;
       for (auto&& instr : block->instructions)
       {
-         std::unique_ptr<Instruction> mov;
+         aco_ptr<Instruction> mov;
          if (instr->format == Format::PSEUDO) {
             switch (instr->opcode)
             {
@@ -247,19 +247,19 @@ void lower_to_hw_instr(Program* program)
             case aco_opcode::p_discard_if:
             {
                assert(instr->getOperand(0).regClass() == s2);
-               std::unique_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2)};
+               aco_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2)};
                sop2->getOperand(0) = Operand(exec, s2);
                sop2->getOperand(1) = instr->getOperand(0);
                sop2->getDefinition(0) = Definition(exec, s2);
                sop2->getDefinition(1) = Definition(PhysReg{253}, b);
                new_instructions.emplace_back(std::move(sop2));
 
-               std::unique_ptr<SOPP_instruction> branch{create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc1, Format::SOPP, 1, 0)};
+               aco_ptr<SOPP_instruction> branch{create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc1, Format::SOPP, 1, 0)};
                branch->getOperand(0) = Operand(exec, s2);
                branch->imm = 3; /* (8 + 4 dwords) / 4 */
                new_instructions.emplace_back(std::move(branch));
 
-               std::unique_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
+               aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
                for (unsigned i = 0; i < 4; i++)
                   exp->getOperand(i) = Operand();
                exp->enabled_mask = 0;
@@ -269,7 +269,7 @@ void lower_to_hw_instr(Program* program)
                exp->dest = 9; /* NULL */
                new_instructions.emplace_back(std::move(exp));
 
-               std::unique_ptr<SOPP_instruction> endpgm{create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)};
+               aco_ptr<SOPP_instruction> endpgm{create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)};
                new_instructions.emplace_back(std::move(endpgm));
                break;
             }
@@ -290,7 +290,7 @@ void lower_to_hw_instr(Program* program)
             if (can_remove)
                continue;
 
-            std::unique_ptr<SOPP_instruction> sopp;
+            aco_ptr<SOPP_instruction> sopp;
             switch (instr->opcode) {
                case aco_opcode::p_branch:
                   sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_branch, Format::SOPP, 0, 0));
@@ -327,7 +327,7 @@ void lower_to_hw_instr(Program* program)
             if (!(instr->getDefinition(0).physReg() == vcc)) {
                /* check if the first operand was a literal */
                if (instr->getOperand(0).physReg().reg == 255) {
-                  std::unique_ptr<SOP1_instruction> mov{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1)};
+                  aco_ptr<SOP1_instruction> mov{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1)};
                   mov->getOperand(0) = instr->getOperand(0);
                   mov->getDefinition(0) = Definition(instr->getDefinition(0).physReg(), s1);
                   instr->getOperand(0) = Operand(instr->getDefinition(0).physReg(), s1);
@@ -335,7 +335,7 @@ void lower_to_hw_instr(Program* program)
                }
 
                /* change the instruction to VOP3 to enable an arbitrary register pair as dst */
-               std::unique_ptr<Instruction> tmp = std::move(instr);
+               aco_ptr<Instruction> tmp = std::move(instr);
                Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
                instr.reset(create_instruction<VOP3A_instruction>(tmp->opcode, format, tmp->num_operands, tmp->num_definitions));
                for (unsigned i = 0; i < instr->num_operands; i++)
@@ -348,7 +348,7 @@ void lower_to_hw_instr(Program* program)
             // TODO: what about literals?!
             if (instr->num_operands == 3 && !(instr->getOperand(2).physReg() == vcc || instr->getOperand(2).physReg().reg == 255 || instr->opcode == aco_opcode::v_mac_f32)) {
                /* change the instruction to VOP3 to enable an arbitrary register pair as dst */
-               std::unique_ptr<Instruction> tmp = std::move(instr);
+               aco_ptr<Instruction> tmp = std::move(instr);
                Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
                instr.reset(create_instruction<VOP3A_instruction>(tmp->opcode, format, tmp->num_operands, tmp->num_definitions));
                for (unsigned i = 0; i < instr->num_operands; i++)
