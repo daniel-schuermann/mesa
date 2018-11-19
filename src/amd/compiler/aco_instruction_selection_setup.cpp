@@ -727,7 +727,7 @@ void add_startpgm(struct isel_context *ctx)
    ctx->program->info->num_user_sgprs = user_sgpr_info.num_sgpr;
    ctx->program->info->num_input_vgprs = args.num_vgprs_used;
 
-   std::unique_ptr<Instruction> startpgm{create_instruction<Instruction>(aco_opcode::p_startpgm, Format::PSEUDO, 0, args.count)};
+   aco_ptr<Instruction> startpgm{create_instruction<Instruction>(aco_opcode::p_startpgm, Format::PSEUDO, 0, args.count)};
    for (unsigned i = 0; i < args.count; i++) {
       if (args.assign[i]) {
          *args.assign[i] = Temp{ctx->program->allocateId(), args.types[i]};

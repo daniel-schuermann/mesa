@@ -581,12 +581,12 @@ bool gen(Instruction* instr, wait_ctx& ctx)
 bool handle_block(Block* block, wait_ctx& ctx)
 {
    bool has_gen = false;
-   std::vector<std::unique_ptr<Instruction>> new_instructions;
+   std::vector<aco_ptr<Instruction>> new_instructions;
    for(auto& instr : block->instructions)
    {
       Instruction* wait_instr;
       if ((wait_instr = kill(instr.get(), ctx)))
-         new_instructions.emplace_back(std::unique_ptr<Instruction>(wait_instr));
+         new_instructions.emplace_back(aco_ptr<Instruction>(wait_instr));
 
       has_gen = gen(instr.get(), ctx) || has_gen;
       new_instructions.emplace_back(std::move(instr));

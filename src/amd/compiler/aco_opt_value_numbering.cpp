@@ -188,12 +188,12 @@ void process_block(std::unique_ptr<Block>& block,
    bool process_successors = false;
    bool run = false;
    Instruction* last_sopc = nullptr;
-   std::vector<std::unique_ptr<Instruction>>::iterator it = block->instructions.begin();
-   std::vector<std::unique_ptr<Instruction>> new_instructions;
+   std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
+   std::vector<aco_ptr<Instruction>> new_instructions;
    new_instructions.reserve(block->instructions.size());
 
    while (it != block->instructions.end()) {
-      std::unique_ptr<Instruction>& instr = *it;
+      aco_ptr<Instruction>& instr = *it;
       /* first, rename operands */
       for (unsigned i = 0; i < instr->num_operands; i++) {
          if (!instr->getOperand(i).isTemp())
