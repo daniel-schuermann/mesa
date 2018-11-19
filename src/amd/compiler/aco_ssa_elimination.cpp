@@ -40,7 +40,7 @@ struct ssa_elimination_ctx {
    phi_info linear_phi_info;
 };
 
-void collect_phi_info(phi_info& ctx, std::unique_ptr<Instruction>& phi, std::vector<Block*> preds)
+void collect_phi_info(phi_info& ctx, aco_ptr<Instruction>& phi, std::vector<Block*> preds)
 {
    assert(!(phi->opcode == aco_opcode::p_phi && phi->getDefinition(0).getTemp().type() == sgpr) && "smart merging for bools not yet implemented.");
    for (unsigned i = 0; i < preds.size(); i++)
@@ -59,7 +59,7 @@ void eliminate_phis(Program* program)
 
    /* 1. Collect information about every phi-instruction */
    for (auto&& block : program->blocks) {
-      for (std::unique_ptr<Instruction>& instr : block->instructions)
+      for (aco_ptr<Instruction>& instr : block->instructions)
       {
          if (instr->opcode == aco_opcode::p_phi)
             collect_phi_info(ctx.logical_phi_info, instr, block->logical_predecessors);
@@ -71,11 +71,11 @@ void eliminate_phis(Program* program)
    /* 2. we replace the p_logical_end instructions with a parallelcopy (we don't need the former anymore) */
    for (auto&& entry : ctx.logical_phi_info) {
       std::unique_ptr<Block>& block = program->blocks[entry.first];
-      for (std::vector<std::unique_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); ; ++it)
+      for (std::vector<aco_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); ; ++it)
       {
          assert(it != block->instructions.rend() && "Couldn't find a p_logical_end instruction");
          if ((*it)->opcode == aco_opcode::p_logical_end) {
-            std::unique_ptr<Instruction> pc{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, entry.second.size(), entry.second.size())};
+            aco_ptr<Instruction> pc{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, entry.second.size(), entry.second.size())};
             unsigned idx = 0;
             for (std::pair<Definition, Operand>& pair : entry.second)
             {
@@ -92,10 +92,10 @@ void eliminate_phis(Program* program)
    /* 3. we insert parallelcopys for the linear phis at the end of blocks just before the branch */
    for (auto&& entry : ctx.linear_phi_info) {
       std::unique_ptr<Block>& block = program->blocks[entry.first];
-      std::vector<std::unique_ptr<Instruction>>::iterator it = block->instructions.end();
+      std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.end();
       --it;
       assert((*it)->format == Format::PSEUDO_BRANCH);
-      std::unique_ptr<Instruction> pc{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, entry.second.size(), entry.second.size())};
+      aco_ptr<Instruction> pc{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, entry.second.size(), entry.second.size())};
       unsigned idx = 0;
       for (std::pair<Definition, Operand>& pair : entry.second)
       {

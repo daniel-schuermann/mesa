@@ -205,9 +205,9 @@ void register_allocation(Program *program)
    };
 
    std::function<PhysReg(std::array<uint32_t, 512>&, RegClass, std::vector<std::pair<Operand, Definition>>&,
-                         std::unique_ptr<Instruction>&)> get_reg =
+                         aco_ptr<Instruction>&)> get_reg =
                      [&](std::array<uint32_t, 512>& reg_file, RegClass rc, std::vector<std::pair<Operand, Definition>>& pc,
-                         std::unique_ptr<Instruction>& instr) {
+                         aco_ptr<Instruction>& instr) {
       unsigned size = sizeOf(rc);
       uint32_t stride = 1;
       uint32_t lb, ub;
@@ -288,8 +288,8 @@ void register_allocation(Program *program)
    bool sealed[program->blocks.size()];
    memset(filled, 0, sizeof filled);
    memset(sealed, 0, sizeof sealed);
-   std::vector<std::vector<std::unique_ptr<Instruction>>> phis(program->blocks.size());
-   std::vector<std::vector<std::unique_ptr<Instruction>>> incomplete_phis(program->blocks.size());
+   std::vector<std::vector<aco_ptr<Instruction>>> phis(program->blocks.size());
+   std::vector<std::vector<aco_ptr<Instruction>>> incomplete_phis(program->blocks.size());
    std::map<unsigned, phi_info> phi_map;
    std::function<Temp(Temp,Block*)> read_variable;
    std::function<Temp(Temp,Block*)> read_variable_recursive;
@@ -317,7 +317,7 @@ void register_allocation(Program *program)
          /* if the block is not sealed yet, we create an incomplete phi (which might later get removed again) */
          new_val = Temp{program->allocateId(), val.regClass()};
          aco_opcode opcode = is_logical ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
-         std::unique_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
+         aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
          phi->getDefinition(0) = Definition(new_val);
          phi->getDefinition(0).setFixed(assignments[val.id()].first);
          assignments[new_val.id()] = {phi->getDefinition(0).physReg(), phi->getDefinition(0).regClass()};
@@ -350,7 +350,7 @@ void register_allocation(Program *program)
 
          /* the variable has been renamed differently in the predecessors: we need to insert a phi */
          aco_opcode opcode = is_logical ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
-         std::unique_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
+         aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
          new_val = Temp{program->allocateId(), val.regClass()};
          phi->getDefinition(0) = Definition(new_val);
          phi->getDefinition(0).setFixed(assignments[val.id()].first);
@@ -430,9 +430,9 @@ void register_allocation(Program *program)
       for (Temp t : live)
          kills.emplace(t.id(), nullptr);
 
-      std::vector<std::unique_ptr<Instruction>>::reverse_iterator rit;
+      std::vector<aco_ptr<Instruction>>::reverse_iterator rit;
       for (rit = block->instructions.rbegin(); rit != block->instructions.rend(); ++rit) {
-         std::unique_ptr<Instruction>& instr = *rit;
+         aco_ptr<Instruction>& instr = *rit;
          if (instr->opcode != aco_opcode::p_linear_phi && instr->opcode != aco_opcode::p_phi) {
             for (unsigned i = 0; i < instr->num_operands; i++) {
                if (instr->getOperand(i).isTemp() && live.emplace(instr->getOperand(i).getTemp()).second)
@@ -480,11 +480,11 @@ void register_allocation(Program *program)
             register_file[assignments[t.id()].first.reg + i] = t.id();
       }
 
-      std::vector<std::unique_ptr<Instruction>> instructions;
-      std::unique_ptr<Instruction> pc;
-      std::vector<std::unique_ptr<Instruction>>::iterator it;
+      std::vector<aco_ptr<Instruction>> instructions;
+      aco_ptr<Instruction> pc;
+      std::vector<aco_ptr<Instruction>>::iterator it;
       for (it = block->instructions.begin(); it != block->instructions.end(); ++it) {
-         std::unique_ptr<Instruction>& instr = *it;
+         aco_ptr<Instruction>& instr = *it;
          std::vector<std::pair<Operand, Definition>> parallelcopy;
          /* this is a slight adjustment from the paper as we already have phi nodes:
           * We consider them incomplete phis. */
@@ -657,7 +657,7 @@ void register_allocation(Program *program)
               instr->opcode == aco_opcode::v_subbrev_co_u32) &&
              !(instr->getDefinition(1).physReg() == vcc)) {
             /* change the instruction to VOP3 to enable an arbitrary register pair as dst */
-            std::unique_ptr<Instruction> tmp = std::move(instr);
+            aco_ptr<Instruction> tmp = std::move(instr);
             Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
             instr.reset(create_instruction<VOP3A_instruction>(tmp->opcode, format, tmp->num_operands, tmp->num_definitions));
             for (unsigned i = 0; i < instr->num_operands; i++)
@@ -681,7 +681,7 @@ void register_allocation(Program *program)
          }
          if (all_filled) {
             /* finish incomplete phis and check if they became trivial */
-            for (std::unique_ptr<Instruction>& phi : incomplete_phis[succ->index]) {
+            for (aco_ptr<Instruction>& phi : incomplete_phis[succ->index]) {
                std::vector<Block*> preds = phi->getDefinition(0).getTemp().type() == vgpr ? succ->logical_predecessors : succ->linear_predecessors;
                for (unsigned i = 0; i < phi->num_operands; i++) {
                   phi->getOperand(i).setTemp(read_variable(phi->getOperand(i).getTemp(), preds[i]));
@@ -690,7 +690,7 @@ void register_allocation(Program *program)
                try_remove_trivial_phi(phi_map.find(phi->getDefinition(0).tempId()));
             }
             /* complete the original phi nodes, but no need to check triviality */
-            for (std::unique_ptr<Instruction>& instr : succ->instructions) {
+            for (aco_ptr<Instruction>& instr : succ->instructions) {
                if (instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi)
                   break;
                std::vector<Block*> preds = instr->opcode == aco_opcode::p_phi ? succ->logical_predecessors : succ->linear_predecessors;
@@ -717,8 +717,8 @@ void register_allocation(Program *program)
 
    /* merge new phis with normal instructions */
    for (std::unique_ptr<Block>& block : program->blocks) {
-      std::vector<std::unique_ptr<Instruction>> tmp;
-      std::vector<std::unique_ptr<Instruction>>::iterator it = phis[block->index].begin();
+      std::vector<aco_ptr<Instruction>> tmp;
+      std::vector<aco_ptr<Instruction>>::iterator it = phis[block->index].begin();
       while (it != phis[block->index].end()) {
          if ((*it)->num_definitions != 0)
             tmp.emplace_back(std::move(*it));
