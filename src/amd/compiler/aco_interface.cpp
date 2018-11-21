@@ -58,11 +58,14 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    aco::value_numbering(program.get());
    aco::optimize(program.get());
    aco::validate(program.get(), stderr);
+
+   std::vector<std::set<aco::Temp>> live_out_per_block = aco::live_temps_at_end_of_block(program.get());
+
    //aco::schedule_program(program.get());
    //std::cerr << "After Opt:\n";
    //aco_print_program(program.get(), stderr);
    /* Register Allocation */
-   aco::register_allocation(program.get());
+   aco::register_allocation(program.get(), live_out_per_block);
    if (options->dump_shader) {
       std::cerr << "After RA:\n";
       aco_print_program(program.get(), stderr);
