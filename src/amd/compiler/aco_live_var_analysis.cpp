@@ -33,39 +33,55 @@
 
  namespace aco {
 
- void process_live_temps_per_block(std::vector<std::set<Temp>>& live_temps, Block* block, std::set<unsigned>& worklist)
+template<bool reg_demand_cond>
+void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>& worklist)
 {
+   std::vector<std::pair<uint16_t,uint16_t>>& register_demand = lives.register_demand[block->index];
+   uint16_t vgpr_demand = 0;
+   uint16_t sgpr_demand = 0;
+   if (reg_demand_cond) {
+      register_demand.resize(block->instructions.size());
+      block->vgpr_demand = 0;
+      block->sgpr_demand = 0;
+   }
    std::set<Temp> live_sgprs;
    std::set<Temp> live_vgprs;
-   unsigned vgpr_demand = 0;
-   unsigned sgpr_demand = 0;
-   block->vgpr_demand = 0;
-   block->sgpr_demand = 0;
+
    /* first, insert the live-outs from this block into our temporary sets */
+   std::vector<std::set<Temp>>& live_temps = lives.live_out;
    for (std::set<Temp>::iterator it = live_temps[block->index].begin(); it != live_temps[block->index].end(); ++it)
    {
       if ((*it).type() == vgpr) {
          live_vgprs.insert(*it);
-         vgpr_demand += (*it).size();
+         if (reg_demand_cond)
+            vgpr_demand += (*it).size();
       } else {
          live_sgprs.insert(*it);
-         sgpr_demand += (*it).size();
+         if (reg_demand_cond)
+            sgpr_demand += (*it).size();
       }
    }
 
    /* traverse the instructions backwards */
-   for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
+   for (int i = block->instructions.size() -1; i >= 0; i--)
    {
-      Instruction *insn = it->get();
+      if (reg_demand_cond)
+         register_demand[i] = {sgpr_demand, vgpr_demand};
+
+      Instruction *insn = block->instructions[i].get();
       /* KILL */
       for (unsigned i = 0; i < insn->definitionCount(); ++i)
       {
          auto& definition = insn->getDefinition(i);
          if (definition.isTemp()) {
             if (definition.getTemp().type() == vgpr) {
-               vgpr_demand -= definition.size() * live_vgprs.erase(definition.getTemp());
+               size_t n = live_vgprs.erase(definition.getTemp());
+               if (reg_demand_cond)
+                  vgpr_demand -= definition.size() * n;
              } else {
-               sgpr_demand -= definition.size() * live_sgprs.erase(definition.getTemp());
+               size_t n = live_sgprs.erase(definition.getTemp());
+               if (reg_demand_cond)
+                  sgpr_demand -= definition.size() * n;
             }
          }
       }
@@ -85,26 +101,27 @@
                   worklist.insert(preds[i]->index);
             }
          }
-         continue;
-      }
-
-      for (unsigned i = 0; i < insn->operandCount(); ++i)
-      {
-         auto& operand = insn->getOperand(i);
-         if (operand.isTemp()) {
-            if (operand.getTemp().type() == vgpr) {
-               auto d = live_vgprs.insert(operand.getTemp());
-               if (d.second)
-                  vgpr_demand += operand.size();
-            } else {
-               auto d = live_sgprs.insert(operand.getTemp());
-               if (d.second)
-                  sgpr_demand += operand.size();
+      } else {
+         for (unsigned i = 0; i < insn->operandCount(); ++i)
+         {
+            auto& operand = insn->getOperand(i);
+            if (operand.isTemp()) {
+               if (operand.getTemp().type() == vgpr) {
+                  auto d = live_vgprs.insert(operand.getTemp());
+                  if (reg_demand_cond && d.second)
+                     vgpr_demand += operand.size();
+               } else {
+                  auto d = live_sgprs.insert(operand.getTemp());
+                  if (reg_demand_cond && d.second)
+                     sgpr_demand += operand.size();
+               }
             }
          }
+         if (reg_demand_cond) {
+            block->vgpr_demand = std::max(block->vgpr_demand, vgpr_demand);
+            block->sgpr_demand = std::max(block->sgpr_demand, sgpr_demand);
+         }
       }
-      block->vgpr_demand = std::max(block->vgpr_demand, vgpr_demand);
-      block->sgpr_demand = std::max(block->sgpr_demand, sgpr_demand);
    }
 
    /* now, we have the live-in sets and need to merge them into the live-out sets */
@@ -125,15 +142,19 @@
    }
 
    assert(block->linear_predecessors.size() != 0 || (live_vgprs.empty() && live_sgprs.empty()));
-   assert(block->linear_predecessors.size() != 0 || (vgpr_demand == 0 && sgpr_demand == 0));
+   assert(!reg_demand_cond || block->linear_predecessors.size() != 0 || (vgpr_demand == 0 && sgpr_demand == 0));
 }
 
-std::vector<std::set<Temp>> live_temps_at_end_of_block(Program* program)
+template<bool register_demand>
+live live_var_analysis(Program* program)
 {
-   std::vector<std::set<Temp>> result(program->blocks.size());
+   live result;
+   result.live_out.resize(program->blocks.size());
+   if (register_demand)
+      result.register_demand.resize(program->blocks.size());
    std::set<unsigned> worklist;
-   unsigned vgpr_demand = 0;
-   unsigned sgpr_demand = 0;
+   uint16_t vgpr_demand = 0;
+   uint16_t sgpr_demand = 0;
    /* this implementation assumes that the block idx corresponds to the block's position in program->blocks vector */
    for (auto& block : program->blocks)
       worklist.insert(block->index);
@@ -141,57 +162,61 @@ std::vector<std::set<Temp>> live_temps_at_end_of_block(Program* program)
       std::set<unsigned>::reverse_iterator b_it = worklist.rbegin();
       unsigned block_idx = *b_it;
       worklist.erase(block_idx);
-      process_live_temps_per_block(result, program->blocks[block_idx].get(), worklist);
+      process_live_temps_per_block<register_demand>(result, program->blocks[block_idx].get(), worklist);
       vgpr_demand = std::max(vgpr_demand, program->blocks[block_idx]->vgpr_demand);
       sgpr_demand = std::max(sgpr_demand, program->blocks[block_idx]->sgpr_demand);
    }
 
    /* calculate the program's register demand and number of waves */
-   // TODO: also take shared mem into account
-   assert(vgpr_demand <= 256 && sgpr_demand <= 100);
-   if (vgpr_demand <= 24 && sgpr_demand <= 46) {
-      program->num_waves = 10;
-      program->max_sgpr = 46;
-      program->max_vgpr = 24;
-   } else if (vgpr_demand <= 28 && sgpr_demand <= 54) {
-      program->num_waves = 9;
-      program->max_sgpr = 54;
-      program->max_vgpr = 28;
-   } else if (vgpr_demand <= 32 && sgpr_demand <= 62) {
-      program->num_waves = 8;
-      program->max_sgpr = 62;
-      program->max_vgpr = 32;
-   } else if (vgpr_demand <= 36 && sgpr_demand <= 70) {
-      program->num_waves = 7;
-      program->max_sgpr = 70;
-      program->max_vgpr = 36;
-   } else if (vgpr_demand <= 40 && sgpr_demand <= 78) {
-      program->num_waves = 6;
-      program->max_sgpr = 78;
-      program->max_vgpr = 40;
-   } else if (vgpr_demand <= 48 && sgpr_demand <= 94) {
-      program->num_waves = 5;
-      program->max_sgpr = 94;
-      program->max_vgpr = 48;
-   } else {
-      program->max_sgpr = 100;
-      if (vgpr_demand <= 64) {
-         program->num_waves = 4;
-         program->max_vgpr = 64;
-      } else if (vgpr_demand <= 84) {
-         program->num_waves = 3;
-         program->max_vgpr = 84;
-      } else if (vgpr_demand <= 128) {
-         program->num_waves = 2;
-         program->max_vgpr = 128;
+   if (register_demand) {
+      // TODO: also take shared mem into account
+      assert(vgpr_demand <= 256 && sgpr_demand <= 100);
+      if (vgpr_demand <= 24 && sgpr_demand <= 46) {
+         program->num_waves = 10;
+         program->max_sgpr = 46;
+         program->max_vgpr = 24;
+      } else if (vgpr_demand <= 28 && sgpr_demand <= 54) {
+         program->num_waves = 9;
+         program->max_sgpr = 54;
+         program->max_vgpr = 28;
+      } else if (vgpr_demand <= 32 && sgpr_demand <= 62) {
+         program->num_waves = 8;
+         program->max_sgpr = 62;
+         program->max_vgpr = 32;
+      } else if (vgpr_demand <= 36 && sgpr_demand <= 70) {
+         program->num_waves = 7;
+         program->max_sgpr = 70;
+         program->max_vgpr = 36;
+      } else if (vgpr_demand <= 40 && sgpr_demand <= 78) {
+         program->num_waves = 6;
+         program->max_sgpr = 78;
+         program->max_vgpr = 40;
+      } else if (vgpr_demand <= 48 && sgpr_demand <= 94) {
+         program->num_waves = 5;
+         program->max_sgpr = 94;
+         program->max_vgpr = 48;
       } else {
-         program->num_waves = 1;
-         program->max_vgpr = 256;
+         program->max_sgpr = 100;
+         if (vgpr_demand <= 64) {
+            program->num_waves = 4;
+            program->max_vgpr = 64;
+         } else if (vgpr_demand <= 84) {
+            program->num_waves = 3;
+            program->max_vgpr = 84;
+         } else if (vgpr_demand <= 128) {
+            program->num_waves = 2;
+            program->max_vgpr = 128;
+         } else {
+            program->num_waves = 1;
+            program->max_vgpr = 256;
+         }
       }
    }
 
    return result;
 }
+template live live_var_analysis<false>(Program* program);
+template live live_var_analysis<true>(Program* program);
 
 }
 

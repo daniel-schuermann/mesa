@@ -725,17 +725,17 @@ struct Block {
    std::vector<Block*> linear_predecessors;
    std::vector<Block*> logical_successors;
    std::vector<Block*> linear_successors;
-   unsigned vgpr_demand;
-   unsigned sgpr_demand;
+   uint16_t vgpr_demand;
+   uint16_t sgpr_demand;
 };
 
 
 class Program final {
 public:
    std::vector<std::unique_ptr<Block>> blocks;
-   unsigned max_vgpr = 0;
-   unsigned max_sgpr = 0;
-   unsigned num_waves = 0;
+   uint16_t max_vgpr = 0;
+   uint16_t max_sgpr = 0;
+   uint16_t num_waves = 0;
    ac_shader_config* config;
    struct radv_shader_variant_info *info;
    enum chip_class chip_class;
@@ -767,11 +767,20 @@ private:
    uint32_t allocationID = 1;
 };
 
+struct live {
+   /* live temps out per block */
+   std::vector<std::set<Temp>> live_out;
+   /* register demand (sgpr/vgpr) per instruction per block */
+   std::vector<std::vector<std::pair<uint16_t,uint16_t>>> register_demand;
+};
+
 std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         ac_shader_config* config,
                                         struct radv_shader_variant_info *info,
                                         struct radv_nir_compiler_options *options);
-std::vector<std::set<Temp>> live_temps_at_end_of_block(Program* program);
+
+template<bool condition>
+live live_var_analysis(Program* program);
 void value_numbering(Program* program);
 void optimize(Program* program);
 void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_per_block);
