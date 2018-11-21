@@ -1022,11 +1022,11 @@ void optimize(Program* program)
    }
 
    /* Backward pass to calculate the number of uses for each instruction */
-   std::vector<std::set<Temp>> live_out_per_block = live_temps_at_end_of_block(program);
+   std::vector<std::set<Temp>> live_out_per_block = live_var_analysis<false>(program).live_out;
    for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it)
    {
       Block* block = it->get();
-      std::set<Temp> live_outs = live_out_per_block[block->index];
+      std::set<Temp>& live_outs = live_out_per_block[block->index];
       for (std::vector<aco_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
          check_instruction_uses(ctx, *it, live_outs);
    }
