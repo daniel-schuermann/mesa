@@ -304,29 +304,30 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          renames[block->index][val.id()] = val;
          bool needs_phi = false;
 
-         /* get the rename from each predecessor and check if it equals the original name */
+         /* get the rename from each predecessor and check if they are the same */
          for (unsigned i = 0; i < preds.size(); i++) {
             ops[i] = read_variable(val, preds[i]);
-            needs_phi |= !(ops[i] == val);
+            if (i == 0)
+               new_val = ops[i];
+            else
+               needs_phi |= !(new_val == ops[i]);
          }
 
-         /* if all are the same, just return val */
-         if (!needs_phi)
-            return val;
-
-         /* the variable has been renamed differently in the predecessors: we need to insert a phi */
-         aco_opcode opcode = is_logical ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
-         aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
-         new_val = Temp{program->allocateId(), val.regClass()};
-         phi->getDefinition(0) = Definition(new_val);
-         phi->getDefinition(0).setFixed(assignments[val.id()].first);
-         assignments[new_val.id()] = {phi->getDefinition(0).physReg(), phi->getDefinition(0).regClass()};
-         for (unsigned i = 0; i < preds.size(); i++) {
-            phi->getOperand(i) = Operand(ops[i]);
-            phi->getOperand(i).setFixed(assignments[ops[i].id()].first);
+         if (needs_phi) {
+            /* the variable has been renamed differently in the predecessors: we need to insert a phi */
+            aco_opcode opcode = is_logical ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
+            aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
+            new_val = Temp{program->allocateId(), val.regClass()};
+            phi->getDefinition(0) = Definition(new_val);
+            phi->getDefinition(0).setFixed(assignments[val.id()].first);
+            assignments[new_val.id()] = {phi->getDefinition(0).physReg(), phi->getDefinition(0).regClass()};
+            for (unsigned i = 0; i < preds.size(); i++) {
+               phi->getOperand(i) = Operand(ops[i]);
+               phi->getOperand(i).setFixed(assignments[ops[i].id()].first);
+            }
+            phi_map.emplace(new_val.id(), phi_info{phi.get(), block->index});
+            phis[block->index].emplace_back(std::move(phi));
          }
-         phi_map.emplace(new_val.id(), phi_info{phi.get(), block->index});
-         phis[block->index].emplace_back(std::move(phi));
       }
 
       renames[block->index][val.id()] = new_val;
