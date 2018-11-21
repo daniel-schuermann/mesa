@@ -733,8 +733,9 @@ struct Block {
 class Program final {
 public:
    std::vector<std::unique_ptr<Block>> blocks;
-   unsigned vgpr_demand = 0;
-   unsigned sgpr_demand = 0;
+   unsigned max_vgpr = 0;
+   unsigned max_sgpr = 0;
+   unsigned num_waves = 0;
    ac_shader_config* config;
    struct radv_shader_variant_info *info;
    enum chip_class chip_class;
@@ -773,7 +774,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
 std::vector<std::set<Temp>> live_temps_at_end_of_block(Program* program);
 void value_numbering(Program* program);
 void optimize(Program* program);
-void register_allocation(Program *program);
+void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_per_block);
 void eliminate_phis(Program* program);
 void lower_to_hw_instr(Program* program);
 void schedule(Program* program);

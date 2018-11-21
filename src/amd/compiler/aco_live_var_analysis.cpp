@@ -132,8 +132,8 @@ std::vector<std::set<Temp>> live_temps_at_end_of_block(Program* program)
 {
    std::vector<std::set<Temp>> result(program->blocks.size());
    std::set<unsigned> worklist;
-   program->vgpr_demand = 0;
-   program->sgpr_demand = 0;
+   unsigned vgpr_demand = 0;
+   unsigned sgpr_demand = 0;
    /* this implementation assumes that the block idx corresponds to the block's position in program->blocks vector */
    for (auto& block : program->blocks)
       worklist.insert(block->index);
@@ -142,8 +142,52 @@ std::vector<std::set<Temp>> live_temps_at_end_of_block(Program* program)
       unsigned block_idx = *b_it;
       worklist.erase(block_idx);
       process_live_temps_per_block(result, program->blocks[block_idx].get(), worklist);
-      program->vgpr_demand = std::max(program->vgpr_demand, program->blocks[block_idx]->vgpr_demand);
-      program->sgpr_demand = std::max(program->sgpr_demand, program->blocks[block_idx]->sgpr_demand);
+      vgpr_demand = std::max(vgpr_demand, program->blocks[block_idx]->vgpr_demand);
+      sgpr_demand = std::max(sgpr_demand, program->blocks[block_idx]->sgpr_demand);
+   }
+
+   /* calculate the program's register demand and number of waves */
+   // TODO: also take shared mem into account
+   assert(vgpr_demand <= 256 && sgpr_demand <= 100);
+   if (vgpr_demand <= 24 && sgpr_demand <= 46) {
+      program->num_waves = 10;
+      program->max_sgpr = 46;
+      program->max_vgpr = 24;
+   } else if (vgpr_demand <= 28 && sgpr_demand <= 54) {
+      program->num_waves = 9;
+      program->max_sgpr = 54;
+      program->max_vgpr = 28;
+   } else if (vgpr_demand <= 32 && sgpr_demand <= 62) {
+      program->num_waves = 8;
+      program->max_sgpr = 62;
+      program->max_vgpr = 32;
+   } else if (vgpr_demand <= 36 && sgpr_demand <= 70) {
+      program->num_waves = 7;
+      program->max_sgpr = 70;
+      program->max_vgpr = 36;
+   } else if (vgpr_demand <= 40 && sgpr_demand <= 78) {
+      program->num_waves = 6;
+      program->max_sgpr = 78;
+      program->max_vgpr = 40;
+   } else if (vgpr_demand <= 48 && sgpr_demand <= 94) {
+      program->num_waves = 5;
+      program->max_sgpr = 94;
+      program->max_vgpr = 48;
+   } else {
+      program->max_sgpr = 100;
+      if (vgpr_demand <= 64) {
+         program->num_waves = 4;
+         program->max_vgpr = 64;
+      } else if (vgpr_demand <= 84) {
+         program->num_waves = 3;
+         program->max_vgpr = 84;
+      } else if (vgpr_demand <= 128) {
+         program->num_waves = 2;
+         program->max_vgpr = 128;
+      } else {
+         program->num_waves = 1;
+         program->max_vgpr = 256;
+      }
    }
 
    return result;

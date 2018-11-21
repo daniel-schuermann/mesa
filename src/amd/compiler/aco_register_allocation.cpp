@@ -40,46 +40,12 @@
 namespace aco {
 
 
-void register_allocation(Program *program)
+void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_per_block)
 {
 
    /* calculate max register bounds */
-   unsigned max_sgpr = 0;
-   unsigned max_vgpr = 0;
-   std::vector<std::set<Temp>> live_out_per_block = live_temps_at_end_of_block(program);
-
-   assert(program->vgpr_demand <= 256 && program->sgpr_demand <= 100);
-   if (program->vgpr_demand <= 24 && program->sgpr_demand <= 46) {
-      max_sgpr = 46;
-      max_vgpr = 24;
-   } else if (program->vgpr_demand <= 28 && program->sgpr_demand <= 54) {
-      max_sgpr = 54;
-      max_vgpr = 28;
-   } else if (program->vgpr_demand <= 32 && program->sgpr_demand <= 62) {
-      max_sgpr = 62;
-      max_vgpr = 32;
-   } else if (program->vgpr_demand <= 36 && program->sgpr_demand <= 70) {
-      max_sgpr = 70;
-      max_vgpr = 36;
-   } else if (program->vgpr_demand <= 40 && program->sgpr_demand <= 78) {
-      max_sgpr = 78;
-      max_vgpr = 40;
-   } else if (program->vgpr_demand <= 48 && program->sgpr_demand <= 94) {
-      max_sgpr = 94;
-      max_vgpr = 48;
-   } else {
-      max_sgpr = 100;
-      if (program->vgpr_demand <= 64)
-         max_vgpr = 64;
-      else if (program->vgpr_demand <= 84)
-         max_vgpr = 84;
-      else if (program->vgpr_demand <= 128)
-         max_vgpr = 128;
-      else
-         max_vgpr = 256;
-   }
-   program->config->num_vgprs = max_vgpr;
-   program->config->num_sgprs = max_sgpr + 2;
+   program->config->num_vgprs = program->max_vgpr;
+   program->config->num_sgprs = program->max_sgpr + 2;
 
    std::unordered_map<unsigned, std::pair<PhysReg, RegClass>> assignments;
    std::vector<std::unordered_map<unsigned, Temp>> renames(program->blocks.size());
@@ -213,10 +179,10 @@ void register_allocation(Program *program)
       uint32_t lb, ub;
       if (typeOf(rc) == vgpr) {
          lb = 256;
-         ub = 256 + max_vgpr;
+         ub = 256 + program->max_vgpr;
       } else {
          lb = 0;
-         ub = max_sgpr;
+         ub = program->max_sgpr;
          if (sizeOf(rc) == 2)
             stride = 2;
          else if (sizeOf(rc) >= 4)
