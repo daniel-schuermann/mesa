@@ -787,7 +787,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 void eliminate_phis(Program* program);
 void lower_to_hw_instr(Program* program);
 void schedule(Program* program);
-void schedule_program(Program* program);
+void schedule_program(Program* program, std::vector<std::vector<std::pair<uint16_t,uint16_t>>> register_demand);
 void insert_wait_states(Program* program);
 std::vector<uint32_t> emit_program(Program* program);
 void print_asm(std::vector<uint32_t>& binary, char* llvm_mc, std::ostream& out);
