@@ -20,169 +20,210 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *
- * Authors:
- *    Daniel Schürmann (daniel.schuermann@campus.tu-berlin.de)
- *
  */
 
 #include "aco_ir.h"
 #include <unordered_set>
-#include <unordered_map>
+#include <algorithm>
 
 namespace aco {
 
-struct Node {
-   aco_ptr<Instruction> instr;
-   std::unordered_set<Node*> children;
-   int succ_count = 0;
-   int reg = 0;
-   int est = 0;
-   int parent_idx = 0;
-   int latency = 0;
-   Node* imm_dep = nullptr;
-
-   Node(aco_ptr<Instruction> instr) : instr(std::move(instr)) {};
+struct sched_ctx {
+   int16_t num_waves;
+   int16_t max_vgpr;
+   int16_t max_sgpr;
 };
 
-void schedule_block(Block* block)
+
+void schedule_block(sched_ctx& ctx, std::unique_ptr<Block>& block, std::vector<std::pair<uint16_t,uint16_t>>& register_demand)
 {
-   std::vector<Node> DG;
-   DG.reserve(block->instructions.size());
-   std::unordered_map<unsigned, Node*> map;
-   Node* latest_scc_write = nullptr;
+   // TODO: check if this is enough and maybe make it dependant on instruction type
+   int window_size = 25 - ctx.num_waves;
 
-   unsigned j = 0;
-   while (j < block->instructions.size()) {
-      if (block->instructions[j]->opcode == aco_opcode::p_logical_start)
-         break;
-      j++;
-   }
-   if (j >= block->instructions.size())
-      return;
+   /* go through all instructions and find memory loads */
+   for (unsigned idx = 0; idx < block->instructions.size(); idx++) {
+      Instruction* current = block->instructions[idx].get();
 
-   j++;
+      if (!current->isVMEM())
+         continue;
 
-   while (block->instructions[j]->opcode != aco_opcode::p_logical_end)
-   {
-      DG.emplace_back(std::move(block->instructions[j]));
-      Node* node = &DG.back();
-      for (unsigned i = 0; i < node->instr->num_definitions; i++) {
-         map.emplace(node->instr->getDefinition(i).tempId(), node);
-         if (node->instr->getDefinition(i).isFixed() &&
-             node->instr->getDefinition(i).physReg().reg == 253) {
-            if (latest_scc_write) {
-               auto test = node->children.emplace(latest_scc_write);
-               if (test.second)
-                  latest_scc_write->succ_count++;
-            }
+      if (!current->num_definitions)
+         continue;
 
-            latest_scc_write = node;
-         }
+      /* create the initial set of values which current depends on */
+      std::set<Temp> depends_on;
+      for (unsigned i = 0; i < current->num_operands; i++) {
+         if (current->getOperand(i).isTemp())
+            depends_on.insert(current->getOperand(i).getTemp());
       }
 
-      for (unsigned i = 0; i < node->instr->num_operands; i++) {
-         Operand op = node->instr->getOperand(i);
-         if (!op.isTemp())
-            continue;
-         std::unordered_map<unsigned, Node*>::iterator it = map.find(op.tempId());
-         if (it != map.end()) {
-            auto test = node->children.emplace(it->second);
-            if (test.second)
-               it->second->succ_count++;
-            /* that's a workaround to make the def of an scc temp the immediate predecessor */
-            if (op.isFixed() && op.physReg().reg == 253) {
-               node->imm_dep = latest_scc_write;
-               auto test = node->children.emplace(latest_scc_write);
-               if (test.second)
-                  latest_scc_write->succ_count++;
-               latest_scc_write = node;
-            }
-         }
-      }
-      j++;
-   }
+      /* maintain how many registers remain free when moving instructions */
+      int sgpr_pressure = register_demand[idx].first;
+      int vgpr_pressure = register_demand[idx].second;
 
-   std::unordered_set<Node*> ready;
-   for (Node& node : DG)
-   {
-      /* calculate register requirement */
-      node.reg = node.instr->isSALU() || node.instr->format == Format::SMEM ? 0 : 1;
-      int k = 0;
-      int i = -1;
-      for (Node* child : node.children) {
-         if (i == child->reg) {
-            k++;
-         } else if (child->reg > i) {
-            i = child->reg;
-            k = 0;
-         }
-         node.reg = i + k;
-      }
+      /* first, check if we have instructions before current to move down */
+      int insert_idx = idx + 1;
 
-      /* calculate EST */
-      node.est = 1;
-      for (Node* child : node.children) {
-         int time = child->instr->format == Format::SMEM ? 15 : 1;
-         time = child->instr->format == Format::MIMG ? 8 : time;
-         time = child->instr->format == Format::MUBUF ? 8 : time;
-         node.est = std::max(node.est, time + child->est);
-      }
-      node.est -= (uint32_t) node.instr->format & (uint32_t) Format::DPP ? -2 : 0;
+      for (int candidate_idx = idx - 1; candidate_idx > (int) idx - window_size; candidate_idx--) {
+         assert(candidate_idx >= 0);
+         aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
 
-      /* calculate latency */
-      node.latency = node.instr->format == Format::SMEM ? 15 : 1;
-      node.latency = node.instr->format == Format::MIMG ? 8 : node.latency;
-      node.latency = node.instr->format == Format::MUBUF ? 8 : node.latency;
-      node.latency = node.instr->isSALU() ? 0 : node.latency;
-      /* check if ready */
-      if (node.succ_count == 0)
-         ready.insert(&node);
-   }
-
-   j--;
-
-   while (!ready.empty()) {
-      /* find candidate */
-      std::unordered_set<Node*>::iterator it = ready.begin();
-      std::unordered_set<Node*>::iterator select = it++;
-      int lowest = (*select)->reg + (*select)->parent_idx - (*select)->est + (*select)->latency;
-      while (it != ready.end()) {
-         int candidate = (*it)->reg + ((*it)->parent_idx) - (*it)->est + (*it)->latency;
-         if (candidate < lowest) {
-            select = it;
-            lowest = candidate;
-         }
-         ++it;
-      }
-      Node* next = *select;
-      ready.erase(select);
-      while (true) {
-         /* add children to ready list */
-         for (Node* child : next->children) {
-            child->parent_idx = j;
-            child->succ_count--;
-            if (child->succ_count <= 0)
-               ready.insert(child);
-         }
-         block->instructions[j--] = std::move(next->instr);
-
-         if (next->imm_dep) {
-            next = next->imm_dep;
-            assert(ready.find(next) != ready.end());
-            ready.erase(next);
-         } else {
+         /* break when encountering another VMEM instruction or logical_start */
+         if (candidate->isVMEM())
             break;
+         if (candidate->opcode == aco_opcode::p_logical_start)
+            break;
+
+         sgpr_pressure = std::max(sgpr_pressure, (int) register_demand[candidate_idx].first);
+         vgpr_pressure = std::max(vgpr_pressure, (int) register_demand[candidate_idx].second);
+
+         /* if current depends on candidate, add additional dependencies and continue */
+         bool can_move_down = true;
+         for (unsigned i = 0; i < candidate->num_definitions; i++) {
+            if (candidate->getDefinition(i).isTemp() && depends_on.find(candidate->getDefinition(i).getTemp()) != depends_on.end())
+               can_move_down = false;
          }
+         if (!can_move_down) {
+            for (unsigned i = 0; i < candidate->num_operands; i++) {
+               if (candidate->getOperand(i).isTemp())
+                  depends_on.insert(candidate->getOperand(i).getTemp());
+            }
+            continue;
+         }
+
+         bool register_pressure_too_high = false;
+         /* check if one of candidate's operands is killed by depending instruction */
+         for (unsigned i = 0; i < candidate->num_operands; i++) {
+            if (candidate->getOperand(i).isTemp() && depends_on.find(candidate->getOperand(i).getTemp()) != depends_on.end()) {
+               // FIXME: account for difference in register pressure
+               register_pressure_too_high = true;
+            }
+         }
+
+         /* check if register pressure is low enough: the diff is negative if register pressure is decreased */
+         int candidate_sgpr_diff = register_demand[candidate_idx].first - register_demand[candidate_idx - 1].first;
+         int candidate_vgpr_diff = register_demand[candidate_idx].second - register_demand[candidate_idx - 1].second;
+         if (register_pressure_too_high ||
+             vgpr_pressure - candidate_vgpr_diff > ctx.max_vgpr ||
+             sgpr_pressure - candidate_sgpr_diff > ctx.max_sgpr)
+            break;
+         // TODO: we might want to look further to find a sequence of instructions to move down which doesn't exceed reg pressure
+
+         /* move the candidate below the memory load */
+         auto begin = std::next(block->instructions.begin(), candidate_idx);
+         auto end = std::next(block->instructions.begin(), insert_idx);
+         std::rotate(begin, begin + 1, end);
+
+         /* update register pressure */
+         for (int i = candidate_idx; i < insert_idx - 1; i++) {
+            register_demand[i].first = register_demand[i + 1].first - candidate_sgpr_diff;
+            register_demand[i].second = register_demand[i + 1].second - candidate_vgpr_diff;
+         }
+         vgpr_pressure = vgpr_pressure - candidate_vgpr_diff;
+         sgpr_pressure = sgpr_pressure - candidate_sgpr_diff;
+         assert(candidate_vgpr_diff == (int) register_demand[insert_idx - 1].second - (int) register_demand[insert_idx - 2].second);
+         --insert_idx;
+
       }
+
+      /* create the initial set of values which depend on current */
+      depends_on.clear();
+      for (unsigned i = 0; i < current->num_definitions; i++) {
+         if (current->getDefinition(i).isTemp())
+            depends_on.insert(current->getDefinition(i).getTemp());
+      }
+      std::set<Temp> RAR_dependencies;
+
+      /* find the first instruction depending on current or find another VMEM */
+      insert_idx = idx;
+
+      bool found_dependency = false;
+      /* second, check if we have instructions after current to move up */
+      for (int candidate_idx = idx + 1; candidate_idx < (int) idx + window_size; candidate_idx++) {
+         assert(candidate_idx < block->instructions.size());
+         aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
+
+         if (candidate->opcode == aco_opcode::p_logical_end)
+            break;
+
+         /* check if candidate depends on current */
+         bool is_dependency = candidate->isVMEM();
+         for (unsigned i = 0; !is_dependency && i < candidate->num_operands; i++) {
+            if (candidate->getOperand(i).isTemp() && depends_on.find(candidate->getOperand(i).getTemp()) != depends_on.end())
+               is_dependency = true;
+         }
+         if (is_dependency) {
+            for (unsigned j = 0; j < candidate->num_definitions; j++) {
+               if (candidate->getDefinition(j).isTemp())
+                  depends_on.insert(candidate->getDefinition(j).getTemp());
+            }
+            for (unsigned i = 0; i < candidate->num_operands; i++) {
+               if (candidate->getOperand(i).isTemp())
+                  RAR_dependencies.insert(candidate->getOperand(i).getTemp());
+            }
+            if (!found_dependency) {
+               insert_idx = candidate_idx;
+               found_dependency = true;
+               /* init register pressure */
+               sgpr_pressure = register_demand[insert_idx - 1].first;
+               vgpr_pressure = register_demand[insert_idx - 1].second;
+               continue;
+            }
+         }
+
+         /* update register pressure */
+         sgpr_pressure = std::max(sgpr_pressure, (int) register_demand[candidate_idx - 1].first);
+         vgpr_pressure = std::max(vgpr_pressure, (int) register_demand[candidate_idx - 1].second);
+
+         if (is_dependency || !found_dependency)
+            continue;
+         assert(insert_idx != idx);
+
+         bool register_pressure_too_high = false;
+         /* check if candidate uses/kills an operand which is used by a dependency */
+         for (unsigned i = 0; i < candidate->num_operands; i++) {
+            if (candidate->getOperand(i).isTemp() && RAR_dependencies.find(candidate->getOperand(i).getTemp()) != RAR_dependencies.end())
+               register_pressure_too_high = true;
+         }
+
+         /* check if register pressure is low enough: the diff is negative if register pressure is decreased */
+         int candidate_sgpr_diff = register_demand[candidate_idx].first - register_demand[candidate_idx - 1].first;
+         int candidate_vgpr_diff = register_demand[candidate_idx].second - register_demand[candidate_idx - 1].second;
+         if (register_pressure_too_high ||
+             vgpr_pressure + candidate_vgpr_diff > ctx.max_vgpr ||
+             sgpr_pressure + candidate_sgpr_diff > ctx.max_sgpr)
+            break;
+
+         /* move the candidate above the insert_idx */
+         auto begin = std::next(block->instructions.begin(), insert_idx);
+         auto end = std::next(block->instructions.begin(), candidate_idx + 1);
+         std::rotate(begin, end - 1, end);
+
+         /* update register pressure */
+         for (int i = candidate_idx - 1; i >= insert_idx; i--) {
+            register_demand[i].first = register_demand[i - 1].first + candidate_sgpr_diff;
+            register_demand[i].second = register_demand[i - 1].second + candidate_vgpr_diff;
+         }
+         assert(candidate_vgpr_diff == (int) register_demand[insert_idx].second - (int) register_demand[insert_idx - 1].second);
+         vgpr_pressure = vgpr_pressure + candidate_vgpr_diff;
+         sgpr_pressure = sgpr_pressure + candidate_sgpr_diff;
+         ++insert_idx;
+      }
+
+      idx = insert_idx;
    }
-   return;
 }
 
-void schedule_program(Program* program)
+
+void schedule_program(Program *program, std::vector<std::vector<std::pair<uint16_t,uint16_t>>> register_demand)
 {
-   for (auto&& block : program->blocks)
-      schedule_block(block.get());
+   sched_ctx ctx;
+   ctx.num_waves = program->num_waves;
+   ctx.max_vgpr = program->max_vgpr;
+   ctx.max_sgpr = program->max_sgpr;
+   for (std::unique_ptr<Block>& block : program->blocks)
+      schedule_block(ctx, block, register_demand[block->index]);
+
 }
 
 }
- 
