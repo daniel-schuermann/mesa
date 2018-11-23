@@ -61,9 +61,10 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
 
    aco::live live_vars = aco::live_var_analysis<true>(program.get());
 
-   //aco::schedule_program(program.get());
-   //std::cerr << "After Opt:\n";
+   //std::cerr << "Before Schedule:\n";
    //aco_print_program(program.get(), stderr);
+   aco::schedule_program(program.get(), live_vars.register_demand);
+
    /* Register Allocation */
    aco::register_allocation(program.get(), live_vars.live_out);
    if (options->dump_shader) {
