@@ -126,18 +126,9 @@ unsigned detect_raw_hazard(Instruction* first, Instruction* second, unsigned op_
             return 1;
    }
 
-   if ((first->format == Format::VOPC) && // TODO: more general - everything that writes vcc implicitly and reads explicitly
-       ((int) second->format & (int) Format::VOP3A)) {
-      for (unsigned i = 0; i < second->num_operands; i++)
-      {
-         if (second->getOperand(i).physReg() == vcc)
-            return 1;
-      }
-   }
-
    return 0;
 
-   // TODO: SALU writes M0 / gds, s_sendmsg, s_ttrace_data, lds, s_moverel
+   // TODO: gds, s_sendmsg, s_ttrace_data, lds, s_moverel
 }
 
 unsigned detect_waw_hazard(Instruction* first, Instruction* second)
