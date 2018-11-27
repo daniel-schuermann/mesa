@@ -442,9 +442,10 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       std::array<uint32_t, 512> register_file = {0};
 
       for (Temp t : live) {
-         assert(assignments.find(t.id()) != assignments.end());
+         Temp renamed = read_variable(t, block.get());
+         assert(assignments.find(renamed.id()) != assignments.end());
          for (unsigned i = 0; i < t.size(); i++)
-            register_file[assignments[t.id()].first.reg + i] = t.id();
+            register_file[assignments[renamed.id()].first.reg + i] = renamed.id();
       }
 
       std::vector<aco_ptr<Instruction>> instructions;
