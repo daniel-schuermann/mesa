@@ -233,7 +233,10 @@ uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
 
          /* Vector Memory reads and writes return in the order they were issued */
          if (instr->isVMEM() && it->second.type == vm_type) {
-            it->second.vm_cnt = 0;
+            it->second.vm_cnt = max_vm_cnt;
+            it->second.type = it->second.type &= ~vm_type;
+            if (it->second.type == done)
+               it = ctx.vgpr_map.erase(it);
             continue;
          }
          writes_vgpr = true;
@@ -509,7 +512,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
          t = wait_type::exp_parameter;
       }
       /* increase counter for all entries of same wait_type */
-      for (std::pair<uint8_t,wait_entry> e : ctx.vgpr_map)
+      for (auto& e : ctx.vgpr_map)
       {
          if ((e.second.type & t) == t)
             e.second.exp_cnt++;
@@ -557,7 +560,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
    case Format::MUBUF:
    case Format::MIMG: {
       /* increase counter for all entries of same wait_type */
-      for (std::pair<uint8_t,wait_entry> e : ctx.vgpr_map)
+      for (auto& e : ctx.vgpr_map)
       {
          if (e.second.type == vm_type)
             e.second.vm_cnt++;
