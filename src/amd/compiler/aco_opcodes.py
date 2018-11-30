@@ -225,8 +225,6 @@ opcode("s_bfm_b64", 2, [s2], 35, Format.SOP2)
 opcode("s_cbranch_g_fork", 2, [], 41, Format.SOP2)
 opcode("s_rfe_restore_b64", 1, [], 43, Format.SOP2)
 
-SOP2 = dict(SOP2_SCC).values() + dict(SOP2_NOSCC).values() + dict(SOP2_64).values() + dict(SOP2_SPECIAL).values()
-
 
 # SOPK instructions: 0 input (+ imm), 1 output + optional scc
 SOPK_SCC = {
@@ -266,8 +264,6 @@ opcode("s_getreg_b32", 0, [s1], 17, Format.SOPK)
 opcode("s_setreg_b32", 1, [s1], 18, Format.SOPK)
 opcode("s_setreg_imm32_b32", 0, [s1], 20, Format.SOPK)
 opcode("s_call_b64", 0, [s2], 21, Format.SOPK)
-
-SOPK = dict(SOPK_SCC).values() + dict(SOPK_SPECIAL).values()
 
 
 # SOP1 instructions: 1 input, 1 output (+optional SCC)
@@ -358,8 +354,6 @@ opcode("s_cbranch_join", 1, [], 46, Format.SOP1)
 opcode("s_set_gpr_idx_idx", 1, [], 50, Format.SOP1)
 opcode("s_bitreplicate_b64_b32", 1, [s2], 55, Format.SOP1)
 
-SOP1 = dict(SOP1_NOSCC).values() + dict(SOP1_NOSCC_64).values() + dict(SOP1_SCC).values() + dict(SOP1_SCC_64).values() + SOP1_SPECIAL
-
 
 # SOPC instructions: 2 inputs and 0 outputs (+SCC)
 SOPC_SCC = {
@@ -391,8 +385,6 @@ SOPC_SPECIAL = [
 ]
 opcode("s_setvskip", 2, [])
 opcode("s_set_gpr_idx_on", 1, [])
-
-SOPC = dict(SOPC_SCC).values() + SOPC_SPECIAL
 
 
 # SOPP instructions: 0 inputs (+optional scc/vcc) , 0 outputs
@@ -431,8 +423,6 @@ SOPP_SPECIAL = {
 }
 for code, name in SOPP_SPECIAL:
    opcode(name, 0, [], code, Format.SOPP)
-
-SOPP = dict(SOPP_SPECIAL).values()
 
 
 # SMEM instructions: sbase input (2 sgpr), potentially 2 offset inputs, 1 sdata input/output
@@ -558,8 +548,6 @@ opcode("s_buffer_atomic_cmpswap_x2", 4, [s2], kills_input = [0, 0, 0, 1])
 opcode("s_atomic_cmpswap", 4, [s1], kills_input = [0, 0, 0, 1])
 opcode("s_atomic_cmpswap_x2", 4, [s2], kills_input = [0, 0, 0, 1])
 
-SMEM = SMEM_LOAD + SMEM_STORE + SMEM_ATOMIC + SMEM_ATOMIC_64 + SMEM_SPECIAL
-
 
 # VOP2 instructions: 2 inputs, 1 output (+ optional vcc)
 VOP2_NOVCC = {
@@ -642,8 +630,6 @@ VOP2_SPECIAL = [
 opcode("v_cndmask_b32", 3, [v1], 0, read_reg = VCC)
 opcode("v_mac_f32", 3, [v1], 22, kills_input = [0, 0, 1])
 opcode("v_mac_f16", 3, [v1], 35, kills_input = [0, 0, 1])
-
-VOP2 = dict(VOP2_NOVCC).values() + dict(VOP2_LITERAL).values() + VOP2_VCCOUT + VOP2_VCCINOUT + VOP2_SPECIAL
 
 
 # VOP1 instructions: instructions with 1 input and 1 output
@@ -741,8 +727,6 @@ opcode("v_nop", 0, [])
 opcode("v_clrexcp", 0, [])
 opcode("v_swap_b32", 2, [v1,v1], 81, Format.VOP1, kills_input = [1,1])
 
-VOP1 = dict(VOP1_32).values() + VOP1_64 + VOP1_SPECIAL
-
 
 # VOPC instructions:
 
@@ -785,11 +769,6 @@ assert(code == 256)
 
 SUFFIX_U32 = ["_i16", "_u16", "_i32", "_u32"]
 SUFFIX_U64 = ["_i64", "_u64"]
-
-VOPC_F = [pre+mid+post for pre in PREFIX for mid in COMPF for post in SUFFIX_F]
-VOPC_32 = [pre+mid+post for pre in PREFIX for mid in COMPI for post in SUFFIX_U32]
-VOPC_64 = [pre+mid+post for pre in PREFIX for mid in COMPI for post in SUFFIX_U64]
-VOPC = dict(VOPC_CLASS).values() + VOPC_F + VOPC_32 + VOPC_64
 
 
 # VOPP instructions: packed 16bit instructions - 1 or 2 inputs and 1 output
@@ -987,9 +966,6 @@ opcode("v_div_fmas_f64", 4, [v2], read_reg = VCC)
 opcode("v_qsad_pk_u16_u8", 3, [v1])
 opcode("v_mqsad_pk_u16_u8", 3, [v1])
 opcode("v_mqsad_u32_u8", 3, [v2])
-# TODO
-
-VOP3a = dict(VOP3a_32).values() + VOP3a_64 + dict(VOP3a_32_2).values() + VOP3a_64_2 + VOP3a_SPECIAL
 
 
 # DS instructions: 3 inputs (1 addr, 2 data), 1 output
@@ -1354,6 +1330,3 @@ NOT_DPP = [
    "v_swap_b32"
 ]
 
-VOP2_DPP = [ x for x in VOP2 if x not in NOT_DPP ]
-VOP1_DPP = [ x for x in VOP1 if x not in NOT_DPP ]
-VOPC_DPP = [ x for x in VOPC if x not in VOPC_64 ]
