@@ -29,7 +29,7 @@ template = """\
 #ifndef _ACO_OPCODES_
 #define _ACO_OPCODES_
 
-<% opcode_names = sorted(opcodes.iterkeys()) %>
+<% opcode_names = sorted(opcodes.keys()) %>
 
 enum class aco_opcode : std::uint16_t {
 % for name in opcode_names:
@@ -44,4 +44,4 @@ enum class aco_opcode : std::uint16_t {
 from aco_opcodes import opcodes
 from mako.template import Template
 
-print Template(template).render(opcodes=opcodes)
+print(Template(template).render(opcodes=opcodes))

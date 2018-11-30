@@ -24,7 +24,7 @@ aco_opcodes_h = custom_target(
   'aco_opcodes.h',
   input : 'aco_opcodes_h.py',
   output : 'aco_opcodes.h',
-  command : [prog_python2, '@INPUT@'],
+  command : [prog_python, '@INPUT@'],
   capture : true,
   depend_files : aco_depends,
 )
@@ -33,16 +33,7 @@ aco_opcodes_c = custom_target(
   'aco_opcodes.cpp',
   input : 'aco_opcodes_cpp.py',
   output : 'aco_opcodes.cpp',
-  command : [prog_python2, '@INPUT@'],
-  capture : true,
-  depend_files : aco_depends,
-)
-
-aco_builder_instr_defs = custom_target(
-  'aco_builder_instr_defs.h',
-  input : 'aco_builder_instr_defs.py',
-  output : 'aco_builder_instr_defs.h',
-  command : [prog_python2, '@INPUT@'],
+  command : [prog_python, '@INPUT@'],
   capture : true,
   depend_files : aco_depends,
 )
@@ -60,7 +51,6 @@ libaco_files = files(
   'aco_interface.cpp',
   'aco_interface.h',
   'aco_ir.h',
-  'aco_builder.h',
   'aco_assembler.cpp',
   'aco_insert_waitcnt.cpp',
   'aco_scheduler_postRA.cpp',
@@ -78,7 +68,7 @@ libaco_files = files(
 
 libaco = static_library(
   'aco',
-  [libaco_files, aco_opcodes_c, aco_opcodes_h, aco_builder_instr_defs],
+  [libaco_files, aco_opcodes_c, aco_opcodes_h],
   include_directories : [
    inc_common, inc_compiler, inc_mesa, inc_mapi, inc_amd, inc_amd_common,
   ],
