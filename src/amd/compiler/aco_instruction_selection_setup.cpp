@@ -28,7 +28,7 @@
 #include "vulkan/radv_shader.h"
 #include "common/sid.h"
 
-#include "gallium/auxiliary/util/u_math.h"
+#include "util/u_math.h"
 
 namespace aco {
 
@@ -428,12 +428,11 @@ add_array_arg(arg_info *info, RegClass type, Temp *param_ptr, unsigned reg)
 
 static void
 set_loc(struct radv_userdata_info *ud_info, uint8_t *sgpr_idx, uint8_t num_sgprs,
-        int32_t indirect_offset)
+        bool indirect)
 {
    ud_info->sgpr_idx = *sgpr_idx;
    ud_info->num_sgprs = num_sgprs;
-   ud_info->indirect = indirect_offset > 0;
-   ud_info->indirect_offset = indirect_offset;
+   ud_info->indirect = indirect;
    *sgpr_idx += num_sgprs;
 }
 
@@ -444,7 +443,7 @@ set_loc_shader(isel_context *ctx, int idx, uint8_t *sgpr_idx,
    struct radv_userdata_info *ud_info = &ctx->program->info->user_sgprs_locs.shader_data[idx];
    assert(ud_info);
 
-   set_loc(ud_info, sgpr_idx, num_sgprs, 0);
+   set_loc(ud_info, sgpr_idx, num_sgprs, false);
 }
 
 static void
@@ -457,13 +456,16 @@ set_loc_shader_ptr(isel_context *ctx, int idx, uint8_t *sgpr_idx)
 
 static void
 set_loc_desc(isel_context *ctx, int idx,  uint8_t *sgpr_idx,
-             uint32_t indirect_offset)
+             bool indirect)
 {
-   struct radv_userdata_info *ud_info =
-      &ctx->program->info->user_sgprs_locs.descriptor_sets[idx];
+   struct radv_userdata_locations *locs = &ctx->program->info->user_sgprs_locs;
+   struct radv_userdata_info *ud_info = &locs->descriptor_sets[idx];
    assert(ud_info);
 
-   set_loc(ud_info, sgpr_idx, 1, indirect_offset);
+   set_loc(ud_info, sgpr_idx, 1, indirect);
+
+   if (!indirect)
+      locs->descriptor_sets_enabled |= 1 << idx;
 }
 
 static void
@@ -485,17 +487,20 @@ declare_global_input_sgprs(isel_context *ctx,
          if ((ctx->program->info->info.desc_set_used_mask & (1 << i)) &&
              ctx->options->layout->set[i].layout->shader_stages & stage_mask) {
             add_array_arg(args, s1, &desc_sets[i], user_sgpr_info->user_sgpr_idx);
-            set_loc_desc(ctx, i, &user_sgpr_info->user_sgpr_idx, 0);
+            set_loc_desc(ctx, i, &user_sgpr_info->user_sgpr_idx, false);
          }
       }
    } else {
+      assert(false && "Fix access to indirect descriptor sets.");
       add_array_arg(args, s1, desc_sets, user_sgpr_info->user_sgpr_idx);
       set_loc_shader_ptr(ctx, AC_UD_INDIRECT_DESCRIPTOR_SETS, &user_sgpr_info->user_sgpr_idx);
+      /*
       for (unsigned i = 0; i < num_sets; ++i) {
          if ((ctx->program->info->info.desc_set_used_mask & (1 << i)) &&
              ctx->options->layout->set[i].layout->shader_stages & stage_mask)
             set_loc_desc(ctx, i, &user_sgpr_info->user_sgpr_idx, i * 8);
       }
+      */
       ctx->program->info->need_indirect_descriptor_sets = true;
    }
 
@@ -503,6 +508,12 @@ declare_global_input_sgprs(isel_context *ctx,
       /* 1 for push constants and dynamic descriptors */
       add_array_arg(args, s1, &ctx->push_constants, user_sgpr_info->user_sgpr_idx);
       set_loc_shader_ptr(ctx, AC_UD_PUSH_CONSTANTS, &user_sgpr_info->user_sgpr_idx);
+   }
+
+   if (ctx->program->info->info.so.num_outputs) {
+      assert(false && "Streamout not yet supported.");
+      //add_arg(args, s4, &ctx->streamout_buffers, user_sgpr_info->user_sgpr_idx);
+      //set_loc_shader_ptr(ctx, AC_UD_STREAMOUT_BUFFERS, &user_sgpr_info->user_sgpr_idx);
    }
 }
 
