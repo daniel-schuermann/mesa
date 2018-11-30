@@ -2326,7 +2326,7 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
    load->getOperand(0) = Operand(coords);
    load->getOperand(1) = Operand(resource);
    load->getDefinition(0) = Definition(dst);
-   load->glc = var->data.image._volatile || var->data.image.coherent;
+   load->glc = var->data.image.access & (ACCESS_VOLATILE | ACCESS_COHERENT) ? 1 : 0;
    load->dmask = 0xF;
    load->unrm = true;
    ctx->block->instructions.emplace_back(std::move(load));
@@ -2345,7 +2345,8 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
       emit_v_mov(ctx, data, t);
       data = t;
    }
-   bool glc = ctx->options->chip_class == SI || var->data.image._volatile || var->data.image.coherent;
+
+   bool glc = ctx->options->chip_class == SI || var->data.image.access & (ACCESS_VOLATILE | ACCESS_COHERENT) ? 1 : 0;
 
    if (dim == GLSL_SAMPLER_DIM_BUF) {
       Temp rsrc = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_BUFFER, nullptr, true, true);
@@ -2527,7 +2528,7 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    mubuf->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand((uint32_t) 0);
    mubuf->getDefinition(0) = Definition(dst);
    mubuf->offen = (offset.type() == vgpr);
-   mubuf->glc = false;// TODO after rebase: nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
+   mubuf->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
    ctx->block->instructions.emplace_back(std::move(mubuf));
    emit_split_vector(ctx, dst, num_components);
 }
@@ -2605,7 +2606,7 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       store->getOperand(3) = Operand(write_data);
       store->offset = start;
       store->offen = (offset.type() == vgpr);
-      store->glc = false;// TODO after rebase: nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
+      store->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
       ctx->block->instructions.emplace_back(std::move(store));
    }
 }
