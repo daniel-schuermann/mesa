@@ -27,6 +27,8 @@ void aco_print_physReg(unsigned reg, unsigned size, FILE *output)
       fprintf(output, ":m0");
    } else if (reg == 106) {
       fprintf(output, ":vcc");
+   } else if (reg == 253) {
+      fprintf(output, ":scc");
    } else {
       bool is_vgpr = reg / 256;
       reg = reg % 256;
@@ -111,7 +113,7 @@ void aco_print_instr(struct Instruction *instr, FILE *output)
       uint16_t imm = waitcnt->imm;
       if ((imm & 0xF) < 0xF) fprintf(output, " vmcnt(%d)", imm & 0xF);
       if (((imm >> 4) & 0x7) < 0x7) fprintf(output, " expcnt(%d)", (imm >> 4) & 0x7);
-      if (((imm >> 7) & 0x1F) < 0x1F) fprintf(output, " lgkmcnt(%d)", (imm >> 7) & 0x1F);
+      if (((imm >> 8) & 0xF) < 0xF) fprintf(output, " lgkmcnt(%d)", (imm >> 8) & 0xF);
    }
    if (instr->format == Format::PSEUDO_BRANCH) {
       Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(instr);
