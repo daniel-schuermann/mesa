@@ -30,7 +30,7 @@ template = """\
 #include "aco_ir.h"
 
 const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)] = {
-% for name, opcode in sorted(opcodes.iteritems()):
+% for name, opcode in sorted(opcodes.items()):
 {
    .name = "${name}",
    .num_inputs = ${opcode.num_inputs},
@@ -46,4 +46,4 @@ const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)] = {
 from aco_opcodes import opcodes
 from mako.template import Template
 
-print Template(template).render(opcodes=opcodes)
+print(Template(template).render(opcodes=opcodes))
