@@ -144,6 +144,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_flog2:
                   case nir_op_ffract:
                   case nir_op_ffloor:
+                  case nir_op_fceil:
                   case nir_op_fsin:
                   case nir_op_fcos:
                   case nir_op_u2f32:
