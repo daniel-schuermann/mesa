@@ -1142,6 +1142,16 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_fceil: {
+      if (dst.size() == 1) {
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_ceil_f32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_fsin:
    case nir_op_fcos: {
       Temp src = get_alu_src(ctx, instr->src[0]);
