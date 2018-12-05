@@ -3152,6 +3152,15 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       ctx->block->instructions.emplace_back(std::move(mbcnt));
       break;
    }
+   case nir_intrinsic_load_sample_id: {
+      aco_ptr<Instruction> bfe{create_instruction<VOP3A_instruction>(aco_opcode::v_bfe_u32, Format::VOP3A, 3, 1)};
+      bfe->getOperand(0) = Operand(ctx->fs_inputs[ancillary]);
+      bfe->getOperand(1) = Operand((uint32_t) 8);
+      bfe->getOperand(2) = Operand((uint32_t) 4);
+      bfe->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      ctx->block->instructions.emplace_back(std::move(bfe));
+      break;
+   }
    default:
       fprintf(stderr, "Unimplemented intrinsic instr: ");
       nir_print_instr(&instr->instr, stderr);
