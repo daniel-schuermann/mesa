@@ -199,6 +199,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      type = sgpr;
                      break;
                   case nir_intrinsic_load_front_face:
+                  case nir_intrinsic_load_sample_id:
                   case nir_intrinsic_load_input:
                   case nir_intrinsic_load_vertex_id:
                   case nir_intrinsic_load_vertex_id_zero_base:
@@ -267,6 +268,9 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                         for (unsigned i = 0; i < intrinsic->dest.ssa.num_components; i++)
                            ctx->fs_vgpr_args[fs_input::frag_pos_0 + i] = true;
                      }
+                     break;
+                  case nir_intrinsic_load_sample_id:
+                     ctx->fs_vgpr_args[fs_input::ancillary] = true;
                      break;
                   default:
                      break;
