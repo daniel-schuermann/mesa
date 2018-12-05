@@ -308,7 +308,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       }
       if (register_pressure_unknown) {
          for (unsigned i = 0; i < candidate->num_operands; i++) {
-            if (candidate->getDefinition(i).isTemp())
+            if (candidate->getOperand(i).isTemp())
                depends_on.insert(candidate->getOperand(i).getTemp());
          }
          continue;
