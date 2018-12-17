@@ -728,6 +728,8 @@ struct Block {
    uint16_t vgpr_demand;
    uint16_t sgpr_demand;
    uint16_t loop_nest_depth;
+   int logical_idom = -1;
+   int linear_idom = -1;
 };
 
 
@@ -759,7 +761,8 @@ public:
 
    Block* createAndInsertBlock()
    {
-      Block* b = new Block{(unsigned) blocks.size()};
+      Block* b = new Block;
+      b->index = (unsigned) blocks.size();
       blocks.push_back(std::unique_ptr<Block>(b));
       return b;
    }
@@ -782,6 +785,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
 
 template<bool condition>
 live live_var_analysis(Program* program);
+void dominator_tree(Program* program);
 void value_numbering(Program* program);
 void optimize(Program* program);
 void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_per_block);
