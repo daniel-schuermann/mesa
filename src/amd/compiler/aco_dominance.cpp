@@ -25,6 +25,9 @@
  *
  */
 
+#ifndef ACO_DOMINANCE_CPP
+#define ACO_DOMINANCE_CPP
+
 #include "aco_ir.h"
 #include <vector>
 
@@ -35,34 +38,10 @@
 
 namespace aco {
 
-inline
-int update_idom(int pred_idx, int new_idom, std::vector<int>& doms)
+void dominator_tree(Program* program)
 {
-   if (doms[pred_idx] != -1) {
-      if (new_idom == -1) {
-         return pred_idx;
-      } else {
-         while (pred_idx != new_idom) {
-            while (pred_idx > new_idom)
-               pred_idx = doms[pred_idx];
-            while (new_idom > pred_idx)
-               new_idom = doms[new_idom];
-         }
-      }
-   }
-   return new_idom;
-}
-
-std::pair<std::vector<int>, std::vector<int>> dominator_tree(Program* program)
-{
-   std::vector<int> logical_doms(program->blocks.size());
-   std::vector<int> linear_doms(program->blocks.size());
-   for (unsigned i = 0; i < program->blocks.size(); i++) {
-      logical_doms[i] = -1;
-      linear_doms[i] = -1;
-   }
-   logical_doms[0] = 0;
-   linear_doms[0] = 0;
+   program->blocks[0]->logical_idom = 0;
+   program->blocks[0]->linear_idom = 0;
 
    bool changed = true;
    while (changed)
@@ -71,19 +50,43 @@ std::pair<std::vector<int>, std::vector<int>> dominator_tree(Program* program)
       for (std::vector<std::unique_ptr<Block>>::iterator it = ++program->blocks.begin(); it != program->blocks.end(); ++it) {
          int new_logical_idom = -1;
          int new_linear_idom = -1;
-         for (Block* pred : (*it)->logical_predecessors)
-            new_logical_idom = update_idom(pred->index, new_logical_idom, logical_doms);
-         for (Block* pred : (*it)->linear_predecessors)
-            new_linear_idom = update_idom(pred->index, new_linear_idom, linear_doms);
+         for (Block* pred : (*it)->logical_predecessors) {
+            if ((int) pred->logical_idom != -1) {
+               if (new_logical_idom == -1) {
+                  new_logical_idom = pred->index;
+               } else {
+                  while ((int) pred->index != new_logical_idom) {
+                     if ((int) pred->index > new_logical_idom)
+                        pred = program->blocks[pred->logical_idom].get();
+                     if ((int) pred->index < new_logical_idom)
+                        new_logical_idom = program->blocks[new_logical_idom]->logical_idom;
+                  }
+               }
+            }
+         }
 
-         changed = logical_doms[(*it)->index] != new_logical_idom ||
-                   linear_doms[(*it)->index] != new_linear_idom;
-         logical_doms[(*it)->index] = new_logical_idom;
-         linear_doms[(*it)->index] = new_linear_idom;
+         for (Block* pred : (*it)->linear_predecessors) {
+            if ((int) pred->linear_idom != -1) {
+               if (new_linear_idom == -1) {
+                  new_linear_idom = pred->index;
+               } else {
+                  while ((int) pred->index != new_linear_idom) {
+                     if ((int) pred->index > new_linear_idom)
+                        pred = program->blocks[pred->linear_idom].get();
+                     if ((int) pred->index < new_linear_idom)
+                        new_linear_idom = program->blocks[new_linear_idom]->linear_idom;
+                  }
+               }
+            }
+         }
+
+         changed = program->blocks[(*it)->index]->logical_idom != new_logical_idom ||
+                   program->blocks[(*it)->index]->linear_idom != new_linear_idom;
+         program->blocks[(*it)->index]->logical_idom = new_logical_idom;
+         program->blocks[(*it)->index]->linear_idom = new_linear_idom;
       }
    }
-
-   return std::make_pair(logical_doms, linear_doms);
 }
 
 }
+#endif
