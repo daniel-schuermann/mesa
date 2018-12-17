@@ -727,6 +727,7 @@ struct Block {
    std::vector<Block*> linear_successors;
    uint16_t vgpr_demand;
    uint16_t sgpr_demand;
+   uint16_t loop_nest_depth;
 };
 
 
