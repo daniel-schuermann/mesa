@@ -60,6 +60,7 @@ public:
       ctx->cf_info.parent_loop.has_divergent_continue = false;
       ctx->cf_info.parent_loop.has_divergent_break = false;
       ctx->cf_info.parent_if.is_divergent = false;
+      ctx->cf_info.loop_nest_depth = ctx->cf_info.loop_nest_depth + 1;
    }
 
    ~loop_info_RAII()
@@ -71,6 +72,7 @@ public:
       ctx->cf_info.parent_loop.has_divergent_continue = divergent_cont_old;
       ctx->cf_info.parent_loop.has_divergent_break = divergent_break_old;
       ctx->cf_info.parent_if.is_divergent = divergent_if_old;
+      ctx->cf_info.loop_nest_depth = ctx->cf_info.loop_nest_depth - 1;
    }
 };
 
@@ -3783,6 +3785,7 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
 
       } else if (ctx->cf_info.parent_loop.has_divergent_continue) {
          Block* break_block = ctx->program->createAndInsertBlock();
+         break_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
 
          /* there might be still active lanes due to previous continue */
          aco_instr.reset(create_instruction<SOP1_instruction>(aco_opcode::s_andn2_saveexec_b64, Format::SOP1, 2, 2));
@@ -3908,7 +3911,9 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    ctx->block->instructions.emplace_back(std::move(save_exec));
 
    Block* loop_entry = ctx->program->createAndInsertBlock();
+   loop_entry->loop_nest_depth = ctx->cf_info.loop_nest_depth + 1;
    Block* loop_exit = new Block();
+   loop_exit->loop_nest_depth = ctx->cf_info.loop_nest_depth;
    branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
    branch->targets[0] = loop_entry;
    ctx->block->instructions.emplace_back(std::move(branch));
@@ -3950,6 +3955,7 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
 
       if (ctx->cf_info.parent_loop.has_divergent_break) {
          Block* loop_continue = ctx->program->createAndInsertBlock();
+         loop_continue->loop_nest_depth = ctx->cf_info.loop_nest_depth;
          branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z, Format::PSEUDO_BRANCH, 1, 0));
          branch->getOperand(0) = Operand{exec, s2};
          branch->targets[0] = loop_exit;
@@ -4025,8 +4031,11 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
 
       Block* BB_if = ctx->block;
       Block* BB_then = ctx->program->createAndInsertBlock();
+      BB_then->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* BB_else = new Block();
+      BB_else->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* BB_endif = new Block();
+      BB_endif->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* parent_if_merge_block = ctx->cf_info.parent_if.merge_block;
       ctx->cf_info.parent_if.merge_block = BB_endif;
 
@@ -4137,11 +4146,17 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
 
       Block* BB_if = ctx->block;
       Block* BB_then_logical = ctx->program->createAndInsertBlock();
+      BB_then_logical->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* BB_then_linear = new Block();
+      BB_then_linear->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* BB_between = new Block();
+      BB_between->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* BB_else_logical = new Block();
+      BB_else_logical->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* BB_else_linear = new Block();
+      BB_else_linear->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* BB_endif = new Block();
+      BB_endif->loop_nest_depth = ctx->cf_info.loop_nest_depth;
 
       /** emit conditional statement */
       Temp cond = extract_divergent_cond32(ctx, cond32);
