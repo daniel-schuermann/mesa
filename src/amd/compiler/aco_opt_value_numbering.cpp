@@ -257,13 +257,12 @@ void value_numbering(Program* program)
 {
    std::vector<std::unordered_set<Instruction*, InstrHash, InstrPred>> expr_values(program->blocks.size());
    std::unordered_map<uint32_t, Operand> renames;
-   /* we only process the logical cfg */
-   std::vector<int> doms = dominator_tree(program).first;
 
+   /* we only process the logical cfg */
    std::set<unsigned> worklist;
-   for (unsigned i = 0; i < doms.size(); i++)
-      if (doms[i] != -1)
-         worklist.insert(i);
+   for (std::unique_ptr<Block>& block : program->blocks)
+      if (block->logical_idom != -1)
+         worklist.insert(block->index);
 
    while (!worklist.empty()) {
       std::set<unsigned>::iterator it = worklist.begin();
@@ -271,7 +270,7 @@ void value_numbering(Program* program)
       worklist.erase(it);
       std::unique_ptr<Block>& block = program->blocks[block_idx];
       /* initialize expr_values from idom */
-      expr_values[block_idx] = expr_values[doms[block_idx]];
+      expr_values[block_idx] = expr_values[block->logical_idom];
       process_block(block, expr_values[block_idx], renames, worklist);
    }
 }
