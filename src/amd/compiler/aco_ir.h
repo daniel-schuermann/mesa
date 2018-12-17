@@ -143,6 +143,8 @@ static inline RegType typeOf(RegClass rc)
 
 static inline unsigned sizeOf(RegClass rc)
 {
+   if (rc == RegClass::b)
+      return 1;
    return (unsigned) rc & 0x1F;
 }
 
