@@ -540,9 +540,20 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   Temp tmp = {register_file[definition.physReg().reg], assignments[register_file[definition.physReg().reg]].second};
                   Operand pc_op = Operand(tmp);
                   pc_op.setFixed(assignments[register_file[definition.physReg().reg]].first);
-                  tmp = Temp{program->allocateId(), pc_op.regClass()};
+                  RegClass rc = definition.physReg() == PhysReg{253} ? RegClass::s1 : pc_op.regClass();
+                  tmp = Temp{program->allocateId(), rc};
                   Definition pc_def = Definition(tmp);
-                  PhysReg reg = get_reg(register_file, pc_op.regClass(), parallelcopy, instr);
+                  /* re-enable the killed operands, so that we don't move the blocking var there */
+                  for (unsigned i = 0; i < instr->num_operands; i++)
+                     if (instr->getOperand(i).isFixed() && instr->getOperand(i).isKill())
+                        for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
+                           register_file[instr->getOperand(i).physReg().reg + j] = 0xFFFF;
+                  /* find a new register for the blocking variable */
+                  PhysReg reg = get_reg(register_file, rc, parallelcopy, instr);
+                  for (unsigned i = 0; i < instr->num_operands; i++)
+                     if (instr->getOperand(i).isFixed() && instr->getOperand(i).isKill())
+                        for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
+                           register_file[instr->getOperand(i).physReg().reg + j] = 0;
                   pc_def.setFixed(reg);
                   assignments[pc_def.tempId()] = {reg, pc_def.regClass()};
                   for (unsigned i = 0; i < pc_op.size(); i++) {

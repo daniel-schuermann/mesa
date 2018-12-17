@@ -69,7 +69,10 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<ac
    while (it != copy_map.end()) {
       if (it->second.uses == 0) {
          /* the target reg is not used as operand for any other copy */
-         if (it->second.def.getTemp().type() == RegType::sgpr)
+         if (it->second.def.physReg().reg == 253) {
+            mov.reset(create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_i32, Format::SOPC, 2, 1));
+            mov->getOperand(1) = Operand((uint32_t) 0);
+         } else if (it->second.def.getTemp().type() == RegType::sgpr)
             mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
          else
             mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));

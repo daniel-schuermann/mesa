@@ -4046,6 +4046,7 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       /* emit branch */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z, Format::PSEUDO_BRANCH, 1, 0));
       branch->getOperand(0) = Operand(cond);
+      branch->getOperand(0).setFixed({253});
       branch->targets[0] = BB_else;
       branch->targets[1] = BB_then;
       BB_if->instructions.emplace_back(std::move(branch));
