@@ -65,6 +65,7 @@ struct isel_context {
    struct {
       bool has_continue;
       bool has_break;
+      uint16_t loop_nest_depth = 0;
       struct {
          Block* entry;
          Block* exit;
@@ -912,6 +913,7 @@ setup_isel_context(Program* program, nir_shader *nir,
    ctx.program->blocks.push_back(std::unique_ptr<Block>{new Block});
    ctx.block = ctx.program->blocks.back().get();
    ctx.block->index = 0;
+   ctx.block->loop_nest_depth = 0;
 
    add_startpgm(&ctx);
 
