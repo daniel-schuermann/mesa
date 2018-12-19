@@ -158,9 +158,8 @@ void emit_v_mov(isel_context *ctx, Temp src, Temp dst)
 
 Temp as_vgpr(isel_context *ctx, Temp val)
 {
-   assert(val.size() == 1);
    if (val.type() == RegType::sgpr) {
-      Temp tmp = {ctx->program->allocateId(), v1};
+      Temp tmp = {ctx->program->allocateId(), getRegClass(vgpr, val.size())};
       emit_v_mov(ctx, val, tmp);
       return tmp;
    }
@@ -464,16 +463,9 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
       if (dst.type() == vgpr) {
          aco_ptr<Instruction> bcsel;
          if (dst.size() == 1) {
-            if (then.type() != vgpr) {
-               Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, then.size()));
-               emit_v_mov(ctx, then, mov_dst);
-               then = mov_dst;
-            }
-            if (els.type() != vgpr) {
-               Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, els.size()));
-               emit_v_mov(ctx, els, mov_dst);
-               els = mov_dst;
-            }
+            then = as_vgpr(ctx, then);
+            els = as_vgpr(ctx, els);
+
             bcsel.reset(create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
             bcsel->getOperand(0) = Operand{els};
             bcsel->getOperand(1) = Operand{then};
@@ -1033,12 +1025,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (dst.size() == 1) {
          aco_ptr<VOP2_instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_sub_f32, Format::VOP2, 2, 1)};
          vop2->getOperand(0) = Operand((uint32_t) 0);
-         if (src.type() == sgpr) {
-            Temp old_src = src;
-            src = {ctx->program->allocateId(), v1};
-            emit_v_mov(ctx, old_src, src);
-         }
-         vop2->getOperand(1) = Operand(src);
+         vop2->getOperand(1) = Operand(as_vgpr(ctx, src));
          vop2->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(vop2));
       } else {
@@ -1053,12 +1040,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (dst.size() == 1) {
          aco_ptr<VOP2_instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_and_b32, Format::VOP2, 2, 1)};
          vop2->getOperand(0) = Operand((uint32_t) 0x7FFFFFFF);
-         if (src.type() == sgpr) {
-            Temp old_src = src;
-            src = {ctx->program->allocateId(), v1};
-            emit_v_mov(ctx, old_src, src);
-         }
-         vop2->getOperand(1) = Operand(src);
+         vop2->getOperand(1) = Operand(as_vgpr(ctx, src));
          vop2->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(vop2));
       } else {
@@ -2356,12 +2338,7 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    const nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
    const struct glsl_type *type = glsl_without_array(var->type);
    const enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
-   Temp data = get_ssa_temp(ctx, instr->src[3].ssa);
-   if (data.type() != vgpr) {
-      Temp t = {ctx->program->allocateId(), getRegClass(vgpr, data.size())};
-      emit_v_mov(ctx, data, t);
-      data = t;
-   }
+   Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[3].ssa));
 
    bool glc = ctx->options->chip_class == SI || var->data.image.access & (ACCESS_VOLATILE | ACCESS_COHERENT) ? 1 : 0;
 
@@ -2410,10 +2387,8 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr) {
       data = {ctx->program->allocateId(), v2};
       vec->getDefinition(0) = Definition(data);
       ctx->block->instructions.emplace_back(std::move(vec));
-   } else if (data.type() != vgpr) {
-      Temp t = {ctx->program->allocateId(), getRegClass(vgpr, data.size())};
-      emit_v_mov(ctx, data, t);
-      data = t;
+   } else {
+      data = as_vgpr(ctx, data);
    }
 
    aco_opcode buf_op, image_op;
@@ -2558,12 +2533,11 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    unsigned writemask = nir_intrinsic_write_mask(instr);
 
    Temp offset;
-   if (ctx->options->chip_class < VI && offset.type() == sgpr) {
-      offset = {ctx->program->allocateId(), v1};
-      emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[2].ssa), offset);
-   } else {
+   if (ctx->options->chip_class < VI)
+      offset = as_vgpr(ctx,get_ssa_temp(ctx, instr->src[2].ssa));
+   else
       offset = get_ssa_temp(ctx, instr->src[2].ssa);
-   }
+
    Temp rsrc = {ctx->program->allocateId(), s4};
 
    aco_ptr<Instruction> load;
@@ -2639,19 +2613,15 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr) {
       data = {ctx->program->allocateId(), v2};
       vec->getDefinition(0) = Definition(data);
       ctx->block->instructions.emplace_back(std::move(vec));
-   } else if (data.type() != vgpr) {
-      Temp t = {ctx->program->allocateId(), v1};
-      emit_v_mov(ctx, data, t);
-      data = t;
+   } else {
+      data = as_vgpr(ctx, data);
    }
 
    Temp offset;
-   if (ctx->options->chip_class < VI && offset.type() == sgpr) {
-      offset = {ctx->program->allocateId(), v1};
-      emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[1].ssa), offset);
-   } else {
+   if (ctx->options->chip_class < VI)
+      offset = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
+   else
       offset = get_ssa_temp(ctx, instr->src[1].ssa);
-   }
 
    Temp rsrc = {ctx->program->allocateId(), s4};
    aco_ptr<Instruction> load;
@@ -2781,11 +2751,7 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp m = load_lds_size_m0(ctx);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    assert(instr->dest.ssa.bit_size == 32 && "Bitsize not supported in load_shared.");
-   Temp address = get_ssa_temp(ctx, instr->src[0].ssa);
-   if (address.type() != vgpr) {
-      address = {ctx->program->allocateId(), getRegClass(vgpr, address.size())};
-      emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[0].ssa), address);
-   }
+   Temp address = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
 
    unsigned offset = instr->const_index[0];
    aco_opcode op;
@@ -2822,13 +2788,9 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    unsigned writemask = instr->const_index[1];
    Temp m = load_lds_size_m0(ctx);
    Temp data = get_ssa_temp(ctx, instr->src[0].ssa);
-   Temp address = get_ssa_temp(ctx, instr->src[1].ssa);
+   Temp address = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
    unsigned elem_size_bytes = instr->src[0].ssa->bit_size / 8;
    assert(elem_size_bytes == 4 && "Only 32bit store_shared currently supported.");
-   if (address.type() != vgpr) {
-      address = {ctx->program->allocateId(), getRegClass(vgpr, address.size())};
-      emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[1].ssa), address);
-   }
 
    /* we need at most two stores for 32bit variables */
    int start[2], count[2];
@@ -2884,16 +2846,8 @@ void visit_shared_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    unsigned offset = instr->const_index[0];
    Temp m = load_lds_size_m0(ctx);
-   Temp data = get_ssa_temp(ctx, instr->src[1].ssa);
-   if (data.type() != vgpr) {
-         data = {ctx->program->allocateId(), getRegClass(vgpr, data.size())};
-         emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[1].ssa), data);
-   }
-   Temp address = get_ssa_temp(ctx, instr->src[0].ssa);
-   if (address.type() != vgpr) {
-      address = {ctx->program->allocateId(), getRegClass(vgpr, address.size())};
-      emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[0].ssa), address);
-   }
+   Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
+   Temp address = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
 
    unsigned num_operands = 3;
    aco_opcode op32, op64, op32_rtn, op64_rtn;
@@ -3539,7 +3493,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       ctx->block->instructions.emplace_back(std::move(vec));
       arg = Operand(tmp);
    } else {
-      arg = args[0];
+      assert(args[0].isTemp());
+      arg = Operand(as_vgpr(ctx, args[0].getTemp()));
    }
 
    if (instr->sampler_dim == GLSL_SAMPLER_DIM_BUF) {
