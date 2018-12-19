@@ -196,7 +196,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    }
    case Format::PSEUDO:
    case Format::PSEUDO_BARRIER:
-      break;
+      return;
    default:
       if ((uint16_t) instr->format & (uint16_t) Format::VOP3A) {
          VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr);
