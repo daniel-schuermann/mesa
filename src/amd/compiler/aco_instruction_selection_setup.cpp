@@ -209,7 +209,6 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_interpolated_input:
                   case nir_intrinsic_load_local_invocation_id:
                   case nir_intrinsic_load_local_invocation_index:
-                  case nir_intrinsic_load_ssbo:
                   case nir_intrinsic_load_shared:
                   case nir_intrinsic_ssbo_atomic_add:
                   case nir_intrinsic_ssbo_atomic_imin:
@@ -247,6 +246,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      size = 2;
                      break;
                   case nir_intrinsic_load_ubo:
+                  case nir_intrinsic_load_ssbo:
                      type = ctx->divergent_vals[intrinsic->dest.ssa.index] ? vgpr : sgpr;
                      break;
                   default:
