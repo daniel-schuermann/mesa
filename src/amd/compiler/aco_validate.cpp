@@ -125,6 +125,13 @@ void validate(Program* program, FILE * output)
             }
             break;
          }
+         case Format::MTBUF:
+         case Format::MUBUF:
+         case Format::MIMG: {
+            check(instr->num_operands > 0, "VMEM instructions must have at least one operand", instr.get());
+            check(instr->getOperand(0).isUndefined() || (instr->getOperand(0).isTemp() && instr->getOperand(0).getTemp().type() == vgpr), "VADDR must be in vgpr for VMEM instructions", instr.get());
+            break;
+         }
          case Format::DS: {
             for (unsigned i = 0; i < instr->num_operands; i++)
                check(instr->getOperand(i).isTemp() && (instr->getOperand(i).getTemp().type() == vgpr || instr->getOperand(i).physReg() == m0),
