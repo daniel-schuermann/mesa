@@ -2541,13 +2541,6 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    unsigned num_components = instr->num_components;
    unsigned num_bytes = num_components * instr->dest.ssa.bit_size / 8;
 
-   Temp offset;
-   if (ctx->options->chip_class < VI && offset.type() == sgpr) {
-      offset = {ctx->program->allocateId(), v1};
-      emit_v_mov(ctx, get_ssa_temp(ctx, instr->src[1].ssa), offset);
-   } else {
-      offset = get_ssa_temp(ctx, instr->src[1].ssa);
-   }
    Temp rsrc = {ctx->program->allocateId(), s4};
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
 
@@ -2559,30 +2552,77 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    ctx->block->instructions.emplace_back(std::move(load));
 
    aco_opcode op;
-   switch (num_bytes) {
-      case 4:
-         op = aco_opcode::buffer_load_dword;
-         break;
-      case 8:
-         op = aco_opcode::buffer_load_dwordx2;
-         break;
-      case 12:
-         op = aco_opcode::buffer_load_dwordx3;
-         break;
-      case 16:
-         op = aco_opcode::buffer_load_dwordx4;
-         break;
-      default:
-         unreachable("Load SSBO not implemented for this size.");
+   if (dst.type() == vgpr) {
+      Temp offset;
+      if (ctx->options->chip_class < VI)
+         offset = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
+      else
+         offset = get_ssa_temp(ctx, instr->src[1].ssa);
+
+      switch (num_bytes) {
+         case 4:
+            op = aco_opcode::buffer_load_dword;
+            break;
+         case 8:
+            op = aco_opcode::buffer_load_dwordx2;
+            break;
+         case 12:
+            op = aco_opcode::buffer_load_dwordx3;
+            break;
+         case 16:
+            op = aco_opcode::buffer_load_dwordx4;
+            break;
+         default:
+            unreachable("Load SSBO not implemented for this size.");
+      }
+      aco_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 3, 1)};
+      mubuf->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand();
+      mubuf->getOperand(1) = Operand(rsrc);
+      mubuf->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand((uint32_t) 0);
+      mubuf->getDefinition(0) = Definition(dst);
+      mubuf->offen = (offset.type() == vgpr);
+      mubuf->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
+      ctx->block->instructions.emplace_back(std::move(mubuf));
+   } else {
+      switch (num_bytes) {
+         case 4:
+            op = aco_opcode::s_buffer_load_dword;
+            break;
+         case 8:
+            op = aco_opcode::s_buffer_load_dwordx2;
+            break;
+         case 12:
+         case 16:
+            op = aco_opcode::s_buffer_load_dwordx4;
+            break;
+         default:
+            unreachable("Load SSBO not implemented for this size.");
+      }
+      load.reset(create_instruction<SMEM_instruction>(op, Format::SMEM, 2, 1));
+      load->getOperand(0) = Operand(rsrc);
+      load->getOperand(1) = Operand(get_ssa_temp(ctx, instr->src[1].ssa));
+      assert(load->getOperand(1).getTemp().type() == sgpr);
+      load->getDefinition(0) = Definition(dst);
+
+      if (dst.size() == 3) {
+      /* trim vector */
+         Temp vec = {ctx->program->allocateId(), s4};
+         load->getDefinition(0) = Definition(vec);
+         ctx->block->instructions.emplace_back(std::move(load));
+         emit_split_vector(ctx, vec, 4);
+
+         aco_ptr<Instruction> trimmed{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1)};
+         for (unsigned i = 0; i < 3; i++) {
+            Temp tmp = emit_extract_vector(ctx, vec, i, s1);
+            trimmed->getOperand(i) = Operand(tmp);
+         }
+         trimmed->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(trimmed));
+      } else {
+         ctx->block->instructions.emplace_back(std::move(load));
+      }
+
    }
-   aco_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 3, 1)};
-   mubuf->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand();
-   mubuf->getOperand(1) = Operand(rsrc);
-   mubuf->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand((uint32_t) 0);
-   mubuf->getDefinition(0) = Definition(dst);
-   mubuf->offen = (offset.type() == vgpr);
-   mubuf->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
-   ctx->block->instructions.emplace_back(std::move(mubuf));
    emit_split_vector(ctx, dst, num_components);
 }
 
