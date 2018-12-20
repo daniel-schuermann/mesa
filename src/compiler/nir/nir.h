@@ -3967,6 +3967,8 @@ bool nir_opt_remove_phis_block(nir_block *block);
 
 bool nir_opt_shrink_load(nir_shader *shader);
 
+bool nir_opt_sink(nir_shader *shader);
+
 bool nir_opt_trivial_continues(nir_shader *shader);
 
 bool nir_opt_undef(nir_shader *shader);

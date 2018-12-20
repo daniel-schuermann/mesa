@@ -192,6 +192,7 @@ files_libnir = files(
   'nir_opt_rematerialize_compares.c',
   'nir_opt_remove_phis.c',
   'nir_opt_shrink_load.c',
+  'nir_opt_sink.c',
   'nir_opt_trivial_continues.c',
   'nir_opt_undef.c',
   'nir_opt_vectorize.c',
