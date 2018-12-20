@@ -27,11 +27,11 @@
  *
  */
 
- #include "aco_ir.h"
- #include <vector>
- #include <set>
+#include "aco_ir.h"
+#include <vector>
+#include <set>
 
- namespace aco {
+namespace aco {
 
 template<bool reg_demand_cond>
 void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>& worklist)
@@ -170,7 +170,8 @@ live live_var_analysis(Program* program)
    /* calculate the program's register demand and number of waves */
    if (register_demand) {
       // TODO: also take shared mem into account
-      assert(vgpr_demand <= 256 && sgpr_demand <= 100);
+
+      program->num_waves = 0;
       if (vgpr_demand <= 24 && sgpr_demand <= 46) {
          program->num_waves = 10;
          program->max_sgpr = 46;
@@ -195,7 +196,7 @@ live live_var_analysis(Program* program)
          program->num_waves = 5;
          program->max_sgpr = 94;
          program->max_vgpr = 48;
-      } else {
+      } else if (sgpr_demand <= 100) {
          program->max_sgpr = 100;
          if (vgpr_demand <= 64) {
             program->num_waves = 4;
@@ -206,7 +207,7 @@ live live_var_analysis(Program* program)
          } else if (vgpr_demand <= 128) {
             program->num_waves = 2;
             program->max_vgpr = 128;
-         } else {
+         } else if (vgpr_demand <= 256) {
             program->num_waves = 1;
             program->max_vgpr = 256;
          }
