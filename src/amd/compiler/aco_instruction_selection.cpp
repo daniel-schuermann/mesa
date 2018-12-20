@@ -444,7 +444,7 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
    Temp then = get_alu_src(ctx, instr->src[1]);
    Temp els = get_alu_src(ctx, instr->src[2]);
 
-   if (ctx->divergent_vals[instr->dest.dest.ssa.index]) {
+   if (dst.regClass() == v1) {
       Temp cond;
       if (cond32.type() == vgpr) {
          cond = extract_divergent_cond32(ctx, cond32);
@@ -503,6 +503,7 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
             fprintf(stderr, "\n");
          }
       } else { /* dst.type() == sgpr */
+         assert(false && "Are 1-bit Bools enabled... ?");
          /* this implements bcsel on bools: dst = s0 ? s1 : s2
           * are going to be: dst = (s0 & s1) | (~s0 & s2) */
          assert(cond.regClass() == s2 && then.regClass() == s2 && els.regClass() == s2);
