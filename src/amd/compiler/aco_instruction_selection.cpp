@@ -1068,7 +1068,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_bcsel: {
+   case nir_op_b32csel: {
       emit_bcsel(ctx, instr, dst);
       break;
    }
@@ -1303,19 +1303,13 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_b2f: {
+   case nir_op_b2f32: {
       Temp cond32 = get_alu_src(ctx, instr->src[0]);
-      if (dst.size() == 1) {
-         aco_ptr<VOP3A_instruction> cndmask{create_instruction<VOP3A_instruction>(aco_opcode::v_and_b32, (Format) ((int) Format::VOP3A | (int) Format::VOP2), 2, 1)};
-         cndmask->getOperand(0) = Operand(cond32);
-         cndmask->getOperand(1) = Operand((uint32_t) 0x3f800000); /* 1.0 */
-         cndmask->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(cndmask));
-      } else {
-         fprintf(stderr, "Unimplemented NIR instr bit size: ");
-         nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
-      }
+      aco_ptr<VOP3A_instruction> cndmask{create_instruction<VOP3A_instruction>(aco_opcode::v_and_b32, (Format) ((int) Format::VOP3A | (int) Format::VOP2), 2, 1)};
+      cndmask->getOperand(0) = Operand(cond32);
+      cndmask->getOperand(1) = Operand((uint32_t) 0x3f800000); /* 1.0 */
+      cndmask->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(cndmask));
       break;
    }
    case nir_op_u2u32: {
@@ -1330,7 +1324,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_feq: {
+   case nir_op_feq32: {
       if (instr->src[0].src.ssa->bit_size == 32) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_eq_f32, dst);
       } else {
@@ -1340,7 +1334,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_fne: {
+   case nir_op_fne32: {
       if (instr->src[0].src.ssa->bit_size == 32) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_lg_f32, dst);
       } else {
@@ -1350,7 +1344,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_flt: {
+   case nir_op_flt32: {
       if (instr->src[0].src.ssa->bit_size == 32) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_lt_f32, dst);
       } else {
@@ -1360,7 +1354,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_fge: {
+   case nir_op_fge32: {
       if (instr->src[0].src.ssa->bit_size == 32) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_ge_f32, dst);
       } else {
@@ -1370,7 +1364,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_ieq: {
+   case nir_op_ieq32: {
       if (dst.regClass() == v1) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_eq_i32, dst);
       } else if (dst.regClass() == s1) {
@@ -1386,7 +1380,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_ine: {
+   case nir_op_ine32: {
       if (dst.regClass() == v1) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_eq_i32, dst);
       } else if (dst.regClass() == s1) {
@@ -1402,7 +1396,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_ilt: {
+   case nir_op_ilt32: {
       if (dst.regClass() == v1) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_lt_i32, dst);
       } else if (dst.regClass() == s1) {
@@ -1418,7 +1412,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_ige: {
+   case nir_op_ige32: {
       if (dst.regClass() == v1) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_ge_i32, dst);
       } else if (dst.regClass() == s1) {
@@ -1434,7 +1428,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_ult: {
+   case nir_op_ult32: {
       if (dst.regClass() == v1) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_lt_u32, dst);
       } else if (dst.regClass() == s1) {
@@ -1450,7 +1444,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_uge: {
+   case nir_op_uge32: {
       if (dst.regClass() == v1) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_ge_u32, dst);
       } else if (dst.regClass() == s1) {
