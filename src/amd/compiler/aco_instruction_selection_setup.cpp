@@ -151,24 +151,24 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_fcos:
                   case nir_op_u2f32:
                   case nir_op_i2f32:
-                  case nir_op_b2f:
+                  case nir_op_b2f32:
                      type = vgpr;
                      break;
-                  case nir_op_flt:
-                  case nir_op_fge:
-                  case nir_op_feq:
-                  case nir_op_fne:
-                  case nir_op_ilt:
-                  case nir_op_ige:
-                  case nir_op_ieq:
-                  case nir_op_ine:
-                  case nir_op_ult:
-                  case nir_op_uge:
+                  case nir_op_flt32:
+                  case nir_op_fge32:
+                  case nir_op_feq32:
+                  case nir_op_fne32:
+                  case nir_op_ilt32:
+                  case nir_op_ige32:
+                  case nir_op_ieq32:
+                  case nir_op_ine32:
+                  case nir_op_ult32:
+                  case nir_op_uge32:
                   case nir_op_f2i32:
                   case nir_op_f2u32:
                      type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
                      break;
-                  case nir_op_bcsel:
+                  case nir_op_b32csel:
                      if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index])
                         type = vgpr;
                      // TODO: with 1-bit bools, the regClass changes!
