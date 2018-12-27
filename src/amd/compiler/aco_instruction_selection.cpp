@@ -1407,7 +1407,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_ine32: {
       if (dst.regClass() == v1) {
-         emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_eq_i32, dst);
+         emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_lg_i32, dst);
       } else if (dst.regClass() == s1) {
          Temp src0 = get_alu_src(ctx, instr->src[0]);
          Temp src1 = get_alu_src(ctx, instr->src[1]);
