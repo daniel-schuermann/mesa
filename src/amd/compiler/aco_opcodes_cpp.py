@@ -39,9 +39,16 @@ const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)] = {
 },
 % endfor
 };
+
+const unsigned VOPC_to_GFX6[256] = {
+% for code in VOPC_GFX6:
+    ${code},
+% endfor
+};
+
 """
 
-from aco_opcodes import opcodes
+from aco_opcodes import opcodes, VOPC_GFX6
 from mako.template import Template
 
-print(Template(template).render(opcodes=opcodes))
+print(Template(template).render(opcodes=opcodes, VOPC_GFX6=VOPC_GFX6))
