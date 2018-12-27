@@ -64,6 +64,7 @@ typedef struct {
 } opcode_info;
 
 extern const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)];
+extern const unsigned VOPC_to_GFX6[256];
 
 #ifdef __cplusplus
 #include <cstdint>
