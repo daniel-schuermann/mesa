@@ -3658,9 +3658,30 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tex->getOperand(1) = Operand(resource);
       tex->dmask = dmask;
       tex->unrm = true;
-      tex->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      Temp dst = instr->op == nir_texop_samples_identical ? Temp{ctx->program->allocateId(), v1} : get_ssa_temp(ctx, &instr->dest.ssa);
+      tex->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(tex));
-      emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
+
+      if (instr->op == nir_texop_samples_identical) {
+         assert(dmask == 1);
+
+         aco_ptr<Instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_eq_u32, Format::VOPC, 2, 1)};
+         cmp->getOperand(0) = Operand((uint32_t) 0);
+         cmp->getOperand(1) = Operand(dst);
+         Temp tmp = {ctx->program->allocateId(), s2};
+         cmp->getDefinition(0) = Definition(tmp);
+         cmp->getDefinition(0).setHint(vcc);
+         ctx->block->instructions.emplace_back(std::move(cmp));
+
+         aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, static_cast<Format>((int)Format::VOP2 | (int)Format::VOP3A), 3, 1)};
+         bcsel->getOperand(0) = Operand((uint32_t) 0);
+         bcsel->getOperand(1) = Operand((uint32_t) -1);
+         bcsel->getOperand(2) = Operand{tmp};
+         bcsel->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+         ctx->block->instructions.emplace_back(std::move(bcsel));
+      } else {
+         emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
+      }
       return;
    }
 
