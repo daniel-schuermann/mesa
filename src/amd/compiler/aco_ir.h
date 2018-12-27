@@ -58,13 +58,9 @@ typedef enum {
 
 typedef struct {
    const char *name;
-   unsigned num_inputs;
-   unsigned num_outputs;
-   RegClass output_type[2];
-   bool kills_input[4];
-   /* TODO: everything that depends on the instruction rather than the format */
-   // like sideeffects on spr's
    unsigned opcode;
+   bool can_use_input_modifiers;
+   bool can_use_output_modifiers;
 } opcode_info;
 
 extern const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)];
