@@ -77,8 +77,7 @@ class Opcode(object):
    """Class that represents all the information we have about the opcode
    NOTE: this must be kept in sync with aco_op_info
    """
-   def __init__(self, name, num_inputs, output_type, code, format,
-                read_reg, write_reg, kills_input):
+   def __init__(self, name, code, format, input_mod, output_mod):
       """Parameters:
 
       - name is the name of the opcode (prepend nir_op_ for the enum name)
@@ -90,61 +89,50 @@ class Opcode(object):
         constant value of the opcode given the constant values of its inputs.
       """
       assert isinstance(name, str)
-      assert isinstance(num_inputs, int)
-      assert isinstance(output_type, list)
-      assert isinstance(kills_input, list)
       assert isinstance(code, int)
       assert isinstance(format, Format)
+      assert isinstance(input_mod, bool)
+      assert isinstance(output_mod, bool)
 
-      num_outputs = len(output_type)
-      assert 0 <= num_inputs <= 4
-      assert 0 <= num_outputs <= 2
       self.name = name
-      self.num_inputs = num_inputs
-      self.num_outputs = num_outputs
       self.opcode = code
-      self.output_type = output_type
-      self.read_reg = read_reg
-      self.write_reg = write_reg
-      self.kills_input = kills_input
+      self.input_mod = "true" if input_mod else "false"
+      self.output_mod = "true" if output_mod else "false"
+
 
 # global dictionary of opcodes
 opcodes = {}
 
-def opcode(name, num_inputs, output_type, code = 0, format = Format.PSEUDO,
-           read_reg = 0, write_reg = 0, kills_input = []):
+def opcode(name, code = 0, format = Format.PSEUDO, input_mod = False, output_mod = False):
    assert name not in opcodes
-   if not kills_input:
-      kills_input = [0] * num_inputs
-   opcodes[name] = Opcode(name, num_inputs, output_type, code, format,
-                          read_reg, write_reg, kills_input)
+   opcodes[name] = Opcode(name, code, format, input_mod, output_mod)
 
-opcode("exp", 0, [], format = Format.EXP)
-opcode("p_parallelcopy", 0, [])
-opcode("p_startpgm", 0, [])
-opcode("p_phi", 0, [])
-opcode("p_linear_phi", 0, [])
-opcode("p_discard_if", 0, [])
+opcode("exp", format = Format.EXP)
+opcode("p_parallelcopy")
+opcode("p_startpgm")
+opcode("p_phi")
+opcode("p_linear_phi")
+opcode("p_discard_if")
 
-opcode("p_create_vector", 0, [])
-opcode("p_extract_vector", 0, [])
-opcode("p_split_vector", 0, [])
+opcode("p_create_vector")
+opcode("p_extract_vector")
+opcode("p_split_vector")
 
 # start/end the parts where we can use exec based instructions
 # implicitly
-opcode("p_logical_start", 0, [])
-opcode("p_logical_end", 0, [])
+opcode("p_logical_start")
+opcode("p_logical_end")
 
-opcode("p_branch", 0, [], format=Format.PSEUDO_BRANCH)
-opcode("p_cbranch", 0, [], format=Format.PSEUDO_BRANCH)
-opcode("p_cbranch_z", 0, [], format=Format.PSEUDO_BRANCH)
-opcode("p_cbranch_nz", 0, [], format=Format.PSEUDO_BRANCH)
+opcode("p_branch", format=Format.PSEUDO_BRANCH)
+opcode("p_cbranch", format=Format.PSEUDO_BRANCH)
+opcode("p_cbranch_z", format=Format.PSEUDO_BRANCH)
+opcode("p_cbranch_nz", format=Format.PSEUDO_BRANCH)
 
-opcode("p_memory_barrier_all", 0, [], format=Format.PSEUDO_BARRIER)
-opcode("p_memory_barrier_atomic", 0, [], format=Format.PSEUDO_BARRIER)
-opcode("p_memory_barrier_buffer", 0, [], format=Format.PSEUDO_BARRIER)
-opcode("p_memory_barrier_image", 0, [], format=Format.PSEUDO_BARRIER)
-opcode("p_memory_barrier_shared", 0, [], format=Format.PSEUDO_BARRIER)
+opcode("p_memory_barrier_all", format=Format.PSEUDO_BARRIER)
+opcode("p_memory_barrier_atomic", format=Format.PSEUDO_BARRIER)
+opcode("p_memory_barrier_buffer", format=Format.PSEUDO_BARRIER)
+opcode("p_memory_barrier_image", format=Format.PSEUDO_BARRIER)
+opcode("p_memory_barrier_shared", format=Format.PSEUDO_BARRIER)
 
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
 SOP2_SCC = {
@@ -176,7 +164,7 @@ SOP2_SCC = {
    (49, "s_lshl4_add_u32"),
 }
 for code, name in SOP2_SCC:
-   opcode(name, 2, [s1, b], code, Format.SOP2, write_reg = SCC)
+   opcode(name, code, Format.SOP2)
 
 SOP2_NOSCC = {
    (34, "s_bfm_b32"),
@@ -188,7 +176,7 @@ SOP2_NOSCC = {
    (52, "s_pack_hh_b32_b16"),
 }
 for code, name in SOP2_NOSCC:
-   opcode(name, 2, [s1], code, Format.SOP2)
+   opcode(name, code, Format.SOP2)
 
 SOP2_64 = {
    (13, "s_and_b64"),
@@ -206,7 +194,7 @@ SOP2_64 = {
    (40, "s_bfe_i64"),
 }
 for code, name in SOP2_64:
-   opcode(name, 2, [s2,b], code, Format.SOP2, write_reg = SCC)
+   opcode(name, code, Format.SOP2)
 
 SOP2_SPECIAL = {
    (4, "s_addc_u32"),
@@ -217,13 +205,13 @@ SOP2_SPECIAL = {
    (41, "s_cbranch_g_fork"),
    (43, "s_rfe_restore_b64"),
 }
-opcode("s_addc_u32", 3, [s1,b], 4, Format.SOP2, read_reg = SCC, write_reg = SCC)
-opcode("s_subb_u32", 3, [s1,b], 5, Format.SOP2, read_reg = SCC, write_reg = SCC)
-opcode("s_cselect_b32", 3, [s1], 10, Format.SOP2, read_reg = SCC)
-opcode("s_cselect_b64", 3, [s2], 11, Format.SOP2, read_reg = SCC)
-opcode("s_bfm_b64", 2, [s2], 35, Format.SOP2)
-opcode("s_cbranch_g_fork", 2, [], 41, Format.SOP2)
-opcode("s_rfe_restore_b64", 1, [], 43, Format.SOP2)
+opcode("s_addc_u32", 4, Format.SOP2)
+opcode("s_subb_u32", 5, Format.SOP2)
+opcode("s_cselect_b32", 10, Format.SOP2)
+opcode("s_cselect_b64", 11, Format.SOP2)
+opcode("s_bfm_b64", 35, Format.SOP2)
+opcode("s_cbranch_g_fork", 41, Format.SOP2)
+opcode("s_rfe_restore_b64", 43, Format.SOP2)
 
 
 # SOPK instructions: 0 input (+ imm), 1 output + optional scc
@@ -242,7 +230,7 @@ SOPK_SCC = {
    (13, "s_cmpk_le_u32"),
 }
 for code, name in SOPK_SCC:
-   opcode(name, 1, [b], code, Format.SOPK, write_reg = SCC)
+   opcode(name, code, Format.SOPK)
 
 SOPK_SPECIAL = {
    (0, "s_movk_i32"),
@@ -255,15 +243,15 @@ SOPK_SPECIAL = {
    (20, "s_setreg_imm32_b32"), # requires 32bit literal
    (21, "s_call_b64"),
 }
-opcode("s_movk_i32", 0, [s1], 0, Format.SOPK)
-opcode("s_cmovk_i32", 1, [s1], 1, Format.SOPK, read_reg = SCC)
-opcode("s_addk_i32", 1, [s1,b], 14, Format.SOPK, write_reg = SCC, kills_input = [1])
-opcode("s_mulk_i32", 1, [s1], 15, Format.SOPK, kills_input = [1])
-opcode("s_cbranch_i_fork", 1, [], 16, Format.SOPK)
-opcode("s_getreg_b32", 0, [s1], 17, Format.SOPK)
-opcode("s_setreg_b32", 1, [s1], 18, Format.SOPK)
-opcode("s_setreg_imm32_b32", 0, [s1], 20, Format.SOPK)
-opcode("s_call_b64", 0, [s2], 21, Format.SOPK)
+opcode("s_movk_i32", 0, Format.SOPK)
+opcode("s_cmovk_i32", 1, Format.SOPK)
+opcode("s_addk_i32", 14, Format.SOPK)
+opcode("s_mulk_i32", 15, Format.SOPK)
+opcode("s_cbranch_i_fork", 16, Format.SOPK)
+opcode("s_getreg_b32", 17, Format.SOPK)
+opcode("s_setreg_b32", 18, Format.SOPK)
+opcode("s_setreg_imm32_b32", 20, Format.SOPK)
+opcode("s_call_b64", 21, Format.SOPK)
 
 
 # SOP1 instructions: 1 input, 1 output (+optional SCC)
@@ -286,7 +274,7 @@ SOP1_NOSCC = {
    (44, "s_movreld_b32"),
 }
 for code, name in SOP1_NOSCC:
-   opcode(name, 1, [s1], code, Format.SOP1)
+   opcode(name, code, Format.SOP1)
 
 SOP1_NOSCC_64 = {
    (1, "s_mov_b64"),
@@ -298,7 +286,7 @@ SOP1_NOSCC_64 = {
    (45, "s_movreld_b64")
 }
 for code, name in SOP1_NOSCC_64:
-   opcode(name, 1, [s2], code, Format.SOP1)
+   opcode(name, code, Format.SOP1)
 
 SOP1_SCC = {
    (4, "s_not_b32"),
@@ -309,7 +297,7 @@ SOP1_SCC = {
    (48, "s_abs_i32")
 }
 for code, name in SOP1_SCC:
-   opcode(name, 1, [s1,b], code, Format.SOP1, write_reg = SCC)
+   opcode(name, code, Format.SOP1)
 
 SOP1_SCC_64 = {
    (5, "s_not_b64"),
@@ -329,7 +317,7 @@ SOP1_SCC_64 = {
    (54, "s_andn2_wrexec_b64"),
 }
 for code, name in SOP1_SCC_64:
-   opcode(name, 1, [s2,b], code, Format.SOP1, write_reg = SCC + "), EXEC" if 'exec' in name else "")
+   opcode(name, code, Format.SOP1)
 
 SOP1_SPECIAL = [
    "s_cmov_b32",
@@ -343,16 +331,16 @@ SOP1_SPECIAL = [
    "s_set_gpr_idx_idx",
    "s_bitreplicate_b64_b32"
 ]
-opcode("s_cmov_b32", 2, [s1], 2, Format.SOP1, read_reg = SCC)
-opcode("s_cmov_b64", 2, [s2], 3, read_reg = SCC)
-opcode("s_bcnt0_i32_b64", 1, [s1,b], 11, Format.SOP1, write_reg = SCC)
-opcode("s_bcnt1_i32_b64", 1, [s1,b], 13, Format.SOP1, write_reg = SCC)
-opcode("s_getpc_b64", 0, [s2], 28, Format.SOP1)
-opcode("s_setpc_b64", 1, [], 29, Format.SOP1)
-opcode("s_rfe_b64", 1, [], 31, Format.SOP1)
-opcode("s_cbranch_join", 1, [], 46, Format.SOP1)
-opcode("s_set_gpr_idx_idx", 1, [], 50, Format.SOP1)
-opcode("s_bitreplicate_b64_b32", 1, [s2], 55, Format.SOP1)
+opcode("s_cmov_b32", 2, Format.SOP1)
+opcode("s_cmov_b64", 3, Format.SOP1)
+opcode("s_bcnt0_i32_b64", 11, Format.SOP1)
+opcode("s_bcnt1_i32_b64", 13, Format.SOP1)
+opcode("s_getpc_b64", 28, Format.SOP1)
+opcode("s_setpc_b64", 29, Format.SOP1)
+opcode("s_rfe_b64", 31, Format.SOP1)
+opcode("s_cbranch_join", 46, Format.SOP1)
+opcode("s_set_gpr_idx_idx", 50, Format.SOP1)
+opcode("s_bitreplicate_b64_b32", 55, Format.SOP1)
 
 
 # SOPC instructions: 2 inputs and 0 outputs (+SCC)
@@ -377,14 +365,14 @@ SOPC_SCC = {
    (19, "s_cmp_lg_u64")
 }
 for code, name in SOPC_SCC:
-   opcode(name, 2, [b], code, Format.SOPC, write_reg = SCC)
+   opcode(name, code, Format.SOPC)
 
 SOPC_SPECIAL = [
    "s_setvskip",
    "s_set_gpr_idx_on"
 ]
-opcode("s_setvskip", 2, [])
-opcode("s_set_gpr_idx_on", 1, [])
+opcode("s_setvskip", 2, Format.SOPC)
+opcode("s_set_gpr_idx_on", 1, Format.SOPC)
 
 
 # SOPP instructions: 0 inputs (+optional scc/vcc) , 0 outputs
@@ -422,7 +410,7 @@ SOPP_SPECIAL = {
    (30, "s_endpgm_ordered_ps_done")
 }
 for code, name in SOPP_SPECIAL:
-   opcode(name, 0, [], code, Format.SOPP)
+   opcode(name, code, Format.SOPP)
 
 
 # SMEM instructions: sbase input (2 sgpr), potentially 2 offset inputs, 1 sdata input/output
@@ -442,7 +430,7 @@ SMEM_LOAD = [
    (12, "s_buffer_load_dwordx16", s16)
 ]
 for (code, name, size) in SMEM_LOAD:
-   opcode(name, 3, [size], code, Format.SMEM)
+   opcode(name, code, Format.SMEM)
 
 SMEM_STORE = [
    (16, "s_store_dword", 1),
@@ -456,7 +444,7 @@ SMEM_STORE = [
    (26, "s_buffer_store_dwordx4", 4)
 ]
 for (code, name, size) in SMEM_STORE:
-   opcode(name, 4, [], code, Format.SMEM)
+   opcode(name, code, Format.SMEM)
 
 SMEM_ATOMIC = [
    (64, "s_buffer_atomic_swap"),
@@ -485,7 +473,7 @@ SMEM_ATOMIC = [
    (140, "s_atomic_dec"),
 ]
 for code, name in SMEM_ATOMIC:
-   opcode(name, 4, [s1], code, Format.SMEM, kills_input = [0, 0, 0, 1])
+   opcode(name, code, Format.SMEM)
 
 SMEM_ATOMIC_64 = [
    (96, "s_buffer_atomic_swap_x2"),
@@ -514,7 +502,7 @@ SMEM_ATOMIC_64 = [
    (172, "s_atomic_dec_x2"),
 ]
 for code, name in SMEM_ATOMIC_64:
-   opcode(name, 4, [s2], code, Format.SMEM, kills_input = [0, 0, 0, 1])
+   opcode(name, code, Format.SMEM)
 
 SMEM_DCACHE = [
    "s_dcache_inv",
@@ -522,8 +510,8 @@ SMEM_DCACHE = [
    "s_dcache_inv_vol",
    "s_dcache_wb_vol"
 ]
-for name in SMEM_DCACHE:
-   opcode(name, 0, [])
+#for name in SMEM_DCACHE:
+#   opcode(name, 0, [])
 
 SMEM_SPECIAL = [
    "s_memtime",
@@ -537,65 +525,65 @@ SMEM_SPECIAL = [
    "s_atomic_cmpswap",
    "s_atomic_cmpswap_x2",
 ]
-opcode("s_memtime", 0, [s2])
-opcode("s_memrealtime", 0, [s2])
-opcode("s_atc_probe", 3, [])
-opcode("s_atc_probe_buffer", 3, [])
-opcode("s_dcache_discard", 3, [])
-opcode("s_dcache_discard_x2", 3, [])
-opcode("s_buffer_atomic_cmpswap", 4, [s1], kills_input = [0, 0, 0, 1])
-opcode("s_buffer_atomic_cmpswap_x2", 4, [s2], kills_input = [0, 0, 0, 1])
-opcode("s_atomic_cmpswap", 4, [s1], kills_input = [0, 0, 0, 1])
-opcode("s_atomic_cmpswap_x2", 4, [s2], kills_input = [0, 0, 0, 1])
+#opcode("s_memtime", 0, [s2])
+#opcode("s_memrealtime", 0, [s2])
+#opcode("s_atc_probe", 3, [])
+#opcode("s_atc_probe_buffer", 3, [])
+#opcode("s_dcache_discard", 3, [])
+#opcode("s_dcache_discard_x2", 3, [])
+#opcode("s_buffer_atomic_cmpswap", 4, [s1], kills_input = [0, 0, 0, 1])
+#opcode("s_buffer_atomic_cmpswap_x2", 4, [s2], kills_input = [0, 0, 0, 1])
+#opcode("s_atomic_cmpswap", 4, [s1], kills_input = [0, 0, 0, 1])
+#opcode("s_atomic_cmpswap_x2", 4, [s2], kills_input = [0, 0, 0, 1])
 
 
 # VOP2 instructions: 2 inputs, 1 output (+ optional vcc)
 VOP2_NOVCC = {
-   (1, "v_add_f32"),
-   (2, "v_sub_f32"),
-   (3, "v_subrev_f32"),
-   (4, "v_mul_legacy_f32"),
-   (5, "v_mul_f32"),
-   (6, "v_mul_i32_i24"),
-   (7, "v_mul_hi_i32_i24"),
-   (8, "v_mul_u32_u24"),
-   (9, "v_mul_hi_u32_u24"),
-   (10, "v_min_f32"),
-   (11, "v_max_f32"),
-   (12, "v_min_i32"),
-   (13, "v_max_i32"),
-   (14, "v_min_u32"),
-   (15, "v_max_u32"),
-   (16, "v_lshrrev_b32"),
-   (17, "v_ashrrev_i32"),
-   (18, "v_lshlrev_b32"),
-   (19, "v_and_b32"),
-   (20, "v_or_b32"),
-   (21, "v_xor_b32"),
-   (31, "v_add_f16"),
-   (32, "v_sub_f16"),
-   (33, "v_subrev_f16"),
-   (34, "v_mul_f16"),
-   (38, "v_add_u16"),
-   (39, "v_sub_u16"),
-   (40, "v_subrev_u16"),
-   (41, "v_mul_lo_u16"),
-   (42, "v_lshlrev_b16"),
-   (43, "v_lshrrev_b16"),
-   (44, "v_ashrrev_b16"),
-   (45, "v_max_f16"),
-   (46, "v_min_f16"),
-   (47, "v_max_u16"),
-   (48, "v_max_i16"),
-   (49, "v_min_u16"),
-   (50, "v_min_i16"),
-   (51, "v_ldexp_f16"),
-   (52, "v_add_u32"),
-   (53, "v_sub_u32"),
-   (54, "v_subrev_u32")
+   (1, "v_add_f32", True),
+   (2, "v_sub_f32", True),
+   (3, "v_subrev_f32", True),
+   (4, "v_mul_legacy_f32", True),
+   (5, "v_mul_f32", True),
+   (6, "v_mul_i32_i24", False),
+   (7, "v_mul_hi_i32_i24", False),
+   (8, "v_mul_u32_u24", False),
+   (9, "v_mul_hi_u32_u24", False),
+   (10, "v_min_f32", True),
+   (11, "v_max_f32", True),
+   (12, "v_min_i32", False),
+   (13, "v_max_i32", False),
+   (14, "v_min_u32", False),
+   (15, "v_max_u32", False),
+   (16, "v_lshrrev_b32", False),
+   (17, "v_ashrrev_i32", False),
+   (18, "v_lshlrev_b32", False),
+   (19, "v_and_b32", False),
+   (20, "v_or_b32", False),
+   (21, "v_xor_b32", False),
+   (31, "v_add_f16", True),
+   (32, "v_sub_f16", True),
+   (33, "v_subrev_f16", True),
+   (34, "v_mul_f16", True),
+   (38, "v_add_u16", False),
+   (39, "v_sub_u16", False),
+   (40, "v_subrev_u16", False),
+   (41, "v_mul_lo_u16", False),
+   (42, "v_lshlrev_b16", False),
+   (43, "v_lshrrev_b16", False),
+   (44, "v_ashrrev_b16", False),
+   (45, "v_max_f16", True),
+   (46, "v_min_f16", True),
+   (47, "v_max_u16", False),
+   (48, "v_max_i16", False),
+   (49, "v_min_u16", False),
+   (50, "v_min_i16", False),
+   (51, "v_ldexp_f16", False),
+   (52, "v_add_u32", False),
+   (53, "v_sub_u32", False),
+   (54, "v_subrev_u32", False)
 }
-for code, name in VOP2_NOVCC:
-   opcode(name, 2, [v1], code)
+for code, name, modifiers in VOP2_NOVCC:
+   opcode(name, code, Format.VOP2, modifiers, modifiers)
 
 VOP2_LITERAL = {
    (23, "v_madmk_f32"),
@@ -604,7 +592,7 @@ VOP2_LITERAL = {
    (37, "v_madak_f16")
 }
 for code, name in VOP2_LITERAL:
-   opcode(name, 3, [v1], code)
+   opcode(name, code, Format.VOP2)
 
 VOP2_VCCOUT = [
    (25, "v_add_co_u32"),
@@ -612,120 +600,120 @@ VOP2_VCCOUT = [
    (27, "v_subrev_co_u32")
 ]
 for code, name in VOP2_VCCOUT:
-   opcode(name, 2, [v1,s2], code, write_reg = VCC)
+   opcode(name, code, Format.VOP2)
 
 VOP2_VCCINOUT = [
-   "v_addc_co_u32",
-   "v_subb_co_u32",
-   "v_subbrev_co_u32"
+   (28, "v_addc_co_u32"),
+   (29, "v_subb_co_u32"),
+   (30, "v_subbrev_co_u32")
 ]
-for name in VOP2_VCCINOUT:
-   opcode(name, 3, [v1,s2], read_reg = VCC, write_reg = VCC, kills_input = [0, 0, 1])
+for code, name in VOP2_VCCINOUT:
+   opcode(name, code, Format.VOP2)
    
 VOP2_SPECIAL = [
    "v_cndmask_b32",
    "v_mac_f32",
    "v_mac_f16"
 ]
-opcode("v_cndmask_b32", 3, [v1], 0, read_reg = VCC)
-opcode("v_mac_f32", 3, [v1], 22, kills_input = [0, 0, 1])
-opcode("v_mac_f16", 3, [v1], 35, kills_input = [0, 0, 1])
+opcode("v_cndmask_b32", 0, Format.VOP2)
+opcode("v_mac_f32", 22, Format.VOP2, True, True)
+opcode("v_mac_f16", 35, Format.VOP2, True, True)
 
 
 # VOP1 instructions: instructions with 1 input and 1 output
 VOP1_32 = {
-   (1, "v_mov_b32"),
-   (2, "v_readfirstlane_b32"),
-   (3, "v_cvt_i32_f64"),
-   (5, "v_cvt_f32_i32"),
-   (6, "v_cvt_f32_u32"),
-   (7, "v_cvt_u32_f32"),
-   (8, "v_cvt_i32_f32"),
-   (10, "v_cvt_f16_f32"),
-   (11, "v_cvt_f32_f16"),
-   (12, "v_cvt_rpi_i32_f32"),
-   (13, "v_cvt_flr_i32_f32"),
-   (14, "v_cvt_off_f32_i4"),
-   (15, "v_cvt_f32_f64"),
-   (17, "v_cvt_f32_ubyte0"),
-   (18, "v_cvt_f32_ubyte1"),
-   (19, "v_cvt_f32_ubyte2"),
-   (20, "v_cvt_f32_ubyte3"),
-   (21, "v_cvt_u32_f64"),
-   (27, "v_fract_f32"),
-   (28, "v_trunc_f32"),
-   (29, "v_ceil_f32"),
-   (30, "v_rndne_f32"),
-   (31, "v_floor_f32"),
-   (32, "v_exp_f32"),
-   (33, "v_log_f32"),
-   (34, "v_rcp_f32"),
-   (35, "v_rcp_iflag_f32"),
-   (36, "v_rsq_f32"),
-   (39, "v_sqrt_f32"),
-   (41, "v_sin_f32"),
-   (42, "v_cos_f32"),
-   (43, "v_not_b32"),
-   (44, "v_bfrev_b32"),
-   (45, "v_ffbh_u32"),
-   (46, "v_ffbl_b32"),
-   (47, "v_ffbh_i32"),
-   (48, "v_frexp_exp_i32_f64"),
-   (51, "v_frexp_exp_i32_f32"),
-   (52, "v_frexp_mant_f32"),
-   (55, "v_screen_partition_4se_b32"),
-   (57, "v_cvt_f16_u16"),
-   (58, "v_cvt_f16_i16"),
-   (59, "v_cvt_u16_f16"),
-   (60, "v_cvt_i16_f16"),
-   (61, "v_rcp_f16"),
-   (62, "v_sqrt_f16"),
-   (63, "v_rsq_f16"),
-   (64, "v_log_f16"),
-   (65, "v_exp_f16"),
-   (66, "v_frexp_mant_f16"),
-   (67, "v_frexp_exp_i16_f16"),
-   (68, "v_floor_f16"),
-   (69, "v_ceil_f16"),
-   (70, "v_trunc_f16"),
-   (71, "v_rndne_f16"),
-   (72, "v_fract_f16"),
-   (73, "v_sin_f16"),
-   (74, "v_cos_f16"),
-   (75, "v_exp_legacy_f32"),
-   (76, "v_log_legacy_f32"),
-   (77, "v_cvt_norm_i16_f16"),
-   (78, "v_cvt_norm_u16_f16"),
-   (79, "v_sat_pk_u8_i16")
+   (1, "v_mov_b32", False, False),
+   (2, "v_readfirstlane_b32", False, False),
+   (3, "v_cvt_i32_f64", True, False),
+   (5, "v_cvt_f32_i32", False, True),
+   (6, "v_cvt_f32_u32", False, True),
+   (7, "v_cvt_u32_f32", True, False),
+   (8, "v_cvt_i32_f32", True, False),
+   (10, "v_cvt_f16_f32", True, True),
+   (11, "v_cvt_f32_f16", True, True),
+   (12, "v_cvt_rpi_i32_f32", True, False),
+   (13, "v_cvt_flr_i32_f32", True, False),
+   (14, "v_cvt_off_f32_i4", False, True),
+   (15, "v_cvt_f32_f64", True, True),
+   (17, "v_cvt_f32_ubyte0", False, True),
+   (18, "v_cvt_f32_ubyte1", False, True),
+   (19, "v_cvt_f32_ubyte2", False, True),
+   (20, "v_cvt_f32_ubyte3", False, True),
+   (21, "v_cvt_u32_f64", True, False),
+   (27, "v_fract_f32", True, True),
+   (28, "v_trunc_f32", True, True),
+   (29, "v_ceil_f32", True, True),
+   (30, "v_rndne_f32", True, True),
+   (31, "v_floor_f32", True, True),
+   (32, "v_exp_f32", True, True),
+   (33, "v_log_f32", True, True),
+   (34, "v_rcp_f32", True, True),
+   (35, "v_rcp_iflag_f32", True, True),
+   (36, "v_rsq_f32", True, True),
+   (39, "v_sqrt_f32", True, True),
+   (41, "v_sin_f32", True, True),
+   (42, "v_cos_f32", True, True),
+   (43, "v_not_b32", False, False),
+   (44, "v_bfrev_b32", False, False),
+   (45, "v_ffbh_u32", False, False),
+   (46, "v_ffbl_b32", False, False),
+   (47, "v_ffbh_i32", False, False),
+   (48, "v_frexp_exp_i32_f64", True, False),
+   (51, "v_frexp_exp_i32_f32", True, False),
+   (52, "v_frexp_mant_f32", True, False),
+   (55, "v_screen_partition_4se_b32", False, False),
+   (57, "v_cvt_f16_u16", False, True),
+   (58, "v_cvt_f16_i16", False, True),
+   (59, "v_cvt_u16_f16", True, False),
+   (60, "v_cvt_i16_f16", True, False),
+   (61, "v_rcp_f16", True, True),
+   (62, "v_sqrt_f16", True, True),
+   (63, "v_rsq_f16", True, True),
+   (64, "v_log_f16", True, True),
+   (65, "v_exp_f16", True, True),
+   (66, "v_frexp_mant_f16", True, False),
+   (67, "v_frexp_exp_i16_f16", True, False),
+   (68, "v_floor_f16", True, True),
+   (69, "v_ceil_f16", True, True),
+   (70, "v_trunc_f16", True, True),
+   (71, "v_rndne_f16", True, True),
+   (72, "v_fract_f16", True, True),
+   (73, "v_sin_f16", True, True),
+   (74, "v_cos_f16", True, True),
+   (75, "v_exp_legacy_f32", True, True),
+   (76, "v_log_legacy_f32", True, True),
+   (77, "v_cvt_norm_i16_f16", True, False),
+   (78, "v_cvt_norm_u16_f16", True, False),
+   (79, "v_sat_pk_u8_i16", False, False)
 }
-for code, name in VOP1_32:
-   opcode(name, 1, [v1], code, Format.VOP1)
+for code, name, in_mod, out_mod in VOP1_32:
+   opcode(name, code, Format.VOP1, in_mod, out_mod)
 
 VOP1_64 = [
-   "v_cvt_f64_i32",
-   "v_cvt_f64_f32",
-   "v_cvt_f64_u32",
-   "v_trunc_f64",
-   "v_ceil_f64",
-   "v_rndne_f64",
-   "v_floor_f64",
-   "v_rcp_f64",
-   "v_rsq_f64",
-   "v_sqrt_f64",
-   "v_frexp_mant_f64",
-   "v_fract_f64"
+   (4, "v_cvt_f64_i32", False, True),
+   (16, "v_cvt_f64_f32", True, True),
+   (22, "v_cvt_f64_u32", False, True),
+   (23, "v_trunc_f64", True, True),
+   (24, "v_ceil_f64", True, True),
+   (25, "v_rndne_f64", True, True),
+   (26, "v_floor_f64", True, True),
+   (37, "v_rcp_f64", True, True),
+   (38, "v_rsq_f64", True, True),
+   (40, "v_sqrt_f64", True, True),
+   (49, "v_frexp_mant_f64", True, False),
+   (50, "v_fract_f64", True, True)
 ]
-for name in VOP1_64:
-   opcode(name, 1, [v2])
+for code, name, in_mod, out_mod in VOP1_64:
+   opcode(name, code, Format.VOP1, in_mod, out_mod)
 
 VOP1_SPECIAL = [
    "v_nop",
    "v_clrexcp",
    "v_swap_b32"
 ]
-opcode("v_nop", 0, [])
-opcode("v_clrexcp", 0, [])
-opcode("v_swap_b32", 2, [v1,v1], 81, Format.VOP1, kills_input = [1,1])
+opcode("v_nop", 0, Format.VOP1)
+opcode("v_clrexcp", 53, Format.VOP1)
+opcode("v_swap_b32", 81, Format.VOP1)
 
 
 # VOPC instructions:
@@ -739,7 +727,7 @@ VOPC_CLASS = {
    (21, "v_cmpx_class_f16"),
 }
 for code, name in VOPC_CLASS:
-    opcode(name, 2, [s2], code, Format.VOPC)
+    opcode(name, code, Format.VOPC, True, False)
 
 PREFIX = ["v_cmp_", "v_cmpx_"]
 
@@ -750,7 +738,7 @@ code = 32
 for post in SUFFIX_F:
    for pre in PREFIX:
       for comp in COMPF:
-         opcode(pre+comp+post, 2, [s2], code, Format.VOPC)
+         opcode(pre+comp+post, code, Format.VOPC, True, False)
          code = code + 1
 assert(code == 128)
 
@@ -763,12 +751,9 @@ for bits in BITSIZE:
    for pre in PREFIX:
       for s in SIGNED:
          for cmp in COMPI:
-            opcode(pre+cmp+s+bits, 2, [s2], code, Format.VOPC)
+            opcode(pre+cmp+s+bits, code, Format.VOPC)
             code = code + 1
 assert(code == 256)
-
-SUFFIX_U32 = ["_i16", "_u16", "_i32", "_u32"]
-SUFFIX_U64 = ["_i64", "_u64"]
 
 
 # VOPP instructions: packed 16bit instructions - 1 or 2 inputs and 1 output
@@ -791,8 +776,8 @@ VOPP_2 = [
    "v_pk_min_f16",
    "v_pk_max_f16"
 ]
-for name in VOPP_2:
-   opcode(name, 2, [v1])
+#for name in VOPP_2:
+#   opcode(name, 2, [v1])
 
 VOPP_3 = [
    "v_pk_mad_i16",
@@ -802,8 +787,8 @@ VOPP_3 = [
    "v_pk_mad_mixlo_f16",
    "v_pk_mad_mixhi_f16"
 ]
-for name in VOPP_3:
-   opcode(name, 3, [v1])
+#for name in VOPP_3:
+#   opcode(name, 3, [v1])
 
 VOPP = VOPP_2 + VOPP_3
 
@@ -815,9 +800,9 @@ VINTRP = [
    "v_interp_p2_f32",
    "v_interp_mov_f32"
 ]
-opcode("v_interp_p1_f32", 1, [v1], 0, Format.VINTRP)
-opcode("v_interp_p2_f32", 1, [v1], 1, Format.VINTRP)
-opcode("v_interp_mov_f32", 1, [v1], 2, Format.VINTRP)
+opcode("v_interp_p1_f32", 0, Format.VINTRP)
+opcode("v_interp_p2_f32", 1, Format.VINTRP)
+opcode("v_interp_mov_f32", 2, Format.VINTRP)
 
 # VOP3 instructions: 3 inputs, 1 output
 # VOP3b instructions: have a unique scalar output, e.g. VOP2 with vcc out
@@ -829,80 +814,76 @@ VOP3b = [
    "v_mad_i64_i32"
 ]
 #TODO opcode("v_mad_u64_u32", 3, [1,1,2], 2, [2,2], [0, 1], 0, 1, 0, 0, [0, 0, 0])
-opcode("v_mad_u64_u32", 3, [v2], 488, Format.VOP3B)
+opcode("v_mad_u64_u32", 488, Format.VOP3B)
 
 
 VOP3a_32 = {
-   (448, "v_mad_legacy_f32"),
-   (449, "v_mad_f32"),
-   (450, "v_mad_i32_i24"),
-   (451, "v_mad_u32_u24"),
-   (452, "v_cubeid_f32"),
-   (453, "v_cubesc_f32"),
-   (454, "v_cubetc_f32"),
-   (455, "v_cubema_f32"),
-   (456, "v_bfe_u32"),
-   (457, "v_bfe_i32"),
-   (458, "v_bfi_b32"),
-   (459, "v_fma_f32"),
-   (461, "v_lerp_u8"),
-   (462, "v_alignbit_b32"),
-   (463, "v_alignbyte_b32"),
-   (464, "v_min3_f32"),
-   (465, "v_min3_i32"),
-   (466, "v_min3_u32"),
-   (467, "v_max3_f32"),
-   (468, "v_max3_i32"),
-   (469, "v_max3_u32"),
-   (470, "v_med3_f32"),
-   (471, "v_med3_i32"),
-   (472, "v_med3_u32"),
-   (473, "v_sad_u8"),
-   (474, "v_sad_hi_u8"),
-   (475, "v_sad_u16"),
-   (476, "v_sad_u32"),
-   (477, "v_cvt_pk_u8_f32"),
-   (478, "v_div_fixup_f32"),
-   (484, "v_msad_u8"),
-   (490, "v_mad_legacy_f16"),
-   (491, "v_mad_legacy_u16"),
-   (492, "v_mad_legacy_i16"),
-   (493, "v_perm_b32"),
-   (494, "v_fma_legacy_f16"),
-   (495, "v_div_fixup_legacy_f16"),
-   (497, "v_mad_u32_u16"),
-   (498, "v_mad_i32_i16"),
-   (499, "v_xad_u32"),
-   (500, "v_min3_f16"),
-   (501, "v_min3_i16"),
-   (502, "v_min3_u16"),
-   (503, "v_max3_f16"),
-   (504, "v_max3_i16"),
-   (505, "v_max3_u16"),
-   (506, "v_med3_f16"),
-   (507, "v_med3_i16"),
-   (508, "v_med3_u16"),
-   (509, "v_lshl_add_u32"),
-   (510, "v_add_lshl_u32"),
-   (511, "v_add3_u32"),
-   (512, "v_lshl_or_b32"),
-   (513, "v_and_or_b32"),
-   (514, "v_or3_b32"),
-   (515, "v_mad_f16"),
-   (516, "v_mad_u16"),
-   (517, "v_mad_i16"),
-   (518, "v_fma_f16"),
-   (519, "v_div_fixup_f16"),
+   (448, "v_mad_legacy_f32", True, True),
+   (449, "v_mad_f32", True, True),
+   (450, "v_mad_i32_i24", False, False),
+   (451, "v_mad_u32_u24", False, False),
+   (452, "v_cubeid_f32", True, True),
+   (453, "v_cubesc_f32", True, True),
+   (454, "v_cubetc_f32", True, True),
+   (455, "v_cubema_f32", True, True),
+   (456, "v_bfe_u32", False, False),
+   (457, "v_bfe_i32", False, False),
+   (458, "v_bfi_b32", False, False),
+   (459, "v_fma_f32", True, True),
+   (460, "v_fma_f64", True, True),
+   (461, "v_lerp_u8", False, False),
+   (462, "v_alignbit_b32", False, False),
+   (463, "v_alignbyte_b32", False, False),
+   (464, "v_min3_f32", True, True),
+   (465, "v_min3_i32", False, False),
+   (466, "v_min3_u32", False, False),
+   (467, "v_max3_f32", True, True),
+   (468, "v_max3_i32", False, False),
+   (469, "v_max3_u32", False, False),
+   (470, "v_med3_f32", True, True),
+   (471, "v_med3_i32", False, False),
+   (472, "v_med3_u32", False, False),
+   (473, "v_sad_u8", False, False),
+   (474, "v_sad_hi_u8", False, False),
+   (475, "v_sad_u16", False, False),
+   (476, "v_sad_u32", False, False),
+   (477, "v_cvt_pk_u8_f32", True, False),
+   (478, "v_div_fixup_f32", True, True),
+   (479, "v_div_fixup_f64", True, True),
+   (484, "v_msad_u8", False, False),
+   (490, "v_mad_legacy_f16", True, True),
+   (491, "v_mad_legacy_u16", False, False),
+   (492, "v_mad_legacy_i16", False, False),
+   (493, "v_perm_b32", False, False),
+   (494, "v_fma_legacy_f16", True, True),
+   (495, "v_div_fixup_legacy_f16", True, True),
+   (497, "v_mad_u32_u16", False, False),
+   (498, "v_mad_i32_i16", False, False),
+   (499, "v_xad_u32", False, False),
+   (500, "v_min3_f16", True, True),
+   (501, "v_min3_i16", False, False),
+   (502, "v_min3_u16", False, False),
+   (503, "v_max3_f16", True, True),
+   (504, "v_max3_i16", False, False),
+   (505, "v_max3_u16", False, False),
+   (506, "v_med3_f16", True, True),
+   (507, "v_med3_i16", False, False),
+   (508, "v_med3_u16", False, False),
+   (509, "v_lshl_add_u32", False, False),
+   (510, "v_add_lshl_u32", False, False),
+   (511, "v_add3_u32", False, False),
+   (512, "v_lshl_or_b32", False, False),
+   (513, "v_and_or_b32", False, False),
+   (514, "v_or3_b32", False, False),
+   (515, "v_mad_f16", True, True),
+   (516, "v_mad_u16", False, False),
+   (517, "v_mad_i16", False, False),
+   (518, "v_fma_f16", True, True),
+   (519, "v_div_fixup_f16", True, True),
 }
-for code, name in VOP3a_32:
-   opcode(name, 3, [v1], code, Format.VOP3A)
+for code, name, in_mod, out_mod in VOP3a_32:
+   opcode(name, code, Format.VOP3A, in_mod, out_mod)
 
-VOP3a_64 = [
-   "v_fma_f64",
-   "v_div_fixup_f64"
-]
-for name in VOP3a_64:
-   opcode(name, 3, [v2])
 
 #two parameters
 VOP3a_32_2 = {
@@ -929,7 +910,7 @@ VOP3a_32_2 = {
    (672, "v_pack_b32_f16"),
 }
 for code, name in VOP3a_32_2:
-   opcode(name, 2, [v1], code, Format.VOP3A)
+   opcode(name, code, Format.VOP3A)
 
 VOP3a_64_2 = [
    (640, "v_add_f64"),
@@ -943,7 +924,7 @@ VOP3a_64_2 = [
    (658, "v_trig_preop_f64"), #64bit
 ]
 for code, name in VOP3a_64_2:
-   opcode(name, 2, [v2], code, Format.VOP3A)
+   opcode(name, code, Format.VOP3A)
    
 VOP3a_SPECIAL = [
    "v_bcnt_u32_b32", # one input
@@ -959,13 +940,13 @@ VOP3a_SPECIAL = [
    "v_interp_p2_legacy_f16",
    "v_interp_p2_f16"
 ]
-opcode("v_bcnt_u32_b32", 1, [v1])
-opcode("v_readlane_b32", 2, [s1])
-opcode("v_div_fmas_f32", 4, [v1], read_reg = VCC)
-opcode("v_div_fmas_f64", 4, [v2], read_reg = VCC)
-opcode("v_qsad_pk_u16_u8", 3, [v1])
-opcode("v_mqsad_pk_u16_u8", 3, [v1])
-opcode("v_mqsad_u32_u8", 3, [v2])
+opcode("v_bcnt_u32_b32", 651, Format.VOP3A)
+opcode("v_readlane_b32", 649, Format.VOP3A)
+opcode("v_div_fmas_f32", 482, Format.VOP3A)
+opcode("v_div_fmas_f64", 483, Format.VOP3A)
+opcode("v_qsad_pk_u16_u8", 485, Format.VOP3A)
+opcode("v_mqsad_pk_u16_u8", 486, Format.VOP3A)
+opcode("v_mqsad_u32_u8", 487, Format.VOP3A)
 
 
 # DS instructions: 3 inputs (1 addr, 2 data), 1 output
@@ -1127,7 +1108,7 @@ DS = [
    (255, "ds_read_b128"),
 ]
 for (code, name) in DS:
-    opcode(name, 0, [], code, Format.DS)
+    opcode(name, code, Format.DS)
 
 
 # MUBUF instructions:
@@ -1204,7 +1185,7 @@ MUBUF = {
    (108, "buffer_atomic_dec_x2"),
 }
 for (code, name) in MUBUF:
-    opcode(name, 0, [], code, Format.MUBUF)
+    opcode(name, code, Format.MUBUF)
 
 
 MIMG = [
@@ -1302,7 +1283,7 @@ MIMG = [
    (111, "image_sample_c_cd_cl_o"),
 ]
 for code, name in MIMG:
-    opcode(name, 0, [], code, Format.MIMG)
+    opcode(name, code, Format.MIMG)
 
 NOT_DPP = [
    "v_madmk_f32",
@@ -1329,4 +1310,5 @@ NOT_DPP = [
    "v_clrexcp",
    "v_swap_b32"
 ]
+
 
