@@ -103,6 +103,9 @@ class Opcode(object):
 # global dictionary of opcodes
 opcodes = {}
 
+# VOPC to GFX6 opcode translation map
+VOPC_GFX6 = [0] * 256
+
 def opcode(name, code = 0, format = Format.PSEUDO, input_mod = False, output_mod = False):
    assert name not in opcodes
    opcodes[name] = Opcode(name, code, format, input_mod, output_mod)
@@ -739,6 +742,7 @@ for post in SUFFIX_F:
    for pre in PREFIX:
       for comp in COMPF:
          opcode(pre+comp+post, code, Format.VOPC, True, False)
+         VOPC_GFX6[code] = max(0, code - 0x40)
          code = code + 1
 assert(code == 128)
 
@@ -752,6 +756,8 @@ for bits in BITSIZE:
       for s in SIGNED:
          for cmp in COMPI:
             opcode(pre+cmp+s+bits, code, Format.VOPC)
+            if (bits != "16"):
+                VOPC_GFX6[code] = code - (0x40 if s == "_i" else 0x8)
             code = code + 1
 assert(code == 256)
 
