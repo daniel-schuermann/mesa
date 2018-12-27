@@ -33,11 +33,9 @@ const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)] = {
 % for name, opcode in sorted(opcodes.items()):
 {
    .name = "${name}",
-   .num_inputs = ${opcode.num_inputs},
-   .num_outputs = ${opcode.num_outputs},
-   .output_type = { ${ ", ".join(str(type) for type in opcode.output_type) }},
-   .kills_input = {${ ", ".join(str(size) for size in opcode.kills_input) }},
    .opcode = ${opcode.opcode},
+   .can_use_input_modifiers = ${opcode.input_mod},
+   .can_use_output_modifiers = ${opcode.output_mod},
 },
 % endfor
 };
