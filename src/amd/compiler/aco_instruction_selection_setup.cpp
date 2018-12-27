@@ -152,6 +152,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_u2f32:
                   case nir_op_i2f32:
                   case nir_op_b2f32:
+                  case nir_op_fddx:
+                  case nir_op_fddy:
                      type = vgpr;
                      break;
                   case nir_op_flt32:
@@ -271,8 +273,12 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      break;
                   case nir_intrinsic_load_interpolated_input:
                      if (nir_intrinsic_base(intrinsic) == VARYING_SLOT_POS) {
-                        for (unsigned i = 0; i < intrinsic->dest.ssa.num_components; i++)
-                           ctx->fs_vgpr_args[fs_input::frag_pos_0 + i] = true;
+                        uint8_t mask = nir_ssa_def_components_read(&intrinsic->dest.ssa);
+                        for (unsigned i = 0; i < 4; i++) {
+                           if (mask & (1 << i))
+                              ctx->fs_vgpr_args[fs_input::frag_pos_0 + i] = true;
+
+                        }
                      }
                      break;
                   case nir_intrinsic_load_sample_id:
