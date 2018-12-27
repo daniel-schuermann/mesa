@@ -3598,7 +3598,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    args.emplace_back(Operand(coords));
    if (has_sample_index)
       args.emplace_back(Operand(sample_index));
-   // TODO: LOD?
+   if (has_lod)
+      args.emplace_back(lod);
 
    Operand arg;
    if (args.size() > 1) {
