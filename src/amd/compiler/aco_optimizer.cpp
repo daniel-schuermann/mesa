@@ -621,10 +621,12 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       if (sgpr_idx == 0 || instr->isVOP3()) {
          instr->getOperand(sgpr_idx) = Operand(sgpr_info->temp);
          sgpr_info->uses--;
+         ctx.info[sgpr_info->temp.id()].uses++;
       } else if (can_swap_operands(instr)) {
          instr->getOperand(sgpr_idx) = instr->getOperand(0);
          instr->getOperand(0) = Operand(sgpr_info->temp);
          sgpr_info->uses--;
+         ctx.info[sgpr_info->temp.id()].uses++;
       }
    /* we can have two sgprs on one instruction if it is the same sgpr! */
    } else if (sgpr_info &&
