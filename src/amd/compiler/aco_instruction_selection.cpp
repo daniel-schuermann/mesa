@@ -2284,7 +2284,6 @@ static int image_type_to_components_count(enum glsl_sampler_dim dim, bool array)
 static Temp adjust_sample_index_using_fmask(isel_context *ctx, Temp coords, Temp sample_index, Temp fmask_desc_ptr)
 {
    Temp fmask = {ctx->program->allocateId(), v1};
-   assert(sample_index.regClass() == s1);
 
    aco_ptr<MIMG_instruction> load{create_instruction<MIMG_instruction>(aco_opcode::image_load, Format::MIMG, 2, 1)};
    load->getOperand(0) = Operand(coords);
@@ -2295,18 +2294,27 @@ static Temp adjust_sample_index_using_fmask(isel_context *ctx, Temp coords, Temp
    load->unrm = true;
    ctx->block->instructions.emplace_back(std::move(load));
 
-   aco_ptr<Instruction> instr;
-   instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_lshl_b32, Format::SOP2, 2, 2));
-   instr->getOperand(0) = Operand(sample_index);
-   instr->getOperand(1) = Operand((uint32_t) 2);
-   Temp sample_index4 = {ctx->program->allocateId(), s1};
-   instr->getDefinition(0) = Definition(sample_index4);
-   Temp t = {ctx->program->allocateId(), b};
-   instr->getDefinition(1) = Definition(t);
-   instr->getDefinition(1).setFixed(PhysReg{253}); /* scc */
-   ctx->block->instructions.emplace_back(std::move(instr));
+   Temp sample_index4 = {ctx->program->allocateId(), sample_index.regClass()};
+   if (sample_index.regClass() == s1) {
+      aco_ptr<Instruction> instr(create_instruction<SOP2_instruction>(aco_opcode::s_lshl_b32, Format::SOP2, 2, 2));
+      instr->getOperand(0) = Operand(sample_index);
+      instr->getOperand(1) = Operand((uint32_t) 2);
+      instr->getDefinition(0) = Definition(sample_index4);
+      Temp t = {ctx->program->allocateId(), b};
+      instr->getDefinition(1) = Definition(t);
+      instr->getDefinition(1).setFixed(PhysReg{253}); /* scc */
+      ctx->block->instructions.emplace_back(std::move(instr));
+   } else {
+      assert(sample_index.regClass() == v1);
 
-   instr.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_bfe_u32, Format::VOP3A, 3, 1));
+      aco_ptr<Instruction> instr(create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1));
+      instr->getOperand(0) = Operand((uint32_t) 2);
+      instr->getOperand(1) = Operand(sample_index);
+      instr->getDefinition(0) = Definition(sample_index4);
+      ctx->block->instructions.emplace_back(std::move(instr));
+   }
+
+   aco_ptr<Instruction> instr(create_instruction<VOP3A_instruction>(aco_opcode::v_bfe_u32, Format::VOP3A, 3, 1));
    instr->getOperand(0) = Operand(fmask);
    instr->getOperand(1) = Operand(sample_index4);
    instr->getOperand(2) = Operand((uint32_t) 4);
