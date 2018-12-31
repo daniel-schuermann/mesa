@@ -241,7 +241,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             return res.first;
          }
       }
-      assert(false);
+
+      unreachable("did not find a register");
    };
 
    struct phi_info {
