@@ -503,7 +503,8 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
             fprintf(stderr, "\n");
          }
       } else { /* dst.type() == sgpr */
-         assert(false && "Are 1-bit Bools enabled... ?");
+         unreachable("Are 1-bit Bools enabled... ?");
+
          /* this implements bcsel on bools: dst = s0 ? s1 : s2
           * are going to be: dst = (s0 & s1) | (~s0 & s2) */
          assert(cond.regClass() == s2 && then.regClass() == s2 && els.regClass() == s2);
@@ -2949,7 +2950,7 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
       else if (count[i] == 4)
          op = aco_opcode::ds_write_b128;
       else
-         assert(false);
+         unreachable("Unhandled LDS write size");
 
       Temp write_data = emit_extract_vector(ctx, data, start[i], getRegClass(vgpr, count[i]));
       ds.reset(create_instruction<DS_instruction>(op, Format::DS, 3, 0));
@@ -3035,7 +3036,7 @@ void visit_shared_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
          num_operands = 4;
          break;
       default:
-         unreachable("unreachable.");
+         unreachable("Unhandled shared atomic intrinsic");
    }
 
    /* return the previous value if dest is ever used */
@@ -3434,7 +3435,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          sample_index = get_ssa_temp(ctx, instr->src[i].src.ssa);
          has_sample_index = true;
          break;
-         assert(false && "Unimplemented tex instr type\n");
+         unreachable("Unimplemented tex instr type");
       case nir_tex_src_texture_offset:
       case nir_tex_src_sampler_offset:
       default:
@@ -3443,10 +3444,10 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    }
 // TODO: all other cases: structure taken from ac_nir_to_llvm.c
    if (instr->op == nir_texop_txs && instr->sampler_dim == GLSL_SAMPLER_DIM_BUF)
-      assert(false && "Unimplemented tex instr type\n");
+      unreachable("Unimplemented tex instr type");
 
    if (instr->op == nir_texop_texture_samples)
-      assert(false && "Unimplemented tex instr type\n");
+      unreachable("Unimplemented tex instr type");
 
    if (has_offset && instr->op != nir_texop_txf) {
       aco_ptr<Instruction> tmp_instr;
@@ -3549,10 +3550,10 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    }
 
    if (instr->op == nir_texop_tg4)
-      assert(false && "Unimplemented tex instr type\n");
+      unreachable("Unimplemented tex instr type");
 
    if (has_offset && instr->op == nir_texop_txf)
-      assert(false && "Unimplemented tex instr type\n");
+      unreachable("Unimplemented tex instr type");
 
    bool da = false;
    if (instr->sampler_dim != GLSL_SAMPLER_DIM_BUF) {
@@ -3745,16 +3746,16 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
 
    if (instr->op == nir_texop_query_levels)
-      assert(false && "Unimplemented tex instr type\n");
+      unreachable("Unimplemented tex instr type");
    else if (instr->op == nir_texop_txs &&
             instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE &&
             instr->is_array)
-      assert(false && "Unimplemented tex instr type\n");
+      unreachable("Unimplemented tex instr type");
    else if (ctx->options->chip_class >= GFX9 &&
             instr->op == nir_texop_txs &&
             instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
             instr->is_array)
-      assert(false && "Unimplemented tex instr type\n");
+      unreachable("Unimplemented tex instr type");
 
 }
 

@@ -508,7 +508,7 @@ declare_global_input_sgprs(isel_context *ctx,
          }
       }
    } else {
-      assert(false && "Fix access to indirect descriptor sets.");
+      unreachable("Fix access to indirect descriptor sets.");
       add_array_arg(args, s1, desc_sets, user_sgpr_info->user_sgpr_idx);
       set_loc_shader_ptr(ctx, AC_UD_INDIRECT_DESCRIPTOR_SETS, &user_sgpr_info->user_sgpr_idx);
       /*
@@ -528,7 +528,7 @@ declare_global_input_sgprs(isel_context *ctx,
    }
 
    if (ctx->program->info->info.so.num_outputs) {
-      assert(false && "Streamout not yet supported.");
+      unreachable("Streamout not yet supported.");
       //add_arg(args, s4, &ctx->streamout_buffers, user_sgpr_info->user_sgpr_idx);
       //set_loc_shader_ptr(ctx, AC_UD_STREAMOUT_BUFFERS, &user_sgpr_info->user_sgpr_idx);
    }
