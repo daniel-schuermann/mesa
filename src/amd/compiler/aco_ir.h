@@ -783,7 +783,8 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         struct radv_nir_compiler_options *options);
 
 template<bool condition>
-live live_var_analysis(Program* program);
+live live_var_analysis(Program* program,
+                       const struct radv_nir_compiler_options *options);
 void dominator_tree(Program* program);
 void value_numbering(Program* program);
 void optimize(Program* program);
