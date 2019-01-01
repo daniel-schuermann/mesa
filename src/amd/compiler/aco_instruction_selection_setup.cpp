@@ -918,9 +918,14 @@ setup_isel_context(Program* program, nir_shader *nir,
    nir_opt_dce(nir);
    nir_opt_sink(nir);
    nir_opt_move_load_ubo(nir);
-//nir_print_shader(nir, stderr);
+
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
    nir_index_ssa_defs(func->impl);
+
+   if (options->dump_preoptir) {
+      fprintf(stderr, "NIR shader before instruction selection:\n");
+      nir_print_shader(nir, stderr);
+   }
    ctx.divergent_vals = nir_divergence_analysis(nir);
    init_context(&ctx, func->impl);
 
