@@ -1025,7 +1025,7 @@ void optimize(Program* program)
    }
 
    /* Backward pass to calculate the number of uses for each instruction */
-   std::vector<std::set<Temp>> live_out_per_block = live_var_analysis<false>(program).live_out;
+   std::vector<std::set<Temp>> live_out_per_block = live_var_analysis<false>(program, nullptr).live_out;
    for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it)
    {
       Block* block = it->get();
