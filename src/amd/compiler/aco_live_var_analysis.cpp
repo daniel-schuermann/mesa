@@ -31,6 +31,8 @@
 #include <vector>
 #include <set>
 
+#include "../vulkan/radv_shader.h"
+
 namespace aco {
 
 template<bool reg_demand_cond>
@@ -146,7 +148,8 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
 }
 
 template<bool register_demand>
-live live_var_analysis(Program* program)
+live live_var_analysis(Program* program,
+                       const struct radv_nir_compiler_options *options)
 {
    live result;
    result.live_out.resize(program->blocks.size());
@@ -167,57 +170,32 @@ live live_var_analysis(Program* program)
       sgpr_demand = std::max(sgpr_demand, program->blocks[block_idx]->sgpr_demand);
    }
 
+   /* Add VCC to demand */
+   sgpr_demand += 2;
+
    /* calculate the program's register demand and number of waves */
    if (register_demand) {
       // TODO: also take shared mem into account
+      uint16_t total_sgpr_regs = options->chip_class >= VI ? 800 : 512;
+      uint16_t rounded_vgpr_demand = std::max<uint16_t>(4, (vgpr_demand + 3) & ~3);
+      uint16_t rounded_sgpr_demand = std::max<uint16_t>(8, (sgpr_demand + 7) & ~7);
 
-      program->num_waves = 0;
-      if (vgpr_demand <= 24 && sgpr_demand <= 46) {
-         program->num_waves = 10;
-         program->max_sgpr = 46;
-         program->max_vgpr = 24;
-      } else if (vgpr_demand <= 28 && sgpr_demand <= 54) {
-         program->num_waves = 9;
-         program->max_sgpr = 54;
-         program->max_vgpr = 28;
-      } else if (vgpr_demand <= 32 && sgpr_demand <= 62) {
-         program->num_waves = 8;
-         program->max_sgpr = 62;
-         program->max_vgpr = 32;
-      } else if (vgpr_demand <= 36 && sgpr_demand <= 70) {
-         program->num_waves = 7;
-         program->max_sgpr = 70;
-         program->max_vgpr = 36;
-      } else if (vgpr_demand <= 40 && sgpr_demand <= 78) {
-         program->num_waves = 6;
-         program->max_sgpr = 78;
-         program->max_vgpr = 40;
-      } else if (vgpr_demand <= 48 && sgpr_demand <= 94) {
-         program->num_waves = 5;
-         program->max_sgpr = 94;
-         program->max_vgpr = 48;
-      } else if (sgpr_demand <= 100) {
-         program->max_sgpr = 100;
-         if (vgpr_demand <= 64) {
-            program->num_waves = 4;
-            program->max_vgpr = 64;
-         } else if (vgpr_demand <= 84) {
-            program->num_waves = 3;
-            program->max_vgpr = 84;
-         } else if (vgpr_demand <= 128) {
-            program->num_waves = 2;
-            program->max_vgpr = 128;
-         } else if (vgpr_demand <= 256) {
-            program->num_waves = 1;
-            program->max_vgpr = 256;
-         }
-      }
+      program->num_waves = std::min<uint16_t>(10,
+                                              std::min<uint16_t>(256 / rounded_vgpr_demand,
+                                                                 total_sgpr_regs / rounded_sgpr_demand));
+
+      /* Subtract 2 agin for VCC */
+      program->max_sgpr = ((total_sgpr_regs / program->num_waves) & ~7) - 2;
+
+      program->max_vgpr = (256 / program->num_waves) & ~3;
    }
 
    return result;
 }
-template live live_var_analysis<false>(Program* program);
-template live live_var_analysis<true>(Program* program);
+template live live_var_analysis<false>(Program* program,
+                                       const struct radv_nir_compiler_options *options);
+template live live_var_analysis<true>(Program* program,
+                                      const struct radv_nir_compiler_options *options);
 
 }
 
