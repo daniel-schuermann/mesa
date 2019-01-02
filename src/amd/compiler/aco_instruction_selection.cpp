@@ -1350,6 +1350,17 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_pack_64_2x32_split: {
+      Temp src0 = get_alu_src(ctx, instr->src[0]);
+      Temp src1 = get_alu_src(ctx, instr->src[1]);
+
+      aco_ptr<Instruction> tmp{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      tmp->getOperand(0) = Operand(src0);
+      tmp->getOperand(1) = Operand(src1);
+      tmp->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(tmp));
+      break;
+   }
    case nir_op_feq32: {
       if (instr->src[0].src.ssa->bit_size == 32) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_eq_f32, dst);
