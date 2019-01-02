@@ -552,9 +552,9 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
          ctx->block->instructions.emplace_back(std::move(sopk));
       }
       assert(cond.regClass() == b);
-      if (dst.size() == 1) {
-         assert(then.regClass() == s1 && els.regClass() == s1);
-         aco_ptr<SOP2_instruction> select{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
+      if (dst.regClass() == s1 || dst.regClass() == s2) {
+         assert((then.regClass() == s1 || then.regClass() == s2) && els.regClass() == then.regClass());
+         aco_ptr<SOP2_instruction> select{create_instruction<SOP2_instruction>(dst.size() == 2 ? aco_opcode::s_cselect_b64 : aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
          select->getOperand(0) = Operand(then);
          select->getOperand(1) = Operand(els);
          select->getOperand(2) = Operand(cond);
