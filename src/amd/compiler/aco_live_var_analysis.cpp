@@ -177,17 +177,24 @@ live live_var_analysis(Program* program,
    if (register_demand) {
       // TODO: also take shared mem into account
       uint16_t total_sgpr_regs = options->chip_class >= VI ? 800 : 512;
+      uint16_t max_addressible_sgpr = options->chip_class >= VI ? 102 : 104;
       uint16_t rounded_vgpr_demand = std::max<uint16_t>(4, (vgpr_demand + 3) & ~3);
-      uint16_t rounded_sgpr_demand = std::max<uint16_t>(8, (sgpr_demand + 7) & ~7);
+      uint16_t rounded_sgpr_demand = std::min(std::max<uint16_t>(8, (sgpr_demand + 7) & ~7), max_addressible_sgpr);
 
-      program->num_waves = std::min<uint16_t>(10,
-                                              std::min<uint16_t>(256 / rounded_vgpr_demand,
-                                                                 total_sgpr_regs / rounded_sgpr_demand));
+      /* this won't compile, register pressure reduction necessary */
+      if (vgpr_demand > 256 || sgpr_demand > max_addressible_sgpr) {
+         program->num_waves = 0;
+         program->max_sgpr = sgpr_demand;
+         program->max_vgpr = vgpr_demand;
+      } else {
+         program->num_waves = std::min<uint16_t>(10,
+                                                 std::min<uint16_t>(256 / rounded_vgpr_demand,
+                                                                    total_sgpr_regs / rounded_sgpr_demand));
 
-      /* Subtract 2 agin for VCC */
-      program->max_sgpr = ((total_sgpr_regs / program->num_waves) & ~7) - 2;
-
-      program->max_vgpr = (256 / program->num_waves) & ~3;
+         /* Subtract 2 again for VCC */
+         program->max_sgpr = std::min<uint16_t>((total_sgpr_regs / program->num_waves) & ~7, max_addressible_sgpr) - 2;
+         program->max_vgpr = (256 / program->num_waves) & ~3;
+      }
    }
 
    return result;
