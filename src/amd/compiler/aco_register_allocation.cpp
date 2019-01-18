@@ -111,6 +111,11 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                stop = true;
                break;
             }
+            /* we cannot split live ranges of linear vgprs */
+            if (assignments[reg_file[j]].second & (1 << 6)) {
+               stop = true;
+               break;
+            }
             vars.emplace(reg_file[j]);
          }
          if (stop)
@@ -275,15 +280,14 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
    };
 
    read_variable_recursive = [&](Temp val, Block* block) -> Temp {
-      bool is_logical = val.type() == vgpr;
-      std::vector<Block*>& preds = is_logical ? block->logical_predecessors : block->linear_predecessors;
+      std::vector<Block*>& preds = val.is_linear() ? block->linear_predecessors : block->logical_predecessors;
       assert(preds.size() > 0);
 
       Temp new_val;
       if (!sealed[block->index]) {
          /* if the block is not sealed yet, we create an incomplete phi (which might later get removed again) */
          new_val = Temp{program->allocateId(), val.regClass()};
-         aco_opcode opcode = is_logical ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
+         aco_opcode opcode = val.is_linear() ? aco_opcode::p_linear_phi : aco_opcode::p_phi;
          aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
          phi->getDefinition(0) = Definition(new_val);
          phi->getDefinition(0).setFixed(assignments[val.id()].first);
@@ -316,7 +320,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
          if (needs_phi) {
             /* the variable has been renamed differently in the predecessors: we need to insert a phi */
-            aco_opcode opcode = is_logical ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
+            aco_opcode opcode = val.is_linear() ? aco_opcode::p_linear_phi : aco_opcode::p_phi;
             aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
             new_val = Temp{program->allocateId(), val.regClass()};
             phi->getDefinition(0) = Definition(new_val);
@@ -364,7 +368,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          /* recursively try to remove trivial phis */
          if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi) {
             std::map<unsigned, phi_info>::iterator it = phi_map.find(instr->getDefinition(0).tempId());
-            if (it != phi_map.end())
+            if (it != phi_map.end() && it != info)
                phi_users.emplace_back(it);
          }
       }
@@ -662,7 +666,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          if (all_filled) {
             /* finish incomplete phis and check if they became trivial */
             for (aco_ptr<Instruction>& phi : incomplete_phis[succ->index]) {
-               std::vector<Block*> preds = phi->getDefinition(0).getTemp().type() == vgpr ? succ->logical_predecessors : succ->linear_predecessors;
+               std::vector<Block*> preds = phi->getDefinition(0).getTemp().is_linear() ? succ->linear_predecessors : succ->logical_predecessors;
                for (unsigned i = 0; i < phi->num_operands; i++) {
                   phi->getOperand(i).setTemp(read_variable(phi->getOperand(i).getTemp(), preds[i]));
                   phi->getOperand(i).setFixed(assignments[phi->getOperand(i).tempId()].first);

@@ -137,6 +137,13 @@ opcode("p_memory_barrier_buffer", format=Format.PSEUDO_BARRIER)
 opcode("p_memory_barrier_image", format=Format.PSEUDO_BARRIER)
 opcode("p_memory_barrier_shared", format=Format.PSEUDO_BARRIER)
 
+opcode("p_spill")
+opcode("p_reload")
+
+# start/end linear vgprs ?
+opcode("p_start_linear_vgpr")
+opcode("p_end_linear_vgpr")
+
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
 SOP2_SCC = {
    (0, "s_add_u32"), 
