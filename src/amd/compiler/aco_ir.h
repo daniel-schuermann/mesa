@@ -54,6 +54,9 @@ typedef enum {
    v3 = s3 | (1 << 5),
    v4 = s4 | (1 << 5),
    v6 = 6  | (1 << 5),
+   /* these are used for WWM and spills to vgpr */
+   v1_linear = v1 | (1 << 6),
+   v2_linear = v2 | (1 << 6),
 } RegClass;
 
 typedef struct {
@@ -129,6 +132,7 @@ enum RegType {
    scc,
    sgpr,
    vgpr,
+   linear_vgpr,
 };
 
 static inline RegType typeOf(RegClass rc)
@@ -175,6 +179,11 @@ public:
    RegType type() const noexcept
    {
       return typeOf(reg_class);
+   }
+
+   bool is_linear() const noexcept
+   {
+      return reg_class <= RegClass::s16 || reg_class & (1 << 6);
    }
 
    RegClass regClass() const noexcept
