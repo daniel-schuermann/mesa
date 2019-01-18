@@ -53,14 +53,15 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
    std::vector<std::set<Temp>>& live_temps = lives.live_out;
    for (std::set<Temp>::iterator it = live_temps[block->index].begin(); it != live_temps[block->index].end(); ++it)
    {
-      if ((*it).type() == vgpr) {
-         live_vgprs.insert(*it);
-         if (reg_demand_cond)
-            vgpr_demand += (*it).size();
-      } else {
+      if ((*it).is_linear())
          live_sgprs.insert(*it);
-         if (reg_demand_cond)
-            sgpr_demand += (*it).size();
+      else
+         live_vgprs.insert(*it);
+      if (reg_demand_cond) {
+         if (it->type() == vgpr)
+            vgpr_demand += it->size();
+         else
+            sgpr_demand += it->size();
       }
    }
 
@@ -76,13 +77,15 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
       {
          auto& definition = insn->getDefinition(i);
          if (definition.isTemp()) {
-            if (definition.getTemp().type() == vgpr) {
-               size_t n = live_vgprs.erase(definition.getTemp());
-               if (reg_demand_cond)
+            size_t n = 0;
+            if (definition.getTemp().is_linear())
+               n = live_sgprs.erase(definition.getTemp());
+            else
+               n = live_vgprs.erase(definition.getTemp());
+            if (reg_demand_cond) {
+               if (definition.getTemp().type() == vgpr)
                   vgpr_demand -= definition.size() * n;
-             } else {
-               size_t n = live_sgprs.erase(definition.getTemp());
-               if (reg_demand_cond)
+               else
                   sgpr_demand -= definition.size() * n;
             }
          }
@@ -108,13 +111,15 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
          {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp()) {
-               if (operand.getTemp().type() == vgpr) {
-                  auto d = live_vgprs.insert(operand.getTemp());
-                  if (reg_demand_cond && d.second)
+               bool inserted = false;
+               if (operand.getTemp().is_linear())
+                  inserted = live_sgprs.insert(operand.getTemp()).second;
+               else
+                  inserted = live_vgprs.insert(operand.getTemp()).second;
+               if (reg_demand_cond && inserted) {
+                  if (operand.getTemp().type() == vgpr)
                      vgpr_demand += operand.size();
-               } else {
-                  auto d = live_sgprs.insert(operand.getTemp());
-                  if (reg_demand_cond && d.second)
+                  else
                      sgpr_demand += operand.size();
                }
             }
