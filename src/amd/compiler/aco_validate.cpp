@@ -120,16 +120,27 @@ void validate(Program* program, FILE * output)
                         "Operand and Definition types do not match", instr.get());
             } else if (instr->opcode == aco_opcode::p_phi) {
                check(instr->num_operands == block->logical_predecessors.size(), "Number of Operands does not match number of predecessors", instr.get());
+               check(instr->getDefinition(0).getTemp().type() == vgpr, "Logical Phi Definition must be vgpr", instr.get());
             } else if (instr->opcode == aco_opcode::p_linear_phi) {
                check(instr->num_operands == block->linear_predecessors.size(), "Number of Operands does not match number of predecessors", instr.get());
             }
             break;
          }
+         case Format::SMEM: {
+            check(instr->getOperand(0).isTemp() && instr->getOperand(0).getTemp().type() == sgpr, "SMEM operands must be sgpr", instr.get());
+            check(instr->getOperand(1).isConstant() || (instr->getOperand(1).isTemp() && instr->getOperand(1).getTemp().type() == sgpr),
+                  "SMEM offset must be constant or sgpr", instr.get());
+            if (instr->num_definitions)
+               check(instr->getDefinition(0).getTemp().type() == sgpr, "SMEM result must be sgpr", instr.get());
+            break;
+         }
          case Format::MTBUF:
          case Format::MUBUF:
          case Format::MIMG: {
-            check(instr->num_operands > 0, "VMEM instructions must have at least one operand", instr.get());
-            check(instr->getOperand(0).isUndefined() || (instr->getOperand(0).isTemp() && instr->getOperand(0).getTemp().type() == vgpr), "VADDR must be in vgpr for VMEM instructions", instr.get());
+            check(instr->num_operands > 1, "VMEM instructions must have at least one operand", instr.get());
+            check(instr->getOperand(0).isUndefined() || (instr->getOperand(0).isTemp() && instr->getOperand(0).getTemp().type() == vgpr),
+                  "VADDR must be in vgpr for VMEM instructions", instr.get());
+            check(instr->getOperand(1).isTemp() && instr->getOperand(1).getTemp().type() == sgpr, "VMEM resource constant must be sgpr", instr.get());
             break;
          }
          case Format::DS: {
