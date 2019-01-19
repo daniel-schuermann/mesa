@@ -18,6 +18,8 @@ void aco_print_reg_class(const RegClass rc, FILE *output)
       case v3: fprintf(output, " v3: "); return;
       case v4: fprintf(output, " v4: "); return;
       case v6: fprintf(output, " v6: "); return;
+      case v1_linear: fprintf(output, " v1: "); return;
+      case v2_linear: fprintf(output, " v2: "); return;
    }
 }
 
@@ -29,6 +31,8 @@ void aco_print_physReg(unsigned reg, unsigned size, FILE *output)
       fprintf(output, ":vcc");
    } else if (reg == 253) {
       fprintf(output, ":scc");
+   } else if (reg == 126) {
+      fprintf(output, ":exec");
    } else {
       bool is_vgpr = reg / 256;
       reg = reg % 256;
