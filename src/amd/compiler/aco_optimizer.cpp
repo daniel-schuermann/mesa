@@ -854,12 +854,12 @@ void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
    /* Dead Code Elimination:
     * We remove instructions if they define temporaries which all are unused */
-   if (instr->num_definitions && !instr->isVMEM()) {
+   if (instr->num_definitions && !instr->isVMEM() && instr->opcode != aco_opcode::p_discard_if) {
       bool is_used = false;
       for (unsigned i = 0; i < instr->num_definitions; i++)
       {
-         if ((instr->getDefinition(i).isFixed() && instr->getDefinition(i).physReg().reg != 253)
-             || ctx.info[instr->getDefinition(i).tempId()].uses) {
+         if ((instr->getDefinition(i).isFixed() && !instr->getDefinition(i).isTemp()) ||
+             ctx.info[instr->getDefinition(i).tempId()].uses) {
             is_used = true;
             break;
          }
