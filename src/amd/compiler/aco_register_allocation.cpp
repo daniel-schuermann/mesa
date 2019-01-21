@@ -548,6 +548,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   RegClass rc = definition.physReg() == PhysReg{253} ? RegClass::s1 : pc_op.regClass();
                   tmp = Temp{program->allocateId(), rc};
                   Definition pc_def = Definition(tmp);
+
                   /* re-enable the killed operands, so that we don't move the blocking var there */
                   for (unsigned i = 0; i < instr->num_operands; i++)
                      if (instr->getOperand(i).isFixed() && instr->getOperand(i).isKill())
@@ -555,17 +556,23 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                            register_file[instr->getOperand(i).physReg().reg + j] = 0xFFFF;
                   /* find a new register for the blocking variable */
                   PhysReg reg = get_reg(register_file, rc, parallelcopy, instr);
+                  /* once again, disable killed operands */
                   for (unsigned i = 0; i < instr->num_operands; i++)
                      if (instr->getOperand(i).isFixed() && instr->getOperand(i).isKill())
                         for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                            register_file[instr->getOperand(i).physReg().reg + j] = 0;
                   pc_def.setFixed(reg);
+
+                  /* finish assignment of parallelcopy */
                   assignments[pc_def.tempId()] = {reg, pc_def.regClass()};
+                  renames[block->index][pc_op.tempId()] = pc_def.getTemp();
+                  parallelcopy.emplace_back(pc_op, pc_def);
+
+                  /* add changes to reg_file */
                   for (unsigned i = 0; i < pc_op.size(); i++) {
-                     register_file[pc_op.physReg().reg + i] = 0xFFFF;
+                     register_file[pc_op.physReg().reg + i] = 0x0;
                      register_file[pc_def.physReg().reg + i] = pc_def.tempId();
                   }
-                  parallelcopy.emplace_back(pc_op, pc_def);
                }
             } else {
                /* find free reg */
