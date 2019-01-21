@@ -2043,8 +2043,10 @@ void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
    cmp->getDefinition(0).setHint(vcc);
    ctx->block->instructions.emplace_back(std::move(cmp));
 
-   aco_ptr<Instruction> discard{create_instruction<Instruction>(aco_opcode::p_discard_if, Format::PSEUDO, 1, 0)};
+   aco_ptr<Instruction> discard{create_instruction<Instruction>(aco_opcode::p_discard_if, Format::PSEUDO, 1, 1)};
    discard->getOperand(0) = Operand(cond);
+   discard->getDefinition(0) = Definition{ctx->program->allocateId(), b};
+   discard->getDefinition(0).setFixed(PhysReg{253});
    ctx->block->instructions.emplace_back(std::move(discard));
    return;
 }
