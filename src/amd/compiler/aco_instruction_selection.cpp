@@ -1350,6 +1350,56 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_i2b32: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      if (dst.regClass() == s1) {
+         if (src.regClass() == s1) {
+            aco_ptr<Instruction> mov{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1)};
+            mov->getOperand(0) = Operand(src);
+            mov->getDefinition(0) = Definition(dst);
+            ctx->block->instructions.emplace_back(std::move(mov));
+
+         } else {
+            fprintf(stderr, "Unimplemented NIR instr bit size: ");
+            nir_print_instr(&instr->instr, stderr);
+            fprintf(stderr, "\n");
+         }
+      } else {
+         assert(dst.regClass() == v1);
+         emit_v_mov(ctx, get_alu_src(ctx, instr->src[0]), dst);
+      }
+      break;
+   }
+   case nir_op_b2i32: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      if (dst.regClass() == s1) {
+         assert(src.regClass() == s1);
+         Temp scc_tmp = extract_uniform_cond32(ctx, src);
+         aco_ptr<Instruction> cselect{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
+         cselect->getOperand(0) = Operand((uint32_t) 1);
+         cselect->getOperand(1) = Operand((uint32_t) 0);
+         cselect->getOperand(2) = Operand{scc_tmp};
+         cselect->getOperand(2).setFixed({253});
+         cselect->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(cselect));
+      } else if (dst.regClass() == v1) {
+         assert(src.regClass() == v1);
+         Temp tmp = extract_divergent_cond32(ctx, src);
+         Format format = (Format) ((uint32_t) Format::VOP2 | (uint32_t) Format::VOP3A);
+         aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, format, 3, 1)};
+         bcsel->getOperand(0) = Operand((uint32_t) 0);
+         bcsel->getOperand(1) = Operand((uint32_t) 1);
+         bcsel->getOperand(2) = Operand{tmp};
+         bcsel->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(bcsel));
+
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_pack_64_2x32_split: {
       Temp src0 = get_alu_src(ctx, instr->src[0]);
       Temp src1 = get_alu_src(ctx, instr->src[1]);
