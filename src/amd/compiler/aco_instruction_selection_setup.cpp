@@ -154,6 +154,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_u2f32:
                   case nir_op_i2f32:
                   case nir_op_b2f32:
+                  case nir_op_pack_half_2x16:
                   case nir_op_fddx:
                   case nir_op_fddy:
                      type = vgpr;

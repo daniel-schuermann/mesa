@@ -1431,6 +1431,26 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       ctx->block->instructions.emplace_back(std::move(tmp));
       break;
    }
+   case nir_op_pack_half_2x16: {
+      Temp src = get_ssa_temp(ctx, instr->src[0].src.ssa);
+      emit_split_vector(ctx, src, 2);
+
+      if (dst.regClass() == v1) {
+         Temp src0 = emit_extract_vector(ctx, src, 0, v1);
+         Temp src1 = emit_extract_vector(ctx, src, 1, v1);
+         aco_ptr<Instruction> vop3{create_instruction<VOP3A_instruction>(aco_opcode::v_cvt_pkrtz_f16_f32, Format::VOP3A, 2, 1)};
+         vop3->getOperand(0) = Operand(src0);
+         vop3->getOperand(1) = Operand(src1);
+         vop3->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vop3));
+
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_feq32: {
       if (instr->src[0].src.ssa->bit_size == 32) {
          emit_vopc_instruction_output32(ctx, instr, aco_opcode::v_cmp_eq_f32, dst);
