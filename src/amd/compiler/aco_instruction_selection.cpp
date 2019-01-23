@@ -444,7 +444,7 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
    Temp then = get_alu_src(ctx, instr->src[1]);
    Temp els = get_alu_src(ctx, instr->src[2]);
 
-   if (dst.regClass() == v1) {
+   if (dst.type() == vgpr) {
       Temp cond;
       if (cond32.type() == vgpr) {
          cond = extract_divergent_cond32(ctx, cond32);
