@@ -2628,6 +2628,55 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr) {
    return;
 }
 
+void visit_image_size(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   const nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
+   const struct glsl_type *type = glsl_without_array(var->type);
+   if (glsl_get_sampler_dim(type) == GLSL_SAMPLER_DIM_BUF)
+      assert(false && "image_deref_size: get buffer size");
+      /*return get_buffer_size(ctx, get_image_descriptor(ctx, instr, AC_DESC_BUFFER, false), true);*/
+
+   /* LOD */
+   aco_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
+   mov->getOperand(0) = Operand((uint32_t) 0);
+   Temp lod = Temp{ctx->program->allocateId(), v1};
+   mov->getDefinition(0) = Definition(lod);
+   ctx->block->instructions.emplace_back(std::move(mov));
+
+   /* Resource */
+   Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, NULL, true, false);
+
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+
+   aco_ptr<MIMG_instruction> mimg{create_instruction<MIMG_instruction>(aco_opcode::image_get_resinfo, Format::MIMG, 2, 1)};
+   mimg->getOperand(0) = Operand(lod);
+   mimg->getOperand(1) = Operand(resource);
+   mimg->dmask = (1 << instr->dest.ssa.num_components) - 1;
+   Definition& def = mimg->getDefinition(0);
+   ctx->block->instructions.emplace_back(std::move(mimg));
+
+   if (glsl_get_sampler_dim(type) == GLSL_SAMPLER_DIM_CUBE &&
+       glsl_sampler_type_is_array(type)) {
+      Temp tmp = {ctx->program->allocateId(), v4};
+      def = Definition(tmp);
+      /* TODO: split vector and divide 3nd value by 6 */
+      assert(false && "Unimplemented image_deref_size");
+
+   } else if (ctx->options->chip_class >= GFX9 &&
+              glsl_get_sampler_dim(type) == GLSL_SAMPLER_DIM_1D &&
+              glsl_sampler_type_is_array(type)) {
+      Temp tmp = {ctx->program->allocateId(), v4};
+      def = Definition(tmp);
+      /* TODO: split vector, extract 3nd value and insert as 2nd */
+      assert(false && "Unimplemented image_deref_size");
+
+   } else {
+      def = Definition(dst);
+   }
+
+   emit_split_vector(ctx, dst, instr->dest.ssa.num_components);
+}
+
 void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    unsigned num_components = instr->num_components;
@@ -3215,6 +3264,9 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_image_deref_atomic_exchange:
    case nir_intrinsic_image_deref_atomic_comp_swap:
       visit_image_atomic(ctx, instr);
+      break;
+   case nir_intrinsic_image_deref_size:
+      visit_image_size(ctx, instr);
       break;
    case nir_intrinsic_load_ssbo:
       visit_load_ssbo(ctx, instr);

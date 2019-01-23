@@ -237,6 +237,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_image_deref_atomic_xor:
                   case nir_intrinsic_image_deref_atomic_exchange:
                   case nir_intrinsic_image_deref_atomic_comp_swap:
+                  case nir_intrinsic_image_deref_size:
                   case nir_intrinsic_shared_atomic_add:
                   case nir_intrinsic_shared_atomic_imin:
                   case nir_intrinsic_shared_atomic_umin:
