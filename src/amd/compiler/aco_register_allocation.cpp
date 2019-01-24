@@ -381,13 +381,14 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             renames[i][orig_var] = same;
       }
 
+      unsigned block_idx = info->second.block_idx;
       instr->num_definitions = 0; /* this indicates that the phi can be removed */ // FIXME: this might cause memory leaks depending on how we implement the unique_ptr custom deleter
       phi_map.erase(info);
       for (auto it : phi_users)
          try_remove_trivial_phi(it);
 
       /* due to the removal of other phis, the name might have changed once again! */
-      return renames[info->second.block_idx][orig_var];
+      return renames[block_idx][orig_var];
    };
 
    std::map<unsigned, unsigned> affinities;
