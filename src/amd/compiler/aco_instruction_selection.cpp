@@ -3458,7 +3458,7 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
 {
 
    if (is_array && !is_lod)
-      fprintf(stderr, "Unimplemented tex instr type: ");
+      fprintf(stderr, "Unimplemented tex instr type: cube coords1");
 
    Temp coord_args[3], ma, tc, sc, id;
    aco_ptr<Instruction> tmp;
@@ -3519,7 +3519,7 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
    ctx->block->instructions.emplace_back(std::move(tmp));
 
    if (is_deriv || is_array)
-      fprintf(stderr, "Unimplemented tex instr type: ");
+      fprintf(stderr, "Unimplemented tex instr type: cube coords2");
 
 }
 
@@ -3598,7 +3598,6 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          sample_index = get_ssa_temp(ctx, instr->src[i].src.ssa);
          has_sample_index = true;
          break;
-         unreachable("Unimplemented tex instr type");
       case nir_tex_src_texture_offset:
       case nir_tex_src_sampler_offset:
       default:
@@ -3712,9 +3711,6 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       sample_index = adjust_sample_index_using_fmask(ctx, coords, sample_index, fmask_ptr);
    }
 
-   if (instr->op == nir_texop_tg4)
-      unreachable("Unimplemented tex instr type");
-
    if (has_offset && instr->op == nir_texop_txf)
       unreachable("Unimplemented tex instr type");
 
@@ -3731,6 +3727,14 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    /* Build tex instruction */
    // TODO: use nir_ssa_def_components_read(&instr->dest.ssa), but then dst size doesn't match the instruction's return value
    unsigned dmask = (1 << instr->dest.ssa.num_components) - 1;
+   /* gather4 selects the component by dmask */
+   if (instr->op == nir_texop_tg4) {
+      if (instr->is_shadow)
+         dmask = 1;
+      else
+         dmask = 1 << instr->component;
+   }
+
 
    aco_ptr<MIMG_instruction> tex;
    if (instr->op == nir_texop_txs) {
@@ -3897,6 +3901,18 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       }
    }
 
+   if (instr->op == nir_texop_tg4) {
+      if (has_offset) {
+         opcode = aco_opcode::image_gather4_lz_o;
+         if (has_compare)
+            opcode = aco_opcode::image_gather4_c_lz_o;
+      } else {
+         opcode = aco_opcode::image_gather4_lz;
+         if (has_compare)
+            opcode = aco_opcode::image_gather4_c_lz;
+      }
+   }
+
    tex.reset(create_instruction<MIMG_instruction>(opcode, Format::MIMG, 3, 1));
    tex->getOperand(0) = arg;
    tex->getOperand(1) = Operand(resource);
@@ -3909,6 +3925,10 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
 
    if (instr->op == nir_texop_query_levels)
+      unreachable("Unimplemented tex instr type");
+   else if (instr->is_shadow && instr->is_new_style_shadow &&
+            instr->op != nir_texop_txs && instr->op != nir_texop_lod &&
+            instr->op != nir_texop_tg4)
       unreachable("Unimplemented tex instr type");
    else if (instr->op == nir_texop_txs &&
             instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE &&
