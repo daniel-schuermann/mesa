@@ -861,6 +861,22 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_find_lsb: {
+      aco_ptr<Instruction> find_lsb;
+      if (dst.regClass() == s1) {
+         find_lsb.reset(create_instruction<SOP1_instruction>(aco_opcode::s_ff1_i32_b32, Format::SOP1, 1, 1));
+      } else if (dst.regClass() == v1) {
+         find_lsb.reset(create_instruction<VOP1_instruction>(aco_opcode::v_ffbl_b32, Format::VOP1, 1, 1));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      find_lsb->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
+      find_lsb->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(find_lsb));
+      break;
+   }
    case nir_op_iadd: {
       if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_add_i32, dst, true);
