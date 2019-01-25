@@ -1861,8 +1861,12 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_fddx:
-   case nir_op_fddy: {
+	case nir_op_fddx:
+	case nir_op_fddy:
+	case nir_op_fddx_fine:
+	case nir_op_fddy_fine:
+	case nir_op_fddx_coarse:
+	case nir_op_fddy_coarse: {
       Temp tl = {ctx->program->allocateId(), v1};
       emit_quad_swizzle(ctx, get_alu_src(ctx, instr->src[0]), tl, 0, 0, 0, 0);
       Format format = (Format) ((uint32_t) Format::VOP2 | (uint32_t) Format::DPP);
