@@ -3550,6 +3550,55 @@ void visit_shared_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
    ctx->block->instructions.emplace_back(std::move(ds));
 }
 
+void visit_load_sample_mask_in(isel_context *ctx, nir_intrinsic_instr *instr) {
+   uint8_t log2_ps_iter_samples;
+   if (ctx->program->info->info.ps.force_persample) {
+      log2_ps_iter_samples =
+         util_logbase2(ctx->options->key.fs.num_samples);
+   } else {
+      log2_ps_iter_samples = ctx->options->key.fs.log2_ps_iter_samples;
+   }
+
+   /* The bit pattern matches that used by fixed function fragment
+    * processing. */
+   static const uint16_t ps_iter_masks[] = {
+      0xffff, /* not used */
+      0x5555,
+      0x1111,
+      0x0101,
+      0x0001,
+   };
+   assert(log2_ps_iter_samples < ARRAY_SIZE(ps_iter_masks));
+
+   Temp sample_id{ctx->program->allocateId(), v1};
+   aco_ptr<Instruction> instruction{create_instruction<VOP3A_instruction>(aco_opcode::v_bfe_u32, Format::VOP3A, 3, 1)};
+   instruction->getOperand(0) = Operand(ctx->fs_inputs[fs_input::ancillary]);
+   instruction->getOperand(1) = Operand((uint32_t) 8);
+   instruction->getOperand(2) = Operand((uint32_t) 4);
+   instruction->getDefinition(0) = Definition(sample_id);
+   ctx->block->instructions.emplace_back(std::move(instruction));
+
+   Temp ps_iter_mask{ctx->program->allocateId(), v1};
+   instruction.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+   instruction->getOperand(0) = Operand((uint32_t) ps_iter_masks[log2_ps_iter_samples]);
+   instruction->getDefinition(0) = Definition(ps_iter_mask);
+   ctx->block->instructions.emplace_back(std::move(instruction));
+
+   Temp mask{ctx->program->allocateId(), v1};
+   instruction.reset(create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1));
+   instruction->getOperand(0) = Operand(sample_id);
+   instruction->getOperand(1) = Operand(ps_iter_mask);
+   instruction->getDefinition(0) = Definition(mask);
+   ctx->block->instructions.emplace_back(std::move(instruction));
+
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+   instruction.reset(create_instruction<VOP2_instruction>(aco_opcode::v_and_b32, Format::VOP2, 2, 1));
+   instruction->getOperand(0) = Operand(mask);
+   instruction->getOperand(1) = Operand(ctx->fs_inputs[fs_input::sample_coverage]);
+   instruction->getDefinition(0) = Definition(dst);
+   ctx->block->instructions.emplace_back(std::move(instruction));
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    switch(instr->intrinsic) {
@@ -3717,6 +3766,10 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       bfe->getOperand(2) = Operand((uint32_t) 4);
       bfe->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
       ctx->block->instructions.emplace_back(std::move(bfe));
+      break;
+   }
+   case nir_intrinsic_load_sample_mask_in: {
+      visit_load_sample_mask_in(ctx, instr);
       break;
    }
    default:
