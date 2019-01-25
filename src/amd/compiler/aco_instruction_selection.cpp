@@ -2780,16 +2780,44 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
 
    if (dim == GLSL_SAMPLER_DIM_BUF) {
+      unsigned mask = nir_ssa_def_components_read(&instr->dest.ssa);
+      unsigned num_channels = util_last_bit(mask);
       Temp rsrc = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_BUFFER, nullptr, true, true);
       Temp vindex = emit_extract_vector(ctx, get_ssa_temp(ctx, instr->src[1].ssa), 0, v1);
 
-      aco_ptr<MUBUF_instruction> load{create_instruction<MUBUF_instruction>(aco_opcode::buffer_load_format_xyzw, Format::MUBUF, 3, 1)};
+      aco_opcode opcode;
+      switch (num_channels) {
+      case 1:
+         opcode = aco_opcode::buffer_load_format_x;
+         break;
+      case 2:
+         opcode = aco_opcode::buffer_load_format_xy;
+         break;
+      case 3:
+         opcode = aco_opcode::buffer_load_format_xyz;
+         break;
+      case 4:
+         opcode = aco_opcode::buffer_load_format_xyzw;
+         break;
+      default:
+         unreachable(">4 channel buffer image load");
+      }
+      aco_ptr<MUBUF_instruction> load{create_instruction<MUBUF_instruction>(opcode, Format::MUBUF, 3, 1)};
       load->getOperand(0) = Operand(vindex);
       load->getOperand(1) = Operand(rsrc);
       load->getOperand(2) = Operand((uint32_t) 0);
-      load->getDefinition(0) = Definition(dst);
+      Temp tmp{ctx->program->allocateId(), v4};
+      load->getDefinition(0) = Definition(tmp);
       load->idxen = true;
       ctx->block->instructions.emplace_back(std::move(load));
+      emit_split_vector(ctx, tmp, 4);
+
+      aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 4, 1)};
+      for (unsigned i = 0; i < num_channels; ++i)
+         vec->getOperand(i) = Operand(emit_extract_vector(ctx, tmp, i, v1));
+      for (unsigned i = num_channels; i < 4; ++i)
+         vec->getOperand(i) = Operand();
+      vec->getDefinition(0) = Definition(dst);
       emit_split_vector(ctx, dst, 4);
       return;
    }
