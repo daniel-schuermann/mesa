@@ -158,6 +158,10 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_unpack_half_2x16:
                   case nir_op_fddx:
                   case nir_op_fddy:
+                  case nir_op_fddx_fine:
+                  case nir_op_fddy_fine:
+                  case nir_op_fddx_coarse:
+                  case nir_op_fddy_coarse:
                      type = vgpr;
                      break;
                   case nir_op_flt32:
