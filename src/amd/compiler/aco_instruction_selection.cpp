@@ -1548,12 +1548,13 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_ubitfield_extract: {
+   case nir_op_ubfe:
+   case nir_op_ibfe: {
       Temp base = get_alu_src(ctx, instr->src[0]);
       Temp offset = get_alu_src(ctx, instr->src[1]);
       Temp bits = get_alu_src(ctx, instr->src[2]);
 
-      if (dst.regClass() == s1) {
+      if (dst.type() == sgpr) {
          Operand extract;
          nir_const_value* const_offset = nir_src_as_const_value(instr->src[1].src);
          nir_const_value* const_bits = nir_src_as_const_value(instr->src[2].src);
@@ -1579,20 +1580,37 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             aco_ptr<Instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_or_b32, Format::SOP2, 2, 2)};
             sop2->getOperand(0) = Operand(offset);
             sop2->getOperand(1) = width;
-            sop2->getDefinition(0) = Definition(dst);
+            Temp tmp = {ctx->program->allocateId(), s1};
+            sop2->getDefinition(0) = Definition(tmp);
             Temp scc_tmp = {ctx->program->allocateId(), b};
             sop2->getDefinition(1) = Definition(scc_tmp);
             sop2->getDefinition(1).setFixed(PhysReg{253});
             ctx->block->instructions.emplace_back(std::move(sop2));
+            extract = Operand(tmp);
          }
 
-         aco_ptr<Instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_bfe_u32, Format::SOP2, 2, 1)};
+         aco_opcode opcode;
+         if (dst.regClass() == s1) {
+            if (instr->op == nir_op_ubfe)
+               opcode = aco_opcode::s_bfe_u32;
+            else
+               opcode = aco_opcode::s_bfe_i32;
+         } else if (dst.regClass() == s2) {
+            if (instr->op == nir_op_ubfe)
+               opcode = aco_opcode::s_bfe_u64;
+            else
+               opcode = aco_opcode::s_bfe_i64;
+         } else {
+            unreachable("Unsupported BFE bit size");
+         }
+
+         aco_ptr<Instruction> sop2{create_instruction<SOP2_instruction>(opcode, Format::SOP2, 2, 1)};
          sop2->getOperand(0) = Operand(base);
          sop2->getOperand(1) = extract;
          sop2->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(sop2));
 
-      } else if (dst.regClass() == v1) {
+      } else {
          /* secure that the instruction has at most 1 sgpr operand
           * The optimizer will inline constants for us */
          if (base.type() == sgpr && offset.type() == sgpr)
@@ -1602,16 +1620,22 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          if (offset.type() == sgpr && bits.type() == sgpr)
             offset = as_vgpr(ctx, offset);
 
-         aco_ptr<Instruction> bfe{create_instruction<VOP3A_instruction>(aco_opcode::v_bfe_u32, Format::VOP3A, 3, 1)};
+         aco_opcode opcode;
+         if (dst.regClass() == v1) {
+            if (instr->op == nir_op_ubfe)
+               opcode = aco_opcode::v_bfe_u32;
+            else
+               opcode = aco_opcode::v_bfe_i32;
+         } else {
+            unreachable("Unsupported BFE bit size");
+         }
+
+         aco_ptr<Instruction> bfe{create_instruction<VOP3A_instruction>(opcode, Format::VOP3A, 3, 1)};
          bfe->getOperand(0) = Operand(base);
          bfe->getOperand(1) = Operand(offset);
          bfe->getOperand(2) = Operand(bits);
+         bfe->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(bfe));
-
-      } else {
-         fprintf(stderr, "Unimplemented NIR instr bit size: ");
-         nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
       }
       break;
    }
