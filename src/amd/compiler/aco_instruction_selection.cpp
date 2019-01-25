@@ -3731,14 +3731,29 @@ void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
 void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is_array, bool is_lod)
 {
 
-   if (is_array && !is_lod)
-      fprintf(stderr, "Unimplemented tex instr type: cube coords1");
-
-   Temp coord_args[3], ma, tc, sc, id;
+   Temp coord_args[4], ma, tc, sc, id;
    aco_ptr<Instruction> tmp;
-   emit_split_vector(ctx, *coords, 3);
-   for (unsigned i = 0; i < 3; i++)
+   emit_split_vector(ctx, *coords, is_array ? 4 : 3);
+   for (unsigned i = 0; i < (is_array ? 4 : 3); i++)
       coord_args[i] = emit_extract_vector(ctx, *coords, i, v1);
+
+   if (is_array && !is_lod) {
+      tmp.reset(create_instruction<VOP1_instruction>(aco_opcode::v_rndne_f32, Format::VOP1, 1, 1));
+      tmp->getOperand(0) = Operand(coord_args[3]);
+      coord_args[3] = {ctx->program->allocateId(), v1};
+      tmp->getDefinition(0) = Definition(coord_args[3]);
+      ctx->block->instructions.emplace_back(std::move(tmp));
+
+      // see comment in ac_prepare_cube_coords()
+      if (ctx->options->chip_class <= VI) {
+         tmp.reset(create_instruction<VOP2_instruction>(aco_opcode::v_max_f32, Format::VOP2, 2, 1));
+         tmp->getOperand(0) = Operand(coord_args[3]);
+         tmp->getOperand(1) = Operand((uint32_t) 0);
+         coord_args[3] = {ctx->program->allocateId(), v1};
+         tmp->getDefinition(0) = Definition(coord_args[3]);
+         ctx->block->instructions.emplace_back(std::move(tmp));
+      }
+   }
 
    tmp.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cubema_f32, Format::VOP3A, 3, 1));
    for (unsigned i = 0; i < 3; i++)
@@ -3784,6 +3799,15 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
    id = {ctx->program->allocateId(), v1};
    tmp->getDefinition(0) = Definition(id);
    ctx->block->instructions.emplace_back(std::move(tmp));
+   if (is_array) {
+      tmp.reset(create_instruction<VOP2_instruction>(aco_opcode::v_madmk_f32, Format::VOP2, 3, 1));
+      tmp->getOperand(0) = Operand(coord_args[3]);
+      tmp->getOperand(1) = Operand(id);
+      tmp->getOperand(2) = Operand((uint32_t) 0x41000000); /* 8.0 */
+      id = {ctx->program->allocateId(), v1};
+      tmp->getDefinition(0) = Definition(id);
+      ctx->block->instructions.emplace_back(std::move(tmp));
+   }
    tmp.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1));
    tmp->getOperand(0) = Operand(sc);
    tmp->getOperand(1) = Operand(tc);
@@ -3792,7 +3816,7 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
    tmp->getDefinition(0) = Definition(*coords);
    ctx->block->instructions.emplace_back(std::move(tmp));
 
-   if (is_deriv || is_array)
+   if (is_deriv)
       fprintf(stderr, "Unimplemented tex instr type: cube coords2");
 
 }
