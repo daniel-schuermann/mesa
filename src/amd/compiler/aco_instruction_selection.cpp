@@ -789,6 +789,20 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_ixor: {
+      if (dst.regClass() == v1) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_xor_b32, dst, true);
+      } else if (dst.regClass() == s1) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_xor_b32, dst, true);
+      } else if (dst.regClass() == s2) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_xor_b64, dst, true);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_ushr: {
       if (dst.regClass() == v1) {
          aco_ptr<VOP2_instruction> shl{create_instruction<VOP2_instruction>(aco_opcode::v_lshrrev_b32, Format::VOP2, 2, 1)};
