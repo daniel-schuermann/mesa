@@ -272,10 +272,10 @@ void emit_sopc_instruction_output32(isel_context *ctx, nir_alu_instr *instr, aco
    ctx->block->instructions.emplace_back(std::move(to_sgpr));
 }
 
-void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst, bool commutative)
+void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst, bool commutative, bool swap_srcs=false)
 {
-   Temp src0 = get_alu_src(ctx, instr->src[0]);
-   Temp src1 = get_alu_src(ctx, instr->src[1]);
+   Temp src0 = get_alu_src(ctx, instr->src[swap_srcs ? 1 : 0]);
+   Temp src1 = get_alu_src(ctx, instr->src[swap_srcs ? 0 : 1]);
    aco_ptr<Instruction> vop2{create_instruction<VOP2_instruction>(op, Format::VOP2, 2, 1)};
    if (src1.type() == sgpr) {
       if (commutative && src0.type() == vgpr) {
@@ -842,6 +842,18 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          shl->getDefinition(1) = Definition(t);
          shl->getDefinition(1).setFixed(PhysReg{253}); /* scc */
          ctx->block->instructions.emplace_back(std::move(shl));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_ishr: {
+      if (dst.regClass() == v1) {
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_ashrrev_i32, dst, false, true);
+      } else if (dst.regClass() == s1) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_ashr_i32, dst, true);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
