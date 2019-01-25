@@ -1493,6 +1493,50 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_unpack_half_2x16: {
+      if (dst.regClass() == v2) {
+         Temp src = get_ssa_temp(ctx, instr->src[0].src.ssa);
+         Temp val0_fp16{ctx->program->allocateId(), v1};
+         Temp val1_fp16{ctx->program->allocateId(), v1};
+         Temp val0_fp32{ctx->program->allocateId(), v1};
+         Temp val1_fp32{ctx->program->allocateId(), v1};
+
+         aco_ptr<Instruction> instr{create_instruction<VOP3A_instruction>(aco_opcode::v_bfe_u32, Format::VOP3A, 3, 1)};
+         instr->getOperand(0) = Operand(src);
+         instr->getOperand(1) = Operand((uint32_t) 0);
+         instr->getOperand(2) = Operand((uint32_t) 16);
+         instr->getDefinition(0) = Definition(val0_fp16);
+         ctx->block->instructions.emplace_back(std::move(instr));
+
+         instr.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_bfe_u32, Format::VOP3A, 3, 1));
+         instr->getOperand(0) = Operand(src);
+         instr->getOperand(1) = Operand((uint32_t) 16);
+         instr->getOperand(2) = Operand((uint32_t) 16);
+         instr->getDefinition(0) = Definition(val1_fp16);
+         ctx->block->instructions.emplace_back(std::move(instr));
+
+         instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_cvt_f32_f16, Format::VOP1, 1, 1));
+         instr->getOperand(0) = Operand(val0_fp16);
+         instr->getDefinition(0) = Definition(val0_fp32);
+         ctx->block->instructions.emplace_back(std::move(instr));
+
+         instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_cvt_f32_f16, Format::VOP1, 1, 1));
+         instr->getOperand(0) = Operand(val1_fp16);
+         instr->getDefinition(0) = Definition(val1_fp32);
+         ctx->block->instructions.emplace_back(std::move(instr));
+
+         instr.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1));
+         instr->getOperand(0) = Operand(val0_fp32);
+         instr->getOperand(1) = Operand(val1_fp32);
+         instr->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(instr));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_bfm: {
       Temp bits = get_alu_src(ctx, instr->src[0]);
       Temp offset = get_alu_src(ctx, instr->src[1]);
