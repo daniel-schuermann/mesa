@@ -2777,16 +2777,26 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
    const nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
    const struct glsl_type *type = glsl_without_array(var->type);
    const enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
 
    if (dim == GLSL_SAMPLER_DIM_BUF) {
-      unreachable("image load with GLSL_SAMPLER_DIM_BUF not yet implemented\n");
+      Temp rsrc = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_BUFFER, nullptr, true, true);
+      Temp vindex = emit_extract_vector(ctx, get_ssa_temp(ctx, instr->src[1].ssa), 0, v1);
+
+      aco_ptr<MUBUF_instruction> load{create_instruction<MUBUF_instruction>(aco_opcode::buffer_load_format_xyzw, Format::MUBUF, 3, 1)};
+      load->getOperand(0) = Operand(vindex);
+      load->getOperand(1) = Operand(rsrc);
+      load->getOperand(2) = Operand((uint32_t) 0);
+      load->getDefinition(0) = Definition(dst);
+      load->idxen = true;
+      ctx->block->instructions.emplace_back(std::move(load));
+      emit_split_vector(ctx, dst, 4);
       return;
    }
 
    Temp coords = get_image_coords(ctx, instr, type);
    Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, nullptr, true, true);
    //aco_image_dim img_dim = get_image_dim(ctx, glsl_get_sampler_dim(type), glsl_sampler_type_is_array(type));
-   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
 
    aco_ptr<MIMG_instruction> load{create_instruction<MIMG_instruction>(aco_opcode::image_load, Format::MIMG, 2, 1)};
    load->getOperand(0) = Operand(coords);
