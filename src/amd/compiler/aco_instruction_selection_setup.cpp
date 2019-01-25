@@ -218,6 +218,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      break;
                   case nir_intrinsic_load_front_face:
                   case nir_intrinsic_load_sample_id:
+                  case nir_intrinsic_load_sample_mask_in:
                   case nir_intrinsic_load_input:
                   case nir_intrinsic_load_vertex_id:
                   case nir_intrinsic_load_vertex_id_zero_base:
@@ -293,6 +294,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      }
                      break;
                   case nir_intrinsic_load_sample_id:
+                  case nir_intrinsic_load_sample_mask_in:
                      ctx->fs_vgpr_args[fs_input::ancillary] = true;
                      break;
                   default:
