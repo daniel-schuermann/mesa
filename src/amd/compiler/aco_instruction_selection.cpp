@@ -2818,6 +2818,7 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
       for (unsigned i = num_channels; i < 4; ++i)
          vec->getOperand(i) = Operand();
       vec->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(vec));
       emit_split_vector(ctx, dst, 4);
       return;
    }
