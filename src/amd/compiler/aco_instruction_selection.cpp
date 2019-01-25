@@ -4263,10 +4263,6 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
    if (instr->op == nir_texop_query_levels)
       unreachable("Unimplemented tex instr type");
-   else if (instr->is_shadow && instr->is_new_style_shadow &&
-            instr->op != nir_texop_txs && instr->op != nir_texop_lod &&
-            instr->op != nir_texop_tg4)
-      unreachable("Unimplemented tex instr type");
    else if (instr->op == nir_texop_txs &&
             instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE &&
             instr->is_array)
