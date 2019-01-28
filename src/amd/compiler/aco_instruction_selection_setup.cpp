@@ -178,6 +178,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_f2u32:
                   case nir_op_i2b32:
                   case nir_op_b2i32:
+                  case nir_op_imov:
                      type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
                      break;
                   case nir_op_b32csel:
