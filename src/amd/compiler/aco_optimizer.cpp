@@ -562,31 +562,6 @@ void check_instruction_uses(opt_ctx &ctx, aco_ptr<Instruction>& instr, std::set<
 
 void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 {
-   if (instr->opcode == aco_opcode::p_split_vector &&
-       ctx.info[instr->getOperand(0).tempId()].is_mimg() &&
-       ctx.info[instr->getOperand(0).tempId()].uses == 1) {
-      MIMG_instruction* mimg = static_cast<MIMG_instruction*>(ctx.info[instr->getOperand(0).tempId()].instr);
-      unsigned num_elements = 0;
-      unsigned dmask_old = mimg->dmask;
-      for (unsigned i = 0; i < instr->num_definitions; i++) {
-         if (ctx.info[instr->getDefinition(i).tempId()].uses != 0) {
-            instr->getDefinition(num_elements) = instr->getDefinition(i);
-            num_elements++;
-         } else {
-            mimg->dmask &= ~(1 << i);
-         }
-      }
-      if (num_elements == 0) {
-         mimg->dmask = dmask_old;
-      } else if (num_elements < instr->num_definitions) {
-         instr->num_definitions = num_elements;
-         /* reduce register class of mimg instruction and split_vector */
-         Temp new_temp = Temp{mimg->getDefinition(0).tempId(), getRegClass(vgpr, num_elements)};
-         mimg->getDefinition(0).setTemp(new_temp);
-         instr->getOperand(0).setTemp(new_temp);
-      }
-   }
-
    if (!instr->isVALU())
       return;
 
