@@ -350,43 +350,6 @@ void lower_to_hw_instr(Program* program)
             sopp->block = branch->targets[0];
             new_instructions.emplace_back(std::move(sopp));
 
-         // FIXME: do this while RA?
-         } else if (instr->format == Format::VOPC) {
-            /* check if the register allocator was able to assign vcc */
-            if (!(instr->getDefinition(0).physReg() == vcc)) {
-               /* check if the first operand was a literal */
-               if (instr->getOperand(0).physReg().reg == 255) {
-                  aco_ptr<SOP1_instruction> mov{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1)};
-                  mov->getOperand(0) = instr->getOperand(0);
-                  mov->getDefinition(0) = Definition(instr->getDefinition(0).physReg(), s1);
-                  instr->getOperand(0) = Operand(instr->getDefinition(0).physReg(), s1);
-                  new_instructions.emplace_back(std::move(mov));
-               }
-
-               /* change the instruction to VOP3 to enable an arbitrary register pair as dst */
-               aco_ptr<Instruction> tmp = std::move(instr);
-               Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
-               instr.reset(create_instruction<VOP3A_instruction>(tmp->opcode, format, tmp->num_operands, tmp->num_definitions));
-               for (unsigned i = 0; i < instr->num_operands; i++)
-                  instr->getOperand(i) = tmp->getOperand(i);
-               for (unsigned i = 0; i < instr->num_definitions; i++)
-                  instr->getDefinition(i) = tmp->getDefinition(i);
-            }
-            new_instructions.emplace_back(std::move(instr));
-         } else if (instr->format == Format::VOP2) {
-            // TODO: what about literals?!
-            if (instr->num_operands == 3 && !(instr->getOperand(2).physReg() == vcc || instr->getOperand(2).physReg().reg == 255 || instr->opcode == aco_opcode::v_mac_f32)) {
-               /* change the instruction to VOP3 to enable an arbitrary register pair as dst */
-               aco_ptr<Instruction> tmp = std::move(instr);
-               Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
-               instr.reset(create_instruction<VOP3A_instruction>(tmp->opcode, format, tmp->num_operands, tmp->num_definitions));
-               for (unsigned i = 0; i < instr->num_operands; i++)
-                  instr->getOperand(i) = tmp->getOperand(i);
-               for (unsigned i = 0; i < instr->num_definitions; i++)
-                  instr->getDefinition(i) = tmp->getDefinition(i);
-            }
-
-            new_instructions.emplace_back(std::move(instr));
          } else {
             new_instructions.emplace_back(std::move(instr));
          }
