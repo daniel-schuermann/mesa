@@ -2810,11 +2810,11 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
       load->getOperand(0) = Operand(vindex);
       load->getOperand(1) = Operand(rsrc);
       load->getOperand(2) = Operand((uint32_t) 0);
-      Temp tmp{ctx->program->allocateId(), v4};
+      Temp tmp = {ctx->program->allocateId(), getRegClass(RegType::vgpr, num_channels)};
       load->getDefinition(0) = Definition(tmp);
       load->idxen = true;
       ctx->block->instructions.emplace_back(std::move(load));
-      emit_split_vector(ctx, tmp, 4);
+      emit_split_vector(ctx, tmp, num_channels);
 
       aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 4, 1)};
       for (unsigned i = 0; i < num_channels; ++i)
