@@ -3843,8 +3843,8 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
       // see comment in ac_prepare_cube_coords()
       if (ctx->options->chip_class <= VI) {
          tmp.reset(create_instruction<VOP2_instruction>(aco_opcode::v_max_f32, Format::VOP2, 2, 1));
-         tmp->getOperand(0) = Operand(coord_args[3]);
-         tmp->getOperand(1) = Operand((uint32_t) 0);
+         tmp->getOperand(0) = Operand((uint32_t) 0);
+         tmp->getOperand(1) = Operand(coord_args[3]);
          coord_args[3] = {ctx->program->allocateId(), v1};
          tmp->getDefinition(0) = Definition(coord_args[3]);
          ctx->block->instructions.emplace_back(std::move(tmp));
@@ -4200,13 +4200,14 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          unreachable("Tex instruction loads more than 4 components.");
       }
       aco_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 3, 1)};
-      mubuf->getOperand(0) = Operand(coords);
+      mubuf->getOperand(0) = Operand(as_vgpr(ctx, coords));
       mubuf->getOperand(1) = Operand(resource);
       mubuf->getOperand(2) = Operand((uint32_t) 0);
-      mubuf->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      mubuf->getDefinition(0) = Definition(dst);
       mubuf->idxen = true;
       ctx->block->instructions.emplace_back(std::move(mubuf));
-      emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
+      emit_split_vector(ctx, dst, instr->dest.ssa.num_components);
       return;
    }
 
