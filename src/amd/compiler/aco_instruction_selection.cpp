@@ -651,7 +651,26 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       ctx->allocated_vec.emplace(dst.id(), elems);
       break;
    }
-   case nir_op_imov:
+   case nir_op_imov: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      aco_ptr<Instruction> mov;
+      if (dst.regClass() == s1) {
+         if (src.regClass() == v1)
+            mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1));
+         else
+            mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+      } else if (dst.regClass() == v1) {
+         mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      mov->getOperand(0) = Operand(src);
+      mov->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(mov));
+      break;
+   }
    case nir_op_fmov: {
       aco_ptr<Instruction> mov;
       if (dst.regClass() == s1) {
