@@ -43,8 +43,8 @@ alu_src_is_divergent(bool *divergent, nir_alu_src src, unsigned num_input_compon
     * we can check if the originating value is non-divergent. */
    if (num_input_components == 1 &&
        src.src.ssa->num_components != 1 &&
-       src.src.parent_instr->type == nir_instr_type_alu) {
-      nir_alu_instr *parent = nir_instr_as_alu(src.src.parent_instr);
+       src.src.ssa->parent_instr->type == nir_instr_type_alu) {
+      nir_alu_instr *parent = nir_instr_as_alu(src.src.ssa->parent_instr);
 
       switch(parent->op) {
       case nir_op_vec2:
