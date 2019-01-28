@@ -719,8 +719,18 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             aco_ptr<Instruction> tmp = std::move(instr);
             Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
             instr.reset(create_instruction<VOP3A_instruction>(tmp->opcode, format, tmp->num_operands, tmp->num_definitions));
-            for (unsigned i = 0; i < instr->num_operands; i++)
-               instr->getOperand(i) = tmp->getOperand(i);
+            for (unsigned i = 0; i < instr->num_operands; i++) {
+               Operand& operand = tmp->getOperand(i);
+               instr->getOperand(i) = operand;
+               /* keep phi_map up to date */
+               if (operand.isTemp()) {
+                  std::map<unsigned, phi_info>::iterator phi = phi_map.find(operand.tempId());
+                  if (phi != phi_map.end()) {
+                     phi->second.uses.erase(tmp.get());
+                     phi->second.uses.emplace(instr.get());
+                  }
+               }
+            }
             for (unsigned i = 0; i < instr->num_definitions; i++)
                instr->getDefinition(i) = tmp->getDefinition(i);
          }
