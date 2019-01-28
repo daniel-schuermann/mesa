@@ -551,6 +551,10 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   Definition pc_def = Definition(tmp);
 
                   /* re-enable the killed operands, so that we don't move the blocking var there */
+                  for (unsigned k = 0; k < i; k++) {
+                     for (unsigned j = 0; j < instr->getDefinition(k).size(); j++)
+                        register_file[instr->getDefinition(k).physReg().reg + j] = 0x0;
+                  }
                   for (unsigned i = 0; i < instr->num_operands; i++)
                      if (instr->getOperand(i).isFixed() && instr->getOperand(i).isKill())
                         for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
@@ -558,10 +562,16 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   /* find a new register for the blocking variable */
                   PhysReg reg = get_reg(register_file, rc, parallelcopy, instr);
                   /* once again, disable killed operands */
-                  for (unsigned i = 0; i < instr->num_operands; i++)
+                  for (unsigned i = 0; i < instr->num_operands; i++) {
                      if (instr->getOperand(i).isFixed() && instr->getOperand(i).isKill())
                         for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                            register_file[instr->getOperand(i).physReg().reg + j] = 0;
+                  }
+                  for (unsigned k = 0; k < i; k++) {
+                     if (instr->getDefinition(k).isTemp() && (kills.find(instr->getDefinition(k).tempId()) != kills.end()))
+                        for (unsigned j = 0; j < instr->getDefinition(k).size(); j++)
+                           register_file[instr->getDefinition(k).physReg().reg + j] = instr->getDefinition(k).tempId();
+                  }
                   pc_def.setFixed(reg);
 
                   /* finish assignment of parallelcopy */
@@ -641,13 +651,70 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             }
             instructions.emplace_back(std::move(pc));
          }
-         if ((instr->opcode == aco_opcode::v_add_co_u32 ||
-              instr->opcode == aco_opcode::v_addc_co_u32 ||
-              instr->opcode == aco_opcode::v_sub_co_u32 ||
-              instr->opcode == aco_opcode::v_subb_co_u32 ||
-              instr->opcode == aco_opcode::v_subrev_co_u32 ||
-              instr->opcode == aco_opcode::v_subbrev_co_u32) &&
-             !(instr->getDefinition(1).physReg() == vcc)) {
+
+         /* some instructions need VOP3 encoding if operand/definition is not assigned to VCC */
+         bool instr_needs_vop3 = !instr->isVOP3() &&
+                                 ((instr->format == Format::VOPC && !(instr->getDefinition(0).physReg() == vcc)) ||
+                                  (instr->opcode == aco_opcode::v_cndmask_b32 && !(instr->getOperand(2).physReg() == vcc)) ||
+                                  ((instr->opcode == aco_opcode::v_add_co_u32 ||
+                                    instr->opcode == aco_opcode::v_addc_co_u32 ||
+                                    instr->opcode == aco_opcode::v_sub_co_u32 ||
+                                    instr->opcode == aco_opcode::v_subb_co_u32 ||
+                                    instr->opcode == aco_opcode::v_subrev_co_u32 ||
+                                    instr->opcode == aco_opcode::v_subbrev_co_u32) &&
+                                   !(instr->getDefinition(1).physReg() == vcc)) ||
+                                  ((instr->opcode == aco_opcode::v_addc_co_u32 ||
+                                    instr->opcode == aco_opcode::v_subb_co_u32 ||
+                                    instr->opcode == aco_opcode::v_subbrev_co_u32) &&
+                                   !(instr->getOperand(2).physReg() == vcc)));
+         if (instr_needs_vop3) {
+
+            /* if the first operand is a literal, we have to move it to a reg */
+            if (instr->num_operands && instr->getOperand(0).isLiteral()) {
+               bool can_sgpr = true;
+               /* check, if we have to move to vgpr */
+               for (unsigned i = 0; i < instr->num_operands; i++) {
+                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).getTemp().type() == sgpr) {
+                     can_sgpr = false;
+                     break;
+                  }
+               }
+               aco_ptr<Instruction> mov;
+               if (can_sgpr)
+                  mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+               else
+                  mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+               mov->getOperand(0) = instr->getOperand(0);
+               Temp tmp = {program->allocateId(), can_sgpr ? s1 : v1};
+               mov->getDefinition(0) = Definition(tmp);
+               /* disable definitions and re-enable operands */
+               for (unsigned i = 0; i < instr->num_definitions; i++) {
+                  for (unsigned j = 0; j < instr->getDefinition(i).size(); j++)
+                     register_file[instr->getDefinition(i).physReg().reg + j] = 0x0;
+               }
+               for (unsigned i = 0; i < instr->num_operands; i++) {
+                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill()) {
+                     for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
+                        register_file[instr->getOperand(i).physReg().reg + j] = 0xFFFF;
+                  }
+               }
+               mov->getDefinition(0).setFixed(get_reg(register_file, tmp.regClass(), parallelcopy, mov));
+               instr->getOperand(0) = Operand(tmp);
+               instr->getOperand(0).setFixed(mov->getDefinition(0).physReg());
+               instructions.emplace_back(std::move(mov));
+               /* re-enable live vars */
+               for (unsigned i = 0; i < instr->num_operands; i++) {
+                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill())
+                     for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
+                        register_file[instr->getOperand(i).physReg().reg + j] = 0x0;
+               }
+               for (unsigned i = 0; i < instr->num_definitions; i++) {
+                  if (instr->getDefinition(i).isTemp() && (kills.find(instr->getDefinition(i).tempId()) != kills.end()))
+                     for (unsigned j = 0; j < instr->getDefinition(i).size(); j++)
+                        register_file[instr->getDefinition(i).physReg().reg + j] = instr->getDefinition(i).tempId();
+               }
+            }
+
             /* change the instruction to VOP3 to enable an arbitrary register pair as dst */
             aco_ptr<Instruction> tmp = std::move(instr);
             Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
@@ -657,8 +724,10 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             for (unsigned i = 0; i < instr->num_definitions; i++)
                instr->getDefinition(i) = tmp->getDefinition(i);
          }
+
          instructions.emplace_back(std::move(*it));
       } /* end for Instr */
+
       block->instructions = std::move(instructions);
 
       filled[block->index] = true;
