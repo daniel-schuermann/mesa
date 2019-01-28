@@ -222,6 +222,27 @@ void emit_split_vector(isel_context* ctx, Temp vec_src, unsigned num_components)
    ctx->allocated_vec.emplace(vec_src.id(), elems);
 }
 
+/* This vector expansion uses a mask to determine which elements in the new vector
+ * come from the original vector. The other elements are undefined. */
+void expand_vector(isel_context* ctx, Temp vec_src, Temp dst, unsigned num_components, unsigned mask)
+{
+   unsigned component_size = dst.size() / num_components;
+   std::array<Temp,4> elems;
+
+   aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, num_components, 1)};
+   vec->getDefinition(0) = Definition(dst);
+   unsigned k = 0;
+   for (unsigned i = 0; i < num_components; i++) {
+      if (mask & (1 << i))
+         vec->getOperand(i) = Operand(emit_extract_vector(ctx, vec_src, k++, getRegClass(dst.type(), component_size)));
+      else
+         vec->getOperand(i) = Operand();
+      elems[i] = vec->getOperand(i).getTemp();
+   }
+   ctx->block->instructions.emplace_back(std::move(vec));
+   ctx->allocated_vec.emplace(dst.id(), elems);
+}
+
 Temp get_alu_src(struct isel_context *ctx, nir_alu_src src)
 {
    if (src.src.ssa->num_components == 1 && src.swizzle[0] == 0)
@@ -2810,20 +2831,18 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
       load->getOperand(0) = Operand(vindex);
       load->getOperand(1) = Operand(rsrc);
       load->getOperand(2) = Operand((uint32_t) 0);
-      Temp tmp = {ctx->program->allocateId(), getRegClass(RegType::vgpr, num_channels)};
+      Temp tmp;
+      if (num_channels == instr->dest.ssa.num_components)
+         tmp = dst;
+      else
+         tmp = {ctx->program->allocateId(), getRegClass(RegType::vgpr, num_channels)};
       load->getDefinition(0) = Definition(tmp);
       load->idxen = true;
       ctx->block->instructions.emplace_back(std::move(load));
-      emit_split_vector(ctx, tmp, num_channels);
 
-      aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 4, 1)};
-      for (unsigned i = 0; i < num_channels; ++i)
-         vec->getOperand(i) = Operand(emit_extract_vector(ctx, tmp, i, v1));
-      for (unsigned i = num_channels; i < 4; ++i)
-         vec->getOperand(i) = Operand();
-      vec->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(vec));
-      emit_split_vector(ctx, dst, 4);
+      emit_split_vector(ctx, tmp, num_channels);
+      if (num_channels != instr->dest.ssa.num_components)
+         expand_vector(ctx, tmp, dst, instr->dest.ssa.num_components, (1 << num_channels) - 1);
       return;
    }
 
@@ -4119,8 +4138,9 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    }
 
    /* Build tex instruction */
-   // TODO: use nir_ssa_def_components_read(&instr->dest.ssa), but then dst size doesn't match the instruction's return value
-   unsigned dmask = (1 << instr->dest.ssa.num_components) - 1;
+   unsigned dmask = nir_ssa_def_components_read(&instr->dest.ssa);
+   Temp tmp_dst = {ctx->program->allocateId(), getRegClass(vgpr, util_bitcount(dmask))};
+
    /* gather4 selects the component by dmask */
    if (instr->op == nir_texop_tg4) {
       if (instr->is_shadow)
@@ -4145,6 +4165,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tex->dmask = dmask;
       tex->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
       ctx->block->instructions.emplace_back(std::move(tex));
+      assert(util_bitcount(dmask) == instr->dest.ssa.num_components);
       return;
    }
 
@@ -4185,7 +4206,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       //FIXME: if (ctx->abi->gfx9_stride_size_workaround) return ac_build_buffer_load_format_gfx9_safe()
 
       assert(coords.size() == 1);
-      unsigned last_bit = util_last_bit(dmask);
+      unsigned last_bit = util_last_bit(nir_ssa_def_components_read(&instr->dest.ssa));
       aco_opcode op;
       switch (last_bit) {
       case 1:
@@ -4199,15 +4220,26 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       default:
          unreachable("Tex instruction loads more than 4 components.");
       }
+
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      /* if the instruction return value matches exactly the nir dest ssa, we can use it directly */
+      if (last_bit == instr->dest.ssa.num_components)
+         tmp_dst = dst;
+      else
+         tmp_dst = {ctx->program->allocateId(), getRegClass(vgpr, last_bit)};
+
       aco_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 3, 1)};
       mubuf->getOperand(0) = Operand(as_vgpr(ctx, coords));
       mubuf->getOperand(1) = Operand(resource);
       mubuf->getOperand(2) = Operand((uint32_t) 0);
-      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      mubuf->getDefinition(0) = Definition(dst);
+      mubuf->getDefinition(0) = Definition(tmp_dst);
       mubuf->idxen = true;
       ctx->block->instructions.emplace_back(std::move(mubuf));
-      emit_split_vector(ctx, dst, instr->dest.ssa.num_components);
+      emit_split_vector(ctx, tmp_dst, last_bit);
+
+      /* otherwise, we create a new vector matching the nir dest ssa */
+      if (last_bit != instr->dest.ssa.num_components)
+         expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, (1 << last_bit) - 1);
       return;
    }
 
@@ -4221,16 +4253,15 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tex->getOperand(1) = Operand(resource);
       tex->dmask = dmask;
       tex->unrm = true;
-      Temp dst = instr->op == nir_texop_samples_identical ? Temp{ctx->program->allocateId(), v1} : get_ssa_temp(ctx, &instr->dest.ssa);
-      tex->getDefinition(0) = Definition(dst);
+      tex->getDefinition(0) = Definition(tmp_dst);
       ctx->block->instructions.emplace_back(std::move(tex));
 
       if (instr->op == nir_texop_samples_identical) {
-         assert(dmask == 1);
+         assert(dmask == 1 && instr->dest.ssa.num_components == 1);
 
          aco_ptr<Instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_eq_u32, Format::VOPC, 2, 1)};
          cmp->getOperand(0) = Operand((uint32_t) 0);
-         cmp->getOperand(1) = Operand(dst);
+         cmp->getOperand(1) = Operand(tmp_dst);
          Temp tmp = {ctx->program->allocateId(), s2};
          cmp->getDefinition(0) = Definition(tmp);
          cmp->getDefinition(0).setHint(vcc);
@@ -4243,7 +4274,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          bcsel->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
          ctx->block->instructions.emplace_back(std::move(bcsel));
       } else {
-         emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
+         emit_split_vector(ctx, tmp_dst, tmp_dst.size());
+         expand_vector(ctx, tmp_dst, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components, dmask);
       }
       return;
    }
@@ -4314,10 +4346,11 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    tex->getOperand(2) = Operand(sampler);
    tex->dmask = dmask;
    tex->da = da;
-   tex->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+   tex->getDefinition(0) = Definition(tmp_dst);
    ctx->block->instructions.emplace_back(std::move(tex));
 
-   emit_split_vector(ctx, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components);
+   emit_split_vector(ctx, tmp_dst, tmp_dst.size());
+   expand_vector(ctx, tmp_dst, get_ssa_temp(ctx, &instr->dest.ssa), instr->dest.ssa.num_components, nir_ssa_def_components_read(&instr->dest.ssa));
 
    if (instr->op == nir_texop_query_levels)
       unreachable("Unimplemented tex instr type");
