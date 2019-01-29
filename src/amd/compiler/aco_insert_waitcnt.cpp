@@ -194,7 +194,7 @@ bool writes_exec(Instruction* instr, wait_ctx& ctx)
       case Format::SOP1: 
       case Format::SOP2:
       case Format::SOPK:
-      case Format::VOP3B:
+      case Format::VOP3:
          break;
    }
 
