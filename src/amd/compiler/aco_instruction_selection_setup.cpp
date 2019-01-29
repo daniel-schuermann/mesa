@@ -295,9 +295,11 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      }
                      break;
                   case nir_intrinsic_load_sample_id:
-                  case nir_intrinsic_load_sample_mask_in:
                      ctx->fs_vgpr_args[fs_input::ancillary] = true;
                      break;
+                  case nir_intrinsic_load_sample_mask_in:
+                     ctx->fs_vgpr_args[fs_input::ancillary] = true;
+                     ctx->fs_vgpr_args[fs_input::sample_coverage] = true;
                   default:
                      break;
                }
