@@ -72,13 +72,14 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<ac
          if (it->second.def.physReg().reg == 253) {
             mov.reset(create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_i32, Format::SOPC, 2, 1));
             mov->getOperand(1) = Operand((uint32_t) 0);
-         } else if (it->second.def.getTemp().type() == RegType::sgpr)
-            mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
-         else
+         } else if (it->second.def.getTemp().type() == RegType::sgpr) {
+            new_instructions.emplace_back(std::move(create_s_mov(it->second.def, it->second.op)));
+         } else {
             mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
-         mov->getOperand(0) = it->second.op;
-         mov->getDefinition(0) = it->second.def;
-         new_instructions.emplace_back(std::move(mov));
+            mov->getOperand(0) = it->second.op;
+            mov->getDefinition(0) = it->second.def;
+            new_instructions.emplace_back(std::move(mov));
+         }
 
          /* reduce the number of uses of the operand reg by one */
          if (it->second.op.isFixed()) {
