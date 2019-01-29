@@ -98,6 +98,7 @@ class Opcode(object):
       self.opcode = code
       self.input_mod = "true" if input_mod else "false"
       self.output_mod = "true" if output_mod else "false"
+      self.format = format
 
 
 # global dictionary of opcodes

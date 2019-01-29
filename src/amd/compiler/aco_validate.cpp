@@ -45,6 +45,31 @@ void validate(Program* program, FILE * output)
    {
       for (auto&& instr : block->instructions)
       {
+         opcode_info op_info = ::opcode_infos[(int)instr->opcode];
+
+         /* check base format */
+         Format base_format = instr->format;
+         base_format = (Format)((uint32_t)base_format & ~(uint32_t)Format::SDWA);
+         base_format = (Format)((uint32_t)base_format & ~(uint32_t)Format::DPP);
+         if ((uint32_t)base_format & (uint32_t)Format::VOP1)
+            base_format = Format::VOP1;
+         else if ((uint32_t)base_format & (uint32_t)Format::VOP2)
+            base_format = Format::VOP2;
+         else if ((uint32_t)base_format & (uint32_t)Format::VOPC)
+            base_format = Format::VOPC;
+         else if ((uint32_t)base_format & (uint32_t)Format::VINTRP)
+            base_format = Format::VINTRP;
+         check(base_format == op_info.format, "Wrong base format for instruction", instr.get());
+
+         /* check VOP3 modifiers */
+         if (((uint32_t)instr->format & (uint32_t)Format::VOP3) && instr->format != Format::VOP3) {
+            check(base_format == Format::VOP2 ||
+                  base_format == Format::VOP1 ||
+                  base_format == Format::VOPC ||
+                  base_format == Format::VINTRP,
+                  "Format cannot have VOP3A/VOP3B applied", instr.get());
+         }
+
          /* check num literals */
          if (instr->isSALU() || instr->isVALU()) {
             unsigned num_literals = 0;
