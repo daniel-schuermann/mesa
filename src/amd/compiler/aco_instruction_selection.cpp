@@ -3391,21 +3391,25 @@ void emit_memory_barrier(isel_context *ctx, nir_intrinsic_instr *instr) {
    ctx->block->instructions.emplace_back(std::move(barrier));
 }
 
-Temp load_lds_size_m0(isel_context *ctx)
+Operand load_lds_size_m0(isel_context *ctx)
 {
+   if (ctx->options->chip_class >= GFX9) //m0 does not need to be initialized on GFX9+
+      return Operand(m0, s1);
    aco_ptr<Instruction> instr{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1)};
    instr->getOperand(0) = Operand(0xFFFFFFFF);
    Temp dst = {ctx->program->allocateId(), s1};
    instr->getDefinition(0) = Definition(dst);
    instr->getDefinition(0).setFixed(m0);
    ctx->block->instructions.emplace_back(std::move(instr));
-   return dst;
+   Operand op(dst);
+   op.setFixed(m0);
+   return op;
 }
 
 
 void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
 {
-   Temp m = load_lds_size_m0(ctx);
+   Operand m = load_lds_size_m0(ctx);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    assert(instr->dest.ssa.bit_size == 32 && "Bitsize not supported in load_shared.");
    Temp address = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
@@ -3431,8 +3435,7 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
 
    aco_ptr<DS_instruction> ds{create_instruction<DS_instruction>(op, Format::DS, 2, 1)};
    ds->getOperand(0) = Operand(address);
-   ds->getOperand(1) = Operand(m);
-   ds->getOperand(1).setFixed(m0);
+   ds->getOperand(1) = m;
    Temp tmp = Temp();
    if (dst.type() == vgpr) {
       ds->getDefinition(0) = Definition(dst);
@@ -3460,7 +3463,7 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    unsigned offset = instr->const_index[0];
    unsigned writemask = instr->const_index[1];
-   Temp m = load_lds_size_m0(ctx);
+   Operand m = load_lds_size_m0(ctx);
    Temp data = get_ssa_temp(ctx, instr->src[0].ssa);
    Temp address = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
    unsigned elem_size_bytes = instr->src[0].ssa->bit_size / 8;
@@ -3480,8 +3483,7 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
       ds->getOperand(0) = Operand(address);
       ds->getOperand(1) = Operand(emit_extract_vector(ctx, data, start[0], v1));
       ds->getOperand(2) = Operand(emit_extract_vector(ctx, data, start[1], v1));
-      ds->getOperand(3) = Operand(m);
-      ds->getOperand(3).setFixed(m0);
+      ds->getOperand(3) = m;
       ds->offset0 = (offset >> 2) + start[0];
       ds->offset1 = (offset >> 2) + start[1];
       ctx->block->instructions.emplace_back(std::move(ds));
@@ -3508,8 +3510,7 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
       ds.reset(create_instruction<DS_instruction>(op, Format::DS, 3, 0));
       ds->getOperand(0) = Operand(address);
       ds->getOperand(1) = Operand(write_data);
-      ds->getOperand(2) = Operand(m);
-      ds->getOperand(2).setFixed(m0);
+      ds->getOperand(2) = m;
       ds->offset0 = offset + (start[i] * elem_size_bytes);
       ctx->block->instructions.emplace_back(std::move(ds));
    }
@@ -3519,7 +3520,7 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
 void visit_shared_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    unsigned offset = instr->const_index[0];
-   Temp m = load_lds_size_m0(ctx);
+   Operand m = load_lds_size_m0(ctx);
    Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
    Temp address = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
 
@@ -3617,8 +3618,7 @@ void visit_shared_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
    ds->getOperand(1) = Operand(data);
    if (num_operands == 4)
       ds->getOperand(2) = Operand(get_ssa_temp(ctx, instr->src[2].ssa));
-   ds->getOperand(num_operands - 1) = Operand(m);
-   ds->getOperand(num_operands - 1).setFixed(m0);
+   ds->getOperand(num_operands - 1) = m;
    ds->offset0 = offset;
    if (return_previous)
       ds->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
