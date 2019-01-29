@@ -36,6 +36,7 @@ const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)] = {
    .opcode = ${opcode.opcode},
    .can_use_input_modifiers = ${opcode.input_mod},
    .can_use_output_modifiers = ${opcode.output_mod},
+   .format = aco::Format::${str(opcode.format.name)}
 },
 % endfor
 };
