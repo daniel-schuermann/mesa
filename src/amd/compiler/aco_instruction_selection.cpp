@@ -1960,11 +1960,7 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
 
    if (dst.size() == 1)
    {
-      aco_ptr<Instruction> mov;
-      aco_opcode op = dst.size() == 2 ? aco_opcode::s_mov_b64 : aco_opcode::s_mov_b32;
-      mov.reset(create_instruction<Instruction>(op, Format::SOP1, 1, 1));
-      mov->getDefinition(0) = Definition(dst);
-      mov->getOperand(0) = Operand(instr->value.u32[0]);
+      aco_ptr<Instruction> mov = create_s_mov(dst, Operand(instr->value.u32[0]));
       ctx->block->instructions.emplace_back(std::move(mov));
    } else {
       assert(dst.size() != 1);
@@ -3395,8 +3391,8 @@ Operand load_lds_size_m0(isel_context *ctx)
 {
    if (ctx->options->chip_class >= GFX9) //m0 does not need to be initialized on GFX9+
       return Operand(m0, s1);
-   aco_ptr<Instruction> instr{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1)};
-   instr->getOperand(0) = Operand(0xFFFFFFFF);
+   aco_ptr<Instruction> instr{create_instruction<SOPK_instruction>(aco_opcode::s_movk_i32, Format::SOPK, 0, 1)};
+   static_cast<SOPK_instruction*>(instr.get())->imm = 0xffff;
    Temp dst = {ctx->program->allocateId(), s1};
    instr->getDefinition(0) = Definition(dst);
    instr->getDefinition(0).setFixed(m0);
@@ -5105,6 +5101,22 @@ static void visit_cf_list(isel_context *ctx,
    }
 }
 } /* end namespace */
+
+aco_ptr<Instruction> create_s_mov(Definition dst, Operand src) {
+   if (src.isLiteral()) {
+      uint32_t v = src.constantValue();
+      if (v >= 0xffff8000 || v <= 0x7fff) {
+         aco_ptr<Instruction> mov(create_instruction<SOPK_instruction>(aco_opcode::s_movk_i32, Format::SOPK, 0, 1));
+         static_cast<SOPK_instruction*>(mov.get())->imm = v;
+         mov->getDefinition(0) = dst;
+         return mov;
+      }
+   }
+   aco_ptr<Instruction> mov(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+   mov->getOperand(0) = src;
+   mov->getDefinition(0) = dst;
+   return mov;
+}
 
 std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         ac_shader_config* config,
