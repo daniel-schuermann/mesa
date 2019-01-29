@@ -59,11 +59,16 @@ typedef enum {
    v2_linear = v2 | (1 << 6),
 } RegClass;
 
+namespace aco {
+enum class Format : std::uint16_t;
+}
+
 typedef struct {
    const char *name;
    unsigned opcode;
    bool can_use_input_modifiers;
    bool can_use_output_modifiers;
+   aco::Format format;
 } opcode_info;
 
 extern const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)];
