@@ -98,8 +98,6 @@ enum class Format : std::uint16_t {
    SOPC = 5,
    /* Scalar Memory Format */
    SMEM = 6,
-   /* Vector Parameter Interpolation Format */
-   VINTRP = 7,
    /* LDS/GDS Format */
    DS = 8,
    /* Vector Memory Buffer Formats */
@@ -121,9 +119,12 @@ enum class Format : std::uint16_t {
    VOP1 = 1 << 8,
    VOP2 = 1 << 9,
    VOPC = 1 << 10,
-   VOP3B = 1 <<11,
+   VOP3 = 1 << 11,
+   VOP3A = 1 << 11,
+   VOP3B = 1 << 11,
    VOP3P = 1 << 12,
-   VOP3A = 1 << 13,
+   /* Vector Parameter Interpolation Format */
+   VINTRP = 1 << 13,
    DPP = 1 << 14,
    SDWA = 1 << 15,
 };
