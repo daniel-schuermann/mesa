@@ -472,6 +472,15 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          assert(instr->getOperand(0).isFixed());
       }
       break;
+   case aco_opcode::s_movk_i32: {
+      uint32_t v = static_cast<SOPK_instruction*>(instr.get())->imm;
+      v = v & 0x8000 ? (v | 0xffff0000) : v;
+      if (v <= 64 && v >= 0xfffffff0)
+         ctx.info[instr->getDefinition(0).tempId()].set_constant(v);
+      else
+         ctx.info[instr->getDefinition(0).tempId()].set_literal(v);
+      break;
+   }
    case aco_opcode::v_mul_f32: /* omod */
       if (instr->getOperand(0).isConstant()) {
          assert(instr->getOperand(1).isTemp());

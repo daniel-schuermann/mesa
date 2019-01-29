@@ -817,6 +817,8 @@ void validate(Program* program, FILE *output);
 void aco_print_instr(Instruction *instr, FILE *output);
 void aco_print_program(Program *program, FILE *output);
 
+aco_ptr<Instruction> create_s_mov(Definition dst, Operand src);
+
 }
 #endif /* __cplusplus */
 #endif /* ACO_IR_H */
