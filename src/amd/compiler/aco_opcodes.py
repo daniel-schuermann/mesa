@@ -52,7 +52,6 @@ class Format(Enum):
    SOPP = 4
    SOPC = 5
    SMEM = 6
-   VINTRP = 7
    DS = 8
    MTBUF = 9
    MUBUF = 10
@@ -66,9 +65,10 @@ class Format(Enum):
    VOP1 = 1 << 8
    VOP2 = 1 << 9
    VOPC = 1 << 10
+   VOP3A = 1 << 11
    VOP3B = 1 << 11
    VOP3P = 1 << 12
-   VOP3A = 1 << 13
+   VINTRP = 1 << 13
    DPP = 1 << 14
    SDWA = 1 << 15
 
