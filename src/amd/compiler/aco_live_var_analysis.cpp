@@ -83,10 +83,17 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
             else
                n = live_vgprs.erase(definition.getTemp());
             if (reg_demand_cond) {
-               if (definition.getTemp().type() == vgpr)
-                  vgpr_demand -= definition.size() * n;
-               else
-                  sgpr_demand -= definition.size() * n;
+               if (n) {
+                  if (definition.getTemp().type() == vgpr)
+                     vgpr_demand -= definition.size();
+                  else
+                     sgpr_demand -= definition.size();
+               } else {
+                  if (definition.getTemp().type() == vgpr)
+                     register_demand[i].second += definition.size();
+                  else
+                     register_demand[i].first += definition.size();
+               }
             }
          }
       }
