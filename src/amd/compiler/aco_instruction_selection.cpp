@@ -3014,7 +3014,7 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr) {
    if (glsl_get_sampler_dim(type) == GLSL_SAMPLER_DIM_BUF) {
       Temp vindex = emit_extract_vector(ctx, get_ssa_temp(ctx, instr->src[1].ssa), 0, v1);
       Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, nullptr, true, true);
-      assert(ctx->options->chip_class < GFX9 && "GFX9 stride size workaround not yet implemented.");
+      //assert(ctx->options->chip_class < GFX9 && "GFX9 stride size workaround not yet implemented.");
       aco_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(buf_op, Format::MUBUF, 4, return_previous ? 1 : 0)};
       mubuf->getOperand(0) = Operand(vindex);
       mubuf->getOperand(1) = Operand(resource);
