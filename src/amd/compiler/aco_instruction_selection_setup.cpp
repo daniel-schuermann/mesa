@@ -227,7 +227,6 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_interpolated_input:
                   case nir_intrinsic_load_local_invocation_id:
                   case nir_intrinsic_load_local_invocation_index:
-                  case nir_intrinsic_load_shared:
                   case nir_intrinsic_ssbo_atomic_add:
                   case nir_intrinsic_ssbo_atomic_imin:
                   case nir_intrinsic_ssbo_atomic_umin:
@@ -267,6 +266,13 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_ubo:
                   case nir_intrinsic_load_ssbo:
                      type = ctx->divergent_vals[intrinsic->dest.ssa.index] ? vgpr : sgpr;
+                     break;
+                  /* due to copy propagation, the swizzled imov is removed if num dest components == 1 */
+                  case nir_intrinsic_load_shared:
+                     if (intrinsic->dest.ssa.num_components != 1 || ctx->divergent_vals[intrinsic->dest.ssa.index])
+                        type = vgpr;
+                     else
+                        type = sgpr;
                      break;
                   default:
                      for (unsigned i = 0; i < nir_intrinsic_infos[intrinsic->intrinsic].num_srcs; i++) {
