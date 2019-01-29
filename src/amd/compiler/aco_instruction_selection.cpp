@@ -706,11 +706,19 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_ineg: {
       if (dst.regClass() == v1) {
-         aco_ptr<VOP2_instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_mul_lo_u32, Format::VOP2, 2, 1)};
-         vop2->getOperand(0) = Operand((uint32_t) 0xFFFFFFFF);
-         vop2->getOperand(1) = Operand(get_alu_src(ctx, instr->src[0]));
-         vop2->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(vop2));
+         aco_ptr<VOP2_instruction> sub;
+         if (dst.regClass() == v1 && ctx->options->chip_class >= GFX9) {
+            sub.reset(create_instruction<VOP2_instruction>(aco_opcode::v_sub_u32, Format::VOP2, 2, 1));
+         } else {
+            sub.reset(create_instruction<VOP2_instruction>(aco_opcode::v_sub_co_u32, Format::VOP2, 2, 2));
+            Temp tmp = {ctx->program->allocateId(), s2};
+            sub->getDefinition(1) = Definition(tmp);
+            sub->getDefinition(1).setHint(vcc);
+         }
+         sub->getOperand(0) = Operand((uint32_t) 0);
+         sub->getOperand(1) = Operand(get_alu_src(ctx, instr->src[0]));
+         sub->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(sub));
       } else if (dst.regClass() == s1) {
          aco_ptr<SOPK_instruction> sopk{create_instruction<SOPK_instruction>(aco_opcode::s_mulk_i32, Format::SOPK, 1, 1)};
          sopk->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
