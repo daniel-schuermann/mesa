@@ -348,7 +348,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
       /* SALU / PSEUDO: propagate inline constants */
       if (instr->isSALU() || (instr->format == Format::PSEUDO && instr->opcode != aco_opcode::p_extract_vector)) {
-         if (info.is_temp()) {
+         if (info.is_temp() && info.temp.type() == sgpr) {
             instr->getOperand(i) = Operand(info.temp);
             info = ctx.info[info.temp.id()];
          }
@@ -361,8 +361,10 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       /* VALU: propagate neg, abs & inline constants */
       else if (instr->isVALU()) {
 
-         if (info.is_temp())
+         if (info.is_temp() && info.temp.type() == vgpr) {
+            instr->getOperand(i) = Operand(info.temp);
             info = ctx.info[info.temp.id()];
+         }
 
          if (info.is_neg() && can_use_VOP3(instr) && opcode_infos[(int)instr->opcode].can_use_input_modifiers) {
             to_VOP3(ctx, instr);
@@ -454,6 +456,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    case aco_opcode::s_mov_b32: /* propagate */
    case aco_opcode::s_mov_b64:
    case aco_opcode::v_mov_b32:
+   case aco_opcode::v_readfirstlane_b32:
       if (instr->getOperand(0).isConstant()) {
          if (instr->getOperand(0).isLiteral())
             ctx.info[instr->getDefinition(0).tempId()].set_literal(instr->getOperand(0).constantValue());
