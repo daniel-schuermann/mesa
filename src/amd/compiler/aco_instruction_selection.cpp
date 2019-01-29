@@ -2869,15 +2869,27 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, nullptr, true, true);
    //aco_image_dim img_dim = get_image_dim(ctx, glsl_get_sampler_dim(type), glsl_sampler_type_is_array(type));
 
+   unsigned dmask = nir_ssa_def_components_read(&instr->dest.ssa);
+   unsigned num_components = util_bitcount(dmask);
+   Temp tmp;
+   if (num_components == instr->dest.ssa.num_components)
+      tmp = dst;
+   else
+      tmp = {ctx->program->allocateId(), getRegClass(RegType::vgpr, num_components)};
+
    aco_ptr<MIMG_instruction> load{create_instruction<MIMG_instruction>(aco_opcode::image_load, Format::MIMG, 2, 1)};
    load->getOperand(0) = Operand(coords);
    load->getOperand(1) = Operand(resource);
-   load->getDefinition(0) = Definition(dst);
+   load->getDefinition(0) = Definition(tmp);
    load->glc = var->data.image.access & (ACCESS_VOLATILE | ACCESS_COHERENT) ? 1 : 0;
-   load->dmask = 0xF;
+   load->dmask = dmask;
    load->unrm = true;
    ctx->block->instructions.emplace_back(std::move(load));
-   emit_split_vector(ctx, dst, 4);
+
+   emit_split_vector(ctx, tmp, num_components);
+   if (num_components != instr->dest.ssa.num_components)
+      expand_vector(ctx, tmp, dst, instr->dest.ssa.num_components, dmask);
+
    return;
 }
 
