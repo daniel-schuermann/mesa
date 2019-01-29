@@ -3413,9 +3413,26 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    ds->getOperand(0) = Operand(address);
    ds->getOperand(1) = Operand(m);
    ds->getOperand(1).setFixed(m0);
-   ds->getDefinition(0) = Definition(dst);
+   Temp tmp = Temp();
+   if (dst.type() == vgpr) {
+      ds->getDefinition(0) = Definition(dst);
+   } else {
+      tmp = {ctx->program->allocateId(), v1};
+      ds->getDefinition(0) = Definition(tmp);
+   }
    ds->offset0 = offset;
    ctx->block->instructions.emplace_back(std::move(ds));
+
+   if (dst.type() == vgpr) {
+      emit_split_vector(ctx, dst, instr->num_components);
+   } else {
+      assert(dst.size() == 1);
+      aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+      readlane->getOperand(0) = Operand(tmp);
+      readlane->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(readlane));
+   }
+
    return;
 }
 
