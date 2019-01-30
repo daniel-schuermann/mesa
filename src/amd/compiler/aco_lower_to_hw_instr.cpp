@@ -311,9 +311,16 @@ void lower_to_hw_instr(Program* program)
             /* check if all blocks from current to target are empty */
             bool can_remove = block->index < branch->targets[0]->index;
             for (unsigned i = block->index + 1; i < branch->targets[0]->index; i++) {
-               if (!program->blocks[i]->instructions.empty()) {
+               if (program->blocks[i]->instructions.size() > 2) {
                   can_remove = false;
                   break;
+               }
+               for (aco_ptr<Instruction>& instr : program->blocks[i]->instructions) {
+                  if (instr->opcode != aco_opcode::p_logical_start &&
+                      instr->opcode != aco_opcode::p_logical_end) {
+                     can_remove = false;
+                     break;
+                  }
                }
             }
             if (can_remove)
