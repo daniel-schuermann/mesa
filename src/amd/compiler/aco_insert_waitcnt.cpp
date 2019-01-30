@@ -485,9 +485,9 @@ Instruction* kill(Instruction* instr, wait_ctx& ctx)
       if (instr->format == Format::PSEUDO_BARRIER) {
          imm &= emit_memory_barrier(instr, ctx);
       } else {
+         imm &= uses_gpr(instr, ctx);
          imm &= writes_vgpr(instr, ctx);
          imm &= writes_sgpr(instr, ctx);
-         imm &= uses_gpr(instr, ctx);
       }
    }
    if (imm != 0xFFFF)
@@ -574,8 +574,14 @@ bool gen(Instruction* instr, wait_ctx& ctx)
             ctx.vgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
             wait_entry(vm_type, 0, max_exp_cnt, max_lgkm_cnt));
          }
-         return true;
+      } else if (instr->num_operands == 4) {
+         for (unsigned i = 0; i < instr->getOperand(3).size(); i++)
+         {
+            ctx.vgpr_map.emplace(instr->getOperand(3).physReg().reg + i,
+            wait_entry(vm_type, 0, max_exp_cnt, max_lgkm_cnt));
+         }
       }
+      return true;
    }
    default:
       return false;
@@ -593,7 +599,7 @@ bool handle_block(Block* block, wait_ctx& ctx)
       if ((wait_instr = kill(instr.get(), ctx)))
          new_instructions.emplace_back(aco_ptr<Instruction>(wait_instr));
 
-      has_gen = gen(instr.get(), ctx) || has_gen;
+      has_gen = gen(instr.get(), ctx) | has_gen;
       new_instructions.emplace_back(std::move(instr));
    }
 
