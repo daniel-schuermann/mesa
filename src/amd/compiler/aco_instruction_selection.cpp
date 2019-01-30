@@ -129,7 +129,7 @@ Temp emit_v_add32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_
    add->getOperand(0) = Operand(a);
    add->getOperand(1) = Operand(b);
    add->getDefinition(0) = Definition(dst);
-   if (ctx->options->chip_class < GFX9) {
+   if (carry_out) {
       carry = {ctx->program->allocateId(), s2};
       add->getDefinition(1) = Definition(carry);
       add->getDefinition(1).setHint(vcc);
