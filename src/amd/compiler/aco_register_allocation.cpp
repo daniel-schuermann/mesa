@@ -590,14 +590,11 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                if (instr->opcode == aco_opcode::v_interp_p2_f32 ||
                    instr->opcode == aco_opcode::v_mac_f32)
                   definition.setFixed(instr->getOperand(2).physReg());
-               else if (instr->format == Format::MUBUF &&
+               else if ((instr->format == Format::MUBUF ||
+                         instr->format == Format::MIMG) &&
                         instr->num_definitions == 1 &&
                         instr->num_operands == 4)
                   definition.setFixed(instr->getOperand(3).physReg());
-               else if (instr->format == Format::MIMG &&
-                        instr->num_definitions == 3 &&
-                        instr->num_operands == 1)
-                  definition.setFixed(instr->getOperand(2).physReg());
                else if (instr->opcode == aco_opcode::p_split_vector &&
                         register_file[instr->getOperand(0).physReg().reg + i] == 0)
                   definition.setFixed(PhysReg{instr->getOperand(0).physReg().reg + i});
