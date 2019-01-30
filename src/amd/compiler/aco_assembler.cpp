@@ -168,12 +168,12 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       encoding = (0xFF & instr->getOperand(0).physReg().reg); /* VADDR */
       if (instr->num_definitions) {
          encoding |= (0xFF & instr->getDefinition(0).physReg().reg) << 8; /* VDATA */
-         encoding |= instr->num_operands > 2 ? (0x1F & (instr->getOperand(2).physReg().reg >> 2)) << 21 : 0; /* sampler */
-      } else {
-         encoding |= (0xFF & instr->getOperand(2).physReg().reg) << 8; /* VDATA */
-         encoding |= instr->num_operands > 3 ? (0x1F & (instr->getOperand(3).physReg().reg >> 2)) << 21 : 0; /* sampler */
+      } else if (instr->num_operands == 4) {
+         encoding |= (0xFF & instr->getOperand(3).physReg().reg) << 8; /* VDATA */
       }
       encoding |= (0x1F & (instr->getOperand(1).physReg().reg >> 2)) << 16; /* T# (resource) */
+      if (instr->num_operands > 2)
+         encoding |= (0x1F & (instr->getOperand(2).physReg().reg >> 2)) << 21; /* sampler */
       // TODO VEGA: D16
       out.push_back(encoding);
       break;
