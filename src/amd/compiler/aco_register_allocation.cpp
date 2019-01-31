@@ -509,7 +509,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      Definition pc_def = Definition(tmp);
                      pc_def.setFixed(operand.physReg());
                      pc_op.setFixed(assignments[operand.tempId()].first);
-                     operand = Operand(tmp);
+                     operand.setTemp(tmp);
                      assignments[tmp.id()] = {pc_def.physReg(), pc_def.regClass()};
                      operand.setFixed(pc_def.physReg());
                      for (unsigned i = 0; i < operand.size(); i++) {
