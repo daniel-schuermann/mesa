@@ -236,7 +236,7 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
          non_undef += 1;
    }
 
-   if (non_undef <= 1) {
+   if (non_undef <= 1 && exec_list_length(&instr->srcs) > 1) {
       assert(divergent[instr->dest.ssa.index] == false);
       return false;
    }
