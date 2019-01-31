@@ -4446,8 +4446,7 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
       phi_src[src->pred->index] = src->src.ssa;
 
    /* if we have a linear phi on a divergent if, we know that one src is undef */
-   if (opcode == aco_opcode::p_linear_phi && ctx->block->logical_predecessors[0] != ctx->block->linear_predecessors[0]) {
-      assert(num_src == 2);
+   if (num_src == 2 && opcode == aco_opcode::p_linear_phi && ctx->block->logical_predecessors[0] != ctx->block->linear_predecessors[0]) {
       Block* block;
       /* we place the phi either in the between-block or in the current block */
       if (phi_src.begin()->second->parent_instr->type != nir_instr_type_ssa_undef) {
