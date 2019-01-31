@@ -72,6 +72,9 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<ac
          if (it->second.def.physReg().reg == 253) {
             mov.reset(create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_i32, Format::SOPC, 2, 1));
             mov->getOperand(1) = Operand((uint32_t) 0);
+            mov->getOperand(0) = it->second.op;
+            mov->getDefinition(0) = it->second.def;
+            new_instructions.emplace_back(std::move(mov));
          } else if (it->second.def.getTemp().type() == RegType::sgpr) {
             new_instructions.emplace_back(std::move(create_s_mov(it->second.def, it->second.op)));
          } else {
