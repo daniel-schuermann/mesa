@@ -211,9 +211,9 @@ nir_to_lcssa(nir_shader *shader) {
       if (function->impl == NULL) 
          continue;
 
-      nir_foreach_block(block, function->impl) {
-         if (block->cf_node.type == nir_cf_node_loop)
-            nir_convert_loop_to_lcssa(nir_cf_node_as_loop(&block->cf_node));
+      foreach_list_typed(nir_cf_node, node, node, &function->impl->body) {
+         if (node->type == nir_cf_node_loop)
+            nir_convert_loop_to_lcssa(nir_cf_node_as_loop(node));
       }
    }
 }
