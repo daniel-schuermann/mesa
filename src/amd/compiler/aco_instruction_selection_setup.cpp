@@ -334,20 +334,24 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
             }
             case nir_instr_type_phi: {
                nir_phi_instr* phi = nir_instr_as_phi(instr);
-               unsigned size = phi->dest.ssa.num_components;
-               if (phi->dest.ssa.bit_size == 64)
-                  size *= 2;
                RegType type;
                if (ctx->divergent_vals[phi->dest.ssa.index]) {
                   type = vgpr;
                } else {
                   type = sgpr;
                   nir_foreach_phi_src (src, phi) {
-                     if (reg_class[src->src.ssa->index] == getRegClass(vgpr, size))
+                     if (typeOf(reg_class[src->src.ssa->index]) == RegType::vgpr)
                         type = vgpr;
-                     else if (reg_class[src->src.ssa->index] != getRegClass(sgpr, size))
+                     else if (typeOf(reg_class[src->src.ssa->index]) != RegType::sgpr)
                         done = false;
                   }
+               }
+
+               int size = -1;
+               nir_foreach_phi_src(src, phi) {
+                  int src_size = sizeOf(reg_class[src->src.ssa->index]);
+                  assert(size == -1 || src_size == size);
+                  size = src_size;
                }
 
                reg_class[phi->dest.ssa.index] = getRegClass(type, size);
