@@ -2937,14 +2937,26 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    return;
 }
 
-void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr) {
+void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   /* return the previous value if dest is ever used */
+   bool return_previous = false;
+   nir_foreach_use_safe(use_src, &instr->dest.ssa) {
+      return_previous = true;
+      break;
+   }
+   nir_foreach_if_use_safe(use_src, &instr->dest.ssa) {
+      return_previous = true;
+      break;
+   }
 
    const nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
    const struct glsl_type *type = glsl_without_array(var->type);
    bool is_unsigned = glsl_get_sampler_result_type(type) == GLSL_TYPE_UINT;
 
-   Temp data = get_ssa_temp(ctx, instr->src[3].ssa);
+   Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[3].ssa));
    assert(data.size() == 1 && "64bit ssbo atomics not yet implemented.");
+
    if (instr->intrinsic == nir_intrinsic_image_deref_atomic_comp_swap) {
       aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
       vec->getOperand(0) = Operand(data);
@@ -2952,8 +2964,13 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr) {
       data = {ctx->program->allocateId(), v2};
       vec->getDefinition(0) = Definition(data);
       ctx->block->instructions.emplace_back(std::move(vec));
-   } else {
-      data = as_vgpr(ctx, data);
+
+   } else if (return_previous) {
+      aco_ptr<Instruction> copy{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, 1, 1)};
+      copy->getOperand(0) = Operand(data);
+      data = {ctx->program->allocateId(), getRegClass(vgpr, data.size())};
+      copy->getDefinition(0) = Definition(data);
+      ctx->block->instructions.emplace_back(std::move(copy));
    }
 
    aco_opcode buf_op, image_op;
@@ -2995,17 +3012,6 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr) {
    }
 
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-   /* return the previous value if dest is ever used */
-   bool return_previous = false;
-   nir_foreach_use_safe(use_src, &instr->dest.ssa) {
-      return_previous = true;
-      break;
-   }
-   nir_foreach_if_use_safe(use_src, &instr->dest.ssa) {
-      return_previous = true;
-      break;
-   }
-
    Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, nullptr, true, true);
 
    if (glsl_get_sampler_dim(type) == GLSL_SAMPLER_DIM_BUF) {
@@ -3257,10 +3263,22 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    }
 }
 
-void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr) {
+void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   /* return the previous value if dest is ever used */
+   bool return_previous = false;
+   nir_foreach_use_safe(use_src, &instr->dest.ssa) {
+      return_previous = true;
+      break;
+   }
+   nir_foreach_if_use_safe(use_src, &instr->dest.ssa) {
+      return_previous = true;
+      break;
+   }
 
-   Temp data = get_ssa_temp(ctx, instr->src[2].ssa);
+   Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[2].ssa));
    assert(data.size() == 1 && "64bit ssbo atomics not yet implemented.");
+
    if (instr->intrinsic == nir_intrinsic_ssbo_atomic_comp_swap) {
       aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
       vec->getOperand(0) = Operand(data);
@@ -3268,8 +3286,13 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr) {
       data = {ctx->program->allocateId(), v2};
       vec->getDefinition(0) = Definition(data);
       ctx->block->instructions.emplace_back(std::move(vec));
-   } else {
-      data = as_vgpr(ctx, data);
+
+   } else if (return_previous) {
+      aco_ptr<Instruction> copy{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, 1, 1)};
+      copy->getOperand(0) = Operand(data);
+      data = {ctx->program->allocateId(), getRegClass(vgpr, data.size())};
+      copy->getDefinition(0) = Definition(data);
+      ctx->block->instructions.emplace_back(std::move(copy));
    }
 
    Temp offset;
@@ -3287,16 +3310,6 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr) {
    ctx->block->instructions.emplace_back(std::move(load));
 
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-   /* return the previous value if dest is ever used */
-   bool return_previous = false;
-   nir_foreach_use_safe(use_src, &instr->dest.ssa) {
-      return_previous = true;
-      break;
-   }
-   nir_foreach_if_use_safe(use_src, &instr->dest.ssa) {
-      return_previous = true;
-      break;
-   }
 
    aco_opcode op;
    switch (instr->intrinsic) {
