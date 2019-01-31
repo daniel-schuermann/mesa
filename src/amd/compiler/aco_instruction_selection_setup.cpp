@@ -945,6 +945,8 @@ setup_isel_context(Program* program, nir_shader *nir,
    nir_opt_algebraic(nir);
    nir_opt_constant_folding(nir);
    nir_lower_load_const_to_scalar(nir);
+   nir_to_lcssa(nir);
+   nir_lower_phis_to_scalar(nir);
    nir_opt_dce(nir);
    nir_opt_sink(nir);
    nir_opt_move_load_ubo(nir);
