@@ -4439,7 +4439,7 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
    aco_ptr<Instruction> phi;
    unsigned num_src = exec_list_length(&instr->srcs);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-   aco_opcode opcode = dst.is_linear() ? aco_opcode::p_linear_phi : aco_opcode::p_phi;
+   aco_opcode opcode = ctx->divergent_vals[instr->dest.ssa.index] ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
    phi.reset(create_instruction<Instruction>(opcode, Format::PSEUDO, num_src, 1));
    std::map<unsigned, nir_ssa_def*> phi_src;
    nir_foreach_phi_src(src, instr)
