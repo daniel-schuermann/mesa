@@ -73,18 +73,27 @@ struct spill_ctx {
    uint32_t next_spill_id = 0;
 };
 
-int32_t get_dominator(int idx_a, int idx_b, Program* program)
+int32_t get_dominator(int idx_a, int idx_b, Program* program, bool is_linear)
 {
 
    if (idx_a == -1)
       return idx_b;
    if (idx_b == -1)
       return idx_a;
-   while (idx_a != idx_b) {
-      if (idx_a > idx_b)
-         idx_a = program->blocks[idx_a]->logical_idom;
-      else
-         idx_b = program->blocks[idx_b]->logical_idom;
+   if (is_linear) {
+      while (idx_a != idx_b) {
+         if (idx_a > idx_b)
+            idx_a = program->blocks[idx_a]->linear_idom;
+         else
+            idx_b = program->blocks[idx_b]->linear_idom;
+      }
+   } else {
+      while (idx_a != idx_b) {
+         if (idx_a > idx_b)
+            idx_a = program->blocks[idx_a]->logical_idom;
+         else
+            idx_b = program->blocks[idx_b]->logical_idom;
+      }
    }
    assert(idx_a != -1);
    return idx_a;
@@ -98,7 +107,6 @@ void next_uses_per_block(spill_ctx& ctx, unsigned block_idx, std::set<uint32_t>&
    /* to compute the next use distance at the beginning of the block, we have to add the block's size */
    for (std::map<Temp, std::pair<uint32_t, uint32_t>>::iterator it = next_uses.begin(); it != next_uses.end(); ++it)
       it->second.second = it->second.second + block->instructions.size();
-
 
    int idx = block->instructions.size() - 1;
    while (idx >= 0) {
@@ -146,12 +154,12 @@ void next_uses_per_block(spill_ctx& ctx, unsigned block_idx, std::set<uint32_t>&
       Temp temp = pair.first;
       uint32_t distance = pair.second.second;
       uint32_t dom = pair.second.first;
-      std::vector<Block*>& preds = temp.type() == vgpr ? block->logical_predecessors : block->linear_predecessors;
+      std::vector<Block*>& preds = temp.is_linear() ? block->linear_predecessors : block->logical_predecessors;
       for (Block* pred : preds) {
          if (pred->loop_nest_depth > block->loop_nest_depth)
             distance += 0xFFFF;
          if (ctx.next_use_distances_end[pred->index].find(temp) != ctx.next_use_distances_end[pred->index].end()) {
-            dom = get_dominator(dom, ctx.next_use_distances_end[pred->index][temp].first, ctx.program);
+            dom = get_dominator(dom, ctx.next_use_distances_end[pred->index][temp].first, ctx.program, temp.is_linear());
             distance = std::min(ctx.next_use_distances_end[pred->index][temp].second, distance);
          }
          if (ctx.next_use_distances_end[pred->index][temp] != std::pair<uint32_t, uint32_t>{dom, distance})
@@ -813,34 +821,45 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
 
       /* check if we have to create a new phi for this variable */
       Temp rename = Temp();
+      bool is_same = true;
       for (Block* pred : preds) {
-         if (ctx.renames[pred->index].find(pair.first) != ctx.renames[pred->index].end()) {
+         if (ctx.renames[pred->index].find(pair.first) == ctx.renames[pred->index].end()) {
+            if (rename == Temp())
+               rename = pair.first;
+            else
+               is_same = rename == pair.first;
+         } else {
             if (rename == Temp())
                rename = ctx.renames[pred->index][pair.first];
-            if (rename == ctx.renames[pred->index][pair.first])
-               continue;
-
-            /* the variable was renamed differently in the predecessors: we have to create a phi */
-            aco_opcode opcode = pair.first.type() == vgpr ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
-            aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
-            rename = {ctx.program->allocateId(), pair.first.regClass()};
-            for (unsigned i = 0; i < phi->num_operands; i++) {
-               Temp tmp;
-               if (ctx.renames[preds[i]->index].find(pair.first) != ctx.renames[preds[i]->index].end())
-                  tmp = ctx.renames[preds[i]->index][pair.first];
-               else if (preds[i]->index >= block_idx)
-                  tmp = rename;
-               else
-                  tmp = pair.first;
-               phi->getOperand(i) = Operand(tmp);
-            }
-            phi->getDefinition(0) = Definition(rename);
-            instructions.emplace_back(std::move(phi));
-            break;
+            else
+               is_same = rename == ctx.renames[pred->index][pair.first];
          }
+
+         if (!is_same)
+            break;
       }
+
+      if (!is_same) {
+         /* the variable was renamed differently in the predecessors: we have to create a phi */
+         aco_opcode opcode = pair.first.type() == vgpr ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
+         aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
+         rename = {ctx.program->allocateId(), pair.first.regClass()};
+         for (unsigned i = 0; i < phi->num_operands; i++) {
+            Temp tmp;
+            if (ctx.renames[preds[i]->index].find(pair.first) != ctx.renames[preds[i]->index].end())
+               tmp = ctx.renames[preds[i]->index][pair.first];
+            else if (preds[i]->index >= block_idx)
+               tmp = rename;
+            else
+               tmp = pair.first;
+            phi->getOperand(i) = Operand(tmp);
+         }
+         phi->getDefinition(0) = Definition(rename);
+         instructions.emplace_back(std::move(phi));
+      }
+
       /* the variable was renamed: add new name to renames */
-      if (!(rename == Temp()))
+      if (!(rename == Temp() || rename == pair.first))
          ctx.renames[block_idx][pair.first] = rename;
    }
 
