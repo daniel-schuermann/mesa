@@ -37,6 +37,34 @@
 
 
 static bool
+never_divergent(nir_ssa_def *def) {
+   nir_instr *instr = def->parent_instr;
+   switch (instr->type) {
+   case nir_instr_type_intrinsic: {
+      nir_intrinsic_instr *intrinsic = nir_instr_as_intrinsic(instr);
+      switch (intrinsic->intrinsic) {
+      case nir_intrinsic_vulkan_resource_index:
+      case nir_intrinsic_load_work_group_id:
+      case nir_intrinsic_load_num_work_groups:
+      case nir_intrinsic_get_buffer_size: {
+         return true;
+      }
+      default: {
+         break;
+      }
+      }
+   }
+   case nir_instr_type_load_const:
+   case nir_instr_type_ssa_undef:
+      return true;
+   default: {
+      break;
+   }
+   }
+   return false;
+}
+
+static bool
 alu_src_is_divergent(bool *divergent, nir_alu_src src, unsigned num_input_components)
 {
    /* If the alu src is swizzled and defined by a vec-instruction,
@@ -223,6 +251,8 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
    if (divergent[instr->dest.ssa.index])
       return false;
 
+   bool lcssa = exec_list_length(&instr->srcs) == 1;
+
    unsigned non_undef = 0;
    nir_foreach_phi_src(src, instr) {
       /* if any source value is divergent, the resulting value is divergent */
@@ -236,7 +266,7 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
          non_undef += 1;
    }
 
-   if (non_undef <= 1 && exec_list_length(&instr->srcs) > 1) {
+   if (non_undef <= 1 && !lcssa) {
       assert(divergent[instr->dest.ssa.index] == false);
       return false;
    }
@@ -294,6 +324,9 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
       /* eta: check if any loop exit condition is divergent */
       assert(prev->type == nir_cf_node_loop);
       nir_foreach_phi_src(src, instr) {
+         if (lcssa && never_divergent(src->src.ssa))
+            break;
+
          nir_cf_node *current = src->pred->cf_node.parent;
          assert(current->type == nir_cf_node_if);
 
