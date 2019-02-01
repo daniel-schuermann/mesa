@@ -140,9 +140,11 @@ void validate(Program* program, FILE * output)
                      "Cannot extract SGPR value from VGPR vector", instr.get());
             } else if (instr->opcode == aco_opcode::p_parallelcopy) {
                check(instr->num_definitions == instr->num_operands, "Number of Operands does not match number of Definitions", instr.get());
-               for (unsigned i = 0; i < instr->num_operands; i++)
-                  check(instr->getDefinition(i).getTemp().type() == instr->getOperand(i).getTemp().type(),
-                        "Operand and Definition types do not match", instr.get());
+               for (unsigned i = 0; i < instr->num_operands; i++) {
+                  if (instr->getOperand(i).isTemp())
+                     check(instr->getDefinition(i).getTemp().type() == instr->getOperand(i).getTemp().type(),
+                           "Operand and Definition types do not match", instr.get());
+               }
             } else if (instr->opcode == aco_opcode::p_phi) {
                check(instr->num_operands == block->logical_predecessors.size(), "Number of Operands does not match number of predecessors", instr.get());
                check(instr->getDefinition(0).getTemp().type() == vgpr, "Logical Phi Definition must be vgpr", instr.get());
