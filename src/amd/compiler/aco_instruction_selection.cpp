@@ -970,6 +970,63 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_uadd_sat: {
+      Temp src0 = get_alu_src(ctx, instr->src[0]);
+      Temp src1 = get_alu_src(ctx, instr->src[1]);
+      if (dst.regClass() == s1) {
+         aco_ptr<SOP2_instruction> add{create_instruction<SOP2_instruction>(aco_opcode::s_add_u32, Format::SOP2, 2, 2)};
+         add->getOperand(0) = Operand(src0);
+         add->getOperand(1) = Operand(src1);
+         Temp tmp = {ctx->program->allocateId(), s1};
+         add->getDefinition(0) = Definition(tmp);
+         Temp carry = {ctx->program->allocateId(), b};
+         add->getDefinition(1) = Definition(carry);
+         add->getDefinition(1).setFixed(PhysReg{253}); /* scc */
+         ctx->block->instructions.emplace_back(std::move(add));
+
+         aco_ptr<SOP2_instruction> clamp{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
+         clamp->getOperand(0) = Operand((uint32_t) 0xffffffff);
+         clamp->getOperand(1) = Operand(tmp);
+         clamp->getOperand(2) = Operand(carry);
+         clamp->getOperand(2).setFixed({253}); /* scc */
+         clamp->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(clamp));
+      } else if (dst.regClass() == v1) {
+         if (ctx->options->chip_class >= GFX9) {
+            aco_ptr<VOP3A_instruction> add{create_instruction<VOP3A_instruction>(aco_opcode::v_add_u32, static_cast<Format>((int)Format::VOP2 | (int)Format::VOP3A), 2, 1)};
+            add->getOperand(0) = Operand(src0);
+            add->getOperand(1) = Operand(src1);
+            add->getDefinition(0) = Definition(dst);
+            add->clamp = 1;
+            ctx->block->instructions.emplace_back(std::move(add));
+         } else {
+            if (src1.regClass() != v1)
+               std::swap(src0, src1);
+            assert(src1.regClass() == v1);
+            aco_ptr<VOP2_instruction> add{create_instruction<VOP2_instruction>(aco_opcode::v_add_co_u32, Format::VOP2, 2, 2)};
+            add->getOperand(0) = Operand(src0);
+            add->getOperand(1) = Operand(src1);
+            Temp tmp = {ctx->program->allocateId(), v1};
+            add->getDefinition(0) = Definition(tmp);
+            Temp carry = {ctx->program->allocateId(), s2};
+            add->getDefinition(1) = Definition(carry);
+            add->getDefinition(1).setHint(vcc);
+            ctx->block->instructions.emplace_back(std::move(add));
+
+            aco_ptr<VOP3A_instruction> clamp{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, static_cast<Format>((int)Format::VOP2 | (int)Format::VOP3A), 3, 1)};
+            clamp->getOperand(0) = Operand(tmp);
+            clamp->getOperand(1) = Operand((uint32_t) 0xffffffff);
+            clamp->getOperand(2) = Operand(carry);
+            clamp->getDefinition(0) = Definition(dst);
+            ctx->block->instructions.emplace_back(std::move(clamp));
+         }
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_isub: {
       if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_sub_i32, dst, true);
