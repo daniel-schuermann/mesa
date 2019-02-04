@@ -258,7 +258,7 @@ void lower_to_hw_instr(Program* program)
                sop2->getOperand(0) = Operand(exec, s2);
                sop2->getOperand(1) = instr->getOperand(0);
                sop2->getDefinition(0) = Definition(exec, s2);
-               sop2->getDefinition(1) = Definition(PhysReg{253}, b);
+               sop2->getDefinition(1) = Definition(program->allocateId(), PhysReg{253}, b);
                new_instructions.emplace_back(std::move(sop2));
 
                aco_ptr<SOPP_instruction> branch{create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc1, Format::SOPP, 1, 0)};
