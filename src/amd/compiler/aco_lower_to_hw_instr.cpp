@@ -69,7 +69,7 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<ac
    while (it != copy_map.end()) {
       if (it->second.uses == 0) {
          /* the target reg is not used as operand for any other copy */
-         if (it->second.def.physReg().reg == 253) {
+         if (it->second.def.physReg().reg == scc.reg) {
             mov.reset(create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_i32, Format::SOPC, 2, 1));
             mov->getOperand(1) = Operand((uint32_t) 0);
             mov->getOperand(0) = it->second.op;
@@ -258,7 +258,7 @@ void lower_to_hw_instr(Program* program)
                sop2->getOperand(0) = Operand(exec, s2);
                sop2->getOperand(1) = instr->getOperand(0);
                sop2->getDefinition(0) = Definition(exec, s2);
-               sop2->getDefinition(1) = Definition(program->allocateId(), PhysReg{253}, b);
+               sop2->getDefinition(1) = Definition(program->allocateId(), scc, b);
                new_instructions.emplace_back(std::move(sop2));
 
                aco_ptr<SOPP_instruction> branch{create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc1, Format::SOPP, 1, 0)};
@@ -341,7 +341,7 @@ void lower_to_hw_instr(Program* program)
                   else if (branch->getOperand(0).physReg() == vcc)
                      sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_vccnz, Format::SOPP, 0, 0));
                   else {
-                     assert(branch->getOperand(0).physReg() == PhysReg{253});
+                     assert(branch->getOperand(0).physReg() == scc);
                      sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc1, Format::SOPP, 0, 0));
                   }
                   break;
@@ -351,7 +351,7 @@ void lower_to_hw_instr(Program* program)
                   else if (branch->getOperand(0).physReg() == vcc)
                      sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_vccz, Format::SOPP, 0, 0));
                   else {
-                     assert(branch->getOperand(0).physReg() == PhysReg{253});
+                     assert(branch->getOperand(0).physReg() == scc);
                      sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc0, Format::SOPP, 0, 0));
                   }
                   break;

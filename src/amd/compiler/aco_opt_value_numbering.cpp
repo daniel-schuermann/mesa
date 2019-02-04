@@ -231,7 +231,7 @@ void process_block(std::unique_ptr<Block>& block,
          }
       } else if (instr->isSALU() &&
                  instr->getDefinition(instr->num_definitions - 1).isFixed() &&
-                 instr->getDefinition(instr->num_definitions - 1).physReg().reg == 253) { /* scc */
+                 instr->getDefinition(instr->num_definitions - 1).physReg().reg == scc.reg) {
          /* if the current instructions overwrites scc, we remove the previous scc instruction from the map */
          if (last_sopc)
             expr_values.erase(last_sopc);
