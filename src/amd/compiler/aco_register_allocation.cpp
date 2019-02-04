@@ -537,8 +537,6 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          /* handle definitions */
          for (unsigned i = 0; i < instr->num_definitions; ++i) {
             auto& definition = instr->getDefinition(i);
-            if (!definition.isTemp())
-               continue;
             if (definition.isFixed()) {
                /* check if target dst is blocked */
                if (register_file[definition.physReg().reg] != 0) {
@@ -585,7 +583,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      register_file[pc_def.physReg().reg + i] = pc_def.tempId();
                   }
                }
-            } else {
+            } else if (definition.isTemp()) {
                /* find free reg */
                if (instr->opcode == aco_opcode::v_interp_p2_f32 ||
                    instr->opcode == aco_opcode::v_mac_f32)
@@ -613,6 +611,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      definition.setFixed(reg);
                } else
                   definition.setFixed(get_reg(register_file, definition.regClass(), parallelcopy, instr));
+            } else {
+               continue;
             }
 
             assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
