@@ -135,7 +135,7 @@ enum class Format : std::uint16_t {
 };
 
 enum RegType {
-   scc,
+   scc_bit,
    sgpr,
    vgpr,
    linear_vgpr,
@@ -143,7 +143,7 @@ enum RegType {
 
 static inline RegType typeOf(RegClass rc)
 {
-   if (rc == RegClass::b) return RegType::scc;
+   if (rc == RegClass::b) return RegType::scc_bit;
    if (rc <= RegClass::s16) return RegType::sgpr;
    else return RegType::vgpr;
 }
@@ -157,7 +157,7 @@ static inline unsigned sizeOf(RegClass rc)
 
 static inline RegClass getRegClass(RegType type, unsigned size)
 {
-   return type == scc ? b : (RegClass) ((type == vgpr ? 1 << 5 : 0) | size);
+   return type == scc_bit ? b : (RegClass) ((type == vgpr ? 1 << 5 : 0) | size);
 }
 
 /**
@@ -238,6 +238,7 @@ static inline PhysReg fixed_sgpr(unsigned idx)
 static constexpr PhysReg m0{124};
 static constexpr PhysReg vcc{106};
 static constexpr PhysReg exec{126};
+static constexpr PhysReg scc{253};
 
 /**
  * Operand Class
