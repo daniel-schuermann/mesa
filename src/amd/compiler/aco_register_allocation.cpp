@@ -544,7 +544,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   Temp tmp = {register_file[definition.physReg().reg], assignments[register_file[definition.physReg().reg]].second};
                   Operand pc_op = Operand(tmp);
                   pc_op.setFixed(assignments[register_file[definition.physReg().reg]].first);
-                  RegClass rc = definition.physReg() == PhysReg{253} ? RegClass::s1 : pc_op.regClass();
+                  RegClass rc = definition.physReg() == scc ? RegClass::s1 : pc_op.regClass();
                   tmp = Temp{program->allocateId(), rc};
                   Definition pc_def = Definition(tmp);
 
