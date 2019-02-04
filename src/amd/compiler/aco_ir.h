@@ -435,6 +435,11 @@ public:
    {
       setFixed(reg);
    }
+   Definition(uint32_t tmpId, PhysReg reg, RegClass type) noexcept
+      : temp(Temp(tmpId, type))
+   {
+      setFixed(reg);
+   }
 
    bool isTemp() const noexcept
    {
