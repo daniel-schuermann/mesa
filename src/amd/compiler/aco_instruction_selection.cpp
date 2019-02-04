@@ -972,7 +972,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_isub: {
       if (dst.regClass() == s1) {
-         emit_sop2_instruction(ctx, instr, aco_opcode::s_sub_i32, dst, false);
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_sub_i32, dst, true);
          break;
       }
       Temp src0 = get_alu_src(ctx, instr->src[0]);
