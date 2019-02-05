@@ -258,7 +258,7 @@ ir3_optimize_nir(struct ir3_shader *shader, nir_shader *s,
 	 * NOTE that UBO analysis pass should only be done once, before variants
 	 */
 	const bool ubo_progress = !key && OPT(s, ir3_nir_analyze_ubo_ranges, shader);
-	const bool idiv_progress = OPT(s, nir_lower_idiv);
+	const bool idiv_progress = OPT(s, nir_lower_idiv, false);
 	if (ubo_progress || idiv_progress)
 		ir3_optimize_loop(s);
 
