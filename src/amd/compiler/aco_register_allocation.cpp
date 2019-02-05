@@ -426,7 +426,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                }
             }
             for (unsigned i = 0; i < instr->num_operands; i++) {
-               if (instr->getOperand(i).isTemp() && i != op_idx)
+               if (instr->getOperand(i).isTemp() && i != op_idx &&
+                   instr->getOperand(i).regClass() == instr->getDefinition(0).regClass())
                   affinities.emplace(instr->getOperand(i).tempId(), preferred);
             }
             if (op_idx < instr->num_operands)
@@ -588,6 +589,9 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                if (instr->opcode == aco_opcode::v_interp_p2_f32 ||
                    instr->opcode == aco_opcode::v_mac_f32)
                   definition.setFixed(instr->getOperand(2).physReg());
+               else if (instr->opcode == aco_opcode::s_addk_i32 ||
+                        instr->opcode == aco_opcode::s_mulk_i32)
+                  definition.setFixed(instr->getOperand(0).physReg());
                else if ((instr->format == Format::MUBUF ||
                          instr->format == Format::MIMG) &&
                         instr->num_definitions == 1 &&
@@ -611,6 +615,9 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      definition.setFixed(reg);
                } else
                   definition.setFixed(get_reg(register_file, definition.regClass(), parallelcopy, instr));
+
+               assert(definition.isFixed() && ((definition.getTemp().type() == vgpr && definition.physReg().reg >= 256) ||
+                                               (definition.getTemp().type() != vgpr && definition.physReg().reg < 256)));
             } else {
                continue;
             }
