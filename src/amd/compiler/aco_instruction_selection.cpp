@@ -590,43 +590,6 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
    }
 }
 
-void emit_udiv(isel_context* ctx, Temp src0, Temp src1, Temp dst)
-{
-   // FIXME: this algorithm is wrong in the general case, but works most of the time.
-   aco_ptr<Instruction> instr;
-
-   instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_cvt_f32_u32, Format::VOP1, 1, 1));
-   instr->getOperand(0) = Operand(src0);
-   Temp f_src0 = {ctx->program->allocateId(), v1};
-   instr->getDefinition(0) = Definition(f_src0);
-   ctx->block->instructions.emplace_back(std::move(instr));
-
-   instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_cvt_f32_u32, Format::VOP1, 1, 1));
-   instr->getOperand(0) = Operand(src1);
-   Temp f_src1 = {ctx->program->allocateId(), v1};
-   instr->getDefinition(0) = Definition(f_src1);
-   ctx->block->instructions.emplace_back(std::move(instr));
-
-   instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_rcp_iflag_f32, Format::VOP1, 1, 1));
-   instr->getOperand(0) = Operand(f_src1);
-   Temp rcp = {ctx->program->allocateId(), v1};
-   instr->getDefinition(0) = Definition(rcp);
-   ctx->block->instructions.emplace_back(std::move(instr));
-
-   instr.reset(create_instruction<VOP2_instruction>(aco_opcode::v_mul_f32, Format::VOP2, 2, 1));
-   instr->getOperand(0) = Operand(f_src0);
-   instr->getOperand(1) = Operand(rcp);
-   Temp f_dst = {ctx->program->allocateId(), v1};
-   instr->getDefinition(0) = Definition(f_dst);
-   ctx->block->instructions.emplace_back(std::move(instr));
-
-   instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_cvt_u32_f32, Format::VOP1, 1, 1));
-   instr->getOperand(0) = Operand(f_dst);
-   instr->getDefinition(0) = Definition(dst);
-   ctx->block->instructions.emplace_back(std::move(instr));
-
-}
-
 void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
 {
    if (!instr->dest.dest.is_ssa) {
@@ -2025,20 +1988,6 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
          fprintf(stderr, "\n");
-      }
-      break;
-   }
-   case nir_op_idiv:
-   case nir_op_udiv: {
-      if (dst.regClass() == v1) {
-         emit_udiv(ctx, get_alu_src(ctx, instr->src[0]), get_alu_src(ctx, instr->src[1]), dst);
-      } else {
-         Temp tmp = {ctx->program->allocateId(), v1};
-         emit_udiv(ctx, get_alu_src(ctx, instr->src[0]), get_alu_src(ctx, instr->src[1]), tmp);
-         aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
-         readlane->getOperand(0) = Operand(tmp);
-         readlane->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(readlane));
       }
       break;
    }
