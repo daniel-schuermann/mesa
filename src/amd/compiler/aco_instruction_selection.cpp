@@ -2036,13 +2036,47 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    }
 
    unsigned index = nir_intrinsic_base(instr) / 4;
-   index = index - FRAG_RESULT_DATA0;
-   unsigned target = V_008DFC_SQ_EXP_MRT + index;
-   unsigned col_format = (ctx->options->key.fs.col_format >> (4 * index)) & 0xf;
-   //bool is_int8 = (ctx->options->key.fs.is_int8 >> index) & 1;
-   //bool is_int10 = (ctx->options->key.fs.is_int10 >> index) & 1;
+   unsigned target, col_format;
    unsigned enabled_channels = 0xF;
    aco_opcode compr_op = (aco_opcode)0;
+
+   assert(index != FRAG_RESULT_COLOR);
+   assert(index != FRAG_RESULT_SAMPLE_MASK);
+
+   if (index == FRAG_RESULT_DEPTH) {
+      target = V_008DFC_SQ_EXP_MRTZ;
+      enabled_channels = 0x1;
+      col_format = (unsigned) -1;
+
+   } else if (index == FRAG_RESULT_STENCIL) {
+
+      aco_ptr<Instruction> shift{create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1)};
+      shift->getOperand(0) = Operand((uint32_t) 16);
+      shift->getOperand(1) = values[0];
+      Temp tmp = {ctx->program->allocateId(), v1};
+      shift->getDefinition(0) = Definition(tmp);
+      ctx->block->instructions.emplace_back(std::move(shift));
+
+      aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
+      exp->valid_mask = false; // TODO
+      exp->done = false; // TODO
+      exp->compressed = true;
+      exp->dest = V_008DFC_SQ_EXP_MRTZ;
+      exp->enabled_mask = 0x3;
+      exp->getOperand(0) = Operand(tmp);
+      for (int i = 1; i < 4; i++)
+         exp->getOperand(i) = Operand();
+      ctx->block->instructions.emplace_back(std::move(exp));
+      return;
+
+   } else {
+      index = index - FRAG_RESULT_DATA0;
+      target = V_008DFC_SQ_EXP_MRT + index;
+      col_format = (ctx->options->key.fs.col_format >> (4 * index)) & 0xf;
+   }
+   bool is_int8 = (ctx->options->key.fs.is_int8 >> index) & 1;
+   bool is_int10 = (ctx->options->key.fs.is_int10 >> index) & 1;
+   assert(!is_int8 && !is_int10);
 
    switch (col_format)
    {
@@ -2064,7 +2098,7 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
 
    case V_028714_SPI_SHADER_FP16_ABGR:
-      enabled_channels = 0;//0x5;
+      enabled_channels = 0x5;
       compr_op = aco_opcode::v_cvt_pkrtz_f16_f32;
       break;
 
@@ -2088,8 +2122,11 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
       compr_op = aco_opcode::v_cvt_pk_i16_i32;
       break;
 
-   default:
    case V_028714_SPI_SHADER_32_ABGR:
+      enabled_channels = 0xF;
+      break;
+
+   default:
       break;
    }
 
