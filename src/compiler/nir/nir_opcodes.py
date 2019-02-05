@@ -200,6 +200,7 @@ unop("fsat", tfloat, ("bit_size == 64 ? " +
                       "((src0 > 1.0) ? 1.0 : ((src0 <= 0.0) ? 0.0 : src0)) : " +
                       "((src0 > 1.0f) ? 1.0f : ((src0 <= 0.0f) ? 0.0f : src0))"))
 unop("frcp", tfloat, "bit_size == 64 ? 1.0 / src0 : 1.0f / src0")
+unop("urcp", tuint32, "(uint32_t)(1 / (float)src0 * 4294967296.0)")
 unop("frsq", tfloat, "bit_size == 64 ? 1.0 / sqrt(src0) : 1.0f / sqrtf(src0)")
 unop("fsqrt", tfloat, "bit_size == 64 ? sqrt(src0) : sqrtf(src0)")
 unop("fexp2", tfloat, "exp2f(src0)")
