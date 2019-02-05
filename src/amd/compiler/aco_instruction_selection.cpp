@@ -2009,7 +2009,7 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
 
    if (dst.size() == 1)
    {
-      aco_ptr<Instruction> mov = create_s_mov(dst, Operand(instr->value.u32[0]));
+      aco_ptr<Instruction> mov = create_s_mov(Definition(dst), Operand(instr->value.u32[0]));
       ctx->block->instructions.emplace_back(std::move(mov));
    } else {
       assert(dst.size() != 1);
@@ -5207,7 +5207,7 @@ aco_ptr<Instruction> create_s_mov(Definition dst, Operand src) {
       uint32_t v = src.constantValue();
       if (v >= 0xffff8000 || v <= 0x7fff) {
          aco_ptr<Instruction> mov(create_instruction<SOPK_instruction>(aco_opcode::s_movk_i32, Format::SOPK, 0, 1));
-         static_cast<SOPK_instruction*>(mov.get())->imm = v;
+         static_cast<SOPK_instruction*>(mov.get())->imm = v & 0xFFFF;
          mov->getDefinition(0) = dst;
          return mov;
       }
