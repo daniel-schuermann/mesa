@@ -1985,6 +1985,49 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       ctx->block->instructions.emplace_back(std::move(sub));
       break;
    }
+   case nir_op_urcp: {
+      if (dst.regClass() == v1 || dst.regClass() == s1) {
+         Temp src0 = get_alu_src(ctx, instr->src[0]);
+         aco_ptr<Instruction> instr;
+
+         instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_cvt_f32_u32, Format::VOP1, 1, 1));
+         instr->getOperand(0) = Operand(src0);
+         Temp f_src0 = {ctx->program->allocateId(), v1};
+         instr->getDefinition(0) = Definition(f_src0);
+         ctx->block->instructions.emplace_back(std::move(instr));
+
+         instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_rcp_iflag_f32, Format::VOP1, 1, 1));
+         instr->getOperand(0) = Operand(f_src0);
+         Temp rcp = {ctx->program->allocateId(), v1};
+         instr->getDefinition(0) = Definition(rcp);
+         ctx->block->instructions.emplace_back(std::move(instr));
+
+         instr.reset(create_instruction<VOP2_instruction>(aco_opcode::v_mul_f32, Format::VOP2, 2, 1));
+         instr->getOperand(0) = Operand((uint32_t) 0x4f800000);
+         instr->getOperand(1) = Operand(rcp);
+         Temp f_dst = {ctx->program->allocateId(), v1};
+         instr->getDefinition(0) = Definition(f_dst);
+         ctx->block->instructions.emplace_back(std::move(instr));
+
+         Temp tmp = dst.regClass() == s1 ? Temp{ctx->program->allocateId(), v1} : dst;
+         instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_cvt_u32_f32, Format::VOP1, 1, 1));
+         instr->getOperand(0) = Operand(f_dst);
+         instr->getDefinition(0) = Definition(tmp);
+         ctx->block->instructions.emplace_back(std::move(instr));
+
+         if (dst.regClass() == s1) {
+            instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1));
+            instr->getOperand(0) = Operand(tmp);
+            instr->getDefinition(0) = Definition(dst);
+            ctx->block->instructions.emplace_back(std::move(instr));
+         }
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_idiv:
    case nir_op_udiv: {
       if (dst.regClass() == v1) {
