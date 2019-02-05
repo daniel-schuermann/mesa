@@ -3805,7 +3805,7 @@ enum nir_lower_non_uniform_access_type {
 bool nir_lower_non_uniform_access(nir_shader *shader,
                                   enum nir_lower_non_uniform_access_type);
 
-bool nir_lower_idiv(nir_shader *shader);
+bool nir_lower_idiv(nir_shader *shader, bool use_urcp);
 
 bool nir_lower_input_attachments(nir_shader *shader, bool use_fragcoord_sysval);
 
