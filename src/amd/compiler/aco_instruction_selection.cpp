@@ -720,11 +720,11 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          sub->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(sub));
       } else if (dst.regClass() == s1) {
-         aco_ptr<SOPK_instruction> sopk{create_instruction<SOPK_instruction>(aco_opcode::s_mulk_i32, Format::SOPK, 1, 1)};
-         sopk->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
-         sopk->getDefinition(0) = Definition(dst);
-         sopk->imm = 0xFFFF;
-         ctx->block->instructions.emplace_back(std::move(sopk));
+         aco_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1)};
+         sop2->getOperand(1) = Operand((uint32_t) -1);
+         sop2->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
+         sop2->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(sop2));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
