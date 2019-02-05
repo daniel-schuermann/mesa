@@ -2207,14 +2207,27 @@ void emit_interp_instr(isel_context *ctx, unsigned idx, unsigned component, Temp
 void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    if (nir_intrinsic_base(instr) == VARYING_SLOT_POS) {
-      aco_ptr<Instruction> vec(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->dest.ssa.num_components, 1));
-      for (unsigned i = 0; i < instr->dest.ssa.num_components; i++)
+      assert(instr->dest.ssa.num_components == 4);
+      Temp frag_pos_3 = Temp();
+      if (ctx->fs_vgpr_args[fs_input::frag_pos_3]) {
+         aco_ptr<Instruction> rcp{create_instruction<VOP1_instruction>(aco_opcode::v_rcp_f32, Format::VOP1, 1, 1)};
+         rcp->getOperand(0) = Operand(ctx->fs_inputs[fs_input::frag_pos_3]);
+         frag_pos_3 = {ctx->program->allocateId(), v1};
+         rcp->getDefinition(0) = Definition(frag_pos_3);
+         ctx->block->instructions.emplace_back(std::move(rcp));
+      }
+      aco_ptr<Instruction> vec(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 4, 1));
+      for (unsigned i = 0; i < 3; i++)
          vec->getOperand(i) = Operand(ctx->fs_inputs[fs_input::frag_pos_0 + i]);
-      vec->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      vec->getOperand(3) = Operand(frag_pos_3);
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      vec->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(vec));
+      emit_split_vector(ctx, dst, 4);
       return;
    }
 
+   assert(nir_intrinsic_base(instr) != VARYING_SLOT_CLIP_DIST0);
    uint64_t base = nir_intrinsic_base(instr) / 4;
    unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
    unsigned component = nir_intrinsic_component(instr);
