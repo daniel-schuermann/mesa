@@ -939,6 +939,7 @@ setup_isel_context(Program* program, nir_shader *nir,
    nir_copy_prop(nir);
    if (nir_opt_idiv_const(nir, 32))
       nir_lower_bool_to_int32(nir);
+   nir_lower_idiv(nir, true);
    nir_opt_shrink_load(nir);
    nir_opt_cse(nir);
    nir_opt_dce(nir);
