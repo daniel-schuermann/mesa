@@ -1929,20 +1929,33 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-	case nir_op_fddx:
-	case nir_op_fddy:
-	case nir_op_fddx_fine:
-	case nir_op_fddy_fine:
-	case nir_op_fddx_coarse:
-	case nir_op_fddy_coarse: {
-      Temp tl = {ctx->program->allocateId(), v1};
-      emit_quad_swizzle(ctx, get_alu_src(ctx, instr->src[0]), tl, 0, 0, 0, 0);
+   case nir_op_fddx:
+   case nir_op_fddy:
+   case nir_op_fddx_fine:
+   case nir_op_fddy_fine:
+   case nir_op_fddx_coarse:
+   case nir_op_fddy_coarse: {
       Format format = (Format) ((uint32_t) Format::VOP2 | (uint32_t) Format::DPP);
       aco_ptr<DPP_instruction> sub{create_instruction<DPP_instruction>(aco_opcode::v_sub_f32, format, 2, 1)};
+
+      Temp tl = {ctx->program->allocateId(), v1};
+      if (instr->op == nir_op_fddx_fine) {
+         emit_quad_swizzle(ctx, get_alu_src(ctx, instr->src[0]), tl, 0, 0, 2, 2);
+         sub->dpp_ctrl = 0xF5;
+      } else if (instr->op == nir_op_fddy_fine) {
+         emit_quad_swizzle(ctx, get_alu_src(ctx, instr->src[0]), tl, 0, 1, 0, 1);
+         sub->dpp_ctrl = 0xEE;
+      } else {
+         emit_quad_swizzle(ctx, get_alu_src(ctx, instr->src[0]), tl, 0, 0, 0, 0);
+         if (instr->op == nir_op_fddx || instr->op == nir_op_fddx_coarse)
+            sub->dpp_ctrl = 0x55;
+         else
+            sub->dpp_ctrl = 0xAA;
+      }
+
       sub->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
       sub->getOperand(1) = Operand(tl);
       sub->getDefinition(0) = Definition(dst);
-      sub->dpp_ctrl = instr->op == nir_op_fddx ? 0x55 : 0xAA;
       sub->row_mask = 0xF;
       sub->bank_mask = 0xF;
       ctx->block->instructions.emplace_back(std::move(sub));
