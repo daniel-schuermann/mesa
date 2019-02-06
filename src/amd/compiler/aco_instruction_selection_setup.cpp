@@ -919,7 +919,9 @@ setup_variables(isel_context *ctx, nir_shader *nir)
          variable->data.driver_location = lds_size_bytes;
          lds_size_bytes += total_shared_var_size(variable->type);
       }
-      const unsigned lds_allocation_size_unit = 4 * 64;
+      unsigned lds_allocation_size_unit = 4 * 64;
+      if (ctx->program->chip_class >= CIK)
+         lds_allocation_size_unit = 4 * 128;
       ctx->program->config->lds_size = (lds_size_bytes + lds_allocation_size_unit - 1) / lds_allocation_size_unit;
       ctx->program->info->cs.block_size[0] = nir->info.cs.local_size[0];
       ctx->program->info->cs.block_size[1] = nir->info.cs.local_size[1];
