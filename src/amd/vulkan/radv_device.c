@@ -1202,6 +1202,7 @@ void radv_GetPhysicalDeviceProperties2(
 			if (pdevice->rad_info.chip_class >= GFX8) {
 				properties->supportedOperations |=
 							VK_SUBGROUP_FEATURE_ARITHMETIC_BIT |
+							VK_SUBGROUP_FEATURE_CLUSTERED_BIT |
 							VK_SUBGROUP_FEATURE_SHUFFLE_BIT |
 							VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT;
 			}
