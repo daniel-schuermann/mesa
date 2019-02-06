@@ -895,6 +895,7 @@ setup_variables(isel_context *ctx, nir_shader *nir)
       unsigned lds_size_bytes = 0;
       nir_foreach_variable(variable, &nir->shared)
       {
+         variable->data.driver_location = lds_size_bytes;
          lds_size_bytes += total_shared_var_size(variable->type);
       }
       const unsigned lds_allocation_size_unit = 4 * 64;
