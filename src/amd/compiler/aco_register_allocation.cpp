@@ -285,12 +285,15 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
       Temp new_val;
       if (!sealed[block->index]) {
+         /* consider rename from already processed predecessor */
+         Temp tmp = read_variable(val, preds[0]);
+
          /* if the block is not sealed yet, we create an incomplete phi (which might later get removed again) */
          new_val = Temp{program->allocateId(), val.regClass()};
          aco_opcode opcode = val.is_linear() ? aco_opcode::p_linear_phi : aco_opcode::p_phi;
          aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
          phi->getDefinition(0) = Definition(new_val);
-         phi->getDefinition(0).setFixed(assignments[val.id()].first);
+         phi->getDefinition(0).setFixed(assignments[tmp.id()].first);
          assignments[new_val.id()] = {phi->getDefinition(0).physReg(), phi->getDefinition(0).regClass()};
          for (unsigned i = 0; i < preds.size(); i++)
             phi->getOperand(i) = Operand(val);
@@ -649,6 +652,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
                pc->getOperand(i).setTemp(read_variable(pc->getOperand(i).getTemp(), block.get()));
                renames[block->index][orig_id] = pc->getDefinition(i).getTemp();
+               renames[block->index][pc->getDefinition(i).tempId()] = pc->getDefinition(i).getTemp();
                std::map<unsigned, phi_info>::iterator phi = phi_map.find(pc->getOperand(i).tempId());
                if (phi != phi_map.end())
                   phi->second.uses.emplace(instr.get());
