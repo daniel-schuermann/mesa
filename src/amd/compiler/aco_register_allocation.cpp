@@ -142,15 +142,15 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             }
             unsigned num_moves = 0;
             std::pair<PhysReg, bool> res = _get_reg(register_file, parallelcopy, lb, ub, sizeOf(var.second), stride, num_moves);
-            success &= res.second;
-            while (!success && remaining_moves > 0) {
+            while (!res.second && remaining_moves > 0) {
                remaining_moves--;
                num_moves++;
                res = _get_reg(register_file, parallelcopy, lb, ub, sizeOf(var.second), stride, num_moves);
-               success &= res.second;
             }
-            if (!success)
+            if (!res.second) {
+               success = false;
                break;
+            }
             /* mark the area as blocked */
             for (unsigned i = res.first.reg; i < res.first.reg + sizeOf(var.second); i++)
                register_file[i] = 0xFFFF;
