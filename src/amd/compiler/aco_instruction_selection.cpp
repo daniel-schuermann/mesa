@@ -4186,8 +4186,48 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (instr->op == nir_texop_txs && instr->sampler_dim == GLSL_SAMPLER_DIM_BUF)
       unreachable("Unimplemented tex instr type");
 
-   if (instr->op == nir_texop_texture_samples)
-      unreachable("Unimplemented tex instr type");
+   if (instr->op == nir_texop_texture_samples) {
+      Temp dword3 = emit_extract_vector(ctx, resource, 3, s1);
+
+      aco_ptr<Instruction> tmp_instr{create_instruction<SOP2_instruction>(aco_opcode::s_bfe_u32, Format::SOP2, 2, 1)};
+      tmp_instr->getOperand(0) = Operand(dword3);
+      tmp_instr->getOperand(1) = Operand((uint32_t) 16 | 4<<16);
+      Temp samples_log2 = {ctx->program->allocateId(), s1};
+      tmp_instr->getDefinition(0) = Definition(samples_log2);
+      ctx->block->instructions.emplace_back(std::move(tmp_instr));
+
+      tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_lshl_b32, Format::SOP2, 2, 2));
+      tmp_instr->getOperand(0) = Operand((uint32_t) 1);
+      tmp_instr->getOperand(1) = Operand(samples_log2);
+      Temp samples = {ctx->program->allocateId(), s1};
+      tmp_instr->getDefinition(0) = Definition(samples);
+      tmp_instr->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
+      ctx->block->instructions.emplace_back(std::move(tmp_instr));
+
+      tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_bfe_u32, Format::SOP2, 2, 1));
+      tmp_instr->getOperand(0) = Operand(dword3);
+      tmp_instr->getOperand(1) = Operand((uint32_t) 28 | 4<<16); //offset=28, width=4
+      Temp type = {ctx->program->allocateId(), s1};
+      tmp_instr->getDefinition(0) = Definition(type);
+      ctx->block->instructions.emplace_back(std::move(tmp_instr));
+
+      tmp_instr.reset(create_instruction<SOPC_instruction>(aco_opcode::s_cmp_ge_u32, Format::SOPC, 2, 1));
+      tmp_instr->getOperand(0) = Operand(type);
+      tmp_instr->getOperand(1) = Operand((uint32_t) 14);
+      Temp is_msaa = {ctx->program->allocateId(), b};
+      tmp_instr->getDefinition(0) = Definition(is_msaa);
+      tmp_instr->getDefinition(0).setFixed(scc);
+      ctx->block->instructions.emplace_back(std::move(tmp_instr));
+
+      tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1));
+      tmp_instr->getOperand(0) = Operand(samples);
+      tmp_instr->getOperand(1) = Operand((uint32_t) 1);
+      tmp_instr->getOperand(2) = Operand(is_msaa);
+      tmp_instr->getOperand(2).setFixed(scc);
+      tmp_instr->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      ctx->block->instructions.emplace_back(std::move(tmp_instr));
+      return;
+   }
 
    if (has_offset && instr->op != nir_texop_txf) {
       aco_ptr<Instruction> tmp_instr;
