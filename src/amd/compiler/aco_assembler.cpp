@@ -305,6 +305,7 @@ void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
       exp->dest = 9; /* NULL */
       /* insert the null export 1 instruction before endpgm */
       block->instructions.insert(block->instructions.end() - 1, std::move(exp));
+      return;
    }
 }
 
