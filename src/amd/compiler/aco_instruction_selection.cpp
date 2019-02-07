@@ -3832,6 +3832,13 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_vulkan_resource_index:
       visit_load_resource(ctx, instr);
       break;
+   case nir_intrinsic_discard: {
+      aco_ptr<Instruction> zero{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
+      zero->getOperand(0) = Operand((uint32_t) 0);
+      zero->getDefinition(0) = Definition{exec, s2};
+      ctx->block->instructions.emplace_back(std::move(zero));
+      break;
+   }
    case nir_intrinsic_discard_if:
       visit_discard_if(ctx, instr);
       break;
