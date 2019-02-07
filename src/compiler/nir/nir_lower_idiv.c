@@ -141,12 +141,13 @@ emit_udiv(nir_builder *bld, nir_ssa_def *numer, nir_ssa_def *denom, bool modulo)
    nir_ssa_def *RCP = nir_urcp(bld, denom);
    nir_ssa_def *RCP_LO = nir_imul(bld, RCP, denom);
    nir_ssa_def *RCP_HI = nir_umul_high(bld, RCP, denom);
+   nir_ssa_def *RCP_HI_NE_Zero = nir_ine(bld, RCP_HI, nir_imm_int(bld, 0));
    nir_ssa_def *NEG_RCP_LO = nir_ineg(bld, RCP_LO);
-   nir_ssa_def *ABS_RCP_LO = nir_bcsel(bld, RCP_HI, RCP_LO, NEG_RCP_LO);
+   nir_ssa_def *ABS_RCP_LO = nir_bcsel(bld, RCP_HI_NE_Zero, RCP_LO, NEG_RCP_LO);
    nir_ssa_def *E = nir_umul_high(bld, ABS_RCP_LO, RCP);
    nir_ssa_def *RCP_A_E = nir_iadd(bld, RCP, E);
    nir_ssa_def *RCP_S_E = nir_isub(bld, RCP, E);
-   nir_ssa_def *Tmp0 = nir_bcsel(bld, RCP_HI, RCP_S_E, RCP_A_E);
+   nir_ssa_def *Tmp0 = nir_bcsel(bld, RCP_HI_NE_Zero, RCP_S_E, RCP_A_E);
    nir_ssa_def *Quotient = nir_umul_high(bld, Tmp0, numer);
    nir_ssa_def *Num_S_Remainder = nir_imul(bld, Quotient, denom);
    nir_ssa_def *Remainder = nir_isub(bld, numer, Num_S_Remainder);
@@ -173,6 +174,8 @@ emit_idiv(nir_builder *bld, nir_ssa_def *numer, nir_ssa_def *denom, nir_op op)
 {
    nir_ssa_def *LHSign = nir_ilt(bld, numer, nir_imm_int(bld, 0));
    nir_ssa_def *RHSign = nir_ilt(bld, denom, nir_imm_int(bld, 0));
+   LHSign = nir_bcsel(bld, LHSign, nir_imm_int(bld, -1), nir_imm_int(bld, 0));
+   RHSign = nir_bcsel(bld, RHSign, nir_imm_int(bld, -1), nir_imm_int(bld, 0));
 
    nir_ssa_def *LHS = nir_iadd(bld, numer, LHSign);
    nir_ssa_def *RHS = nir_iadd(bld, denom, RHSign);
