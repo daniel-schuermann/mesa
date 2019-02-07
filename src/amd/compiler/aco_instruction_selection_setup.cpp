@@ -316,7 +316,10 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                unsigned size = nir_instr_as_tex(instr)->dest.ssa.num_components;
                if (nir_instr_as_tex(instr)->dest.ssa.bit_size == 64)
                   size *= 2;
-               reg_class[nir_instr_as_tex(instr)->dest.ssa.index] = getRegClass(vgpr, size);
+               if (nir_instr_as_tex(instr)->op == nir_texop_texture_samples)
+                  reg_class[nir_instr_as_tex(instr)->dest.ssa.index] = getRegClass(sgpr, size);
+               else
+                  reg_class[nir_instr_as_tex(instr)->dest.ssa.index] = getRegClass(vgpr, size);
                break;
             }
             case nir_instr_type_parallel_copy: {
