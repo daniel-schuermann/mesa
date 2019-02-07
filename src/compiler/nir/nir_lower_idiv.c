@@ -192,7 +192,7 @@ emit_idiv(nir_builder *bld, nir_ssa_def *numer, nir_ssa_def *denom, nir_op op)
       res = nir_isub(bld, res, LHSign);
       if (op == nir_op_imod) {
          nir_ssa_def *cond = nir_ieq32(bld, res, nir_imm_int(bld, 0));
-         cond = nir_ior(bld, nir_iand(bld, LHSign, RHSign), cond);
+         cond = nir_ior(bld, nir_ieq32(bld, LHSign, RHSign), cond);
          res = nir_b32csel(bld, cond, res, nir_iadd(bld, res, denom));
       }
       return res;
