@@ -248,16 +248,6 @@ struct ssa_info {
       return label.test(16);
    }
 
-   void set_mimg(Instruction* mimg_instr)
-   {
-      instr = mimg_instr;
-      label.set(17,1);
-   }
-
-   bool is_mimg()
-   {
-      return label.test(17);
-   }
 };
 
 struct opt_ctx {
@@ -541,8 +531,6 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    default:
       break;
    }
-   if (instr->format == Format::MIMG)
-      ctx.info[instr->getDefinition(0).tempId()].set_mimg(instr.get());
 }
 
 
