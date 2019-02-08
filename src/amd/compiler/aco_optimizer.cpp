@@ -365,17 +365,16 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             instr->getOperand(i) = Operand(info.temp);
             info = ctx.info[info.temp.id()];
          }
-
-         if (info.is_neg() && can_use_VOP3(instr) && opcode_infos[(int)instr->opcode].can_use_input_modifiers) {
-            to_VOP3(ctx, instr);
-            instr->getOperand(i) = Operand(info.temp);
-            static_cast<VOP3A_instruction*>(instr.get())->neg[i] = true;
-            info = ctx.info[info.temp.id()];
-         }
          if (info.is_abs() && can_use_VOP3(instr) && opcode_infos[(int)instr->opcode].can_use_input_modifiers) {
             to_VOP3(ctx, instr);
             instr->getOperand(i) = Operand(info.temp);
             static_cast<VOP3A_instruction*>(instr.get())->abs[i] = true;
+         }
+         if (info.is_neg() && can_use_VOP3(instr) && opcode_infos[(int)instr->opcode].can_use_input_modifiers) {
+            to_VOP3(ctx, instr);
+            instr->getOperand(i) = Operand(info.temp);
+            static_cast<VOP3A_instruction*>(instr.get())->neg[i] = true;
+            continue;
          }
          if (info.is_constant()) {
             if (i == 0) {
@@ -500,6 +499,8 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    case aco_opcode::v_sub_f32: /* neg */
       if (instr->getOperand(0).isConstant() && instr->getOperand(0).constantValue() == 0)
          ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(1).getTemp());
+      if (instr->isVOP3() && static_cast<VOP3A_instruction*>(instr.get())->abs[1]) /* neg(abs(x)) */
+         ctx.info[instr->getDefinition(0).tempId()].set_abs(instr->getOperand(1).getTemp());
       break;
    case aco_opcode::v_med3_f32: { /* clamp */
       VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr.get());
