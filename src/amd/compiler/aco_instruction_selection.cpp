@@ -816,20 +816,9 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_ushr: {
       if (dst.regClass() == v1) {
-         aco_ptr<VOP2_instruction> shl{create_instruction<VOP2_instruction>(aco_opcode::v_lshrrev_b32, Format::VOP2, 2, 1)};
-         shl->getOperand(0) = Operand{get_alu_src(ctx, instr->src[1])};
-         shl->getOperand(1) = Operand{get_alu_src(ctx, instr->src[0])};
-         shl->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(shl));
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_lshrrev_b32, dst, false, true);
       } else if (dst.regClass() == s1) {
-         aco_ptr<SOP2_instruction> shl{create_instruction<SOP2_instruction>(aco_opcode::s_lshr_b32, Format::SOP2, 2, 2)};
-         shl->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-         shl->getOperand(1) = Operand{get_alu_src(ctx, instr->src[1])};
-         shl->getDefinition(0) = Definition(dst);
-         Temp t = {ctx->program->allocateId(), b};
-         shl->getDefinition(1) = Definition(t);
-         shl->getDefinition(1).setFixed(scc);
-         ctx->block->instructions.emplace_back(std::move(shl));
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_lshr_b32, dst, true);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -839,20 +828,9 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_ishl: {
       if (dst.regClass() == v1) {
-         aco_ptr<VOP2_instruction> shl{create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1)};
-         shl->getOperand(0) = Operand{get_alu_src(ctx, instr->src[1])};
-         shl->getOperand(1) = Operand{get_alu_src(ctx, instr->src[0])};
-         shl->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(shl));
+         emit_vop2_instruction(ctx, instr, aco_opcode::v_lshlrev_b32, dst, false, true);
       } else if (dst.regClass() == s1) {
-         aco_ptr<SOP2_instruction> shl{create_instruction<SOP2_instruction>(aco_opcode::s_lshl_b32, Format::SOP2, 2, 2)};
-         shl->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-         shl->getOperand(1) = Operand{get_alu_src(ctx, instr->src[1])};
-         shl->getDefinition(0) = Definition(dst);
-         Temp t = {ctx->program->allocateId(), b};
-         shl->getDefinition(1) = Definition(t);
-         shl->getDefinition(1).setFixed(scc);
-         ctx->block->instructions.emplace_back(std::move(shl));
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_lshl_b32, dst, true);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
