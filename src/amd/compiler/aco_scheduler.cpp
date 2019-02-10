@@ -33,7 +33,7 @@ struct sched_ctx {
    int16_t max_vgpr;
    int16_t max_sgpr;
    int16_t last_SMEM_stall;
-   unsigned last_SMEM_dep_idx;
+   int last_SMEM_dep_idx;
 };
 
 /* This scheduler is a simple bottom-up pass based on ideas from
@@ -48,8 +48,9 @@ struct sched_ctx {
 
 void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
                        std::vector<std::pair<uint16_t,uint16_t>>& register_demand,
-                       Instruction* current, unsigned idx = 0)
+                       Instruction* current, int idx)
 {
+   assert(idx != 0);
    int window_size = 25 - ctx.num_waves;
    int16_t k = 0;
 
@@ -157,7 +158,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
    bool found_dependency = false;
    /* second, check if we have instructions after current to move up */
    for (int candidate_idx = idx + 1; candidate_idx < (int) idx + window_size; candidate_idx++) {
-      assert(candidate_idx < block->instructions.size());
+      assert(candidate_idx < (int) block->instructions.size());
       aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
 
       if (candidate->opcode == aco_opcode::p_logical_end)
@@ -248,8 +249,9 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
 void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
                        std::vector<std::pair<uint16_t,uint16_t>>& register_demand,
-                       Instruction* current, unsigned idx = 0)
+                       Instruction* current, int idx)
 {
+   assert(idx != 0);
    int window_size = 25 - ctx.num_waves;
 
    /* create the initial set of values which current depends on */
@@ -354,7 +356,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
    bool found_dependency = false;
    /* second, check if we have instructions after current to move up */
    for (int candidate_idx = idx + 1; candidate_idx < (int) idx + window_size; candidate_idx++) {
-      assert(candidate_idx < block->instructions.size());
+      assert(candidate_idx < (int) block->instructions.size());
       aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
 
       if (candidate->opcode == aco_opcode::p_logical_end)
