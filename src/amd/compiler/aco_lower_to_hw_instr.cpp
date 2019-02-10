@@ -286,9 +286,10 @@ void lower_to_hw_instr(Program* program)
                for (unsigned i = 0; i < instr->getOperand(2).size(); i++) {
                   aco_ptr<VOP3A_instruction> writelane{create_instruction<VOP3A_instruction>(aco_opcode::v_writelane_b32, Format::VOP3A, 2, 1)};
                   writelane->getOperand(0) = instr->getOperand(2);
+                  writelane->getOperand(0).setFixed(PhysReg{instr->getOperand(2).physReg().reg + i});
                   writelane->getOperand(1) = Operand(instr->getOperand(1).constantValue() + i);
                   writelane->getDefinition(0) = Definition(instr->getOperand(0).getTemp());
-                  writelane->getDefinition(0).setFixed(PhysReg{instr->getOperand(0).physReg().reg + i});
+                  writelane->getDefinition(0).setFixed(instr->getOperand(0).physReg());
                   new_instructions.emplace_back(std::move(writelane));
                }
                break;
@@ -296,7 +297,7 @@ void lower_to_hw_instr(Program* program)
             case aco_opcode::p_reload:
             {
                assert(instr->getOperand(0).regClass() == v1_linear);
-               for (unsigned i = 0; i < instr->getOperand(2).size(); i++) {
+               for (unsigned i = 0; i < instr->getDefinition(0).size(); i++) {
                   aco_ptr<VOP3A_instruction> readlane{create_instruction<VOP3A_instruction>(aco_opcode::v_readlane_b32, Format::VOP3A, 2, 1)};
                   readlane->getOperand(0) = instr->getOperand(0);
                   readlane->getOperand(1) = Operand(instr->getOperand(1).constantValue() + i);
