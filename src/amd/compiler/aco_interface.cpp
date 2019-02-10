@@ -55,7 +55,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    aco::validate(program.get(), stderr);
    aco::dominator_tree(program.get());
 
-   /* Optimization: doesn't work yet with control flow */
+   /* Optimization */
    aco::value_numbering(program.get());
    aco::optimize(program.get());
    aco::validate(program.get(), stderr);

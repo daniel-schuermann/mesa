@@ -2189,7 +2189,6 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
       for (unsigned i = 0; i < instr->dest.ssa.num_components; i++)
          vec->getOperand(i) = Operand(ctx->fs_inputs[fs_input::frag_pos_0 + i]);
 
-      Temp frag_pos_3 = Temp();
       if (ctx->fs_vgpr_args[fs_input::frag_pos_3]) {
          assert(instr->dest.ssa.num_components == 4);
          aco_ptr<Instruction> rcp{create_instruction<VOP1_instruction>(aco_opcode::v_rcp_f32, Format::VOP1, 1, 1)};
