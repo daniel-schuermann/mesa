@@ -163,8 +163,10 @@ convert_to_lcssa(nir_cf_node *cf_node, lcssa_state *state)
 {
    switch (cf_node->type) {
    case nir_cf_node_block:
-      nir_foreach_instr(instr, nir_cf_node_as_block(cf_node))
-         nir_foreach_ssa_def(instr, convert_loop_exit_for_ssa, state);
+      if (state->loop) {
+         nir_foreach_instr(instr, nir_cf_node_as_block(cf_node))
+            nir_foreach_ssa_def(instr, convert_loop_exit_for_ssa, state);
+      }
       return;
    case nir_cf_node_if: {
       nir_if *if_stmt = nir_cf_node_as_if(cf_node);
@@ -208,13 +210,16 @@ nir_convert_loop_to_lcssa(nir_loop *loop) {
 void
 nir_to_lcssa(nir_shader *shader) {
 
+   lcssa_state *state = rzalloc(NULL, lcssa_state);
+   state->shader = shader;
+
    nir_foreach_function(function, shader) {
       if (function->impl == NULL) 
          continue;
 
-      foreach_list_typed(nir_cf_node, node, node, &function->impl->body) {
-         if (node->type == nir_cf_node_loop)
-            nir_convert_loop_to_lcssa(nir_cf_node_as_loop(node));
-      }
+      foreach_list_typed(nir_cf_node, node, node, &function->impl->body)
+         convert_to_lcssa(node, state);
    }
+
+   ralloc_free(state);
 }
