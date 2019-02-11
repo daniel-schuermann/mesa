@@ -3050,8 +3050,8 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
 
    if (instr->intrinsic == nir_intrinsic_image_deref_atomic_comp_swap) {
       aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-      vec->getOperand(0) = Operand(data);
-      vec->getOperand(1) = Operand(get_ssa_temp(ctx, instr->src[4].ssa));
+      vec->getOperand(0) = Operand(get_ssa_temp(ctx, instr->src[4].ssa));
+      vec->getOperand(1) = Operand(data);
       data = {ctx->program->allocateId(), v2};
       vec->getDefinition(0) = Definition(data);
       ctx->block->instructions.emplace_back(std::move(vec));
@@ -3372,8 +3372,8 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
 
    if (instr->intrinsic == nir_intrinsic_ssbo_atomic_comp_swap) {
       aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-      vec->getOperand(0) = Operand(data);
-      vec->getOperand(1) = Operand(get_ssa_temp(ctx, instr->src[3].ssa));
+      vec->getOperand(0) = Operand(get_ssa_temp(ctx, instr->src[3].ssa));
+      vec->getOperand(1) = Operand(data);
       data = {ctx->program->allocateId(), v2};
       vec->getDefinition(0) = Definition(data);
       ctx->block->instructions.emplace_back(std::move(vec));
