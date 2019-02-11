@@ -342,7 +342,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   nir_foreach_phi_src (src, phi) {
                      if (typeOf(reg_class[src->src.ssa->index]) == RegType::vgpr)
                         type = vgpr;
-                     else if (typeOf(reg_class[src->src.ssa->index]) != RegType::sgpr)
+                     if (typeOf(reg_class[src->src.ssa->index]) == 0)
                         done = false;
                   }
                }
@@ -353,8 +353,10 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   assert(size == -1 || src_size == size);
                   size = src_size;
                }
-
-               reg_class[phi->dest.ssa.index] = getRegClass(type, size);
+               RegClass rc = getRegClass(type, size);
+               if (rc != reg_class[phi->dest.ssa.index])
+                  done = false;
+               reg_class[phi->dest.ssa.index] = rc;
                break;
             }
             default:
