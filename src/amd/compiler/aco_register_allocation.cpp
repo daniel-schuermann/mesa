@@ -494,7 +494,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      /* check if target reg is blocked, and move away the blocking var */
                      if (register_file[operand.physReg().reg]) {
                         uint32_t blocking_id = register_file[operand.physReg().reg];
-                        Operand pc_op = Operand(Temp{blocking_id, assignments[blocking_id].second});
+                        RegClass rc = operand.physReg() == scc ? RegClass::s1 : assignments[blocking_id].second;
+                        Operand pc_op = Operand(Temp{blocking_id, rc});
                         pc_op.setFixed(operand.physReg());
                         Definition pc_def = Definition(Temp{program->allocateId(), pc_op.regClass()});
                         /* find free reg */
@@ -553,10 +554,6 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   Definition pc_def = Definition(tmp);
 
                   /* re-enable the killed operands, so that we don't move the blocking var there */
-                  for (unsigned k = 0; k < i; k++) {
-                     for (unsigned j = 0; j < instr->getDefinition(k).size(); j++)
-                        register_file[instr->getDefinition(k).physReg().reg + j] = 0x0;
-                  }
                   for (unsigned i = 0; i < instr->num_operands; i++)
                      if (instr->getOperand(i).isFixed() && instr->getOperand(i).isKill())
                         for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
@@ -578,7 +575,6 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
                   /* finish assignment of parallelcopy */
                   assignments[pc_def.tempId()] = {reg, pc_def.regClass()};
-                  renames[block->index][pc_op.tempId()] = pc_def.getTemp();
                   parallelcopy.emplace_back(pc_op, pc_def);
 
                   /* add changes to reg_file */
