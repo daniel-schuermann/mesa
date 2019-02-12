@@ -2600,6 +2600,17 @@ get_sampler_dim(isel_context *ctx, enum glsl_sampler_dim dim, bool is_array)
    }
 }
 
+static bool
+should_declare_array(isel_context *ctx, enum glsl_sampler_dim sampler_dim, bool is_array) {
+   if (sampler_dim == GLSL_SAMPLER_DIM_BUF)
+      return false;
+   aco_image_dim dim = get_sampler_dim(ctx, sampler_dim, is_array);
+   return dim == aco_image_cube ||
+          dim == aco_image_1darray ||
+          dim == aco_image_2darray ||
+          dim == aco_image_2darraymsaa;
+}
+
 Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
                       enum aco_descriptor_type desc_type,
                       const nir_tex_instr *tex_instr, bool image, bool write)
@@ -2797,7 +2808,7 @@ static int image_type_to_components_count(enum glsl_sampler_dim dim, bool array)
  * The sample index should be adjusted as follows:
  *   sample_index = (fmask >> (sample_index * 4)) & 0xF;
  */
-static Temp adjust_sample_index_using_fmask(isel_context *ctx, Temp coords, Temp sample_index, Temp fmask_desc_ptr)
+static Temp adjust_sample_index_using_fmask(isel_context *ctx, bool da, Temp coords, Temp sample_index, Temp fmask_desc_ptr)
 {
    Temp fmask = {ctx->program->allocateId(), v1};
 
@@ -2808,6 +2819,7 @@ static Temp adjust_sample_index_using_fmask(isel_context *ctx, Temp coords, Temp
    load->glc = false;
    load->dmask = 0x1;
    load->unrm = true;
+   load->da = da;
    ctx->block->instructions.emplace_back(std::move(load));
 
    Temp sample_index4 = {ctx->program->allocateId(), sample_index.regClass()};
@@ -2979,6 +2991,7 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
    load->glc = var->data.image.access & (ACCESS_VOLATILE | ACCESS_COHERENT) ? 1 : 0;
    load->dmask = dmask;
    load->unrm = true;
+   load->da = should_declare_array(ctx, dim, glsl_sampler_type_is_array(type));
    ctx->block->instructions.emplace_back(std::move(load));
 
    emit_split_vector(ctx, tmp, num_components);
@@ -3024,6 +3037,7 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    store->glc = glc;
    store->dmask = 0xF;
    store->unrm = true;
+   store->da = should_declare_array(ctx, dim, glsl_sampler_type_is_array(type));
    ctx->block->instructions.emplace_back(std::move(store));
    return;
 }
@@ -3043,6 +3057,7 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
 
    const nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
    const struct glsl_type *type = glsl_without_array(var->type);
+   const enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
    bool is_unsigned = glsl_get_sampler_result_type(type) == GLSL_TYPE_UINT;
 
    Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[3].ssa));
@@ -3105,7 +3120,7 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, nullptr, true, true);
 
-   if (glsl_get_sampler_dim(type) == GLSL_SAMPLER_DIM_BUF) {
+   if (dim == GLSL_SAMPLER_DIM_BUF) {
       Temp vindex = emit_extract_vector(ctx, get_ssa_temp(ctx, instr->src[1].ssa), 0, v1);
       Temp resource = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_IMAGE, nullptr, true, true);
       //assert(ctx->options->chip_class < GFX9 && "GFX9 stride size workaround not yet implemented.");
@@ -3134,6 +3149,7 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
    mimg->glc = return_previous;
    mimg->dmask = (1 << data.size()) - 1;
    mimg->unrm = true;
+   mimg->da = should_declare_array(ctx, dim, glsl_sampler_type_is_array(type));
    ctx->block->instructions.emplace_back(std::move(mimg));
    return;
 }
@@ -4320,27 +4336,19 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       ctx->block->instructions.emplace_back(std::move(vec));
    }
 
+   bool da = should_declare_array(ctx, instr->sampler_dim, instr->is_array);
+
    if (instr->op == nir_texop_samples_identical)
       resource = fmask_ptr;
 
    else if (instr->sampler_dim == GLSL_SAMPLER_DIM_MS &&
        instr->op != nir_texop_txs) {
       assert(has_sample_index);
-      sample_index = adjust_sample_index_using_fmask(ctx, coords, sample_index, fmask_ptr);
+      sample_index = adjust_sample_index_using_fmask(ctx, da, coords, sample_index, fmask_ptr);
    }
 
    if (has_offset && instr->op == nir_texop_txf)
       unreachable("Unimplemented tex instr type");
-
-   bool da = false;
-   if (instr->sampler_dim != GLSL_SAMPLER_DIM_BUF) {
-      aco_image_dim dim = get_sampler_dim(ctx, instr->sampler_dim, instr->is_array);
-
-      da = dim == aco_image_cube ||
-           dim == aco_image_1darray ||
-           dim == aco_image_2darray ||
-           dim == aco_image_2darraymsaa;
-   }
 
    /* Build tex instruction */
    unsigned dmask = nir_ssa_def_components_read(&instr->dest.ssa);
@@ -4458,6 +4466,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tex->getOperand(1) = Operand(resource);
       tex->dmask = dmask;
       tex->unrm = true;
+      tex->da = da;
       tex->getDefinition(0) = Definition(tmp_dst);
       ctx->block->instructions.emplace_back(std::move(tex));
 
