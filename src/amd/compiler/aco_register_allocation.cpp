@@ -233,7 +233,32 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      if (reg_file[instr->getOperand(i).physReg().reg + j] != 0) {
                         Operand op = instr->getOperand(i);
                         Definition def = Definition(program->allocateId(), op.regClass());
+
+                        /* re-enable the killed operands */
+                        for (unsigned k = 0; k < instr->num_operands; k++) {
+                           Operand& op = instr->getOperand(k);
+                           if (!op.isTemp() || !op.isKill())
+                              continue;
+                           assert(op.isFixed());
+                           for (unsigned r = op.physReg().reg; r < op.physReg().reg + op.size(); r++) {
+                              if (!reg_file[r])
+                                 reg_file[r] = 0xFFFF;
+                           }
+                        }
+
                         PhysReg reg = get_reg(reg_file, op.regClass(), pc, instr);
+
+                        /* disable the killed operands */
+                        for (unsigned k = 0; k < instr->num_operands; k++) {
+                           Operand& op = instr->getOperand(k);
+                           if (!op.isTemp() || !op.isKill())
+                              continue;
+                           for (unsigned r = op.physReg().reg; r < op.physReg().reg + op.size(); r++) {
+                              if (reg_file[r] == 0xFFFF)
+                                 reg_file[r] = 0;
+                           }
+                        }
+
                         def.setFixed(reg);
                         pc.emplace_back(op, def);
                         instr->getOperand(i).setTemp(def.getTemp());
