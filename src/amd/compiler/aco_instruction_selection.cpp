@@ -1541,7 +1541,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_unpack_half_2x16: {
       if (dst.regClass() == v2) {
-         Temp src = get_ssa_temp(ctx, instr->src[0].src.ssa);
+         Temp src = get_alu_src(ctx, instr->src[0]);
          Temp val0_fp16{ctx->program->allocateId(), v1};
          Temp val1_fp16{ctx->program->allocateId(), v1};
          Temp val0_fp32{ctx->program->allocateId(), v1};
