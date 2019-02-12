@@ -559,7 +559,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             }
             /* remove dead vars from register file */
             for (unsigned i = 0; i < instr->num_operands; i++)
-               if (instr->getOperand(i).isFixed() && instr->getOperand(i).isKill())
+               if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill())
                   for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                      register_file[instr->getOperand(i).physReg().reg + j] = 0;
          }
@@ -580,14 +580,14 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
                   /* re-enable the killed operands, so that we don't move the blocking var there */
                   for (unsigned i = 0; i < instr->num_operands; i++)
-                     if (instr->getOperand(i).isFixed() && instr->getOperand(i).isKill())
+                     if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill())
                         for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                            register_file[instr->getOperand(i).physReg().reg + j] = 0xFFFF;
                   /* find a new register for the blocking variable */
                   PhysReg reg = get_reg(register_file, rc, parallelcopy, instr);
                   /* once again, disable killed operands */
                   for (unsigned i = 0; i < instr->num_operands; i++) {
-                     if (instr->getOperand(i).isFixed() && instr->getOperand(i).isKill())
+                     if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill())
                         for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                            register_file[instr->getOperand(i).physReg().reg + j] = 0;
                   }
