@@ -144,24 +144,45 @@ SOPP_instruction* create_waitcnt(uint16_t imm)
    return waitcnt;
 }
 
-void reset_exp_cnt(wait_ctx& ctx)
+void reset_counters(wait_ctx& ctx, uint16_t types)
 {
-   std::unordered_map<uint8_t,wait_entry>::iterator it = ctx.vgpr_map.begin();
-   while (it != ctx.vgpr_map.end())
-   {
-      if (it->second.type < exp_type) {
-         it = ctx.vgpr_map.erase(it);
-      } else if (it->second.type & exp_type) {
-         it->second.exp_cnt = max_exp_cnt;
-         it->second.type &= ~exp_type;
-         it++;
-      } else {
+   /* update vgpr/sgpr maps */
+   for (int i = 0; i < 2; i++) {
+      bool sgpr_map = i == 1;
+      if (sgpr_map && !(types & lgkm_type)) // the sgpr map only contains lgkm counters
+         continue;
+      std::unordered_map<uint8_t,wait_entry>& map = i ? ctx.sgpr_map : ctx.vgpr_map;
+      std::unordered_map<uint8_t,wait_entry>::iterator it = map.begin();
+      while (it != map.end())
+      {
+         if ((it->second.type & types) == it->second.type) {
+            it = map.erase(it);
+            continue;
+         }
+
+         if ((types & exp_type) && (it->second.type & exp_type)) {
+            it->second.exp_cnt = max_exp_cnt;
+            it->second.type &= ~exp_type;
+         }
+         if ((types & vm_type) && (it->second.type & vm_type)) {
+            it->second.vm_cnt = max_vm_cnt;
+            it->second.type &= ~vm_type;
+         }
+         if ((types & lgkm_type) && (it->second.type & lgkm_type)) {
+            it->second.lgkm_cnt = max_lgkm_cnt;
+            it->second.type &= ~lgkm_type;
+         }
          it++;
       }
    }
-   /* reset counter */
-   ctx.exp_cnt = 0;
-   return;
+
+   /* reset counters */
+   if (types & exp_type)
+      ctx.exp_cnt = 0;
+   if (types & vm_type)
+      ctx.vm_cnt = 0;
+   if (types & lgkm_type)
+      ctx.lgkm_cnt = 0;
 }
 
 bool writes_exec(Instruction* instr, wait_ctx& ctx)
@@ -447,8 +468,7 @@ uint16_t emit_memory_barrier(Instruction* instr, wait_ctx& ctx) {
          vm_cnt = ctx.vm_cnt ? 0 : -1;
          lgkm_cnt = ctx.lgkm_cnt ? 0 : -1;
          if (ctx.vm_cnt || ctx.lgkm_cnt) {
-            ctx.vm_cnt &= vm_cnt;
-            ctx.lgkm_cnt &= lgkm_cnt;
+            reset_counters(ctx, vm_type | lgkm_type);
             return create_waitcnt_imm(vm_cnt, -1, lgkm_cnt);
          }
          break;
@@ -456,13 +476,13 @@ uint16_t emit_memory_barrier(Instruction* instr, wait_ctx& ctx) {
       case aco_opcode::p_memory_barrier_buffer:
       case aco_opcode::p_memory_barrier_image:
          if (ctx.vm_cnt) {
-            ctx.vm_cnt = 0;
+            reset_counters(ctx, vm_type);
             return create_waitcnt_imm(0, -1, -1);
          }
          break;
       case aco_opcode::p_memory_barrier_shared:
          if (ctx.lgkm_cnt) {
-            ctx.lgkm_cnt = 0;
+            reset_counters(ctx, lgkm_type);
             return create_waitcnt_imm(-1, -1, 0);
          }
          break;
@@ -477,7 +497,7 @@ Instruction* kill(Instruction* instr, wait_ctx& ctx)
    uint16_t imm = 0xFFFF;
    if (ctx.exp_cnt && writes_exec(instr, ctx))
    {
-      reset_exp_cnt(ctx);
+      reset_counters(ctx, exp_type);
       imm = create_waitcnt_imm(-1, 0, -1);
    }
    if (ctx.exp_cnt || ctx.vm_cnt || ctx.lgkm_cnt)
