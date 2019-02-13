@@ -1283,6 +1283,30 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_cube_face_coord: {
+      Temp in = get_ssa_temp(ctx, instr->src[0].src.ssa);
+      emit_split_vector(ctx, in, 3);
+      Temp src[3] = { emit_extract_vector(ctx, in, 0, v1),
+                      emit_extract_vector(ctx, in, 1, v1),
+                      emit_extract_vector(ctx, in, 2, v1) };
+      Temp ma = bld.vop3(aco_opcode::v_cubema_f32, bld.def(v1), src[0], src[1], src[2]);
+      ma = bld.vop1(aco_opcode::v_rcp_f32, bld.def(v1), ma);
+      Temp sc = bld.vop3(aco_opcode::v_cubesc_f32, bld.def(v1), src[0], src[1], src[2]);
+      Temp tc = bld.vop3(aco_opcode::v_cubetc_f32, bld.def(v1), src[0], src[1], src[2]);
+      sc = bld.vop2(aco_opcode::v_madak_f32, bld.def(v1), sc, ma, Operand(0x3f000000u/*0.5*/));
+      tc = bld.vop2(aco_opcode::v_madak_f32, bld.def(v1), tc, ma, Operand(0x3f000000u/*0.5*/));
+      bld.pseudo(aco_opcode::p_create_vector, Definition(dst), sc, tc);
+      break;
+   }
+   case nir_op_cube_face_index: {
+      Temp in = get_ssa_temp(ctx, instr->src[0].src.ssa);
+      emit_split_vector(ctx, in, 3);
+      Temp src[3] = { emit_extract_vector(ctx, in, 0, v1),
+                      emit_extract_vector(ctx, in, 1, v1),
+                      emit_extract_vector(ctx, in, 2, v1) };
+      bld.vop3(aco_opcode::v_cubeid_f32, Definition(dst), src[0], src[1], src[2]);
+      break;
+   }
    case nir_op_bcsel: {
       emit_bcsel(ctx, instr, dst);
       break;
@@ -4564,6 +4588,9 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
                get_ssa_temp(ctx, &instr->dest.ssa));
       break;
    }
+   case nir_intrinsic_shader_clock:
+      bld.smem(aco_opcode::s_memtime, Definition(get_ssa_temp(ctx, &instr->dest.ssa)));
+      break;
    default:
       fprintf(stderr, "Unimplemented intrinsic instr: ");
       nir_print_instr(&instr->instr, stderr);

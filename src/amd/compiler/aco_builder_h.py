@@ -210,7 +210,7 @@ formats = [("pseudo", [Format.PSEUDO], 'Instruction', itertools.product(range(5)
            ("sopk", [Format.SOPK], 'SOPK_instruction', itertools.product([0, 1, 2], [0, 1])),
            ("sopp", [Format.SOPP], 'SOPP_instruction', [(0, 0)]),
            ("sopc", [Format.SOPC], 'SOPC_instruction', [(1, 2)]),
-           ("smem", [Format.SMEM], 'SMEM_instruction', [(0, 4), (0, 3), (1, 3), (1, 2)]),
+           ("smem", [Format.SMEM], 'SMEM_instruction', [(0, 4), (0, 3), (1, 0), (1, 3), (1, 2)]),
            ("ds", [Format.DS], 'DS_instruction', [(1, 1), (1, 2), (0, 3), (0, 4)]),
            ("mubuf", [Format.MUBUF], 'MUBUF_instruction', [(0, 4), (1, 3)]),
            ("mimg", [Format.MIMG], 'MIMG_instruction', [(0, 4), (1, 3), (0, 3), (1, 2)]), #TODO(pendingchaos): less shapes?
