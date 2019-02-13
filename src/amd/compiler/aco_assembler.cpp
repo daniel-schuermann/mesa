@@ -1,5 +1,7 @@
 #include <vector>
 #include <map>
+#include <iostream>
+#include <iomanip>
 
 #include "aco_ir.h"
 
@@ -269,8 +271,19 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
 
 void emit_block(asm_context& ctx, std::vector<uint32_t>& out, Block* block)
 {
-   for (auto const& instr : block->instructions)
+   for (auto const& instr : block->instructions) {
+#if 0
+      int start_idx = out.size();
+      std::cerr << "Encoding:\t" << std::endl;
+      aco_print_instr(&*instr, stderr);
+      std::cerr << std::endl;
+#endif
       emit_instruction(ctx, out, instr.get());
+#if 0
+      for (int i = start_idx; i < out.size(); i++)
+         std::cerr << "encoding: " << "0x" << std::setfill('0') << std::setw(8) << std::hex << out[i] << std::endl;
+#endif
+   }
 }
 
 void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
