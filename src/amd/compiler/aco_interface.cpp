@@ -60,6 +60,9 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    aco::optimize(program.get());
    aco::validate(program.get(), stderr);
 
+   aco::setup_reduce_temp(program.get());
+   aco::validate(program.get(), stderr);
+
    aco::live live_vars = aco::live_var_analysis<true>(program.get(), options);
    aco::spill(program.get(), live_vars, options);
 

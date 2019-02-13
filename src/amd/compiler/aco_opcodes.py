@@ -62,6 +62,7 @@ class Format(Enum):
    SCRATCH = 15
    PSEUDO_BRANCH = 16
    PSEUDO_BARRIER = 17
+   PSEUDO_REDUCTION = 18
    VOP1 = 1 << 8
    VOP2 = 1 << 9
    VOPC = 1 << 10
@@ -126,6 +127,13 @@ opcode("p_split_vector")
 # implicitly
 opcode("p_logical_start")
 opcode("p_logical_end")
+
+# e.g. subgroupMin() in SPIR-V
+opcode("p_reduce", format=Format.PSEUDO_REDUCTION)
+# e.g. subgroupInclusiveMin()
+opcode("p_inclusive_scan", format=Format.PSEUDO_REDUCTION)
+# e.g. subgroupExclusiveMin()
+opcode("p_exclusive_scan", format=Format.PSEUDO_REDUCTION)
 
 opcode("p_branch", format=Format.PSEUDO_BRANCH)
 opcode("p_cbranch", format=Format.PSEUDO_BRANCH)
