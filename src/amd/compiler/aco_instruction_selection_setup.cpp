@@ -215,7 +215,15 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_work_group_id:
                   case nir_intrinsic_load_num_work_groups:
                   case nir_intrinsic_get_buffer_size:
+                  case nir_intrinsic_vote_all:
+                  case nir_intrinsic_vote_any:
+                  case nir_intrinsic_read_first_invocation:
+                  case nir_intrinsic_read_invocation:
                      type = sgpr;
+                     break;
+                  case nir_intrinsic_ballot:
+                     type = sgpr;
+                     size = 2;
                      break;
                   case nir_intrinsic_load_front_face:
                   case nir_intrinsic_load_sample_id:
@@ -257,11 +265,19 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_shared_atomic_xor:
                   case nir_intrinsic_shared_atomic_exchange:
                   case nir_intrinsic_shared_atomic_comp_swap:
+                  case nir_intrinsic_inclusive_scan:
+                  case nir_intrinsic_exclusive_scan:
                      type = vgpr;
                      break;
                   case nir_intrinsic_vulkan_resource_index:
                      type = sgpr;
                      size = 2;
+                     break;
+                  case nir_intrinsic_reduce:
+                     if (nir_intrinsic_cluster_size(intrinsic) == 0)
+                        type = sgpr;
+                     else
+                        type = vgpr;
                      break;
                   case nir_intrinsic_load_ubo:
                   case nir_intrinsic_load_ssbo:

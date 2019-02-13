@@ -3997,6 +3997,103 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       visit_load_sample_mask_in(ctx, instr);
       break;
    }
+   case nir_intrinsic_read_first_invocation: {
+      aco_ptr<Instruction> rfl;
+      Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
+      if (src.regClass() == v1)
+         rfl.reset(create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1));
+      else
+         rfl.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+      rfl->getOperand(0) = Operand(src);
+      rfl->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      ctx->block->instructions.emplace_back(std::move(rfl));
+      break;
+   }
+   case nir_intrinsic_vote_all: {
+      Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
+      assert(src.regClass() == v1);
+
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      assert(dst.regClass() == s1);
+
+      aco_ptr<Instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_eq_u32, Format::VOPC, 2, 1)};
+      cmp->getOperand(0) = Operand((uint32_t) 0);
+      cmp->getOperand(1) = Operand(src);
+      Temp tmp = {ctx->program->allocateId(), s2};
+      cmp->getDefinition(0) = Definition(tmp);
+      cmp->getDefinition(0).setHint(vcc);
+      ctx->block->instructions.emplace_back(std::move(cmp));
+
+      aco_ptr<SOPC_instruction> scmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_eq_u64, Format::SOPC, 2, 1)};
+      scmp->getOperand(0) = Operand(tmp);
+      scmp->getOperand(1) = Operand((uint32_t) 0);
+      Temp scc_tmp = {ctx->program->allocateId(), b};
+      scmp->getDefinition(0) = Definition(scc_tmp);
+      scmp->getDefinition(0).setFixed(scc);
+      ctx->block->instructions.emplace_back(std::move(scmp));
+
+      aco_ptr<SOP2_instruction> to_sgpr{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
+      to_sgpr->getOperand(0) = Operand(0xFFFFFFFF);
+      to_sgpr->getOperand(1) = Operand((uint32_t) 0);
+      to_sgpr->getOperand(2) = Operand(scc_tmp);
+      to_sgpr->getOperand(2).setFixed(scc);
+      to_sgpr->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(to_sgpr));
+      break;
+   }
+   case nir_intrinsic_reduce:
+   case nir_intrinsic_inclusive_scan:
+   case nir_intrinsic_exclusive_scan: {
+      Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      nir_op op = (nir_op) nir_intrinsic_reduction_op(instr);
+      unsigned cluster_size = instr->intrinsic == nir_intrinsic_reduce ?
+         nir_intrinsic_cluster_size(instr) : 0;
+
+      ReduceOp reduce_op;
+      switch (op) {
+#define CASE(name) case nir_op_##name: reduce_op = (src.regClass() == v1) ? name##32 : name##64; break;
+         CASE(iadd)
+         CASE(imul)
+         CASE(fadd)
+         CASE(fmul)
+         CASE(imin)
+         CASE(umin)
+         CASE(fmin)
+         CASE(imax)
+         CASE(umax)
+         CASE(fmax)
+         CASE(iand)
+         CASE(ior)
+         CASE(ixor)
+         default:
+            unreachable("unknown reduction op");
+      }
+
+      aco_opcode aco_op;
+      switch (instr->intrinsic) {
+         case nir_intrinsic_reduce: aco_op = aco_opcode::p_reduce; break;
+         case nir_intrinsic_inclusive_scan: aco_op = aco_opcode::p_inclusive_scan; break;
+         case nir_intrinsic_exclusive_scan: aco_op = aco_opcode::p_exclusive_scan; break;
+         default:
+            unreachable("unknown reduce intrinsic");
+      }
+
+      Temp stmp{ctx->program->allocateId(), s2};
+      aco_ptr<Pseudo_reduction_instruction> reduce{create_instruction<Pseudo_reduction_instruction>(aco_op, Format::PSEUDO_REDUCTION, 2, 3)};
+      reduce->getOperand(0) = Operand(src);
+      // filled in by aco_reduce_assign.cpp, used internally as part of the
+      // reduce sequence
+      reduce->getOperand(1) = Operand();
+
+      reduce->getDefinition(0) = Definition(dst);
+      reduce->getDefinition(1) = Definition(stmp);
+      reduce->getDefinition(2) = Definition(scc, b); // clobbers scc
+      reduce->reduce_op = reduce_op;
+      reduce->cluster_size = cluster_size;
+      ctx->block->instructions.emplace_back(std::move(reduce));
+      break;
+   }
    default:
       fprintf(stderr, "Unimplemented intrinsic instr: ");
       nir_print_instr(&instr->instr, stderr);
