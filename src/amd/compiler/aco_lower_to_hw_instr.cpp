@@ -32,6 +32,132 @@
 
 namespace aco {
 
+struct lower_context {
+   std::vector<aco_ptr<Instruction>> instructions;
+};
+
+enum dpp_ctrl {
+	_dpp_quad_perm = 0x000,
+	_dpp_row_sl = 0x100,
+	_dpp_row_sr = 0x110,
+	_dpp_row_rr = 0x120,
+	dpp_wf_sl1 = 0x130,
+	dpp_wf_rl1 = 0x134,
+	dpp_wf_sr1 = 0x138,
+	dpp_wf_rr1 = 0x13C,
+	dpp_row_mirror = 0x140,
+	dpp_row_half_mirror = 0x141,
+	dpp_row_bcast15 = 0x142,
+	dpp_row_bcast31 = 0x143
+};
+
+static inline dpp_ctrl
+dpp_quad_perm(unsigned lane0, unsigned lane1, unsigned lane2, unsigned lane3)
+{
+	assert(lane0 < 4 && lane1 < 4 && lane2 < 4 && lane3 < 4);
+	return (dpp_ctrl)(lane0 | (lane1 << 2) | (lane2 << 4) | (lane3 << 6));
+}
+
+static inline dpp_ctrl
+dpp_row_sl(unsigned amount)
+{
+	assert(amount > 0 && amount < 16);
+	return (dpp_ctrl)(((unsigned) _dpp_row_sl) | amount);
+}
+
+static inline dpp_ctrl
+dpp_row_sr(unsigned amount)
+{
+	assert(amount > 0 && amount < 16);
+	return (dpp_ctrl)(((unsigned) _dpp_row_sr) | amount);
+}
+
+void emit_dpp_op(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1,
+                 aco_opcode op, unsigned dpp_ctrl, unsigned row_mask, unsigned bank_mask,
+                 bool bound_ctrl_zero)
+{
+   Format format = (Format) ((uint32_t) Format::VOP2 | (uint32_t) Format::DPP);
+   aco_ptr<DPP_instruction> dpp{create_instruction<DPP_instruction>(op, format, 3, 1)};
+   dpp->getOperand(0) = Operand(src0, v1);
+   dpp->getOperand(1) = Operand(src1, v1);
+   dpp->getDefinition(0) = Definition(dst, v1);
+   dpp->dpp_ctrl = dpp_ctrl;
+   dpp->row_mask = row_mask;
+   dpp->bank_mask = bank_mask;
+   dpp->bound_ctrl = bound_ctrl_zero;
+   ctx->instructions.emplace_back(std::move(dpp));
+}
+
+void invert_exec(lower_context *ctx)
+{
+   aco_ptr<Instruction> inv{create_instruction<SOP2_instruction>(aco_opcode::s_xor_b64, Format::SOP2, 2, 1)};
+
+   inv->getOperand(0) = Operand(exec, s2);
+   inv->getOperand(1) = Operand((uint64_t)-1);
+   inv->getDefinition(0) = Definition(exec, s2);
+   ctx->instructions.emplace_back(std::move(inv));
+}
+
+void emit_reduce(lower_context *ctx, aco_opcode op, ReduceOp reduce_op, unsigned cluster_size, PhysReg tmp,
+                 PhysReg stmp, Operand src, Definition dst)
+{
+   assert(reduce_op == ReduceOp::umin32);
+   assert(op == aco_opcode::p_reduce);
+   assert(cluster_size == 0);
+
+   /* First, copy the source to tmp and set inactive lanes to the identity */
+   for (unsigned k = 0; k < src.size(); k++) {
+      aco_ptr<Instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
+      mov->getOperand(0) = Operand(PhysReg{src.physReg().reg + k}, v1);
+      mov->getDefinition(0) = Definition(PhysReg{tmp.reg + k}, v1);
+      ctx->instructions.emplace_back(std::move(mov));
+   }
+
+   invert_exec(ctx);
+
+   for (unsigned k = 0; k < src.size(); k++) {
+      aco_ptr<Instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
+      mov->getOperand(0) = Operand((uint32_t) 0); // TODO get identity for op!
+      mov->getDefinition(0) = Definition(PhysReg{tmp.reg + k}, v1);
+      ctx->instructions.emplace_back(std::move(mov));
+   }
+
+   invert_exec(ctx);
+
+   // note: this clobbers SCC!
+   aco_ptr<SOP1_instruction> set_exec{create_instruction<SOP1_instruction>(aco_opcode::s_or_saveexec_b64, Format::SOP1, 1, 2)};
+   set_exec->getOperand(0) = Operand((uint64_t) -1);
+   set_exec->getDefinition(0) = Definition(stmp, s2);
+   set_exec->getDefinition(1) = Definition(scc, b);
+   ctx->instructions.emplace_back(std::move(set_exec));
+
+   // TODO: generalize this!
+   emit_dpp_op(ctx, tmp, tmp, tmp, aco_opcode::v_min_u32,
+               dpp_quad_perm(1, 0, 3, 2), 0xf, 0xf, false);
+   emit_dpp_op(ctx, tmp, tmp, tmp, aco_opcode::v_min_u32,
+               dpp_quad_perm(2, 3, 0, 1), 0xf, 0xf, false);
+   emit_dpp_op(ctx, tmp, tmp, tmp, aco_opcode::v_min_u32,
+               dpp_row_half_mirror, 0xf, 0xf, false);
+   emit_dpp_op(ctx, tmp, tmp, tmp, aco_opcode::v_min_u32,
+               dpp_row_mirror, 0xf, 0xf, false);
+   emit_dpp_op(ctx, tmp, tmp, tmp, aco_opcode::v_min_u32,
+               dpp_row_bcast15, 0xf, 0xf, false);
+   emit_dpp_op(ctx, tmp, tmp, tmp, aco_opcode::v_min_u32,
+               dpp_row_bcast31, 0xf, 0xf, false);
+
+   aco_ptr<Instruction> restore{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
+   restore->getOperand(0) = Operand(stmp, s2);
+   restore->getDefinition(0) = Definition(exec, s2);
+   ctx->instructions.emplace_back(std::move(restore));
+
+   for (unsigned k = 0; k < src.size(); k++) {
+      aco_ptr<VOP3A_instruction> readlane{create_instruction<VOP3A_instruction>(aco_opcode::v_readlane_b32, Format::VOP3A, 2, 1)};
+      readlane->getOperand(0) = Operand(PhysReg{tmp.reg + k}, v1);
+      readlane->getOperand(1) = Operand((uint32_t)63);
+      readlane->getDefinition(0) = Definition(PhysReg{dst.physReg().reg + k}, s1);
+      ctx->instructions.emplace_back(std::move(readlane));
+   }
+}
 
 struct copy_operation {
    Operand op;
@@ -39,7 +165,7 @@ struct copy_operation {
    unsigned uses;
 };
 
-void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<aco_ptr<Instruction>>& new_instructions, chip_class chip_class)
+void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context* ctx, chip_class chip_class)
 {
    aco_ptr<Instruction> mov;
    std::map<PhysReg, copy_operation>::iterator it = copy_map.begin();
@@ -74,14 +200,14 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<ac
             mov->getOperand(1) = Operand((uint32_t) 0);
             mov->getOperand(0) = it->second.op;
             mov->getDefinition(0) = it->second.def;
-            new_instructions.emplace_back(std::move(mov));
+            ctx->instructions.emplace_back(std::move(mov));
          } else if (it->second.def.getTemp().type() == RegType::sgpr) {
-            new_instructions.emplace_back(std::move(create_s_mov(it->second.def, it->second.op)));
+            ctx->instructions.emplace_back(std::move(create_s_mov(it->second.def, it->second.op)));
          } else {
             mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
             mov->getOperand(0) = it->second.op;
             mov->getDefinition(0) = it->second.def;
-            new_instructions.emplace_back(std::move(mov));
+            ctx->instructions.emplace_back(std::move(mov));
          }
 
          /* reduce the number of uses of the operand reg by one */
@@ -120,7 +246,7 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<ac
          mov->getOperand(1) = def_as_op;
          mov->getDefinition(0) = swap.def;
          mov->getDefinition(1) = op_as_def;
-         new_instructions.emplace_back(std::move(mov));
+         ctx->instructions.emplace_back(std::move(mov));
       } else {
          aco_opcode opcode = swap.def.getTemp().type() == RegType::sgpr ? aco_opcode::s_xor_b32 : aco_opcode::v_xor_b32;
          Format format = swap.def.getTemp().type() == RegType::sgpr ? Format::SOP2 : Format::VOP2;
@@ -128,17 +254,17 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, std::vector<ac
          mov->getOperand(0) = swap.op;
          mov->getOperand(1) = def_as_op;
          mov->getDefinition(0) = op_as_def;
-         new_instructions.emplace_back(std::move(mov));
+         ctx->instructions.emplace_back(std::move(mov));
          mov.reset(create_instruction<Instruction>(opcode, format, 2, 1));
          mov->getOperand(0) = swap.op;
          mov->getOperand(1) = def_as_op;
          mov->getDefinition(0) = swap.def;
-         new_instructions.emplace_back(std::move(mov));
+         ctx->instructions.emplace_back(std::move(mov));
          mov.reset(create_instruction<Instruction>(opcode, format, 2, 1));
          mov->getOperand(0) = swap.op;
          mov->getOperand(1) = def_as_op;
          mov->getDefinition(0) = op_as_def;
-         new_instructions.emplace_back(std::move(mov));
+         ctx->instructions.emplace_back(std::move(mov));
       }
 
       /* change the operand reg of the target's use */
@@ -159,7 +285,7 @@ void lower_to_hw_instr(Program* program)
    for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it)
    {
       Block* block = it->get();
-      std::vector<aco_ptr<Instruction>> new_instructions;
+      lower_context ctx;
       for (auto&& instr : block->instructions)
       {
          aco_ptr<Instruction> mov;
@@ -182,7 +308,7 @@ void lower_to_hw_instr(Program* program)
                }
                mov->getOperand(0) = Operand(PhysReg{reg}, rc);
                mov->getDefinition(0) = instr->getDefinition(0);
-               new_instructions.emplace_back(std::move(mov));
+               ctx.instructions.emplace_back(std::move(mov));
                break;
             }
             case aco_opcode::p_create_vector:
@@ -209,7 +335,7 @@ void lower_to_hw_instr(Program* program)
                      reg_idx++;
                   }
                }
-               handle_operands(copy_operations, new_instructions, program->chip_class);
+               handle_operands(copy_operations, &ctx, program->chip_class);
                break;
             }
             case aco_opcode::p_split_vector:
@@ -225,7 +351,7 @@ void lower_to_hw_instr(Program* program)
                      copy_operations[def.physReg()] = {op, def, 0};
                   }
                }
-               handle_operands(copy_operations, new_instructions, program->chip_class);
+               handle_operands(copy_operations, &ctx, program->chip_class);
                break;
             }
             case aco_opcode::p_parallelcopy:
@@ -248,7 +374,7 @@ void lower_to_hw_instr(Program* program)
                      }
                   }
                }
-               handle_operands(copy_operations, new_instructions, program->chip_class);
+               handle_operands(copy_operations, &ctx, program->chip_class);
                break;
             }
             case aco_opcode::p_discard_if:
@@ -259,12 +385,12 @@ void lower_to_hw_instr(Program* program)
                sop2->getOperand(1) = instr->getOperand(0);
                sop2->getDefinition(0) = Definition(exec, s2);
                sop2->getDefinition(1) = Definition(program->allocateId(), scc, b);
-               new_instructions.emplace_back(std::move(sop2));
+               ctx.instructions.emplace_back(std::move(sop2));
 
                aco_ptr<SOPP_instruction> branch{create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc1, Format::SOPP, 1, 0)};
                branch->getOperand(0) = Operand(exec, s2);
                branch->imm = 3; /* (8 + 4 dwords) / 4 */
-               new_instructions.emplace_back(std::move(branch));
+               ctx.instructions.emplace_back(std::move(branch));
 
                aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
                for (unsigned i = 0; i < 4; i++)
@@ -274,10 +400,10 @@ void lower_to_hw_instr(Program* program)
                exp->done = true;
                exp->valid_mask = true;
                exp->dest = 9; /* NULL */
-               new_instructions.emplace_back(std::move(exp));
+               ctx.instructions.emplace_back(std::move(exp));
 
                aco_ptr<SOPP_instruction> endpgm{create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)};
-               new_instructions.emplace_back(std::move(endpgm));
+               ctx.instructions.emplace_back(std::move(endpgm));
                break;
             }
             case aco_opcode::p_spill:
@@ -290,7 +416,7 @@ void lower_to_hw_instr(Program* program)
                   writelane->getOperand(1) = Operand(instr->getOperand(1).constantValue() + i);
                   writelane->getDefinition(0) = Definition(instr->getOperand(0).getTemp());
                   writelane->getDefinition(0).setFixed(instr->getOperand(0).physReg());
-                  new_instructions.emplace_back(std::move(writelane));
+                  ctx.instructions.emplace_back(std::move(writelane));
                }
                break;
             }
@@ -303,12 +429,12 @@ void lower_to_hw_instr(Program* program)
                   readlane->getOperand(1) = Operand(instr->getOperand(1).constantValue() + i);
                   readlane->getDefinition(0) = instr->getDefinition(0);
                   readlane->getDefinition(0).setFixed(PhysReg{instr->getDefinition(0).physReg().reg + i});
-                  new_instructions.emplace_back(std::move(readlane));
+                  ctx.instructions.emplace_back(std::move(readlane));
                }
                break;
             }
             default:
-               new_instructions.emplace_back(std::move(instr));
+               ctx.instructions.emplace_back(std::move(instr));
                break;
             }
          } else if (instr->format == Format::PSEUDO_BRANCH) {
@@ -360,14 +486,20 @@ void lower_to_hw_instr(Program* program)
                   unreachable("Unknown Pseudo branch instruction!");
             }
             sopp->block = branch->targets[0];
-            new_instructions.emplace_back(std::move(sopp));
+            ctx.instructions.emplace_back(std::move(sopp));
 
+         } else if (instr->format == Format::PSEUDO_REDUCTION) {
+            Pseudo_reduction_instruction* reduce = static_cast<Pseudo_reduction_instruction*>(instr.get());
+            emit_reduce(&ctx, reduce->opcode, reduce->reduce_op, reduce->cluster_size,
+                        reduce->getOperand(1).physReg(), // tmp
+                        reduce->getDefinition(1).physReg(), // stmp
+                        reduce->getOperand(0), reduce->getDefinition(0));
          } else {
-            new_instructions.emplace_back(std::move(instr));
+            ctx.instructions.emplace_back(std::move(instr));
          }
 
       }
-      block->instructions.swap(new_instructions);
+      block->instructions.swap(ctx.instructions);
    }
 }
 
