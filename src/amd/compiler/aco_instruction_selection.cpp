@@ -4474,7 +4474,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
    /* Build tex instruction */
    unsigned dmask = nir_ssa_def_components_read(&instr->dest.ssa);
-   Temp tmp_dst = {ctx->program->allocateId(), getRegClass(vgpr, util_bitcount(dmask))};
+   unsigned dst_components = instr->op == nir_texop_tg4 ? 4 : util_bitcount(dmask);
+   Temp tmp_dst = {ctx->program->allocateId(), getRegClass(vgpr, dst_components)};
 
    /* gather4 selects the component by dmask */
    if (instr->op == nir_texop_tg4) {
