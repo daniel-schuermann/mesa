@@ -46,7 +46,12 @@ never_divergent(nir_ssa_def *def) {
       case nir_intrinsic_vulkan_resource_index:
       case nir_intrinsic_load_work_group_id:
       case nir_intrinsic_load_num_work_groups:
-      case nir_intrinsic_get_buffer_size: {
+      case nir_intrinsic_get_buffer_size:
+      case nir_intrinsic_vote_any:
+      case nir_intrinsic_vote_all:
+      case nir_intrinsic_vote_feq:
+      case nir_intrinsic_vote_ieq:
+      case nir_intrinsic_ballot: {
          return true;
       }
       default: {
@@ -128,13 +133,16 @@ visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_vote_all:
    case nir_intrinsic_vote_feq:
    case nir_intrinsic_vote_ieq:
-   case nir_intrinsic_reduce:
    case nir_intrinsic_load_push_constant:
    case nir_intrinsic_vulkan_resource_index:
    case nir_intrinsic_load_work_group_id:
    case nir_intrinsic_load_num_work_groups:
    case nir_intrinsic_get_buffer_size:
       is_divergent = false;
+      break;
+
+   case nir_intrinsic_reduce:
+      is_divergent = nir_intrinsic_cluster_size(instr) != 0;
       break;
 
    case nir_intrinsic_load_ubo:
