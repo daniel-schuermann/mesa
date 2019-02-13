@@ -1086,6 +1086,31 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_imul_high: {
+      if (dst.regClass() == v1) {
+         aco_ptr<VOP3A_instruction> mul{create_instruction<VOP3A_instruction>(aco_opcode::v_mul_hi_i32, Format::VOP3A, 2, 1)};
+         mul->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
+         mul->getOperand(1) = Operand{get_alu_src(ctx, instr->src[1])};
+         mul->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(mul));
+      } else if (dst.regClass() == s1) {
+         aco_ptr<VOP3A_instruction> mul{create_instruction<VOP3A_instruction>(aco_opcode::v_mul_hi_i32, Format::VOP3A, 2, 1)};
+         mul->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
+         mul->getOperand(1) = Operand{as_vgpr(ctx, get_alu_src(ctx, instr->src[1]))};
+         Temp vgpr_dst = {ctx->program->allocateId(), v1};
+         mul->getDefinition(0) = Definition(vgpr_dst);
+         ctx->block->instructions.emplace_back(std::move(mul));
+         aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+         readlane->getOperand(0) = Operand(vgpr_dst);
+         readlane->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(readlane));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_fmul: {
       if (dst.size() == 1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_mul_f32, dst, true);
