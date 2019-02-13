@@ -406,6 +406,25 @@ void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
    bld.vop2(op, Definition(dst), src0, src1);
 }
 
+void emit_vop3a_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst)
+{
+   Temp src0 = get_alu_src(ctx, instr->src[0]);
+   Temp src1 = get_alu_src(ctx, instr->src[1]);
+   Temp src2 = get_alu_src(ctx, instr->src[2]);
+
+   /* ensure that the instruction has at most 1 sgpr operand
+    * The optimizer will inline constants for us */
+   if (src0.type() == sgpr && src1.type() == sgpr)
+      src0 = as_vgpr(ctx, src0);
+   if (src1.type() == sgpr && src2.type() == sgpr)
+      src1 = as_vgpr(ctx, src1);
+   if (src2.type() == sgpr && src0.type() == sgpr)
+      src2 = as_vgpr(ctx, src2);
+
+   Builder bld(ctx->program, ctx->block);
+   bld.vop3(op, Definition(dst), src0, src1, src2);
+}
+
 void emit_vop1_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode op, Temp dst)
 {
    Builder bld(ctx->program, ctx->block);
@@ -1174,6 +1193,96 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_fmax3: {
+      if (dst.size() == 1) {
+         emit_vop3a_instruction(ctx, instr, aco_opcode::v_max3_f32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_fmin3: {
+      if (dst.size() == 1) {
+         emit_vop3a_instruction(ctx, instr, aco_opcode::v_min3_f32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_fmed3: {
+      if (dst.size() == 1) {
+         emit_vop3a_instruction(ctx, instr, aco_opcode::v_med3_f32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_umax3: {
+      if (dst.size() == 1) {
+         emit_vop3a_instruction(ctx, instr, aco_opcode::v_max3_u32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_umin3: {
+      if (dst.size() == 1) {
+         emit_vop3a_instruction(ctx, instr, aco_opcode::v_min3_u32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_umed3: {
+      if (dst.size() == 1) {
+         emit_vop3a_instruction(ctx, instr, aco_opcode::v_med3_u32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_imax3: {
+      if (dst.size() == 1) {
+         emit_vop3a_instruction(ctx, instr, aco_opcode::v_max3_i32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_imin3: {
+      if (dst.size() == 1) {
+         emit_vop3a_instruction(ctx, instr, aco_opcode::v_min3_i32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_imed3: {
+      if (dst.size() == 1) {
+         emit_vop3a_instruction(ctx, instr, aco_opcode::v_med3_i32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_bcsel: {
       emit_bcsel(ctx, instr, dst);
       break;
@@ -1616,15 +1725,6 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          bld.sop2(opcode, Definition(dst), base, extract);
 
       } else {
-         /* secure that the instruction has at most 1 sgpr operand
-          * The optimizer will inline constants for us */
-         if (base.type() == sgpr && offset.type() == sgpr)
-            base = as_vgpr(ctx, base);
-         if (base.type() == sgpr && bits.type() == sgpr)
-            base = as_vgpr(ctx, base);
-         if (offset.type() == sgpr && bits.type() == sgpr)
-            offset = as_vgpr(ctx, offset);
-
          aco_opcode opcode;
          if (dst.regClass() == v1) {
             if (instr->op == nir_op_ubfe)
@@ -1635,7 +1735,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             unreachable("Unsupported BFE bit size");
          }
 
-         bld.vop3(opcode, Definition(dst), base, offset, bits);
+         emit_vop3a_instruction(ctx, instr, opcode, dst);
       }
       break;
    }
