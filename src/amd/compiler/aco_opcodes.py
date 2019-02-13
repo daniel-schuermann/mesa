@@ -606,17 +606,19 @@ SMEM_DCACHE = [
 #   opcode(name, 0, [])
 
 SMEM_SPECIAL = [
-   "s_memtime",
-   "s_memrealtime",
-   "s_atc_probe",
-   "s_atc_probe_buffer",
-   "s_dcache_discard",
-   "s_dcache_discard_x2",
-   "s_buffer_atomic_cmpswap",
-   "s_buffer_atomic_cmpswap_x2",
-   "s_atomic_cmpswap",
-   "s_atomic_cmpswap_x2",
+   (36, "s_memtime"),
+   (37, "s_memrealtime"),
+   (38, "s_atc_probe"),
+   (39, "s_atc_probe_buffer"),
+   (40, "s_dcache_discard"),
+   (41, "s_dcache_discard_x2"),
+   (65, "s_buffer_atomic_cmpswap"),
+   (97, "s_buffer_atomic_cmpswap_x2"),
+   (129, "s_atomic_cmpswap"),
+   (161, "s_atomic_cmpswap_x2"),
 ]
+for code, name in SMEM_SPECIAL:
+   opcode(name, code, Format.SMEM)
 #opcode("s_memtime", 0, [s2])
 #opcode("s_memrealtime", 0, [s2])
 #opcode("s_atc_probe", 3, [])
