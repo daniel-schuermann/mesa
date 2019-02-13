@@ -54,6 +54,7 @@ libaco_files = files(
   'aco_assembler.cpp',
   'aco_insert_waitcnt.cpp',
   'aco_scheduler_postRA.cpp',
+  'aco_reduce_assign.cpp',
   'aco_register_allocation.cpp',
   'aco_live_var_analysis.cpp',
   'aco_lower_to_hw_instr.cpp',
