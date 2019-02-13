@@ -494,6 +494,9 @@ uint16_t emit_memory_barrier(Instruction* instr, wait_ctx& ctx) {
 
 Instruction* kill(Instruction* instr, wait_ctx& ctx)
 {
+   if (instr->format == Format::PSEUDO)
+      return nullptr;
+
    uint16_t imm = 0xFFFF;
    if (ctx.exp_cnt && writes_exec(instr, ctx))
    {
