@@ -305,8 +305,11 @@ void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
             break;
          } else if ((*it)->num_definitions && (*it)->getDefinition(0).physReg() == exec)
             break;
-         else if ((*it)->opcode == aco_opcode::s_endpgm)
+         else if ((*it)->opcode == aco_opcode::s_endpgm) {
+            if (endBlock)
+               break;
             endBlock = true;
+         }
          ++it;
       }
       if (!endBlock || exported)
