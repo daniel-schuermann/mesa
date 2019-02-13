@@ -69,6 +69,54 @@ struct sched_ctx {
    }
 };
 
+bool reads_exec_implicitly(Instruction* instr)
+{
+   if (instr->isSALU()) {
+      switch (instr->opcode) {
+         case aco_opcode::s_or_saveexec_b64:
+         case aco_opcode::s_and_saveexec_b64:
+         case aco_opcode::s_xor_saveexec_b64:
+         case aco_opcode::s_andn2_saveexec_b64:
+         case aco_opcode::s_orn2_saveexec_b64:
+         case aco_opcode::s_nand_saveexec_b64:
+         case aco_opcode::s_nor_saveexec_b64:
+         case aco_opcode::s_xnor_saveexec_b64:
+            return true;
+         default:
+            return false;
+      }
+   }
+
+   if (instr->opcode == aco_opcode::v_readlane_b32 ||
+       instr->opcode == aco_opcode::v_readfirstlane_b32 ||
+       instr->opcode == aco_opcode::v_writelane_b32)
+      return false;
+
+   return true;
+}
+
+bool writes_exec_implicitly(Instruction* instr)
+{
+   if (instr->isSALU()) {
+      switch (instr->opcode) {
+         case aco_opcode::s_and_saveexec_b64:
+         case aco_opcode::s_or_saveexec_b64:
+         case aco_opcode::s_xor_saveexec_b64:
+         case aco_opcode::s_andn2_saveexec_b64:
+         case aco_opcode::s_orn2_saveexec_b64:
+         case aco_opcode::s_nand_saveexec_b64:
+         case aco_opcode::s_nor_saveexec_b64:
+         case aco_opcode::s_xnor_saveexec_b64:
+            return true;
+         default:
+            return false;
+      }
+   }
+
+   // TODO v_cmpx_*
+   return false;
+}
+
 unsigned detect_pipeline_hazard(Instruction* first, Instruction* second)
 {
    return 0;
@@ -84,7 +132,7 @@ unsigned detect_pipeline_hazard(Instruction* first, Instruction* second)
     */
 }
 
-unsigned detect_raw_hazard(Instruction* first, Instruction* second, unsigned op_idx)
+unsigned detect_raw_hazard(Instruction* first, Instruction* second, int op_idx)
 {
    /* VALU writes vgpr / VALU DPP reads vgpr */
    if (second->isDPP() && op_idx == 0 &&
@@ -205,6 +253,46 @@ Node* select_candidate(sched_ctx& ctx)
    return next;
 }
 
+bool handle_read(Block* block, Instruction* instr, Node* node, int op_idx, unsigned reg, sched_ctx& ctx)
+{
+   bool is_candidate = true;
+   std::unordered_map<unsigned, Node*>::iterator it = ctx.def_table.find(reg);
+   if (it != ctx.def_table.end())
+   {
+      Node* predecessor = it->second;
+      is_candidate = false;
+      predecessor->successors.insert(node);
+      int nops = detect_raw_hazard(block->instructions[predecessor->index].get(), instr, op_idx);
+      node->predecessors.emplace_back(std::make_pair(predecessor, nops));
+   }
+   return is_candidate;
+}
+
+bool handle_write(Block *block, Instruction* instr, Node* node, unsigned reg, sched_ctx& ctx)
+{
+   bool is_candidate = true;
+   std::unordered_map<unsigned, Node*>::iterator it = ctx.def_table.find(reg);
+   if (it != ctx.def_table.end())
+   {
+      is_candidate = false;
+      /* add all uses of previous write to predecessors */
+      for (Node* use : it->second->successors)
+      {
+         if (use == node)
+            continue;
+         use->successors.insert(node);
+         int nops = detect_war_hazard(block->instructions[use->index].get(), instr);
+         node->predecessors.emplace_back(std::make_pair(use, nops));
+      }
+      /* add previous write as predecessor */
+      it->second->successors.insert(node);
+      int nops = detect_waw_hazard(block->instructions[it->second->index].get(), instr);
+      node->predecessors.emplace_back(std::make_pair(it->second, nops));
+   }
+   ctx.def_table[reg] = node;
+   return is_candidate;
+}
+
 void build_dag(Block* block, sched_ctx& ctx)
 {
    // TODO: add / propagate priorities
@@ -219,18 +307,17 @@ void build_dag(Block* block, sched_ctx& ctx)
       {
          if (instr->operands[i].isConstant()) continue;
          unsigned reg = instr->operands[i].physReg().reg;
-         for (unsigned k = 0; k < instr->operands[i].size(); k++)
-         {
-            std::unordered_map<unsigned, Node*>::iterator it = ctx.def_table.find(reg + k);
-            if (it != ctx.def_table.end())
-            {
-               Node* predecessor = it->second;
+         for (unsigned k = 0; k < instr->operands[i].size(); k++) {
+            if (!handle_read(block, instr, node, i, reg + k, ctx))
                is_candidate = false;
-               predecessor->successors.insert(node);
-               int nops = detect_raw_hazard(block->instructions[predecessor->index].get(), instr, i);
-               node->predecessors.emplace_back(std::make_pair(predecessor, nops));
-               break;
-            }
+         }
+
+      }
+
+      if (reads_exec_implicitly(instr)) {
+         for (unsigned reg = exec.reg; reg <= exec.reg + 1; reg++) {
+            if (!handle_read(block, instr, node, -1, reg, ctx))
+               is_candidate = false;
          }
       }
 
@@ -240,25 +327,14 @@ void build_dag(Block* block, sched_ctx& ctx)
          unsigned reg = instr->definitions[i].physReg().reg;
          for (unsigned k = 0; k < instr->definitions[i].size(); k++)
          {
-            std::unordered_map<unsigned, Node*>::iterator it = ctx.def_table.find(reg + k);
-            if (it != ctx.def_table.end())
-            {
+            if (!handle_write(block, instr, node, reg + k, ctx))
                is_candidate = false;
-               /* add all uses of previous write to predecessors */
-               for (Node* use : it->second->successors)
-               {
-                  if (use == node)
-                     continue;
-                  use->successors.insert(node);
-                  int nops = detect_war_hazard(block->instructions[use->index].get(), instr);
-                  node->predecessors.emplace_back(std::make_pair(use, nops));
-               }
-               /* add previous write as predecessor */
-               it->second->successors.insert(node);
-               int nops = detect_waw_hazard(block->instructions[it->second->index].get(), instr);
-               node->predecessors.emplace_back(std::make_pair(it->second, nops));
-            }
-            ctx.def_table[reg+k] = node;
+         }
+      }
+      if (writes_exec_implicitly(instr)) {
+         for (unsigned reg = exec.reg; reg <= exec.reg + 1; reg++) {
+            if (!handle_write(block, instr, node, reg, ctx))
+               is_candidate = false;
          }
       }
       if (is_candidate)
