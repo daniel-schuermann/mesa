@@ -59,6 +59,12 @@ typedef enum {
    v2_linear = v2 | (1 << 6),
 } RegClass;
 
+static inline RegClass linearClass(RegClass reg)
+{
+   assert(reg == v1 || reg == v2);
+   return (RegClass)((unsigned)reg | (1 << 6));
+}
+
 namespace aco {
 enum class Format : std::uint16_t;
 }
@@ -119,6 +125,7 @@ enum class Format : std::uint16_t {
 
    PSEUDO_BRANCH = 16,
    PSEUDO_BARRIER = 17,
+   PSEUDO_REDUCTION = 18,
 
    /* Vector ALU Formats */
    VOP1 = 1 << 8,
@@ -710,6 +717,27 @@ struct Pseudo_branch_instruction : public Instruction {
 struct Pseudo_barrier_instruction : public Instruction {
 };
 
+enum ReduceOp {
+   iadd32, iadd64,
+   imul32, imul64,
+   fadd32, fadd64,
+   fmul32, fmul64,
+   imin32, imin64,
+   imax32, imax64,
+   umin32, umin64,
+   umax32, umax64,
+   fmin32, fmin64,
+   fmax32, fmax64,
+   iand32, iand64,
+   ior32, ior64,
+   ixor32, ixor64,
+};
+
+struct Pseudo_reduction_instruction : public Instruction {
+   ReduceOp reduce_op;
+   unsigned cluster_size; // must be 0 for scans
+};
+
 struct instr_deleter_functor {
    void operator()(void* p) {
       free(p);
@@ -809,6 +837,7 @@ live live_var_analysis(Program* program,
 void dominator_tree(Program* program);
 void value_numbering(Program* program);
 void optimize(Program* program);
+void setup_reduce_temp(Program* program);
 void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_per_block);
 void eliminate_phis(Program* program);
 void lower_to_hw_instr(Program* program);
