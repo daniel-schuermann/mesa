@@ -476,6 +476,7 @@ static const struct debug_control radv_debug_options[] = {
 	{"nobinning", RADV_DEBUG_NOBINNING},
 	{"noloadstoreopt", RADV_DEBUG_NO_LOAD_STORE_OPT},
 	{"nongg", RADV_DEBUG_NO_NGG},
+	{"compiletime", RADV_DEBUG_COMPILETIME},
 	{NULL, 0}
 };
 
