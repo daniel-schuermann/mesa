@@ -489,7 +489,8 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    case aco_opcode::v_sub_f32:
    case aco_opcode::v_subrev_f32: { /* neg */
       int first = instr->opcode == aco_opcode::v_subrev_f32;
-      if (instr->getOperand(first).isConstant() && instr->getOperand(first).constantValue() == 0) {
+      if (instr->getOperand(first).isConstant() && instr->getOperand(first).constantValue() == 0 &&
+          (!instr->isVOP3() || !static_cast<VOP3A_instruction*>(instr.get())->neg[!first])) {
          ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(!first).getTemp());
          if (instr->isVOP3() && static_cast<VOP3A_instruction*>(instr.get())->abs[!first]) /* neg(abs(x)) */
             ctx.info[instr->getDefinition(0).tempId()].set_abs(instr->getOperand(!first).getTemp());
