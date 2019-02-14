@@ -887,6 +887,7 @@ optimizations.extend([
    (('ussub_4x8', a, 0), a),
    (('ussub_4x8', a, ~0), 0),
    (('fsub', a, b), ('fadd', a, ('fneg', b)), 'options->lower_sub'),
+   (('fadd', a, ('fneg', b)), ('fsub', a, b), '!options->lower_sub'),
    (('isub', a, b), ('iadd', a, ('ineg', b)), 'options->lower_sub'),
    (('fneg', a), ('fsub', 0.0, a), 'options->lower_negate'),
    (('ineg', a), ('isub', 0, a), 'options->lower_negate'),
