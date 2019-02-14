@@ -487,10 +487,11 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          ctx.info[instr->getDefinition(0).tempId()].set_abs(instr->getOperand(1).getTemp());
       break;
    case aco_opcode::v_sub_f32: /* neg */
-      if (instr->getOperand(0).isConstant() && instr->getOperand(0).constantValue() == 0)
+      if (instr->getOperand(0).isConstant() && instr->getOperand(0).constantValue() == 0) {
          ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(1).getTemp());
-      if (instr->isVOP3() && static_cast<VOP3A_instruction*>(instr.get())->abs[1]) /* neg(abs(x)) */
-         ctx.info[instr->getDefinition(0).tempId()].set_abs(instr->getOperand(1).getTemp());
+         if (instr->isVOP3() && static_cast<VOP3A_instruction*>(instr.get())->abs[1]) /* neg(abs(x)) */
+            ctx.info[instr->getDefinition(0).tempId()].set_abs(instr->getOperand(1).getTemp());
+      }
       break;
    case aco_opcode::v_med3_f32: { /* clamp */
       VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr.get());
