@@ -49,6 +49,9 @@ static void ac_init_llvm_target()
 	/* For inline assembly. */
 	LLVMInitializeAMDGPUAsmParser();
 
+	/* For ACO disassembly. */
+	LLVMInitializeAMDGPUDisassembler();
+
 	/* Workaround for bug in llvm 4.0 that causes image intrinsics
 	 * to disappear.
 	 * https://reviews.llvm.org/D26348

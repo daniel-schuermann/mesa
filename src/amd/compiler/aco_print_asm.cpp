@@ -1,40 +1,53 @@
 #include <vector>
 #include <ostream>
+#include <iomanip>
 #include "aco_ir.h"
+#include "llvm-c/Disassembler.h"
+#include "common/ac_llvm_util.h"
 
 namespace aco {
 
-void print_asm(std::vector<uint32_t>& binary, char* llvm_mc, std::ostream& out)
+void print_asm(std::vector<uint32_t>& binary, enum radeon_family family, std::ostream& out)
 {
-   char path[] = "/tmp/fileXXXXXX";
-   char line[2048], tmp[128];
-   FILE *p;
-   int fd;
+   LLVMDisasmContextRef disasm = LLVMCreateDisasmCPU("amdgcn-mesa-mesa3d",
+                                                     ac_get_llvm_processor_name(family),
+                                                     NULL, 0, NULL, NULL);
 
-   /* Dump the binary into a temporary file. */
-   fd = mkstemp(path);
-   if (fd < 0)
-      return;
+   char outline[1024];
+   size_t pos = 0;
+   bool invalid = false;
+   while (pos < binary.size()) {
+      size_t l = LLVMDisasmInstruction(disasm, (uint8_t *) &binary[pos],
+                                       (binary.size() - pos) * sizeof(uint32_t), 0,
+                                       outline, sizeof(outline));
 
-   for (uint32_t w : binary)
-   {
-      sprintf(tmp, "0x%02x 0x%02x 0x%02x 0x%02x\n", (w >> 0 ) & 0xFF, (w >> 8 ) & 0xFF, (w >> 16) & 0xFF, (w >> 24) & 0xFF);
-      if (write(fd, tmp, 20) == -1)
-         goto fail;
+      size_t new_pos;
+      const int align_width = 60;
+      if (!l) {
+         out << std::left << std::setw(align_width) << std::setfill(' ') << "(invalid instruction)";
+         new_pos = pos + 1;
+         invalid = true;
+      } else {
+         out << std::left << std::setw(align_width) << std::setfill(' ') << outline;
+         assert(l % 4 == 0);
+         new_pos = pos + l / 4;
+      }
+
+      out << " ;";
+      for (; pos < new_pos; pos++)
+         out << " " << std::setfill('0') << std::setw(8) << std::hex << binary[pos];
+      out << std::endl;
    }
 
-   sprintf(tmp, "%s --arch=amdgcn -mcpu=gfx906 -disassemble %s", llvm_mc, path);
-   p = popen(tmp, "r");
-   if (p) {
-      while (fgets(line, sizeof(line), p))
-         out << line;
-      pclose(p);
+   LLVMDisasmDispose(disasm);
+
+   if (invalid) {
+      /* Invalid instructions usually lead to GPU hangs, which can make
+       * getting the actual invalid instruction hard. Abort here so that we
+       * can find the problem.
+       */
+      abort();
    }
-
-fail:
-   close(fd);
-   unlink(path);
-
 }
 
 }

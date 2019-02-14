@@ -846,7 +846,7 @@ void schedule_program(Program* program, std::vector<std::vector<std::pair<uint16
 void spill(Program* program, live& live_vars, const struct radv_nir_compiler_options *options);
 void insert_wait_states(Program* program);
 std::vector<uint32_t> emit_program(Program* program);
-void print_asm(std::vector<uint32_t>& binary, char* llvm_mc, std::ostream& out);
+void print_asm(std::vector<uint32_t>& binary, enum radeon_family family, std::ostream& out);
 void validate(Program* program, FILE *output);
 
 void aco_print_instr(Instruction *instr, FILE *output);

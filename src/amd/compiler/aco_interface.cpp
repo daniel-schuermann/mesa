@@ -96,12 +96,11 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    /* Assembly */
    std::vector<uint32_t> code = aco::emit_program(program.get());
 
-   char llvm_mc[] = "/usr/bin/llvm-mc-7";
    if (options->dump_shader) {
       std::cerr << "After Assembly:\n";
       //std::cerr << "Num VGPRs: " << program->config->num_vgprs << "\n";
       //std::cerr << "Num SGPRs: " << program->config->num_sgprs << "\n";
-      aco::print_asm(code, llvm_mc, std::cerr);
+      aco::print_asm(code, options->family, std::cerr);
    }
    //std::cerr << binary->disasm_string;
    uint32_t* bin = (uint32_t*) malloc(code.size() * sizeof(uint32_t));
