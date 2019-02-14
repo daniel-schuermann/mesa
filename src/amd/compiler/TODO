@@ -1,0 +1,45 @@
+ACO TODOs
+
+Features:
+- implement subgroup operations
+- implement other shader stages
+- implement missing features for games or just CTS
+
+Fixes:
+- fix WQM for FS (see LLVM's SIWholeQuadMode.cpp)
+- fix discard_if to check if anywhere(!) are lanes active:
+	%tmp = active_lanes_at_start_of_program
+	%tmp = %tmp & ~cond . EXEC &= %tmp. if %tmp == 0 endpgm
+	- also schedule discard_if
+
+Optimizations:
+- optimize V_OR3_B32/V_AND_OR_B32/V_LSHL_ADD_U32/etc
+- optimize sub-dword-addressing (SDWA) e.g. for unpack_*
+- lower to CSSA
+	- idea from the paper "Revisiting Out-of-SSA Translation for Correctness, CodeQuality, and Efficiency"
+	- it is necessary to lower to CSSA for correctness wrt spilling (we don't have mem-to-mem moves)
+	- also, it can enable much better jump threading by keeping empty blocks empty
+- rework register coalescing to also use negative affinities
+- jump threading
+	- if a block is empty, not only remove the branch, but also change the exec mask handling in the surrounding blocks
+	- a rework of how exec mask is handled might help (maybe with pseudo ops)
+- GCM/LICM
+	- long-term-goal is global code motion with register contraints
+	- a good heuristic might do fine, but unrestricted GCM can do more harm than good
+	- we might also want some kind of Sethi-Ulman sequencing to lower register usage even further
+- Spilling/Rematerialization
+	- currently, we only spill sgprs, and sometimes even const values
+	- it might be beneficial to spill if it helps to squeeze in an additional wave (we can easily test different thresholds here)
+
+Refactorings (lower priority):
+- create an Instruction Builder class to be used for isel
+- change schedule_postRA to be either a single forward insert_NOPs pass or really schedule to avoid NOPs (or both)
+- nir_opt_sink() should either be merged with nir_opt_move_load_ubo() or be done by GCM
+
+
+NIR TODOs
+- pointer analysis / alias analysis
+	- we really want to schedule independent memory operations
+- memory coalescing
+	- currently, we have tons of loads of single dwords
+- ABI lowering for future hardware and maybe in very far future radeonSI
