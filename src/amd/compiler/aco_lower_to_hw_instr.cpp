@@ -379,13 +379,21 @@ void lower_to_hw_instr(Program* program)
             }
             case aco_opcode::p_discard_if:
             {
-               assert(instr->getOperand(0).regClass() == s2);
-               aco_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2)};
-               sop2->getOperand(0) = Operand(exec, s2);
-               sop2->getOperand(1) = instr->getOperand(0);
-               sop2->getDefinition(0) = Definition(exec, s2);
-               sop2->getDefinition(1) = Definition(program->allocateId(), scc, b);
-               ctx.instructions.emplace_back(std::move(sop2));
+               if (instr->getOperand(0).regClass() == s1) {
+                  aco_ptr<SOPC_instruction> cmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_u32, Format::SOPC, 2, 1)};
+                  cmp->getOperand(0) = Operand(instr->getOperand(0));
+                  cmp->getOperand(1) = Operand((uint32_t) 0);
+                  cmp->getDefinition(0) = Definition(program->allocateId(), scc, b);
+                  ctx.instructions.emplace_back(std::move(cmp));
+               } else {
+                  assert(instr->getOperand(0).regClass() == s2);
+                  aco_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2)};
+                  sop2->getOperand(0) = Operand(exec, s2);
+                  sop2->getOperand(1) = instr->getOperand(0);
+                  sop2->getDefinition(0) = Definition(exec, s2);
+                  sop2->getDefinition(1) = Definition(program->allocateId(), scc, b);
+                  ctx.instructions.emplace_back(std::move(sop2));
+               }
 
                aco_ptr<SOPP_instruction> branch{create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc1, Format::SOPP, 1, 0)};
                branch->getOperand(0) = Operand(exec, s2);
