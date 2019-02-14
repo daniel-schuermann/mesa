@@ -2555,6 +2555,7 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
 void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    /**
+    * (vgpr discard_if)
     * s_andn2_b64 exec, exec, vcc
     * s_cbranch_execnz Label
     * exp null off, off, off, off done vm
@@ -2562,14 +2563,20 @@ void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
     * Label
     */
    Temp cond32 = get_ssa_temp(ctx, instr->src[0].ssa);
-   Temp cond = Temp{ctx->program->allocateId(), s2};
+   Temp cond;
 
-   aco_ptr<Instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_lg_u32, Format::VOPC, 2, 1)};
-   cmp->getOperand(0) = Operand((uint32_t) 0);
-   cmp->getOperand(1) = Operand{cond32};
-   cmp->getDefinition(0) = Definition{cond};
-   cmp->getDefinition(0).setHint(vcc);
-   ctx->block->instructions.emplace_back(std::move(cmp));
+   if (cond32.regClass() == s1) {
+      cond = cond32;
+   } else {
+      cond = Temp{ctx->program->allocateId(), s2};
+
+      aco_ptr<Instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_lg_u32, Format::VOPC, 2, 1)};
+      cmp->getOperand(0) = Operand((uint32_t) 0);
+      cmp->getOperand(1) = Operand{cond32};
+      cmp->getDefinition(0) = Definition{cond};
+      cmp->getDefinition(0).setHint(vcc);
+      ctx->block->instructions.emplace_back(std::move(cmp));
+   }
 
    aco_ptr<Instruction> discard{create_instruction<Instruction>(aco_opcode::p_discard_if, Format::PSEUDO, 1, 1)};
    discard->getOperand(0) = Operand(cond);
