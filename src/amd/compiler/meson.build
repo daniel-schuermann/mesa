@@ -75,7 +75,7 @@ libaco = static_library(
    inc_common, inc_compiler, inc_mesa, inc_mapi, inc_amd, inc_amd_common,
   ],
   dependencies : [
-    dep_thread, dep_elf, dep_libdrm_amdgpu, dep_valgrind,
+    dep_llvm, dep_thread, dep_elf, dep_libdrm_amdgpu, dep_valgrind,
     idep_nir_headers,
   ],
   c_args : [c_vis_args],
