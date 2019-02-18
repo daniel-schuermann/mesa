@@ -838,6 +838,7 @@ void dominator_tree(Program* program);
 void value_numbering(Program* program);
 void optimize(Program* program);
 void setup_reduce_temp(Program* program);
+void lower_to_cssa(Program* program, live& live_vars, const struct radv_nir_compiler_options *options);
 void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_per_block);
 void eliminate_phis(Program* program);
 void lower_to_hw_instr(Program* program);
