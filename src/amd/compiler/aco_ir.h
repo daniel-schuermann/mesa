@@ -404,9 +404,9 @@ public:
       return data_.i;
    }
 
-   void setKill(bool) noexcept
+   void setKill(bool flag) noexcept
    {
-      control_[3] = 1;
+      control_[3] = flag;
    }
 
    bool isKill() const noexcept
