@@ -109,8 +109,11 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
             if (operand.isTemp()) {
                auto it = live_temps[preds[i]->index].insert(operand.getTemp());
                /* check if we changed an already processed block */
-               if (it.second)
+               if (it.second) {
+                  if (reg_demand_cond)
+                     operand.setKill(true);
                   worklist.insert(preds[i]->index);
+               }
             }
          }
       } else {
@@ -123,11 +126,16 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
                   inserted = live_sgprs.insert(operand.getTemp()).second;
                else
                   inserted = live_vgprs.insert(operand.getTemp()).second;
-               if (reg_demand_cond && inserted) {
-                  if (operand.getTemp().type() == vgpr)
-                     vgpr_demand += operand.size();
-                  else
-                     sgpr_demand += operand.size();
+               if (reg_demand_cond) {
+                  if (inserted) {
+                     operand.setKill(true);
+                     if (operand.getTemp().type() == vgpr)
+                        vgpr_demand += operand.size();
+                     else
+                        sgpr_demand += operand.size();
+                  } else {
+                     operand.setKill(false);
+                  }
                }
             }
          }
