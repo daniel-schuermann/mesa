@@ -57,6 +57,7 @@ libaco_files = files(
   'aco_reduce_assign.cpp',
   'aco_register_allocation.cpp',
   'aco_live_var_analysis.cpp',
+  'aco_lower_to_cssa.cpp',
   'aco_lower_to_hw_instr.cpp',
   'aco_optimizer.cpp',
   'aco_opt_value_numbering.cpp',
