@@ -128,13 +128,10 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
                   inserted = live_vgprs.insert(operand.getTemp()).second;
                if (reg_demand_cond) {
                   if (inserted) {
-                     operand.setKill(true);
                      if (operand.getTemp().type() == vgpr)
                         vgpr_demand += operand.size();
                      else
                         sgpr_demand += operand.size();
-                  } else {
-                     operand.setKill(false);
                   }
                }
             }
