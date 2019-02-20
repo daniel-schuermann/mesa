@@ -43,9 +43,9 @@ namespace aco {
 void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_per_block)
 {
 
-   /* calculate max register bounds */
-   program->config->num_vgprs = program->max_vgpr;
-   program->config->num_sgprs = program->max_sgpr + 2;
+   /* keep track of the highest used register */
+   unsigned max_used_sgpr = 0;
+   unsigned max_used_vgpr = 0;
 
    std::unordered_map<unsigned, std::pair<PhysReg, RegClass>> assignments;
    std::vector<std::unordered_map<unsigned, Temp>> renames(program->blocks.size());
@@ -67,16 +67,19 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                reg_lo += stride;
                continue;
             }
+            reg_hi = reg_lo + size - 1;
             found = true;
-            for (unsigned i = 1; i < size; i++) {
-               reg_hi = reg_lo + i;
-               if (reg_file[reg_hi] != 0) {
+            for (unsigned reg = reg_lo + 1; reg <= reg_hi; reg++) {
+               if (reg_file[reg] != 0) {
                   found = false;
                   break;
                }
             }
             if (found) {
-
+               if (lb == 0)
+                  max_used_sgpr = std::max(max_used_sgpr, reg_hi);
+               else
+                  max_used_vgpr = std::max(max_used_vgpr, reg_hi - 256);
                return std::make_pair(PhysReg{reg_lo}, true);
             }
             while (reg_lo <= reg_hi)
@@ -168,6 +171,10 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             reg_file = register_file;
             for (unsigned i = reg_lo; i < reg_lo + size; i++)
                reg_file[i] = 0;
+            if (lb == 0)
+               max_used_sgpr = std::max(max_used_sgpr, reg_hi);
+            else
+               max_used_vgpr = std::max(max_used_vgpr, reg_hi - 256);
             return std::make_pair(PhysReg{reg_lo}, true);
          }
       }
@@ -891,6 +898,9 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                                  std::make_move_iterator(tmp.begin()),
                                  std::make_move_iterator(tmp.end()));
    }
+
+   program->config->num_vgprs = max_used_vgpr + 1;
+   program->config->num_sgprs = max_used_sgpr + 1 + 2;
 }
 
 }
