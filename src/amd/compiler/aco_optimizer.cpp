@@ -535,6 +535,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       break;
    case aco_opcode::p_phi:
    case aco_opcode::p_linear_phi: {
+      /* lower_bool_phis() can create phis like this */
       bool all_same = instr->getOperand(0).isTemp();
       for (unsigned i = 1; all_same && (i < instr->operandCount()); i++) {
          if (!instr->getOperand(i).isTemp() || instr->getOperand(i).tempId() != instr->getOperand(0).tempId())
