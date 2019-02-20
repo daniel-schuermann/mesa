@@ -2528,7 +2528,6 @@ void radv_create_shaders(struct radv_pipeline *pipeline,
 
 	for (int i = 0; i < MESA_SHADER_STAGES; ++i) {
 		if (nir[i]) {
-			NIR_PASS_V(nir[i], nir_lower_bool_to_int32);
 			NIR_PASS_V(nir[i], nir_lower_non_uniform_access,
 			                   nir_lower_non_uniform_ubo_access |
 			                   nir_lower_non_uniform_ssbo_access |
