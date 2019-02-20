@@ -60,6 +60,8 @@ struct isel_context {
    bool *divergent_vals;
    std::unique_ptr<RegClass[]> reg_class;
    std::unordered_map<unsigned, unsigned> allocated;
+   /* used to avoid splitting SCC live ranges and pointless conversions */
+   std::unordered_map<unsigned, unsigned> allocated_bool32;
    std::unordered_map<unsigned, std::array<Temp,4>> allocated_vec;
    gl_shader_stage stage;
    struct {
@@ -164,28 +166,58 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_fddy_coarse:
                      type = vgpr;
                      break;
-                  case nir_op_flt32:
-                  case nir_op_fge32:
-                  case nir_op_feq32:
-                  case nir_op_fne32:
-                  case nir_op_ilt32:
-                  case nir_op_ige32:
-                  case nir_op_ieq32:
-                  case nir_op_ine32:
-                  case nir_op_ult32:
-                  case nir_op_uge32:
-                  case nir_op_f2i32:
-                  case nir_op_f2u32:
-                  case nir_op_i2b32:
-                  case nir_op_b2i32:
-                  case nir_op_imov:
-                     type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
+                  case nir_op_flt:
+                  case nir_op_fge:
+                  case nir_op_feq:
+                  case nir_op_fne:
+                  case nir_op_ilt:
+                  case nir_op_ige:
+                  case nir_op_ieq:
+                  case nir_op_ine:
+                  case nir_op_ult:
+                  case nir_op_uge:
+                  case nir_op_i2b1:
+                  case nir_op_iand:
+                  case nir_op_ior:
+                  case nir_op_inot:
+                  case nir_op_ixor:
+                     if (alu_instr->dest.dest.ssa.bit_size == 1) {
+                        type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? sgpr : scc_bit;
+                        size = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? 2 : 1;
+                     } else {
+                        for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
+                           if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr)
+                              type = vgpr;
+                        }
+                     }
                      break;
-                  case nir_op_b32csel:
-                     if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index])
-                        type = vgpr;
-                     // TODO: with 1-bit bools, the regClass changes!
-                     /* fallthrough */
+                  case nir_op_b2i32:
+                     for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
+                        if (reg_class[alu_instr->src[i].src.ssa->index] == s2)
+                           type = vgpr;
+                     }
+                     break;
+                  case nir_op_bcsel:
+                     if (alu_instr->dest.dest.ssa.bit_size == 1) {
+                        type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? sgpr : scc_bit;
+                        size = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? 2 : 1;
+                     } else {
+                        for (unsigned i = 1; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
+                           if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr)
+                              type = vgpr;
+                        }
+                        if (reg_class[alu_instr->src[0].src.ssa->index] == s2)
+                           type = vgpr;
+                     }
+                     break;
+                  case nir_op_imov:
+                     if (alu_instr->dest.dest.ssa.bit_size == 1) {
+                        type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? sgpr : scc_bit;
+                        size = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? 2 : 1;
+                     } else {
+                        type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
+                     }
+                     break;
                   default:
                      for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
                         if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr)
@@ -197,10 +229,14 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                break;
             }
             case nir_instr_type_load_const: {
-               unsigned size = nir_instr_as_load_const(instr)->def.num_components;
-               if (nir_instr_as_load_const(instr)->def.bit_size == 64)
-                  size *= 2;
-               reg_class[nir_instr_as_load_const(instr)->def.index] = getRegClass(sgpr, size);
+               if (nir_instr_as_load_const(instr)->def.bit_size == 1) {
+                  reg_class[nir_instr_as_load_const(instr)->def.index] = b;
+               } else {
+                  unsigned size = nir_instr_as_load_const(instr)->def.num_components;
+                  if (nir_instr_as_load_const(instr)->def.bit_size == 64)
+                     size *= 2;
+                  reg_class[nir_instr_as_load_const(instr)->def.index] = getRegClass(sgpr, size);
+               }
                break;
             }
             case nir_instr_type_intrinsic: {
@@ -225,7 +261,6 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      type = sgpr;
                      size = 2;
                      break;
-                  case nir_intrinsic_load_front_face:
                   case nir_intrinsic_load_sample_id:
                   case nir_intrinsic_load_sample_mask_in:
                   case nir_intrinsic_load_input:
@@ -268,6 +303,10 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_inclusive_scan:
                   case nir_intrinsic_exclusive_scan:
                      type = vgpr;
+                     break;
+                  case nir_intrinsic_load_front_face:
+                     type = sgpr;
+                     size = 2;
                      break;
                   case nir_intrinsic_vulkan_resource_index:
                      type = sgpr;
@@ -345,14 +384,24 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                break;
             }
             case nir_instr_type_ssa_undef: {
-               unsigned size = nir_instr_as_ssa_undef(instr)->def.num_components;
-               if (nir_instr_as_ssa_undef(instr)->def.bit_size == 64)
-                  size *= 2;
-               reg_class[nir_instr_as_ssa_undef(instr)->def.index] = getRegClass(sgpr, size);
+               if (nir_instr_as_ssa_undef(instr)->def.bit_size == 1) {
+                  reg_class[nir_instr_as_ssa_undef(instr)->def.index] = b;
+               } else {
+                  unsigned size = nir_instr_as_ssa_undef(instr)->def.num_components;
+                  if (nir_instr_as_ssa_undef(instr)->def.bit_size == 64)
+                     size *= 2;
+                  reg_class[nir_instr_as_ssa_undef(instr)->def.index] = getRegClass(sgpr, size);
+               }
                break;
             }
             case nir_instr_type_phi: {
                nir_phi_instr* phi = nir_instr_as_phi(instr);
+
+               if (phi->dest.ssa.bit_size == 1) {
+                  reg_class[phi->dest.ssa.index] = ctx->divergent_vals[phi->dest.ssa.index] ? s2 : b;
+                  break;
+               }
+
                RegType type;
                if (ctx->divergent_vals[phi->dest.ssa.index]) {
                   type = vgpr;
@@ -963,7 +1012,6 @@ setup_isel_context(Program* program, nir_shader *nir,
    nir_copy_prop(nir);
    nir_opt_idiv_const(nir, 32);
    nir_lower_idiv(nir, true);
-   nir_lower_bool_to_int32(nir);
    nir_opt_shrink_load(nir);
    nir_opt_cse(nir);
    nir_opt_dce(nir);
