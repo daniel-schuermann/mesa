@@ -832,6 +832,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         struct radv_shader_variant_info *info,
                                         struct radv_nir_compiler_options *options);
 
+void lower_bool_phis(Program* program);
 template<bool condition>
 live live_var_analysis(Program* program,
                        const struct radv_nir_compiler_options *options);
