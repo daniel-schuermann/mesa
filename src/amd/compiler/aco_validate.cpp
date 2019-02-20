@@ -147,7 +147,7 @@ void validate(Program* program, FILE * output)
                }
             } else if (instr->opcode == aco_opcode::p_phi) {
                check(instr->num_operands == block->logical_predecessors.size(), "Number of Operands does not match number of predecessors", instr.get());
-               check(instr->getDefinition(0).getTemp().type() == vgpr, "Logical Phi Definition must be vgpr", instr.get());
+               check(instr->getDefinition(0).getTemp().type() == vgpr || instr->getDefinition(0).getTemp().regClass() == s2, "Logical Phi Definition must be vgpr or divergent boolean", instr.get());
             } else if (instr->opcode == aco_opcode::p_linear_phi) {
                check(instr->num_operands == block->linear_predecessors.size(), "Number of Operands does not match number of predecessors", instr.get());
             }
