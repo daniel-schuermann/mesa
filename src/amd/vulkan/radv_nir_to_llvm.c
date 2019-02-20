@@ -4325,8 +4325,10 @@ LLVMModuleRef ac_translate_nir_to_llvm(struct ac_llvm_compiler *ac_llvm,
 
 	radv_nir_shader_info_init(&shader_info->info);
 
-	for(int i = 0; i < shader_count; ++i)
+	for(int i = 0; i < shader_count; ++i) {
+		nir_lower_bool_to_int32(shaders[i]);
 		radv_nir_shader_info_pass(shaders[i], options, &shader_info->info);
+	}
 
 	for (i = 0; i < MAX_SETS; i++)
 		shader_info->user_sgprs_locs.descriptor_sets[i].sgpr_idx = -1;

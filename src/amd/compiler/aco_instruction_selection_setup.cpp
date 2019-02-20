@@ -961,10 +961,9 @@ setup_isel_context(Program* program, nir_shader *nir,
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
    nir_lower_io(nir, nir_var_shared, shared_var_size, (nir_lower_io_options)0);
    nir_copy_prop(nir);
-   bool lower_bools = nir_opt_idiv_const(nir, 32);
-   lower_bools = nir_lower_idiv(nir, true) || lower_bools;
-   if (lower_bools)
-      nir_lower_bool_to_int32(nir);
+   nir_opt_idiv_const(nir, 32);
+   nir_lower_idiv(nir, true);
+   nir_lower_bool_to_int32(nir);
    nir_opt_shrink_load(nir);
    nir_opt_cse(nir);
    nir_opt_dce(nir);
