@@ -42,7 +42,6 @@ struct ssa_elimination_ctx {
 
 void collect_phi_info(phi_info& ctx, aco_ptr<Instruction>& phi, std::vector<Block*> preds)
 {
-   assert(!(phi->opcode == aco_opcode::p_phi && phi->getDefinition(0).getTemp().type() == sgpr) && "smart merging for bools not yet implemented.");
    for (unsigned i = 0; i < preds.size(); i++)
    {
       if (phi->getOperand(i).isUndefined())
