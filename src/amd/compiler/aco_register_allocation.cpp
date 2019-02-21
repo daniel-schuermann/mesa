@@ -234,20 +234,21 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             }
             /* it might happen that something was moved to the position of an killed operand */
             for (unsigned i = 0; i < instr->num_operands; i++) {
-               if (instr->getOperand(i).getTemp().type() == typeOf(rc) && instr->getOperand(i).isKill()) {
-                  for (unsigned j = 0; j < instr->getOperand(i).size(); j++) {
+               Operand op = instr->getOperand(i);
+               if (op.getTemp().type() == typeOf(rc) && op.isKill()) {
+                  for (unsigned j = 0; j < op.size(); j++) {
                      /* if that is the case, we have to find another position for this operand */
-                     if (reg_file[instr->getOperand(i).physReg().reg + j] != 0) {
-                        Operand op = instr->getOperand(i);
+                     if (reg_file[op.physReg().reg + j] != 0) {
                         Definition def = Definition(program->allocateId(), op.regClass());
 
-                        /* re-enable the killed operands */
+                        /* re-enable other killed operands */
                         for (unsigned k = 0; k < instr->num_operands; k++) {
-                           Operand& op = instr->getOperand(k);
-                           if (!op.isTemp() || !op.isKill())
+                           Operand& op_ = instr->getOperand(k);
+                           if (!op_.isTemp() || !op_.isKill() || op_.getTemp() == op.getTemp())
                               continue;
-                           assert(op.isFixed());
-                           for (unsigned r = op.physReg().reg; r < op.physReg().reg + op.size(); r++) {
+
+                           assert(op_.isFixed());
+                           for (unsigned r = op_.physReg().reg; r < op_.physReg().reg + op_.size(); r++) {
                               if (!reg_file[r])
                                  reg_file[r] = 0xFFFF;
                            }
