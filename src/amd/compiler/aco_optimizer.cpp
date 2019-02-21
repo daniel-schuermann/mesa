@@ -388,9 +388,30 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       return;
 
    switch (instr->opcode) {
-   case aco_opcode::p_create_vector:
+   case aco_opcode::p_create_vector: {
+      unsigned num_ops = instr->num_operands;
+      for (unsigned i = 0; i < instr->num_operands; i++) {
+         if (instr->getOperand(i).isTemp() && ctx.info[instr->getOperand(i).tempId()].is_vec())
+            num_ops += ctx.info[instr->getOperand(i).tempId()].instr->num_operands - 1;
+      }
+      if (num_ops != instr->num_operands) {
+         aco_ptr<Instruction> old_vec = std::move(instr);
+         instr.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, num_ops, 1));
+         instr->getDefinition(0) = old_vec->getDefinition(0);
+         unsigned k = 0;
+         for (unsigned i = 0; i < old_vec->num_operands; i++) {
+            if (old_vec->getOperand(i).isTemp() && ctx.info[old_vec->getOperand(i).tempId()].is_vec()) {
+               for (unsigned j = 0; j < ctx.info[old_vec->getOperand(i).tempId()].instr->num_operands; j++)
+                  instr->getOperand(k++) = ctx.info[old_vec->getOperand(i).tempId()].instr->getOperand(j);
+            } else {
+               instr->getOperand(k++) = old_vec->getOperand(i);
+            }
+         }
+         assert(k == num_ops);
+      }
       ctx.info[instr->getDefinition(0).tempId()].set_vec(instr.get());
       break;
+   }
    case aco_opcode::p_split_vector: {
       if (!ctx.info[instr->getOperand(0).tempId()].is_vec())
          break;
