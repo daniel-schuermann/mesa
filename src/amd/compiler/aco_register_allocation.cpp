@@ -91,9 +91,9 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       /* we use a sliding window to find potential positions */
       for (reg_lo = lb, reg_hi = lb + size - 1; reg_hi < ub; reg_lo += stride, reg_hi += stride) {
          /* first check the edges: this is what we have to fix to allow for num_moves > size */
-         if (reg_lo > lb + 1 && reg_file[reg_lo] == reg_file[reg_lo - 1])
+         if (reg_lo > lb + 1 && reg_file[reg_lo] != 0 && reg_file[reg_lo] == reg_file[reg_lo - 1])
             continue;
-         if (reg_hi < ub - 1 && reg_file[reg_hi] == reg_file[reg_hi + 1])
+         if (reg_hi < ub - 1 && reg_file[reg_hi] != 0 && reg_file[reg_hi] == reg_file[reg_hi + 1])
             continue;
 
          /* second, check that we have at most k=num_moves elements in the window
