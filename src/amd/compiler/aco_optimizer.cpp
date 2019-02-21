@@ -533,6 +533,17 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
           instr->getOperand(1).isTemp() && ctx.info[instr->getOperand(1).tempId()].is_vcc())
          ctx.info[instr->getDefinition(0).tempId()].set_temp(ctx.info[instr->getOperand(1).tempId()].temp);
       break;
+   case aco_opcode::p_phi:
+   case aco_opcode::p_linear_phi: {
+      bool all_same = instr->getOperand(0).isTemp();
+      for (unsigned i = 1; all_same && (i < instr->operandCount()); i++) {
+         if (!instr->getOperand(i).isTemp() || instr->getOperand(i).tempId() != instr->getOperand(0).tempId())
+            all_same = false;
+      }
+      if (all_same)
+         ctx.info[instr->getDefinition(0).tempId()].set_temp(instr->getOperand(0).getTemp());
+      break;
+   }
    default:
       break;
    }
