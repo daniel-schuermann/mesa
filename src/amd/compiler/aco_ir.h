@@ -54,6 +54,7 @@ typedef enum {
    v3 = s3 | (1 << 5),
    v4 = s4 | (1 << 5),
    v6 = 6  | (1 << 5),
+   v7 = 7  | (1 << 5),
    /* these are used for WWM and spills to vgpr */
    v1_linear = v1 | (1 << 6),
    v2_linear = v2 | (1 << 6),
