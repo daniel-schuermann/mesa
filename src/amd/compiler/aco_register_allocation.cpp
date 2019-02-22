@@ -604,7 +604,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   }
                   /* move operand to fixed reg and create parallelcopy pair */
                   Operand pc_op = operand;
-                  Temp tmp = Temp{program->allocateId(), operand.regClass()};
+                  Temp tmp = Temp{program->allocateId(), operand.physReg() == scc ? RegClass::b : operand.regClass()};
                   Definition pc_def = Definition(tmp);
                   pc_def.setFixed(operand.physReg());
                   pc_op.setFixed(assignments[operand.tempId()].first);
