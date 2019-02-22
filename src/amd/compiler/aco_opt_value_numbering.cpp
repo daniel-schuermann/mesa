@@ -84,6 +84,8 @@ struct InstrPred {
          return false;
       if (a->opcode != b->opcode)
          return false;
+      if (a->num_operands != b->num_operands || a->num_definitions != b->num_definitions)
+         return false; /* possible with pseudo-instructions */
       for (unsigned i = 0; i < a->num_operands; i++) {
          if (a->getOperand(i).isConstant()) {
             if (!b->getOperand(i).isConstant())
