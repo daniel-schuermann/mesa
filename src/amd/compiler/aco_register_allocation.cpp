@@ -550,7 +550,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
          /* update phi affinities */
          for (unsigned i = 0; i < phi->num_operands; i++) {
-            if (phi->getOperand(i).isTemp() && phi->getOperand(i).regClass() == phi->getDefinition(i).regClass())
+            if (phi->getOperand(i).isTemp() && phi->getOperand(i).regClass() == phi->getDefinition(0).regClass())
                affinities[phi->getOperand(i).tempId()] = definition.tempId();
          }
 
