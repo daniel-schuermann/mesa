@@ -316,7 +316,8 @@ bool get_reg_specified(ra_ctx& ctx,
       return true;
    }
 
-   return get_reg_helper(ctx, reg_file, parallelcopies, instr, rc, reg.reg, reg.reg + size, size, stride, num_moves).second;
+   // TODO
+   return false;
 }
 
 
@@ -779,6 +780,28 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      }
                   }
                   definition.setFixed(reg);
+               } else if (instr->opcode == aco_opcode::p_create_vector) {
+                  for (unsigned num_moves = 0; num_moves <= 0; num_moves++) { // TODO: get_reg_specified cannot handle moves yet
+                     unsigned k = 0;
+                     for (unsigned i = 0; i < instr->num_operands; i++) {
+                        if (!instr->getOperand(i).isTemp()) {
+                           k += instr->getOperand(i).size();
+                           continue;
+                        }
+                        PhysReg reg = PhysReg{instr->getOperand(i).physReg().reg - k};
+                        if (get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg, num_moves)) {
+                           definition.setFixed(reg);
+                           break;
+                        } else {
+                           k += instr->getOperand(i).size();
+                        }
+                     }
+                     if (definition.isFixed())
+                        break;
+                  }
+                  if (!definition.isFixed())
+                     definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr));
+
                } else if (affinities.find(definition.tempId()) != affinities.end() &&
                           ctx.assignments.find(affinities[definition.tempId()]) != ctx.assignments.end()) {
                   PhysReg reg = ctx.assignments[affinities[definition.tempId()]].first;
@@ -786,6 +809,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      definition.setFixed(reg);
                   else
                      definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr));
+
                } else
                   definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr));
 
