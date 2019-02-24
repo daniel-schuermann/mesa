@@ -503,15 +503,13 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       }
       break;
    case aco_opcode::v_and_b32: /* abs */
-      if (instr->getOperand(0).isConstant() && instr->getOperand(0).constantValue() == 0x7FFFFFFF &&
-          instr->getOperand(1).isTemp())
+      if (instr->getOperand(0).constantEquals(0x7FFFFFFF) && instr->getOperand(1).isTemp())
          ctx.info[instr->getDefinition(0).tempId()].set_abs(instr->getOperand(1).getTemp());
       break;
    case aco_opcode::v_sub_f32:
    case aco_opcode::v_subrev_f32: { /* neg */
       int first = instr->opcode == aco_opcode::v_subrev_f32;
-      if (instr->getOperand(first).isConstant() && instr->getOperand(first).constantValue() == 0 &&
-          instr->getOperand(!first).isTemp() &&
+      if (instr->getOperand(first).constantEquals(0) && instr->getOperand(!first).isTemp() &&
           (!instr->isVOP3() || !static_cast<VOP3A_instruction*>(instr.get())->neg[!first])) {
          ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(!first).getTemp());
          if (instr->isVOP3() && static_cast<VOP3A_instruction*>(instr.get())->abs[!first]) /* neg(abs(x)) */
@@ -531,28 +529,26 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       bool found_zero = false, found_one = false;
       for (unsigned i = 0; i < 3; i++)
       {
-         if (instr->getOperand(i).isConstant()) {
-            if (instr->getOperand(i).constantValue() == 0)
-               found_zero = true;
-            else if (instr->getOperand(i).constantValue() == 0x3f800000) /* 1.0 */
-               found_one = true;
-         } else
+         if (instr->getOperand(i).constantEquals(0))
+            found_zero = true;
+         else if (instr->getOperand(i).constantEquals(0x3f800000)) /* 1.0 */
+            found_one = true;
+         else
             idx = i;
       }
-      if (found_zero && found_one) {
-         assert(instr->getOperand(idx).isTemp());
+      if (found_zero && found_one && instr->getOperand(idx).isTemp()) {
          ctx.info[instr->getOperand(idx).tempId()].set_clamp();
       }
       break;
    }
    case aco_opcode::v_cndmask_b32:
-      if (instr->getOperand(0).isConstant() && instr->getOperand(0).constantValue() == 0x0 &&
-          instr->getOperand(1).isConstant() && instr->getOperand(1).constantValue() == 0xFFFFFFFF &&
+      if (instr->getOperand(0).constantEquals(0) &&
+          instr->getOperand(1).constantEquals(0xFFFFFFFF) &&
           instr->getOperand(2).isTemp())
          ctx.info[instr->getDefinition(0).tempId()].set_vcc(instr->getOperand(2).getTemp());
       break;
    case aco_opcode::v_cmp_lg_u32:
-      if (instr->getOperand(0).isConstant() && instr->getOperand(0).constantValue() == 0 &&
+      if (instr->getOperand(0).constantEquals(0) &&
           instr->getOperand(1).isTemp() && ctx.info[instr->getOperand(1).tempId()].is_vcc())
          ctx.info[instr->getDefinition(0).tempId()].set_temp(ctx.info[instr->getOperand(1).tempId()].temp);
       break;
@@ -691,15 +687,15 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       bool found_zero = false, found_one = false;
       for (unsigned i = 0; i < 3; i++)
       {
-         if (instr->getOperand(i).isConstant()) {
-            if (instr->getOperand(i).constantValue() == 0)
-               found_zero = true;
-            else if (instr->getOperand(i).constantValue() == 0x3f800000) /* 1.0 */
-               found_one = true;
-         } else
+         if (instr->getOperand(i).constantEquals(0))
+            found_zero = true;
+         else if (instr->getOperand(i).constantEquals(0x3f800000)) /* 1.0 */
+            found_one = true;
+         else
             idx = i;
       }
-      if (found_zero && found_one && ctx.info[instr->getOperand(idx).tempId()].is_clamp_success()) {
+      if (found_zero && found_one && instr->getOperand(idx).isTemp() &&
+          ctx.info[instr->getOperand(idx).tempId()].is_clamp_success()) {
          /* clamp was successfully applied */
          /* if the clamp instruction is v_mad, we also have to change the original add */
          if (ctx.info[instr->getOperand(idx).tempId()].is_mad()) {
