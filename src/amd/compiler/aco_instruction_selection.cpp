@@ -3853,6 +3853,16 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       emit_split_vector(ctx, dst, 2);
       break;
    }
+   case nir_intrinsic_load_barycentric_centroid: {
+      aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+      vec->getOperand(0) = Operand(ctx->fs_inputs[fs_input::persp_centroid_p1]);
+      vec->getOperand(1) = Operand(ctx->fs_inputs[fs_input::persp_centroid_p2]);
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      vec->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(vec));
+      emit_split_vector(ctx, dst, 2);
+      break;
+   }
    case nir_intrinsic_load_front_face: {
       aco_ptr<Instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_lg_u32, Format::VOPC, 2, 1)};
       cmp->getOperand(0) = Operand((uint32_t) 0);
