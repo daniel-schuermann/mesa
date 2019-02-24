@@ -492,8 +492,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       break;
    }
    case aco_opcode::v_mul_f32: /* omod */
-      if (instr->getOperand(0).isConstant()) {
-         assert(instr->getOperand(1).isTemp());
+      if (instr->getOperand(0).isConstant() && instr->getOperand(1).isTemp()) {
          if (instr->getOperand(0).constantValue() == 0x40000000) { /* 2.0 */
             ctx.info[instr->getOperand(1).tempId()].set_omod2();
          } else if (instr->getOperand(0).constantValue() == 0x40800000) { /* 4.0 */
@@ -504,13 +503,15 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       }
       break;
    case aco_opcode::v_and_b32: /* abs */
-      if (instr->getOperand(0).isConstant() && instr->getOperand(0).constantValue() == 0x7FFFFFFF)
+      if (instr->getOperand(0).isConstant() && instr->getOperand(0).constantValue() == 0x7FFFFFFF &&
+          instr->getOperand(1).isTemp())
          ctx.info[instr->getDefinition(0).tempId()].set_abs(instr->getOperand(1).getTemp());
       break;
    case aco_opcode::v_sub_f32:
    case aco_opcode::v_subrev_f32: { /* neg */
       int first = instr->opcode == aco_opcode::v_subrev_f32;
       if (instr->getOperand(first).isConstant() && instr->getOperand(first).constantValue() == 0 &&
+          instr->getOperand(!first).isTemp() &&
           (!instr->isVOP3() || !static_cast<VOP3A_instruction*>(instr.get())->neg[!first])) {
          ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(!first).getTemp());
          if (instr->isVOP3() && static_cast<VOP3A_instruction*>(instr.get())->abs[!first]) /* neg(abs(x)) */
@@ -546,7 +547,8 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    }
    case aco_opcode::v_cndmask_b32:
       if (instr->getOperand(0).isConstant() && instr->getOperand(0).constantValue() == 0x0 &&
-          instr->getOperand(1).isConstant() && instr->getOperand(1).constantValue() == 0xFFFFFFFF)
+          instr->getOperand(1).isConstant() && instr->getOperand(1).constantValue() == 0xFFFFFFFF &&
+          instr->getOperand(2).isTemp())
          ctx.info[instr->getDefinition(0).tempId()].set_vcc(instr->getOperand(2).getTemp());
       break;
    case aco_opcode::v_cmp_lg_u32:
