@@ -690,6 +690,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       else
          mov->getOperand(0) = Operand(src);
       mov->getDefinition(0) = Definition(dst);
+      if (dst.regClass() == b)
+         mov->getDefinition(0).setFixed(scc);
       ctx->block->instructions.emplace_back(std::move(mov));
       break;
    }
