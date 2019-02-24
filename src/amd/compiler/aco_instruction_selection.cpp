@@ -678,7 +678,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       } else if (dst.regClass() == s2) {
          mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
       } else if (dst.regClass() == b) {
-         mov.reset(create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_u32, Format::SOPC, 1, 1));
+         mov.reset(create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_u32, Format::SOPC, 2, 1));
          mov->getOperand(1) = Operand((uint32_t) 0);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
