@@ -142,7 +142,8 @@ void validate(Program* program, FILE * output)
                check(instr->num_definitions == instr->num_operands, "Number of Operands does not match number of Definitions", instr.get());
                for (unsigned i = 0; i < instr->num_operands; i++) {
                   if (instr->getOperand(i).isTemp())
-                     check(instr->getDefinition(i).getTemp().type() == instr->getOperand(i).getTemp().type(),
+                     check((instr->getDefinition(i).getTemp().type() == instr->getOperand(i).getTemp().type()) ||
+                           (instr->getDefinition(i).getTemp().type() == vgpr && instr->getOperand(i).getTemp().type() == sgpr),
                            "Operand and Definition types do not match", instr.get());
                }
             } else if (instr->opcode == aco_opcode::p_phi) {
