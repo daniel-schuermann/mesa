@@ -174,6 +174,7 @@ visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_load_sample_mask_in:
    case nir_intrinsic_load_interpolated_input:
    case nir_intrinsic_load_barycentric_pixel:
+   case nir_intrinsic_load_barycentric_centroid:
    case nir_intrinsic_load_invocation_id:
    case nir_intrinsic_load_local_invocation_index:
    case nir_intrinsic_ssbo_atomic_add:
