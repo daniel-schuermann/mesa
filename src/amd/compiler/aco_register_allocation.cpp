@@ -295,10 +295,10 @@ bool get_reg_specified(ra_ctx& ctx,
    uint32_t stride = 1;
 
    if (typeOf(rc) == vgpr) {
-      if (reg.reg < 256 || reg.reg >= 256u + ctx.program->max_vgpr)
+      if (reg.reg < 256 || reg.reg + size > 256u + ctx.program->max_vgpr)
          return false;
    } else {
-      if (reg.reg >= ctx.program->max_sgpr)
+      if (reg.reg + size > ctx.program->max_sgpr)
          return false;
       if (size == 2)
          stride = 2;
@@ -313,6 +313,10 @@ bool get_reg_specified(ra_ctx& ctx,
          if (reg_file[i] != 0)
             return false;
       }
+      if (typeOf(rc) == sgpr)
+         ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, reg.reg + size - 1);
+      else
+         ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, reg.reg + size - 1 - 256);
       return true;
    }
 
@@ -788,7 +792,13 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                            k += instr->getOperand(i).size();
                            continue;
                         }
-                        PhysReg reg = PhysReg{instr->getOperand(i).physReg().reg - k};
+                        PhysReg reg = instr->getOperand(i).physReg();
+                        if (reg.reg % 256 < k) {
+                           /* this can happen with a p_create_vector with identical operands, each fixed to s[0] */
+                           k += instr->getOperand(i).size();
+                           continue;
+                        }
+                        reg.reg -= k;
                         if (get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg, num_moves)) {
                            definition.setFixed(reg);
                            break;
