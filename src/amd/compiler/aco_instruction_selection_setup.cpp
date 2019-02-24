@@ -36,7 +36,8 @@ enum fs_input {
    persp_sample,
    persp_center_p1,
    persp_center_p2,
-   persp_centroid,
+   persp_centroid_p1,
+   persp_centroid_p2,
    persp_pull_model,
    linear_sample,
    linear_center,
@@ -267,6 +268,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_vertex_id:
                   case nir_intrinsic_load_vertex_id_zero_base:
                   case nir_intrinsic_load_barycentric_pixel:
+                  case nir_intrinsic_load_barycentric_centroid:
                   case nir_intrinsic_load_interpolated_input:
                   case nir_intrinsic_load_local_invocation_id:
                   case nir_intrinsic_load_local_invocation_index:
@@ -341,6 +343,9 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                switch(intrinsic->intrinsic) {
                   case nir_intrinsic_load_barycentric_pixel:
                      ctx->fs_vgpr_args[fs_input::persp_center_p1] = true;
+                     break;
+                  case nir_intrinsic_load_barycentric_centroid:
+                     ctx->fs_vgpr_args[fs_input::persp_centroid_p1] = true;
                      break;
                   case nir_intrinsic_load_front_face:
                      ctx->fs_vgpr_args[fs_input::front_face] = true;
@@ -733,8 +738,9 @@ void add_startpgm(struct isel_context *ctx)
          ctx->program->config->spi_ps_input_addr |= S_0286CC_PERSP_CENTER_ENA(1);
          ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_CENTER_ENA(1);
       }
-      if (ctx->fs_vgpr_args[fs_input::persp_centroid]) {
-         add_arg(&args, v2, &ctx->fs_inputs[fs_input::persp_centroid], vgpr_idx);
+      if (ctx->fs_vgpr_args[fs_input::persp_centroid_p1]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::persp_centroid_p1], vgpr_idx++);
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::persp_centroid_p2], vgpr_idx++);
          ctx->program->config->spi_ps_input_addr |= S_0286CC_PERSP_CENTROID_ENA(1);
          ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_CENTROID_ENA(1);
          vgpr_idx += 2;
