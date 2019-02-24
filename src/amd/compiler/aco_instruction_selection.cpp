@@ -948,6 +948,22 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       ctx->block->instructions.emplace_back(std::move(find_lsb));
       break;
    }
+   case nir_op_bitfield_reverse: {
+      aco_ptr<Instruction> brev;
+      if (dst.regClass() == s1) {
+         brev.reset(create_instruction<SOP1_instruction>(aco_opcode::s_brev_b32, Format::SOP1, 1, 1));
+      } else if (dst.regClass() == v1) {
+         brev.reset(create_instruction<VOP1_instruction>(aco_opcode::v_bfrev_b32, Format::VOP1, 1, 1));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      brev->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
+      brev->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(brev));
+      break;
+   }
    case nir_op_iadd: {
       if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_add_i32, dst, true);
