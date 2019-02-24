@@ -405,6 +405,11 @@ public:
       return data_.i;
    }
 
+   bool constantEquals(uint32_t cmp) const noexcept
+   {
+      return isConstant() && constantValue() == cmp;
+   }
+
    void setKill(bool flag) noexcept
    {
       control_[3] = flag;
