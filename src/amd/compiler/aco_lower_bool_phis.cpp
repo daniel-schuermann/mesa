@@ -228,6 +228,7 @@ aco_ptr<Instruction> lower_uniform_bool_phi(Program *program, Block *block, aco_
    cmp->getOperand(0) = Operand((uint32_t) 0);
    cmp->getOperand(1) = Operand(dst32);
    cmp->getDefinition(0) = phi->getDefinition(0);
+   cmp->getDefinition(0).setFixed(scc);
 
    phi->getDefinition(0) = Definition(dst32);
 
