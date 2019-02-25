@@ -156,6 +156,40 @@ void emit_v_mov(isel_context *ctx, Temp src, Temp dst)
    }
 }
 
+Temp emit_wqm(isel_context *ctx, Temp src, Temp dst=Temp(0, s1))
+{
+   if (ctx->stage != MESA_SHADER_FRAGMENT) {
+      if (!dst.id())
+         return src;
+
+      if (src.type() == vgpr || src.size() > 1) {
+         emit_v_mov(ctx, src, dst);
+      } else {
+         aco_ptr<Instruction> mov(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+         mov->getOperand(0) = Operand(src);
+         mov->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(mov));
+      }
+      return dst;
+   }
+
+   if (!dst.id())
+      dst = {ctx->program->allocateId(), src.regClass()};
+
+   aco_ptr<Instruction> copy{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, 1, 1)};
+   Temp tmp{ctx->program->allocateId(), src.regClass()};
+   copy->getDefinition(0) = Definition(tmp);
+   copy->getOperand(0) = Operand(src);
+   ctx->block->instructions.emplace_back(std::move(copy));
+
+   aco_ptr<Instruction> wqm{create_instruction<Instruction>(aco_opcode::p_wqm, Format::PSEUDO, 1, 1)};
+   wqm->getOperand(0) = Operand(tmp);
+   wqm->getDefinition(0) = Definition(dst);
+   ctx->block->instructions.emplace_back(std::move(wqm));
+   ctx->program->needs_wqm = true;
+   return dst;
+}
+
 Temp as_vgpr(isel_context *ctx, Temp val)
 {
    if (val.type() == RegType::sgpr) {
@@ -1972,12 +2006,14 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             sub->dpp_ctrl = 0xAA;
       }
 
+      Temp tmp{ctx->program->allocateId(), v1};
       sub->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
       sub->getOperand(1) = Operand(tl);
-      sub->getDefinition(0) = Definition(dst);
+      sub->getDefinition(0) = Definition(tmp);
       sub->row_mask = 0xF;
       sub->bank_mask = 0xF;
       ctx->block->instructions.emplace_back(std::move(sub));
+      emit_wqm(ctx, tmp, dst);
       break;
    }
    case nir_op_urcp: {
@@ -3053,6 +3089,8 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
       store->getOperand(3) = Operand(data);
       store->idxen = true;
       store->glc = glc;
+      store->disable_wqm = true;
+      ctx->program->needs_exact = true;
       ctx->block->instructions.emplace_back(std::move(store));
       return;
    }
@@ -3070,6 +3108,8 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    store->dmask = 0xF;
    store->unrm = true;
    store->da = should_declare_array(ctx, dim, glsl_sampler_type_is_array(type));
+   store->disable_wqm = true;
+   ctx->program->needs_exact = true;
    ctx->block->instructions.emplace_back(std::move(store));
    return;
 }
@@ -3165,6 +3205,8 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
       mubuf->offset = 0;
       mubuf->idxen = true;
       mubuf->glc = return_previous;
+      mubuf->disable_wqm = true;
+      ctx->program->needs_exact = true;
       ctx->block->instructions.emplace_back(std::move(mubuf));
       return;
    }
@@ -3182,6 +3224,8 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
    mimg->dmask = (1 << data.size()) - 1;
    mimg->unrm = true;
    mimg->da = should_declare_array(ctx, dim, glsl_sampler_type_is_array(type));
+   mimg->disable_wqm = true;
+   ctx->program->needs_exact = true;
    ctx->block->instructions.emplace_back(std::move(mimg));
    return;
 }
@@ -3398,6 +3442,8 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       store->offset = start;
       store->offen = (offset.type() == vgpr);
       store->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
+      store->disable_wqm = true;
+      ctx->program->needs_exact = true;
       ctx->block->instructions.emplace_back(std::move(store));
    }
 }
@@ -3496,6 +3542,8 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    mubuf->offset = 0;
    mubuf->offen = (offset.type() == vgpr);
    mubuf->glc = return_previous;
+   mubuf->disable_wqm = true;
+   ctx->program->needs_exact = true;
    ctx->block->instructions.emplace_back(std::move(mubuf));
 }
 
@@ -4108,12 +4156,14 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       // reduce sequence
       reduce->getOperand(1) = Operand();
 
-      reduce->getDefinition(0) = Definition(dst);
+      Temp tmp_dst{ctx->program->allocateId(), dst.regClass()};
+      reduce->getDefinition(0) = Definition(tmp_dst);
       reduce->getDefinition(1) = Definition(stmp);
       reduce->getDefinition(2) = Definition(scc, b); // clobbers scc
       reduce->reduce_op = reduce_op;
       reduce->cluster_size = cluster_size;
       ctx->block->instructions.emplace_back(std::move(reduce));
+      emit_wqm(ctx, tmp_dst, dst);
       break;
    }
    default:
@@ -4529,6 +4579,11 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       assert(util_bitcount(dmask) == instr->dest.ssa.num_components);
       return;
    }
+
+   if (!(has_ddx && has_ddy) && !has_lod && !level_zero &&
+       instr->sampler_dim != GLSL_SAMPLER_DIM_MS &&
+       instr->sampler_dim != GLSL_SAMPLER_DIM_SUBPASS_MS)
+      coords = emit_wqm(ctx, coords);
 
    std::vector<Operand> args;
    if (has_offset)
@@ -5484,15 +5539,6 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
 {
    std::unique_ptr<Program> program{new Program};
    isel_context ctx = setup_isel_context(program.get(), nir, config, info, options);
-
-   // TODO: this is more a workaround until we have proper wqm handling
-   if (ctx.stage == MESA_SHADER_FRAGMENT) {
-      aco_ptr<Instruction> wqm{create_instruction<Instruction>(aco_opcode::s_wqm_b64, Format::SOP1, 1, 2)};
-      wqm->getOperand(0) = Operand(PhysReg{126}, s2);
-      wqm->getDefinition(0) = Definition(PhysReg{126}, s2);
-      wqm->getDefinition(1) = Definition(program->allocateId(), scc, b);
-      ctx.block->instructions.push_back(std::move(wqm));
-   }
 
    append_logical_start(ctx.block);
 
