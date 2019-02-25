@@ -153,6 +153,8 @@ opcode("p_reload")
 opcode("p_start_linear_vgpr")
 opcode("p_end_linear_vgpr")
 
+opcode("p_wqm")
+
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
 SOP2_SCC = {
    (0, "s_add_u32"), 

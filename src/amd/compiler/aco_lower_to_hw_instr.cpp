@@ -462,6 +462,11 @@ void lower_to_hw_instr(Program* program)
                }
                break;
             }
+            case aco_opcode::p_wqm:
+            {
+               assert(instr->getOperand(0).physReg() == instr->getDefinition(0).physReg());
+               break;
+            }
             default:
                ctx.instructions.emplace_back(std::move(instr));
                break;
