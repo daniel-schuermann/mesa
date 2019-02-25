@@ -6,7 +6,6 @@ Features:
 - implement missing features for games or just CTS
 
 Fixes:
-- fix WQM for FS (see LLVM's SIWholeQuadMode.cpp)
 - fix discard_if to check if anywhere(!) are lanes active:
 	%tmp = active_lanes_at_start_of_program
 	%tmp = %tmp & ~cond . EXEC &= %tmp. if %tmp == 0 endpgm

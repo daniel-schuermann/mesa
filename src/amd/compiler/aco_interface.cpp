@@ -75,6 +75,11 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    //aco_print_program(program.get(), stderr);
    aco::schedule_program(program.get(), live_vars);
 
+   if (program->stage == MESA_SHADER_FRAGMENT) {
+      if (aco::lower_wqm(program.get()))
+         live_vars = aco::live_var_analysis<true>(program.get(), options);
+   }
+
    aco::spill(program.get(), live_vars, options);
 
    /* Register Allocation */
