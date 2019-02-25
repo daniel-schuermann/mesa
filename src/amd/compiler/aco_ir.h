@@ -708,6 +708,7 @@ struct MUBUF_instruction : public Instruction {
    bool slc; /* system level coherent */
    bool tfe; /* texture fail enable */
    bool lds; /* Return read-data to LDS instead of VGPRs */
+   bool disable_wqm; /* Require an exec mask without helper invocations */
 };
 
 /**
@@ -731,6 +732,7 @@ struct MIMG_instruction : public Instruction {
       bool a16; /* VEGA: Address components are 16-bits */
    };
    bool d16; /* Convert 32-bit data to 16-bit data */
+   bool disable_wqm; /* Require an exec mask without helper invocations */
 };
 
 struct Export_instruction : public Instruction {
@@ -823,6 +825,8 @@ public:
    struct radv_shader_variant_info *info;
    enum chip_class chip_class;
    gl_shader_stage stage;
+   bool needs_exact = false; /* there exists an instruction with disable_wqm = true */
+   bool needs_wqm = false; /* there exists a p_wqm instruction */
 
    uint32_t allocateId()
    {
@@ -863,6 +867,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         struct radv_shader_variant_info *info,
                                         struct radv_nir_compiler_options *options);
 
+bool lower_wqm(Program* program);
 void lower_bool_phis(Program* program);
 void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr);
 template<bool condition>

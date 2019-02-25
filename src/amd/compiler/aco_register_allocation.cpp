@@ -903,7 +903,10 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                else if (instr->opcode == aco_opcode::s_addk_i32 ||
                         instr->opcode == aco_opcode::s_mulk_i32)
                   definition.setFixed(instr->getOperand(0).physReg());
-               else if ((instr->format == Format::MUBUF ||
+               else if (instr->opcode == aco_opcode::p_wqm) {
+                  assert(instr->getOperand(0).isKill());
+                  definition.setFixed(instr->getOperand(0).physReg());
+               } else if ((instr->format == Format::MUBUF ||
                          instr->format == Format::MIMG) &&
                         instr->num_definitions == 1 &&
                         instr->num_operands == 4)
