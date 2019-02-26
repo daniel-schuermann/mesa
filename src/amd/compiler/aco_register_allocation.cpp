@@ -886,12 +886,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   definition.setFixed(definition.physReg());
                else if (instr->opcode == aco_opcode::p_split_vector) {
                   PhysReg reg = PhysReg{instr->getOperand(0).physReg().reg + i};
-                  for (unsigned i = 0; i < definition.size(); i++) {
-                     if (register_file[reg.reg + i] != 0) {
-                        reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
-                        break;
-                     }
-                  }
+                  if (!get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg, 0))
+                     reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
                   definition.setFixed(reg);
                } else if (instr->opcode == aco_opcode::p_create_vector) {
                   unsigned max_moves = 0;
