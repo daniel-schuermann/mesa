@@ -50,12 +50,61 @@ struct ra_ctx {
 };
 
 
-/* forward declaration */
+/* forward declarations */
 PhysReg get_reg(ra_ctx& ctx,
                 std::array<uint32_t, 512>& reg_file,
                 RegClass rc,
                 std::vector<std::pair<Operand, Definition>>& parallelcopies,
                 aco_ptr<Instruction>& instr);
+
+std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
+                                      std::array<uint32_t, 512>& reg_file,
+                                      std::vector<std::pair<Operand, Definition>>& parallelcopies,
+                                      uint32_t lb, uint32_t ub,
+                                      uint32_t size, uint32_t stride,
+                                      uint32_t num_moves,
+                                      bool is_sgpr);
+
+bool get_reg_for_copies(ra_ctx& ctx,
+                      std::array<uint32_t, 512>& reg_file,
+                      std::vector<std::pair<Operand, Definition>>& parallelcopies,
+                      std::set<unsigned> vars,
+                      uint32_t lb, uint32_t ub,
+                      uint32_t remaining_moves,
+                      bool is_sgpr)
+{
+   for (unsigned id : vars) {
+      std::pair<PhysReg, RegClass> var = ctx.assignments[id];
+      uint32_t stride = 1;
+      if (is_sgpr) {
+         if (sizeOf(var.second) == 2)
+            stride = 2;
+         if (sizeOf(var.second) > 3)
+            stride = 4;
+      }
+      unsigned num_moves = 0;
+      std::pair<PhysReg, bool> res = get_reg_impl(ctx, reg_file, parallelcopies, lb, ub, sizeOf(var.second), stride, num_moves, is_sgpr);
+      while (!res.second && remaining_moves > 0 && num_moves < sizeOf(var.second)) {
+         remaining_moves--;
+         num_moves++;
+         res = get_reg_impl(ctx, reg_file, parallelcopies, lb, ub, sizeOf(var.second), stride, num_moves, is_sgpr);
+      }
+      if (!res.second)
+         return false;
+
+      /* mark the area as blocked */
+      for (unsigned i = res.first.reg; i < res.first.reg + sizeOf(var.second); i++)
+         reg_file[i] = 0xFFFF;
+
+      /* create parallelcopy pair (without definition id) */
+      Temp tmp = Temp(id, var.second);
+      Operand pc_op = Operand(tmp);
+      pc_op.setFixed(var.first);
+      Definition pc_def = Definition(res.first, pc_op.regClass());
+      parallelcopies.emplace_back(pc_op, pc_def);
+   }
+   return true;
+}
 
 
 std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
@@ -142,45 +191,13 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
          register_file[j] = 0xFFFF;
 
       std::vector<std::pair<Operand, Definition>> parallelcopy;
-      bool success = true;
-      unsigned remaining_moves = num_moves - k;
-      for (unsigned id : vars) {
-         std::pair<PhysReg, RegClass> var = ctx.assignments[id];
-         uint32_t stride = 1;
-         if (typeOf(var.second) == sgpr) {
-            if (sizeOf(var.second) == 2)
-               stride = 2;
-            if (sizeOf(var.second) > 3)
-               stride = 4;
-         }
-         unsigned num_moves = 0;
-         std::pair<PhysReg, bool> res = get_reg_impl(ctx, register_file, parallelcopy, lb, ub, sizeOf(var.second), stride, num_moves, is_sgpr);
-         while (!res.second && remaining_moves > 0) {
-            remaining_moves--;
-            num_moves++;
-            res = get_reg_impl(ctx, register_file, parallelcopy, lb, ub, sizeOf(var.second), stride, num_moves, is_sgpr);
-         }
-         if (!res.second) {
-            success = false;
-            break;
-         }
-         /* mark the area as blocked */
-         for (unsigned i = res.first.reg; i < res.first.reg + sizeOf(var.second); i++)
-            register_file[i] = 0xFFFF;
 
-         /* create parallelcopy pair (without definition id) */
-         Temp tmp = Temp(id, var.second);
-         Operand pc_op = Operand(tmp);
-         pc_op.setFixed(var.first);
-         Definition pc_def = Definition(res.first, pc_op.regClass());
-         parallelcopy.emplace_back(pc_op, pc_def);
-      }
+      bool success = get_reg_for_copies(ctx, register_file, parallelcopy, vars, lb, ub, num_moves - k, is_sgpr);
+
       if (success) {
          /* if everything worked out: insert parallelcopies, release [reg_lo,reg_hi], copy back reg_file */
          parallelcopies.insert(parallelcopies.end(), parallelcopy.begin(), parallelcopy.end());
          reg_file = register_file;
-         for (unsigned i = reg_lo; i < reg_lo + size; i++)
-            reg_file[i] = 0;
          if (is_sgpr)
             ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, reg_hi);
          else
@@ -234,6 +251,7 @@ std::pair<PhysReg, bool> get_reg_helper(ra_ctx& ctx,
    }
 
    /* it might happen that something was moved to the position of an killed operand */
+   // TODO: it would be better to try to find another register than to insert more moves */
    for (unsigned i = 0; i < instr->num_operands; i++) {
       Operand op = instr->getOperand(i);
       if (!op.isTemp() || op.getTemp().type() != typeOf(rc) || !op.isKill())
@@ -292,36 +310,127 @@ bool get_reg_specified(ra_ctx& ctx,
                        uint32_t num_moves)
 {
    uint32_t size = sizeOf(rc);
+   assert(num_moves <= size);
    uint32_t stride = 1;
+   uint32_t lb, ub;
+   bool is_sgpr = false;
 
    if (typeOf(rc) == vgpr) {
-      if (reg.reg < 256 || reg.reg + size > 256u + ctx.program->max_vgpr)
-         return false;
+      lb = 256;
+      ub = 256 + ctx.program->max_vgpr;
    } else {
-      if (reg.reg + size > ctx.program->max_sgpr)
-         return false;
+      is_sgpr = true;
       if (size == 2)
          stride = 2;
       else if (size >= 4)
          stride = 4;
       if (reg.reg % stride != 0)
          return false;
+      lb = 0;
+      ub = ctx.program->max_sgpr;
    }
 
+   uint32_t reg_lo = reg.reg;
+   uint32_t reg_hi = reg.reg + (size - 1);
+
+   if (reg_lo < lb || reg_hi >= ub || reg_lo > reg_hi)
+      return false;
+
    if (num_moves == 0) {
-      for (unsigned i = reg.reg; i < reg.reg + size; i++) {
+      for (unsigned i = reg_lo; i <= reg_hi; i++) {
          if (reg_file[i] != 0)
             return false;
       }
       if (typeOf(rc) == sgpr)
-         ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, reg.reg + size - 1);
+         ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, reg_hi);
       else
-         ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, reg.reg + size - 1 - 256);
+         ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, reg_hi - 256);
       return true;
    }
 
-   // TODO
-   return false;
+   /* first check the edges: this is what we have to fix to allow for num_moves > size */
+   if (reg_lo > lb + 1 && reg_file[reg_lo] != 0 && reg_file[reg_lo] == reg_file[reg_lo - 1])
+      return false;
+   if (reg_hi < ub - 1 && reg_file[reg_hi] != 0 && reg_file[reg_hi] == reg_file[reg_hi + 1])
+      return false;
+
+   /* second, check that we have at most k=num_moves elements in the window
+    * and no element is larger than the currently processed one */
+   unsigned k = 0;
+   std::set<unsigned> vars;
+   for (unsigned i = reg_lo; i <= reg_hi; i++) {
+      if (reg_file[i] == 0)
+         continue;
+      k++;
+
+      assert(reg_file[i] != 0xFFFF);
+
+      if (k > num_moves ||
+          sizeOf(ctx.assignments[reg_file[i]].second) >= size ||
+          ctx.assignments[reg_file[i]].second & (1 << 6))
+         return false;
+
+      vars.emplace(reg_file[i]);
+   }
+
+   /* now, we have a list of vars, we want to move away from the current slot */
+   /* copy the current register file */
+   std::array<uint32_t, 512> register_file = reg_file;
+   /* mark the area as blocked: [reg_lo, reg_hi] */
+   for (unsigned j = reg_lo; j <= reg_hi; j++)
+      register_file[j] = 0xFFFF;
+
+   std::vector<std::pair<Operand, Definition>> parallelcopy;
+   bool success = get_reg_for_copies(ctx, register_file, parallelcopy, vars, lb, ub, num_moves - k, is_sgpr);
+
+   if (success) {
+      for (unsigned i = reg_lo; i < reg_lo + size; i++)
+         register_file[i] = 0;
+
+      /* check that no variable was moved to a killed operand's register */
+      for (unsigned i = 0; i < instr->num_operands; i++) {
+         Operand op = instr->getOperand(i);
+         if (!op.isTemp() || op.getTemp().type() != typeOf(rc) || !op.isKill())
+            continue;
+
+         for (unsigned j = 0; j < op.size(); j++) {
+            if (register_file[op.physReg().reg + j] != 0)
+               return false;
+         }
+      }
+
+      /* if everything worked out: insert parallelcopies, release [reg_lo,reg_hi], copy back reg_file */
+      reg_file = register_file;
+
+      if (is_sgpr)
+         ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, reg_hi);
+      else
+         ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, reg_hi - 256);
+      parallelcopies.insert(parallelcopies.end(), parallelcopy.begin(), parallelcopy.end());
+      /* allocate id's and rename operands: this is done transparently here */
+      for (std::pair<Operand, Definition>& copy : parallelcopies) {
+         /* the definitions with id are not from this function and already handled */
+         if (!copy.second.isTemp()) {
+            copy.second.setTemp(Temp(ctx.program->allocateId(), copy.second.regClass()));
+            ctx.assignments[copy.second.tempId()] = {copy.second.physReg(), copy.second.regClass()};
+            for (unsigned i = copy.second.physReg().reg; i < copy.second.physReg().reg + copy.second.size(); i++)
+               reg_file[i] = copy.second.tempId();
+            /* check if we moved an operand */
+            for (unsigned i = 0; i < instr->num_operands; i++) {
+               if (!instr->getOperand(i).isTemp())
+                  continue;
+               if (instr->getOperand(i).tempId() == copy.first.tempId()) {
+                  instr->getOperand(i).setTemp(copy.second.getTemp());
+                  instr->getOperand(i).setFixed(copy.second.physReg());
+               }
+            }
+         }
+      }
+
+      return true;
+   } else {
+      return false;
+   }
 }
 
 
@@ -785,19 +894,18 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   }
                   definition.setFixed(reg);
                } else if (instr->opcode == aco_opcode::p_create_vector) {
-                  for (unsigned num_moves = 0; num_moves <= 0; num_moves++) { // TODO: get_reg_specified cannot handle moves yet
+                  unsigned max_moves = 0;
+                  for (unsigned i = 0; i < instr->num_operands; i++)
+                     if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill())
+                        max_moves += instr->getOperand(i).size();
+                  for (unsigned num_moves = 0; num_moves <= max_moves / 2; num_moves++) {
                      unsigned k = 0;
                      for (unsigned i = 0; i < instr->num_operands; i++) {
-                        if (!instr->getOperand(i).isTemp()) {
+                        if (!(instr->getOperand(i).isTemp() && instr->getOperand(i).isKill())) {
                            k += instr->getOperand(i).size();
                            continue;
                         }
                         PhysReg reg = instr->getOperand(i).physReg();
-                        if (reg.reg % 256 < k) {
-                           /* this can happen with a p_create_vector with identical operands, each fixed to s[0] */
-                           k += instr->getOperand(i).size();
-                           continue;
-                        }
                         reg.reg -= k;
                         if (get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg, num_moves)) {
                            definition.setFixed(reg);
