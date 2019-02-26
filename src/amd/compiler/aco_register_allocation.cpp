@@ -300,6 +300,28 @@ std::pair<PhysReg, bool> get_reg_helper(ra_ctx& ctx,
    return res;
 }
 
+std::pair<PhysReg, bool> get_reg_vec(ra_ctx& ctx,
+                                     std::array<uint32_t, 512>& reg_file,
+                                     std::vector<std::pair<Operand, Definition>>& pc,
+                                     RegClass rc)
+{
+   uint32_t size = sizeOf(rc);
+   uint32_t stride = 1;
+   uint32_t lb, ub;
+   if (typeOf(rc) == vgpr) {
+      lb = 256;
+      ub = 256 + ctx.program->max_vgpr;
+   } else {
+      lb = 0;
+      ub = ctx.program->max_sgpr;
+      if (size == 2)
+         stride = 2;
+      else if (size >= 4)
+         stride = 4;
+   }
+   return get_reg_impl(ctx, reg_file, pc, lb, ub, size, stride, 0, typeOf(rc) == sgpr);
+}
+
 
 bool get_reg_specified(ra_ctx& ctx,
                        std::array<uint32_t, 512>& reg_file,
@@ -619,9 +641,11 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
    };
 
    std::map<unsigned, unsigned> affinities;
+   std::map<unsigned, Instruction*> vectors;
    std::vector<std::map<unsigned, Instruction*>> kills_per_block(program->blocks.size());
    std::vector<std::vector<Temp>> phi_ressources;
    std::map<unsigned, unsigned> temp_to_phi_ressources;
+
    for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); it++) {
       std::unique_ptr<Block>& block = *it;
 
@@ -639,6 +663,12 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             for (unsigned i = 0; i < instr->num_operands; i++) {
                if (instr->getOperand(i).isTemp() && live.emplace(instr->getOperand(i).getTemp()).second)
                   kills.emplace(instr->getOperand(i).tempId(), instr.get());
+            }
+            if (instr->opcode == aco_opcode::p_create_vector) {
+               for (unsigned i = 0; i < instr->num_operands; i++) {
+                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).getTemp().type() == instr->getDefinition(0).getTemp().type())
+                     vectors[instr->getOperand(i).tempId()] = instr.get();
+               }
             }
          } else {
             /* collect information about affinity-related temporaries */
@@ -894,7 +924,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   for (unsigned i = 0; i < instr->num_operands; i++)
                      if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill())
                         max_moves += instr->getOperand(i).size();
-                  for (unsigned num_moves = 0; num_moves <= max_moves / 2; num_moves++) {
+                  for (unsigned num_moves = 0; num_moves <= max_moves; num_moves++) {
                      unsigned k = 0;
                      for (unsigned i = 0; i < instr->num_operands; i++) {
                         if (!(instr->getOperand(i).isTemp() && instr->getOperand(i).isKill())) {
@@ -924,6 +954,40 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   else
                      definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr));
 
+               } else if (vectors.find(definition.tempId()) != vectors.end()) {
+                  Instruction* vec = vectors[definition.tempId()];
+                  unsigned offset = 0;
+                  for (unsigned i = 0; i < vec->num_operands; i++) {
+                     if (vec->getOperand(i).isTemp() && vec->getOperand(i).tempId() == definition.tempId())
+                        break;
+                     else
+                        offset += vec->getOperand(i).size();
+                  }
+                  unsigned k = 0;
+                  for (unsigned i = 0; i < vec->num_operands; i++) {
+                     if (vec->getOperand(i).isTemp() &&
+                         vec->getOperand(i).tempId() != definition.tempId() &&
+                         vec->getOperand(i).getTemp().type() == definition.getTemp().type() &&
+                         ctx.assignments.find(vec->getOperand(i).tempId()) != ctx.assignments.end()) {
+                        PhysReg reg = ctx.assignments[vec->getOperand(i).tempId()].first;
+                        reg.reg = reg.reg - k + offset;
+                        if (get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg, 0)) {
+                           definition.setFixed(reg);
+                           break;
+                        }
+                     }
+                     k += vec->getOperand(i).size();
+                  }
+                  if (!definition.isFixed()) {
+                     std::pair<PhysReg, bool> res = get_reg_vec(ctx, register_file, parallelcopy, vec->getDefinition(0).regClass());
+                     PhysReg reg = res.first;
+                     if (res.second) {
+                        reg.reg += offset;
+                     } else {
+                        reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
+                     }
+                     definition.setFixed(reg);
+                  }
                } else
                   definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr));
 
