@@ -66,12 +66,12 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
    }
 
    /* traverse the instructions backwards */
-   for (int i = block->instructions.size() -1; i >= 0; i--)
+   for (int idx = block->instructions.size() -1; idx >= 0; idx--)
    {
       if (reg_demand_cond)
-         register_demand[i] = {sgpr_demand, vgpr_demand};
+         register_demand[idx] = {sgpr_demand, vgpr_demand};
 
-      Instruction *insn = block->instructions[i].get();
+      Instruction *insn = block->instructions[idx].get();
       /* KILL */
       for (unsigned i = 0; i < insn->definitionCount(); ++i)
       {
@@ -90,9 +90,9 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
                      sgpr_demand -= definition.size();
                } else {
                   if (definition.getTemp().type() == vgpr)
-                     register_demand[i].second += definition.size();
+                     register_demand[idx].second += definition.size();
                   else
-                     register_demand[i].first += definition.size();
+                     register_demand[idx].first += definition.size();
                }
             }
          }
@@ -136,10 +136,10 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
                }
             }
          }
-         if (reg_demand_cond) {
-            block->vgpr_demand = std::max(block->vgpr_demand, vgpr_demand);
-            block->sgpr_demand = std::max(block->sgpr_demand, sgpr_demand);
-         }
+      }
+      if (reg_demand_cond) {
+         block->vgpr_demand = std::max(block->vgpr_demand, register_demand[idx].second);
+         block->sgpr_demand = std::max(block->sgpr_demand, register_demand[idx].first);
       }
    }
 
@@ -195,8 +195,7 @@ live live_var_analysis(Program* program,
       /* VGPRs are allocated in chunks of 4 */
       uint16_t rounded_vgpr_demand = std::max<uint16_t>(4, (vgpr_demand + 3) & ~3);
       /* SGPRs are allocated in chunks of 16 between 8 and 104. VCC occupies the last 2 registers */
-      uint16_t rounded_sgpr_demand = std::min(std::max<uint16_t>(8, (sgpr_demand + 2 + 7) & ~8), max_addressible_sgpr);
-
+      uint16_t rounded_sgpr_demand = std::min(std::max<uint16_t>(8, (sgpr_demand + 2 + 7) & ~7), max_addressible_sgpr);
       /* this won't compile, register pressure reduction necessary */
       if (vgpr_demand > 256 || sgpr_demand > max_addressible_sgpr) {
          program->num_waves = 0;
@@ -207,7 +206,7 @@ live live_var_analysis(Program* program,
                                                  std::min<uint16_t>(256 / rounded_vgpr_demand,
                                                                     total_sgpr_regs / rounded_sgpr_demand));
 
-         program->max_sgpr = std::min<uint16_t>(((total_sgpr_regs / program->num_waves) & ~8) - 2, max_addressible_sgpr);
+         program->max_sgpr = std::min<uint16_t>(((total_sgpr_regs / program->num_waves) & ~7) - 2, max_addressible_sgpr);
          program->max_vgpr = (256 / program->num_waves) & ~3;
       }
    }
