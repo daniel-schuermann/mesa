@@ -4848,7 +4848,9 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
          aco_instr->getOperand(1) = Operand(exec, s2);
          ctx->cf_info.parent_loop.active_mask = {ctx->program->allocateId(), s2};
          aco_instr->getDefinition(0) = Definition(ctx->cf_info.parent_loop.active_mask);
-         aco_instr->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
+         Temp branch_cond{ctx->program->allocateId(), b};
+         aco_instr->getDefinition(1) = Definition(branch_cond);
+         aco_instr->getDefinition(1).setFixed(scc);
          ctx->block->instructions.emplace_back(std::move(aco_instr));
 
          /* set exec zero */
@@ -4860,7 +4862,8 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
 
          /* exit loop if needed */
          branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z, Format::PSEUDO_BRANCH, 1, 0));
-         branch->getOperand(0) = Operand(scc, b);
+         branch->getOperand(0) = Operand(branch_cond);
+         branch->getOperand(0).setFixed(scc);
          branch->targets[0] = ctx->cf_info.parent_loop.exit;
          branch->targets[1] = break_block;
          ctx->block->instructions.emplace_back(std::move(branch));
@@ -4874,17 +4877,21 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
          break_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
 
          /* there might be still active lanes due to previous continue */
-         aco_instr.reset(create_instruction<SOP1_instruction>(aco_opcode::s_andn2_saveexec_b64, Format::SOP1, 2, 2));
+         aco_instr.reset(create_instruction<SOP1_instruction>(aco_opcode::s_andn2_saveexec_b64, Format::SOP1, 2, 3));
          aco_instr->getOperand(0) = Operand(ctx->cf_info.parent_loop.active_mask);
          aco_instr->getOperand(1) = Operand(exec, s2);
          Temp temp = {ctx->program->allocateId(), s2};
          aco_instr->getDefinition(0) = Definition(temp);
-         aco_instr->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
+         Temp branch_cond{ctx->program->allocateId(), b};
+         aco_instr->getDefinition(1) = Definition(branch_cond);
+         aco_instr->getDefinition(1).setFixed(scc);
+         aco_instr->getDefinition(2) = Definition(exec, s2);
          ctx->block->instructions.emplace_back(std::move(aco_instr));
 
          /* branch to loop entry if still lanes are active */
          branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0));
-         branch->getOperand(0) = Operand(scc, b);
+         branch->getOperand(0) = Operand(branch_cond);
+         branch->getOperand(0).setFixed(scc);
          branch->targets[0] = ctx->cf_info.parent_loop.entry;
          branch->targets[1] = break_block;
          ctx->block->instructions.emplace_back(std::move(branch));
@@ -5238,11 +5245,14 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       append_logical_end(BB_if);
 
       /* create the exec mask for then branch */
-      aco_ptr<SOP1_instruction> set_exec{create_instruction<SOP1_instruction>(aco_opcode::s_and_saveexec_b64, Format::SOP1, 1, 2)};
+      aco_ptr<SOP1_instruction> set_exec{create_instruction<SOP1_instruction>(aco_opcode::s_and_saveexec_b64, Format::SOP1, 1, 3)};
       set_exec->getOperand(0) = Operand(cond);
       Temp orig_exec = {ctx->program->allocateId(), s2};
       set_exec->getDefinition(0) = Definition(orig_exec);
       set_exec->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
+      Temp branch_cond{ctx->program->allocateId(), s2};
+      set_exec->getDefinition(2) = Definition(branch_cond);
+      set_exec->getDefinition(2).setFixed(exec);
       BB_if->instructions.push_back(std::move(set_exec));
 
       /* create the exec mask for else branch */
@@ -5256,7 +5266,8 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
 
       /* branch to linear then block */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z, Format::PSEUDO_BRANCH, 1, 0));
-      branch->getOperand(0) = Operand(exec, s2);
+      branch->getOperand(0) = Operand(branch_cond);
+      branch->getOperand(0).setFixed(exec);
       branch->targets[0] = BB_then_linear;
       branch->targets[1] = BB_then_logical;
       BB_if->instructions.push_back(std::move(branch));
@@ -5321,14 +5332,11 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       Temp then_mask = {ctx->program->allocateId(), s2};
       mov->getDefinition(0) = Definition(then_mask);
       BB_between->instructions.push_back(std::move(mov));
-      mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
-      mov->getOperand(0) = Operand(else_mask);
-      mov->getDefinition(0) = Definition(exec, s2);
-      BB_between->instructions.push_back(std::move(mov));
 
       /* branch to linear else block (skip else) */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z, Format::PSEUDO_BRANCH, 1, 0));
-      branch->getOperand(0) = Operand(PhysReg{126}, s2);
+      branch->getOperand(0) = Operand(else_mask);
+      branch->getOperand(0).setFixed(exec);
       branch->targets[0] = BB_else_linear;
       branch->targets[1] = BB_else_logical;
       BB_between->instructions.push_back(std::move(branch));
