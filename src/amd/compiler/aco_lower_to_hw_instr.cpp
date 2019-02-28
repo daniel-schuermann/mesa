@@ -125,10 +125,11 @@ void emit_reduce(lower_context *ctx, aco_opcode op, ReduceOp reduce_op, unsigned
    invert_exec(ctx);
 
    // note: this clobbers SCC!
-   aco_ptr<SOP1_instruction> set_exec{create_instruction<SOP1_instruction>(aco_opcode::s_or_saveexec_b64, Format::SOP1, 1, 2)};
+   aco_ptr<SOP1_instruction> set_exec{create_instruction<SOP1_instruction>(aco_opcode::s_or_saveexec_b64, Format::SOP1, 1, 3)};
    set_exec->getOperand(0) = Operand((uint64_t) -1);
    set_exec->getDefinition(0) = Definition(stmp, s2);
    set_exec->getDefinition(1) = Definition(scc, b);
+   set_exec->getDefinition(2) = Definition(exec, s2);
    ctx->instructions.emplace_back(std::move(set_exec));
 
    // TODO: generalize this!
