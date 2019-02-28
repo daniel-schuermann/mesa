@@ -97,22 +97,6 @@ bool reads_exec_implicitly(Instruction* instr)
 
 bool writes_exec_implicitly(Instruction* instr)
 {
-   if (instr->isSALU()) {
-      switch (instr->opcode) {
-         case aco_opcode::s_and_saveexec_b64:
-         case aco_opcode::s_or_saveexec_b64:
-         case aco_opcode::s_xor_saveexec_b64:
-         case aco_opcode::s_andn2_saveexec_b64:
-         case aco_opcode::s_orn2_saveexec_b64:
-         case aco_opcode::s_nand_saveexec_b64:
-         case aco_opcode::s_nor_saveexec_b64:
-         case aco_opcode::s_xnor_saveexec_b64:
-            return true;
-         default:
-            return false;
-      }
-   }
-
    // TODO v_cmpx_*
    return false;
 }
