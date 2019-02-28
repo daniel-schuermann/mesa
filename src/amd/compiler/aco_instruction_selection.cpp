@@ -4716,6 +4716,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          if (has_compare)
             opcode = aco_opcode::image_gather4_c_lz;
       }
+   } else if (instr->op == nir_texop_lod) {
+      opcode = aco_opcode::image_get_lod;
    }
 
    tex.reset(create_instruction<MIMG_instruction>(opcode, Format::MIMG, 3, 1));
