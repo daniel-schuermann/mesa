@@ -919,6 +919,17 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   if (!get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg, 0))
                      reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
                   definition.setFixed(reg);
+               } else if (instr->opcode == aco_opcode::p_extract_vector) {
+                  PhysReg reg;
+                  if (kills.find(instr->getOperand(0).tempId()) != kills.end() &&
+                      kills.find(instr->getOperand(0).tempId())->second == instr.get()) {
+                     reg = instr->getOperand(0).physReg();
+                     reg.reg += definition.size() * instr->getOperand(1).constantValue();
+                     assert(register_file[reg.reg] == 0);
+                  } else {
+                     reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
+                  }
+                  definition.setFixed(reg);
                } else if (instr->opcode == aco_opcode::p_create_vector) {
                   unsigned max_moves = 0;
                   for (unsigned i = 0; i < instr->num_operands; i++)
