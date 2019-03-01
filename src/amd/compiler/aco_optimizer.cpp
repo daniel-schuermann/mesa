@@ -882,6 +882,26 @@ void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       }
    }
 
+   /* convert split_vector into extract_vector if only one definition is ever used */
+   if (instr->opcode == aco_opcode::p_split_vector) {
+      unsigned num_used = 0;
+      unsigned idx = 0;
+      for (unsigned i = 0; i < instr->num_definitions; i++)
+      {
+         if (ctx.info[instr->getDefinition(i).tempId()].uses) {
+            num_used++;
+            idx = i;
+         }
+      }
+      if (num_used == 1) {
+         aco_ptr<Instruction> extract{create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1)};
+         extract->getOperand(0) = instr->getOperand(0);
+         extract->getOperand(1) = Operand((uint32_t) idx);
+         extract->getDefinition(0) = instr->getDefinition(idx);
+         instr.reset(extract.release());
+      }
+   }
+
    /* re-check mad instructions */
    if (instr->opcode == aco_opcode::v_mad_f32 && ctx.info[instr->getDefinition(0).tempId()].is_mad()) {
       mad_info* info = &ctx.mad_infos[ctx.info[instr->getDefinition(0).tempId()].val];
