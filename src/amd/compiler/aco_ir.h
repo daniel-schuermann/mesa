@@ -413,11 +413,27 @@ public:
    void setKill(bool flag) noexcept
    {
       control_[3] = flag;
+      if (!flag)
+         setFirstKill(false);
    }
 
    bool isKill() const noexcept
    {
-      return control_[3];
+      return control_[3] || isFirstKill();
+   }
+
+   void setFirstKill(bool flag) noexcept
+   {
+      control_[5] = flag;
+      if (flag)
+         setKill(flag);
+   }
+
+   /* When there are multiple operands killing the same temporary,
+    * isFirstKill() is only returns true for the first one. */
+   bool isFirstKill() const noexcept
+   {
+      return control_[5];
    }
 
 private:
@@ -519,6 +535,16 @@ public:
    bool hasHint() const noexcept
    {
       return control_[2];
+   }
+
+   void setKill(bool flag) noexcept
+   {
+      control_[3] = flag;
+   }
+
+   bool isKill() const noexcept
+   {
+      return control_[3];
    }
 
 private:
