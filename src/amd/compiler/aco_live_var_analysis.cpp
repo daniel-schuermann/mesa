@@ -88,11 +88,13 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
                      vgpr_demand -= definition.size();
                   else
                      sgpr_demand -= definition.size();
+                  definition.setKill(false);
                } else {
                   if (definition.getTemp().type() == vgpr)
                      register_demand[idx].second += definition.size();
                   else
                      register_demand[idx].first += definition.size();
+                  definition.setKill(true);
                }
             }
          }
@@ -111,7 +113,7 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
                /* check if we changed an already processed block */
                if (it.second) {
                   if (reg_demand_cond)
-                     operand.setKill(true);
+                     operand.setFirstKill(true);
                   worklist.insert(preds[i]->index);
                }
             }
@@ -128,10 +130,20 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
                   inserted = live_vgprs.insert(operand.getTemp()).second;
                if (reg_demand_cond) {
                   if (inserted) {
+                     operand.setFirstKill(true);
+                     for (unsigned j = i + 1; j < insn->operandCount(); ++j) {
+                        if (insn->getOperand(j).tempId() == operand.tempId()) {
+                           insn->getOperand(j).setFirstKill(false);
+                           insn->getOperand(j).setKill(true);
+                        }
+                     }
+
                      if (operand.getTemp().type() == vgpr)
                         vgpr_demand += operand.size();
                      else
                         sgpr_demand += operand.size();
+                  } else {
+                     operand.setKill(false);
                   }
                }
             }
