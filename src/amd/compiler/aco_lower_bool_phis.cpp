@@ -199,42 +199,6 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
    return copy;
 }
 
-aco_ptr<Instruction> lower_uniform_bool_phi(Program *program, Block *block, aco_ptr<Instruction>& phi)
-{
-   /* TODO: it is possible to implement these without the conversions in some circumstances */
-   for (unsigned i = 0; i < phi->operandCount(); i++) {
-      Block *pred = block->linear_predecessors[i];
-
-      if (phi->getOperand(i).isUndefined())
-         continue;
-
-      /* TODO: this is usually redundant */
-      aco_ptr<Instruction> cselect{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
-      cselect->getOperand(0) = Operand((uint32_t) -1);
-      cselect->getOperand(1) = Operand((uint32_t) 0);
-      cselect->getOperand(2) = Operand(phi->getOperand(i));
-      cselect->getOperand(2).setFixed(scc);
-      Temp new_src{program->allocateId(), s1};
-      cselect->getDefinition(0) = Definition(new_src);
-      insert_before_branch(pred, std::move(cselect));
-
-      phi->getOperand(i) = Operand(new_src);
-   }
-
-   Temp dst32{program->allocateId(), s1};
-
-   /* TODO: this should be placed later to minimize the definition's live range */
-   aco_ptr<Instruction> cmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_u32, Format::SOPC, 2, 1)};
-   cmp->getOperand(0) = Operand((uint32_t) 0);
-   cmp->getOperand(1) = Operand(dst32);
-   cmp->getDefinition(0) = phi->getDefinition(0);
-   cmp->getDefinition(0).setFixed(scc);
-
-   phi->getDefinition(0) = Definition(dst32);
-
-   return cmp;
-}
-
 void lower_bool_phis(Program* program)
 {
    for (std::vector<std::unique_ptr<Block>>::iterator it = program->blocks.begin(); it != program->blocks.end(); ++it)
@@ -252,9 +216,6 @@ void lower_bool_phis(Program* program)
             break;
          if (phi->opcode == aco_opcode::p_phi && phi->getDefinition(0).regClass() == s2) {
             non_phi.emplace_back(std::move(lower_divergent_bool_phi(program, block, phi)));
-         } else if (phi->opcode == aco_opcode::p_linear_phi && phi->getDefinition(0).regClass() == b) {
-            non_phi.emplace_back(std::move(lower_uniform_bool_phi(program, block, phi)));
-            block->instructions.emplace_back(std::move(phi));
          } else {
             block->instructions.emplace_back(std::move(phi));
          }
