@@ -156,7 +156,6 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_fcos:
                   case nir_op_u2f32:
                   case nir_op_i2f32:
-                  case nir_op_b2f32:
                   case nir_op_pack_half_2x16:
                   case nir_op_unpack_half_2x16:
                   case nir_op_fddx:
@@ -171,6 +170,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_fge:
                   case nir_op_feq:
                   case nir_op_fne:
+                     size = 2;
+                     break;
                   case nir_op_ilt:
                   case nir_op_ige:
                   case nir_op_ieq:
@@ -178,12 +179,44 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_ult:
                   case nir_op_uge:
                   case nir_op_i2b1:
-                  case nir_op_iand:
-                  case nir_op_ior:
-                  case nir_op_inot:
-                  case nir_op_ixor:
+                     if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index]) {
+                        size = 2;
+                     } else {
+                        for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
+                           if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr)
+                              size = 2;
+                        }
+                     }
+                     break;
+                  case nir_op_b2i32:
+                  case nir_op_b2f32:
+                     type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
+                     break;
+                  case nir_op_bcsel:
                      if (alu_instr->dest.dest.ssa.bit_size == 1) {
-                        type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? sgpr : scc_bit;
+                        size = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? 2 : 1;
+                     } else {
+                        if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index]) {
+                           type = vgpr;
+                        } else {
+                           for (unsigned i = 1; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
+                              if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr) {
+                                 type = vgpr;
+                                 break;
+                              }
+                           }
+                        }
+                     }
+                     break;
+                  case nir_op_imov:
+                     if (alu_instr->dest.dest.ssa.bit_size == 1) {
+                        size = sizeOf(reg_class[alu_instr->src[0].src.ssa->index]);
+                     } else {
+                        type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
+                     }
+                     break;
+                  default:
+                     if (alu_instr->dest.dest.ssa.bit_size == 1) {
                         size = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? 2 : 1;
                      } else {
                         for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
@@ -192,52 +225,15 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                         }
                      }
                      break;
-                  case nir_op_b2i32:
-                     for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
-                        if (reg_class[alu_instr->src[i].src.ssa->index] == s2)
-                           type = vgpr;
-                     }
-                     break;
-                  case nir_op_bcsel:
-                     if (alu_instr->dest.dest.ssa.bit_size == 1) {
-                        type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? sgpr : scc_bit;
-                        size = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? 2 : 1;
-                     } else {
-                        for (unsigned i = 1; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
-                           if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr)
-                              type = vgpr;
-                        }
-                        if (reg_class[alu_instr->src[0].src.ssa->index] == s2)
-                           type = vgpr;
-                     }
-                     break;
-                  case nir_op_imov:
-                     if (alu_instr->dest.dest.ssa.bit_size == 1) {
-                        type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? sgpr : scc_bit;
-                        size = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? 2 : 1;
-                     } else {
-                        type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
-                     }
-                     break;
-                  default:
-                     for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
-                        if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr)
-                           type = vgpr;
-                     }
-                     break;
                }
                reg_class[alu_instr->dest.dest.ssa.index] = getRegClass(type, size);
                break;
             }
             case nir_instr_type_load_const: {
-               if (nir_instr_as_load_const(instr)->def.bit_size == 1) {
-                  reg_class[nir_instr_as_load_const(instr)->def.index] = b;
-               } else {
-                  unsigned size = nir_instr_as_load_const(instr)->def.num_components;
-                  if (nir_instr_as_load_const(instr)->def.bit_size == 64)
-                     size *= 2;
-                  reg_class[nir_instr_as_load_const(instr)->def.index] = getRegClass(sgpr, size);
-               }
+               unsigned size = nir_instr_as_load_const(instr)->def.num_components;
+               if (nir_instr_as_load_const(instr)->def.bit_size == 64)
+                  size *= 2;
+               reg_class[nir_instr_as_load_const(instr)->def.index] = getRegClass(sgpr, size);
                break;
             }
             case nir_instr_type_intrinsic: {
@@ -389,21 +385,17 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                break;
             }
             case nir_instr_type_ssa_undef: {
-               if (nir_instr_as_ssa_undef(instr)->def.bit_size == 1) {
-                  reg_class[nir_instr_as_ssa_undef(instr)->def.index] = b;
-               } else {
-                  unsigned size = nir_instr_as_ssa_undef(instr)->def.num_components;
-                  if (nir_instr_as_ssa_undef(instr)->def.bit_size == 64)
-                     size *= 2;
-                  reg_class[nir_instr_as_ssa_undef(instr)->def.index] = getRegClass(sgpr, size);
-               }
+               unsigned size = nir_instr_as_ssa_undef(instr)->def.num_components;
+               if (nir_instr_as_ssa_undef(instr)->def.bit_size == 64)
+                  size *= 2;
+               reg_class[nir_instr_as_ssa_undef(instr)->def.index] = getRegClass(sgpr, size);
                break;
             }
             case nir_instr_type_phi: {
                nir_phi_instr* phi = nir_instr_as_phi(instr);
 
                if (phi->dest.ssa.bit_size == 1) {
-                  reg_class[phi->dest.ssa.index] = ctx->divergent_vals[phi->dest.ssa.index] ? s2 : b;
+                  reg_class[phi->dest.ssa.index] = ctx->divergent_vals[phi->dest.ssa.index] ? s2 : s1;
                   break;
                }
 
