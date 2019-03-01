@@ -254,7 +254,7 @@ std::pair<PhysReg, bool> get_reg_helper(ra_ctx& ctx,
    // TODO: it would be better to try to find another register than to insert more moves */
    for (unsigned i = 0; i < instr->num_operands; i++) {
       Operand op = instr->getOperand(i);
-      if (!op.isTemp() || op.getTemp().type() != typeOf(rc) || !op.isKill())
+      if (!op.isTemp() || op.getTemp().type() != typeOf(rc) || !op.isFirstKill())
          continue;
 
       for (unsigned j = 0; j < op.size(); j++) {
@@ -265,7 +265,7 @@ std::pair<PhysReg, bool> get_reg_helper(ra_ctx& ctx,
             /* re-enable other killed operands */
             for (unsigned k = 0; k < instr->num_operands; k++) {
                Operand& op_ = instr->getOperand(k);
-               if (!op_.isTemp() || !op_.isKill() || op_.getTemp() == op.getTemp())
+               if (!op_.isTemp() || !op_.isFirstKill() || op_.getTemp() == op.getTemp())
                   continue;
 
                assert(op_.isFixed());
@@ -280,7 +280,7 @@ std::pair<PhysReg, bool> get_reg_helper(ra_ctx& ctx,
             /* disable the killed operands */
             for (unsigned k = 0; k < instr->num_operands; k++) {
                Operand& op = instr->getOperand(k);
-               if (!op.isTemp() || !op.isKill())
+               if (!op.isTemp() || !op.isFirstKill())
                   continue;
                for (unsigned r = op.physReg().reg; r < op.physReg().reg + op.size(); r++) {
                   if (reg_file[r] == 0xFFFF)
@@ -412,7 +412,7 @@ bool get_reg_specified(ra_ctx& ctx,
       /* check that no variable was moved to a killed operand's register */
       for (unsigned i = 0; i < instr->num_operands; i++) {
          Operand op = instr->getOperand(i);
-         if (!op.isTemp() || op.getTemp().type() != typeOf(rc) || !op.isKill())
+         if (!op.isTemp() || op.getTemp().type() != typeOf(rc) || !op.isFirstKill())
             continue;
 
          for (unsigned j = 0; j < op.size(); j++) {
@@ -642,7 +642,6 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
    std::map<unsigned, unsigned> affinities;
    std::map<unsigned, Instruction*> vectors;
-   std::vector<std::map<unsigned, Instruction*>> kills_per_block(program->blocks.size());
    std::vector<std::vector<Temp>> phi_ressources;
    std::map<unsigned, unsigned> temp_to_phi_ressources;
 
@@ -651,18 +650,14 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
       /* first, compute the death points of all live vars within the block */
       std::set<Temp>& live = live_out_per_block[block->index];
-      std::map<unsigned, Instruction*>& kills = kills_per_block[block->index];
-      /* create dummy kill points for live outs */
-      for (Temp t : live)
-         kills.emplace(t.id(), nullptr);
 
       std::vector<aco_ptr<Instruction>>::reverse_iterator rit;
       for (rit = block->instructions.rbegin(); rit != block->instructions.rend(); ++rit) {
          aco_ptr<Instruction>& instr = *rit;
          if (instr->opcode != aco_opcode::p_linear_phi && instr->opcode != aco_opcode::p_phi) {
             for (unsigned i = 0; i < instr->num_operands; i++) {
-               if (instr->getOperand(i).isTemp() && live.emplace(instr->getOperand(i).getTemp()).second)
-                  kills.emplace(instr->getOperand(i).tempId(), instr.get());
+               if (instr->getOperand(i).isTemp())
+                  live.emplace(instr->getOperand(i).getTemp());
             }
             if (instr->opcode == aco_opcode::p_create_vector) {
                for (unsigned i = 0; i < instr->num_operands; i++) {
@@ -706,7 +701,6 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
    for (std::unique_ptr<Block>& block : program->blocks) {
       std::set<Temp>& live = live_out_per_block[block->index];
-      std::map<unsigned, Instruction*>& kills = kills_per_block[block->index];
       /* initialize register file */
       assert(block->index != 0 || live.empty());
       std::array<uint32_t, 512> register_file = {0};
@@ -792,12 +786,6 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             if (!operand.isTemp())
                continue;
 
-            /* unset register file bits if it's the last use */
-            std::map<unsigned, Instruction*>::iterator it = kills.find(operand.tempId());
-            if (it != kills.end() && it->second == instr.get()) {
-               operand.setKill(true);
-            }
-
             /* rename operands */
             operand.setTemp(read_variable(operand.getTemp(), block.get()));
 
@@ -850,7 +838,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          }
          /* remove dead vars from register file */
          for (unsigned i = 0; i < instr->num_operands; i++)
-            if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill())
+            if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill())
                for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                   register_file[instr->getOperand(i).physReg().reg + j] = 0;
 
@@ -871,19 +859,19 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
                   /* re-enable the killed operands, so that we don't move the blocking var there */
                   for (unsigned i = 0; i < instr->num_operands; i++)
-                     if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill())
+                     if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill())
                         for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                            register_file[instr->getOperand(i).physReg().reg + j] = 0xFFFF;
                   /* find a new register for the blocking variable */
                   PhysReg reg = get_reg(ctx, register_file, rc, parallelcopy, instr);
                   /* once again, disable killed operands */
                   for (unsigned i = 0; i < instr->num_operands; i++) {
-                     if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill())
+                     if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill())
                         for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                            register_file[instr->getOperand(i).physReg().reg + j] = 0;
                   }
                   for (unsigned k = 0; k < i; k++) {
-                     if (instr->getDefinition(k).isTemp() && (kills.find(instr->getDefinition(k).tempId()) != kills.end()))
+                     if (instr->getDefinition(k).isTemp() && !instr->getDefinition(k).isKill())
                         for (unsigned j = 0; j < instr->getDefinition(k).size(); j++)
                            register_file[instr->getDefinition(k).physReg().reg + j] = instr->getDefinition(k).tempId();
                   }
@@ -921,8 +909,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   definition.setFixed(reg);
                } else if (instr->opcode == aco_opcode::p_extract_vector) {
                   PhysReg reg;
-                  if (kills.find(instr->getOperand(0).tempId()) != kills.end() &&
-                      kills.find(instr->getOperand(0).tempId())->second == instr.get()) {
+                  if (instr->getOperand(0).isKill()) {
                      reg = instr->getOperand(0).physReg();
                      reg.reg += definition.size() * instr->getOperand(1).constantValue();
                      assert(register_file[reg.reg] == 0);
@@ -1010,7 +997,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
             ctx.assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
             /* set live if it has a kill point */
-            if (kills.find(definition.tempId()) != kills.end()) {
+            if (!definition.isKill()) {
                for (unsigned i = 0; i < definition.size(); i++)
                   register_file[definition.physReg().reg + i] = definition.tempId();
                live.emplace(definition.getTemp());
@@ -1085,7 +1072,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      register_file[instr->getDefinition(i).physReg().reg + j] = 0x0;
                }
                for (unsigned i = 0; i < instr->num_operands; i++) {
-                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill()) {
+                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill()) {
                      for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                         register_file[instr->getOperand(i).physReg().reg + j] = 0xFFFF;
                   }
@@ -1096,12 +1083,12 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                instructions.emplace_back(std::move(mov));
                /* re-enable live vars */
                for (unsigned i = 0; i < instr->num_operands; i++) {
-                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill())
+                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill())
                      for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                         register_file[instr->getOperand(i).physReg().reg + j] = 0x0;
                }
                for (unsigned i = 0; i < instr->num_definitions; i++) {
-                  if (instr->getDefinition(i).isTemp() && (kills.find(instr->getDefinition(i).tempId()) != kills.end()))
+                  if (instr->getDefinition(i).isTemp() && !instr->getDefinition(i).isKill())
                      for (unsigned j = 0; j < instr->getDefinition(i).size(); j++)
                         register_file[instr->getDefinition(i).physReg().reg + j] = instr->getDefinition(i).tempId();
                }
