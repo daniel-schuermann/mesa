@@ -74,7 +74,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
 
    //std::cerr << "Before Schedule:\n";
    //aco_print_program(program.get(), stderr);
-   aco::schedule_program(program.get(), live_vars.register_demand);
+   aco::schedule_program(program.get(), live_vars);
 
    /* Register Allocation */
    aco::register_allocation(program.get(), live_vars.live_out);
