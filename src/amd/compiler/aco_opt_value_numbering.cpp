@@ -111,6 +111,12 @@ struct InstrPred {
          }
       }
       for (unsigned i = 0; i < a->num_definitions; i++) {
+         if (a->getDefinition(i).isTemp()) {
+            if (!b->getDefinition(i).isTemp())
+               return false;
+            if (a->getDefinition(i).regClass() != b->getDefinition(i).regClass())
+               return false;
+         }
          if (a->getDefinition(i).isFixed()) {
             if (!b->getDefinition(i).isFixed())
                return false;
