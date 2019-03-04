@@ -148,7 +148,7 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
 
       assert(phi->getOperand(i).isTemp());
       Temp phi_src = phi->getOperand(i).getTemp();
-      if (phi_src.regClass() == b) {
+      if (phi_src.regClass() == s1) {
          aco_ptr<Instruction> cselect{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b64, Format::SOP2, 3, 1)};
          cselect->getOperand(0) = Operand((uint32_t) -1);
          cselect->getOperand(1) = Operand((uint32_t) 0);
@@ -158,6 +158,7 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
          cselect->getDefinition(0) = Definition(phi_src);
          insert_before_logical_end(pred, std::move(cselect));
       }
+      assert(phi_src.regClass() == s2);
 
       Operand cur = get_ssa(program, pred, &state);
       Temp new_cur = write_ssa(program, pred, &state, cur.tempId());
