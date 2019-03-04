@@ -281,6 +281,10 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
             if (candidate->getDefinition(i).isTemp())
                RAR_dependencies.insert(candidate->getDefinition(i).getTemp());
          }
+         for (unsigned i = 0; i < candidate->num_operands; i++) {
+            if (candidate->getOperand(i).isTemp())
+               RAR_dependencies.insert(candidate->getOperand(i).getTemp());
+         }
          continue;
       }
 
@@ -486,6 +490,10 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          for (unsigned i = 0; i < candidate->num_definitions; i++) {
             if (candidate->getDefinition(i).isTemp())
                RAR_dependencies.insert(candidate->getDefinition(i).getTemp());
+         }
+         for (unsigned i = 0; i < candidate->num_operands; i++) {
+            if (candidate->getOperand(i).isTemp())
+               RAR_dependencies.insert(candidate->getOperand(i).getTemp());
          }
          continue;
       }
