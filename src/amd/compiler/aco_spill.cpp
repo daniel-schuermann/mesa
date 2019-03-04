@@ -385,7 +385,7 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
             }
          }
       }
-      if (block->vgpr_demand - spilled_vgprs > ctx.target_sgpr && block->logical_predecessors.size() == 1) {
+      if (block->vgpr_demand - spilled_vgprs > ctx.target_vgpr && block->logical_predecessors.size() == 1) {
          pred_idx = block->logical_predecessors[0]->index;
          for (std::pair<Temp, uint32_t> pair : ctx.spills_exit[pred_idx]) {
             if (pair.first.type() == vgpr &&
