@@ -26,6 +26,8 @@
 #include <unordered_set>
 #include <algorithm>
 
+#include "../vulkan/radv_shader.h" // for radv_nir_compiler_options
+
 namespace aco {
 
 struct sched_ctx {
@@ -46,9 +48,64 @@ struct sched_ctx {
  * Instructions will only be moved if the register pressure won't exceed a certain bound.
  */
 
+template <typename T>
+void move_element(T& list, size_t idx, size_t before) {
+    if (idx < before) {
+        auto begin = std::next(list.begin(), idx);
+        auto end = std::next(list.begin(), before);
+        std::rotate(begin, begin + 1, end);
+    } else if (idx > before) {
+        auto begin = std::next(list.begin(), before);
+        auto end = std::next(list.begin(), idx + 1);
+        std::rotate(begin, end - 1, end);
+    }
+}
+
+static std::pair<int16_t, int16_t> getLiveChanges(aco_ptr<Instruction>& instr)
+{
+   std::pair<int16_t, int16_t> changes{0, 0};
+   for (unsigned i = 0; i < instr->definitionCount(); i++) {
+      Definition& def = instr->getDefinition(i);
+      if (!def.isTemp() || def.isKill())
+         continue;
+      if (typeOf(def.regClass()) == vgpr)
+         changes.second += def.size();
+      else
+         changes.first += def.size();
+   }
+
+   for (unsigned i = 0; i < instr->operandCount(); i++) {
+      Operand& op = instr->getOperand(i);
+      if (!op.isTemp() || !op.isFirstKill())
+         continue;
+      if (typeOf(op.regClass()) == vgpr)
+         changes.second -= op.size();
+      else
+         changes.first -= op.size();
+   }
+
+   return changes;
+}
+
+static std::pair<uint16_t, uint16_t> getTempRegisters(aco_ptr<Instruction>& instr)
+{
+   std::pair<uint16_t, uint16_t> temp_registers{0, 0};
+   for (unsigned i = 0; i < instr->definitionCount(); i++) {
+      Definition& def = instr->getDefinition(i);
+      if (!def.isTemp() || !def.isKill())
+         continue;
+      if (typeOf(def.regClass()) == vgpr)
+         temp_registers.second += def.size();
+      else
+         temp_registers.first += def.size();
+   }
+
+   return temp_registers;
+}
+
 void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
-                       std::vector<std::pair<uint16_t,uint16_t>>& register_demand,
-                       Instruction* current, int idx)
+                   std::vector<std::pair<uint16_t,uint16_t>>& register_demand,
+                   Instruction* current, int idx)
 {
    assert(idx != 0);
    int window_size = 25 - ctx.num_waves;
@@ -117,26 +174,34 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       }
 
       /* check if register pressure is low enough: the diff is negative if register pressure is decreased */
-      int candidate_sgpr_diff = register_demand[candidate_idx].first - register_demand[candidate_idx - 1].first;
-      int candidate_vgpr_diff = register_demand[candidate_idx].second - register_demand[candidate_idx - 1].second;
+      int candidate_sgpr_diff, candidate_vgpr_diff, temp_sgpr, temp_vgpr;
+      std::tie(candidate_sgpr_diff, candidate_vgpr_diff) = getLiveChanges(candidate);
+      std::tie(temp_sgpr, temp_vgpr) = getTempRegisters(candidate);
       if (vgpr_pressure - candidate_vgpr_diff > ctx.max_vgpr ||
           sgpr_pressure - candidate_sgpr_diff > ctx.max_sgpr)
+         break;
+      int temp_sgpr2, temp_vgpr2;
+      std::tie(temp_sgpr2, temp_vgpr2) = getTempRegisters(block->instructions[insert_idx - 1]);
+      uint16_t new_sgpr_demand, new_vgpr_demand;
+      new_sgpr_demand = register_demand[insert_idx - 1].first - temp_sgpr2 + temp_sgpr;
+      new_vgpr_demand = register_demand[insert_idx - 1].second - temp_vgpr2 + temp_vgpr;
+      if (new_sgpr_demand > ctx.max_sgpr || new_vgpr_demand > ctx.max_vgpr)
          break;
       // TODO: we might want to look further to find a sequence of instructions to move down which doesn't exceed reg pressure
 
       /* move the candidate below the memory load */
-      auto begin = std::next(block->instructions.begin(), candidate_idx);
-      auto end = std::next(block->instructions.begin(), insert_idx);
-      std::rotate(begin, begin + 1, end);
+      move_element(block->instructions, candidate_idx, insert_idx);
 
       /* update register pressure */
+      move_element(register_demand, candidate_idx, insert_idx);
       for (int i = candidate_idx; i < insert_idx - 1; i++) {
-         register_demand[i].first = register_demand[i + 1].first - candidate_sgpr_diff;
-         register_demand[i].second = register_demand[i + 1].second - candidate_vgpr_diff;
+         register_demand[i].first -= candidate_sgpr_diff;
+         register_demand[i].second -= candidate_vgpr_diff;
       }
+      register_demand[insert_idx - 1].first = new_sgpr_demand;
+      register_demand[insert_idx - 1].second = new_vgpr_demand;
       vgpr_pressure = vgpr_pressure - candidate_vgpr_diff;
       sgpr_pressure = sgpr_pressure - candidate_sgpr_diff;
-      assert(candidate_vgpr_diff == (int) register_demand[insert_idx - 1].second - (int) register_demand[insert_idx - 2].second);
 
       if (candidate_idx < ctx.last_SMEM_dep_idx)
          ctx.last_SMEM_stall++;
@@ -220,23 +285,31 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       }
 
       /* check if register pressure is low enough: the diff is negative if register pressure is decreased */
-      int candidate_sgpr_diff = register_demand[candidate_idx].first - register_demand[candidate_idx - 1].first;
-      int candidate_vgpr_diff = register_demand[candidate_idx].second - register_demand[candidate_idx - 1].second;
+      int candidate_sgpr_diff, candidate_vgpr_diff, temp_sgpr, temp_vgpr;
+      std::tie(candidate_sgpr_diff, candidate_vgpr_diff) = getLiveChanges(candidate);
+      std::tie(temp_sgpr, temp_vgpr) = getTempRegisters(candidate);
       if (vgpr_pressure + candidate_vgpr_diff > ctx.max_vgpr ||
           sgpr_pressure + candidate_sgpr_diff > ctx.max_sgpr)
          break;
+      int temp_sgpr2, temp_vgpr2;
+      std::tie(temp_sgpr2, temp_vgpr2) = getTempRegisters(block->instructions[insert_idx - 1]);
+      uint16_t new_sgpr_demand, new_vgpr_demand;
+      new_sgpr_demand = register_demand[insert_idx - 1].first - temp_sgpr2 + candidate_sgpr_diff + temp_sgpr;
+      new_vgpr_demand = register_demand[insert_idx - 1].second - temp_vgpr2 + candidate_vgpr_diff + temp_vgpr;
+      if (new_sgpr_demand > ctx.max_sgpr || new_vgpr_demand > ctx.max_vgpr)
+         break;
 
       /* move the candidate above the insert_idx */
-      auto begin = std::next(block->instructions.begin(), insert_idx);
-      auto end = std::next(block->instructions.begin(), candidate_idx + 1);
-      std::rotate(begin, end - 1, end);
+      move_element(block->instructions, candidate_idx, insert_idx);
 
       /* update register pressure */
-      for (int i = candidate_idx - 1; i >= insert_idx; i--) {
-         register_demand[i].first = register_demand[i - 1].first + candidate_sgpr_diff;
-         register_demand[i].second = register_demand[i - 1].second + candidate_vgpr_diff;
+      move_element(register_demand, candidate_idx, insert_idx);
+      for (int i = insert_idx + 1; i <= candidate_idx; i++) {
+         register_demand[i].first += candidate_sgpr_diff;
+         register_demand[i].second += candidate_vgpr_diff;
       }
-      assert(candidate_vgpr_diff == (int) register_demand[insert_idx].second - (int) register_demand[insert_idx - 1].second);
+      register_demand[insert_idx].first = new_sgpr_demand;
+      register_demand[insert_idx].second = new_vgpr_demand;
       vgpr_pressure = vgpr_pressure + candidate_vgpr_diff;
       sgpr_pressure = sgpr_pressure + candidate_sgpr_diff;
       insert_idx++;
@@ -248,8 +321,8 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 }
 
 void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
-                       std::vector<std::pair<uint16_t,uint16_t>>& register_demand,
-                       Instruction* current, int idx)
+                   std::vector<std::pair<uint16_t,uint16_t>>& register_demand,
+                   Instruction* current, int idx)
 {
    assert(idx != 0);
    int window_size = 25 - ctx.num_waves;
@@ -317,26 +390,34 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       }
 
       /* check if register pressure is low enough: the diff is negative if register pressure is decreased */
-      int candidate_sgpr_diff = register_demand[candidate_idx].first - register_demand[candidate_idx - 1].first;
-      int candidate_vgpr_diff = register_demand[candidate_idx].second - register_demand[candidate_idx - 1].second;
+      int candidate_sgpr_diff, candidate_vgpr_diff, temp_sgpr, temp_vgpr;
+      std::tie(candidate_sgpr_diff, candidate_vgpr_diff) = getLiveChanges(candidate);
+      std::tie(temp_sgpr, temp_vgpr) = getTempRegisters(candidate);
       if (vgpr_pressure - candidate_vgpr_diff > ctx.max_vgpr ||
           sgpr_pressure - candidate_sgpr_diff > ctx.max_sgpr)
+         break;
+      int temp_sgpr2, temp_vgpr2;
+      std::tie(temp_sgpr2, temp_vgpr2) = getTempRegisters(block->instructions[insert_idx - 1]);
+      uint16_t new_sgpr_demand, new_vgpr_demand;
+      new_sgpr_demand = register_demand[insert_idx - 1].first - temp_sgpr2 + temp_sgpr;
+      new_vgpr_demand = register_demand[insert_idx - 1].second - temp_vgpr2 + temp_vgpr;
+      if (new_sgpr_demand > ctx.max_sgpr || new_vgpr_demand > ctx.max_vgpr)
          break;
       // TODO: we might want to look further to find a sequence of instructions to move down which doesn't exceed reg pressure
 
       /* move the candidate below the memory load */
-      auto begin = std::next(block->instructions.begin(), candidate_idx);
-      auto end = std::next(block->instructions.begin(), insert_idx);
-      std::rotate(begin, begin + 1, end);
+      move_element(block->instructions, candidate_idx, insert_idx);
 
       /* update register pressure */
+      move_element(register_demand, candidate_idx, insert_idx);
       for (int i = candidate_idx; i < insert_idx - 1; i++) {
-         register_demand[i].first = register_demand[i + 1].first - candidate_sgpr_diff;
-         register_demand[i].second = register_demand[i + 1].second - candidate_vgpr_diff;
+         register_demand[i].first -= candidate_sgpr_diff;
+         register_demand[i].second -= candidate_vgpr_diff;
       }
+      register_demand[insert_idx - 1].first = new_sgpr_demand;
+      register_demand[insert_idx - 1].second = new_vgpr_demand;
       vgpr_pressure = vgpr_pressure - candidate_vgpr_diff;
       sgpr_pressure = sgpr_pressure - candidate_sgpr_diff;
-      assert(candidate_vgpr_diff == (int) register_demand[insert_idx - 1].second - (int) register_demand[insert_idx - 2].second);
       insert_idx--;
       if (candidate_idx < ctx.last_SMEM_dep_idx)
          ctx.last_SMEM_stall++;
@@ -410,30 +491,38 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       }
 
       /* check if register pressure is low enough: the diff is negative if register pressure is decreased */
-      int candidate_sgpr_diff = register_demand[candidate_idx].first - register_demand[candidate_idx - 1].first;
-      int candidate_vgpr_diff = register_demand[candidate_idx].second - register_demand[candidate_idx - 1].second;
+      int candidate_sgpr_diff, candidate_vgpr_diff, temp_sgpr, temp_vgpr;
+      std::tie(candidate_sgpr_diff, candidate_vgpr_diff) = getLiveChanges(candidate);
+      std::tie(temp_sgpr, temp_vgpr) = getTempRegisters(candidate);
       if (vgpr_pressure + candidate_vgpr_diff > ctx.max_vgpr ||
           sgpr_pressure + candidate_sgpr_diff > ctx.max_sgpr)
          break;
+      int temp_sgpr2, temp_vgpr2;
+      std::tie(temp_sgpr2, temp_vgpr2) = getTempRegisters(block->instructions[insert_idx - 1]);
+      uint16_t new_sgpr_demand, new_vgpr_demand;
+      new_sgpr_demand = register_demand[insert_idx - 1].first - temp_sgpr2 + candidate_sgpr_diff + temp_sgpr;
+      new_vgpr_demand = register_demand[insert_idx - 1].second - temp_vgpr2 + candidate_vgpr_diff + temp_vgpr;
+      if (new_sgpr_demand > ctx.max_sgpr || new_vgpr_demand > ctx.max_vgpr)
+         break;
 
       /* move the candidate above the insert_idx */
-      auto begin = std::next(block->instructions.begin(), insert_idx);
-      auto end = std::next(block->instructions.begin(), candidate_idx + 1);
-      std::rotate(begin, end - 1, end);
+      move_element(block->instructions, candidate_idx, insert_idx);
 
       /* update register pressure */
-      for (int i = candidate_idx - 1; i >= insert_idx; i--) {
-         register_demand[i].first = register_demand[i - 1].first + candidate_sgpr_diff;
-         register_demand[i].second = register_demand[i - 1].second + candidate_vgpr_diff;
+      move_element(register_demand, candidate_idx, insert_idx);
+      for (int i = insert_idx + 1; i <= candidate_idx; i++) {
+         register_demand[i].first += candidate_sgpr_diff;
+         register_demand[i].second += candidate_vgpr_diff;
       }
-      assert(candidate_vgpr_diff == (int) register_demand[insert_idx].second - (int) register_demand[insert_idx - 1].second);
+      register_demand[insert_idx].first = new_sgpr_demand;
+      register_demand[insert_idx].second = new_vgpr_demand;
       vgpr_pressure = vgpr_pressure + candidate_vgpr_diff;
       sgpr_pressure = sgpr_pressure + candidate_sgpr_diff;
       insert_idx++;
    }
 }
 
-void schedule_block(sched_ctx& ctx, std::unique_ptr<Block>& block, std::vector<std::pair<uint16_t,uint16_t>>& register_demand)
+void schedule_block(sched_ctx& ctx, Program *program, std::unique_ptr<Block>& block, live& live_vars)
 {
    ctx.last_SMEM_dep_idx = 0;
    ctx.last_SMEM_stall = INT16_MIN;
@@ -446,14 +535,22 @@ void schedule_block(sched_ctx& ctx, std::unique_ptr<Block>& block, std::vector<s
          continue;
 
       if (current->isVMEM())
-         schedule_VMEM(ctx, block, register_demand, current, idx);
+         schedule_VMEM(ctx, block, live_vars.register_demand[block->index], current, idx);
       if (current->format == Format::SMEM)
-         schedule_SMEM(ctx, block, register_demand, current, idx);
+         schedule_SMEM(ctx, block, live_vars.register_demand[block->index], current, idx);
+   }
+
+   /* resummarize the block's register demand */
+   block->vgpr_demand = 0;
+   block->sgpr_demand = 0;
+   for (unsigned idx = 0; idx < block->instructions.size(); idx++) {
+      block->vgpr_demand = std::max(block->vgpr_demand, live_vars.register_demand[block->index][idx].second);
+      block->sgpr_demand = std::max(block->sgpr_demand, live_vars.register_demand[block->index][idx].first);
    }
 }
 
 
-void schedule_program(Program *program, std::vector<std::vector<std::pair<uint16_t,uint16_t>>> register_demand)
+void schedule_program(Program *program, live& live_vars)
 {
    sched_ctx ctx;
    ctx.num_waves = program->num_waves;
@@ -461,8 +558,46 @@ void schedule_program(Program *program, std::vector<std::vector<std::pair<uint16
    ctx.max_sgpr = program->max_sgpr;
 
    for (std::unique_ptr<Block>& block : program->blocks)
-      schedule_block(ctx, block, register_demand[block->index]);
+      schedule_block(ctx, program, block, live_vars);
 
+   /* update max_vgpr, max_sgpr and num_waves */
+   uint16_t sgpr_demand = 0;
+   uint16_t vgpr_demand = 0;
+   for (std::unique_ptr<Block>& block : program->blocks) {
+      sgpr_demand = std::max(block->sgpr_demand, sgpr_demand);
+      vgpr_demand = std::max(block->vgpr_demand, vgpr_demand);
+   }
+   update_vgpr_sgpr_demand(program, vgpr_demand, sgpr_demand);
+
+   /* if enabled, this code asserts that register_demand is updated correctly */
+   #if 1
+   int prev_num_waves = program->num_waves;
+   int prev_max_sgpr = program->max_sgpr;
+   int prev_max_vgpr = program->max_vgpr;
+
+   unsigned vgpr_demands[program->blocks.size()];
+   unsigned sgpr_demands[program->blocks.size()];
+   for (unsigned j = 0; j < program->blocks.size(); j++) {
+      vgpr_demands[j] = program->blocks[j]->vgpr_demand;
+      sgpr_demands[j] = program->blocks[j]->sgpr_demand;
+   }
+
+   struct radv_nir_compiler_options options;
+   options.chip_class = program->chip_class;
+   live live_vars2 = aco::live_var_analysis<true>(program, &options);
+
+   for (unsigned j = 0; j < program->blocks.size(); j++) {
+      Block *b = program->blocks[j].get();
+      for (unsigned i = 0; i < b->instructions.size(); i++)
+         assert(live_vars.register_demand[b->index][i] == live_vars2.register_demand[b->index][i]);
+      assert(b->vgpr_demand == vgpr_demands[j]);
+      assert(b->sgpr_demand == sgpr_demands[j]);
+   }
+
+   assert(program->max_vgpr == prev_max_vgpr);
+   assert(program->max_sgpr == prev_max_sgpr);
+   assert(program->num_waves == prev_num_waves);
+   #endif
 }
 
 }
