@@ -176,6 +176,30 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
    assert(!reg_demand_cond || block->linear_predecessors.size() != 0 || (vgpr_demand == 0 && sgpr_demand == 0));
 }
 
+void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr)
+{
+   // TODO: also take shared mem into account
+   uint16_t total_sgpr_regs = program->chip_class >= VI ? 800 : 512;
+   uint16_t max_addressible_sgpr = program->chip_class >= VI ? 102 : 104;
+   /* VGPRs are allocated in chunks of 4 */
+   uint16_t rounded_vgpr_demand = std::max<uint16_t>(4, (vgpr + 3) & ~3);
+   /* SGPRs are allocated in chunks of 16 between 8 and 104. VCC occupies the last 2 registers */
+   uint16_t rounded_sgpr_demand = std::min(std::max<uint16_t>(8, (sgpr + 2 + 7) & ~7), max_addressible_sgpr);
+   /* this won't compile, register pressure reduction necessary */
+   if (vgpr > 256 || sgpr > max_addressible_sgpr) {
+      program->num_waves = 0;
+      program->max_sgpr = sgpr;
+      program->max_vgpr = vgpr;
+   } else {
+      program->num_waves = std::min<uint16_t>(10,
+                                              std::min<uint16_t>(256 / rounded_vgpr_demand,
+                                                                 total_sgpr_regs / rounded_sgpr_demand));
+
+      program->max_sgpr = std::min<uint16_t>(((total_sgpr_regs / program->num_waves) & ~7) - 2, max_addressible_sgpr);
+      program->max_vgpr = (256 / program->num_waves) & ~3;
+   }
+}
+
 template<bool register_demand>
 live live_var_analysis(Program* program,
                        const struct radv_nir_compiler_options *options)
@@ -200,28 +224,8 @@ live live_var_analysis(Program* program,
    }
 
    /* calculate the program's register demand and number of waves */
-   if (register_demand) {
-      // TODO: also take shared mem into account
-      uint16_t total_sgpr_regs = options->chip_class >= VI ? 800 : 512;
-      uint16_t max_addressible_sgpr = options->chip_class >= VI ? 102 : 104;
-      /* VGPRs are allocated in chunks of 4 */
-      uint16_t rounded_vgpr_demand = std::max<uint16_t>(4, (vgpr_demand + 3) & ~3);
-      /* SGPRs are allocated in chunks of 16 between 8 and 104. VCC occupies the last 2 registers */
-      uint16_t rounded_sgpr_demand = std::min(std::max<uint16_t>(8, (sgpr_demand + 2 + 7) & ~7), max_addressible_sgpr);
-      /* this won't compile, register pressure reduction necessary */
-      if (vgpr_demand > 256 || sgpr_demand > max_addressible_sgpr) {
-         program->num_waves = 0;
-         program->max_sgpr = sgpr_demand;
-         program->max_vgpr = vgpr_demand;
-      } else {
-         program->num_waves = std::min<uint16_t>(10,
-                                                 std::min<uint16_t>(256 / rounded_vgpr_demand,
-                                                                    total_sgpr_regs / rounded_sgpr_demand));
-
-         program->max_sgpr = std::min<uint16_t>(((total_sgpr_regs / program->num_waves) & ~7) - 2, max_addressible_sgpr);
-         program->max_vgpr = (256 / program->num_waves) & ~3;
-      }
-   }
+   if (register_demand)
+      update_vgpr_sgpr_demand(program, vgpr_demand, sgpr_demand);
 
    return result;
 }

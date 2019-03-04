@@ -864,6 +864,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         struct radv_nir_compiler_options *options);
 
 void lower_bool_phis(Program* program);
+void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr);
 template<bool condition>
 live live_var_analysis(Program* program,
                        const struct radv_nir_compiler_options *options);
@@ -876,7 +877,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 void eliminate_phis(Program* program);
 void lower_to_hw_instr(Program* program);
 void schedule(Program* program);
-void schedule_program(Program* program, std::vector<std::vector<std::pair<uint16_t,uint16_t>>> register_demand);
+void schedule_program(Program* program, live& live_vars);
 void spill(Program* program, live& live_vars, const struct radv_nir_compiler_options *options);
 void insert_wait_states(Program* program);
 std::vector<uint32_t> emit_program(Program* program);
