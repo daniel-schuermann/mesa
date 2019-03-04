@@ -467,7 +467,9 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    case aco_opcode::s_mov_b64:
    case aco_opcode::v_mov_b32:
    case aco_opcode::v_readfirstlane_b32:
-      if (instr->getOperand(0).isConstant()) {
+      if (instr->getDefinition(0).isFixed()) {
+         /* don't copy-propagate copies into fixed registers */
+      } else if (instr->getOperand(0).isConstant()) {
          if (instr->getOperand(0).isLiteral())
             ctx.info[instr->getDefinition(0).tempId()].set_literal(instr->getOperand(0).constantValue());
          else
