@@ -379,8 +379,8 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
          pred_idx = block->linear_predecessors[0]->index;
          for (std::pair<Temp, uint32_t> pair : ctx.spills_exit[pred_idx]) {
             if (pair.first.type() == sgpr &&
-                ctx.next_use_distances_start[block_idx].find(pair.first) != ctx.next_use_distances_start[block_idx].end()) {
-               ctx.spills_entry[block_idx].insert(pair);
+                ctx.next_use_distances_start[block_idx].find(pair.first) != ctx.next_use_distances_start[block_idx].end() &&
+                ctx.spills_entry[block_idx].insert(pair).second) {
                spilled_sgprs += pair.first.size();
             }
          }
@@ -389,8 +389,8 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
          pred_idx = block->logical_predecessors[0]->index;
          for (std::pair<Temp, uint32_t> pair : ctx.spills_exit[pred_idx]) {
             if (pair.first.type() == vgpr &&
-                ctx.next_use_distances_start[block_idx].find(pair.first) != ctx.next_use_distances_start[block_idx].end()) {
-               ctx.spills_entry[block_idx].insert(pair);
+                ctx.next_use_distances_start[block_idx].find(pair.first) != ctx.next_use_distances_start[block_idx].end() &&
+                ctx.spills_entry[block_idx].insert(pair).second) {
                spilled_vgprs += pair.first.size();
             }
          }
