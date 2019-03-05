@@ -194,7 +194,13 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      break;
                   case nir_op_bcsel:
                      if (alu_instr->dest.dest.ssa.bit_size == 1) {
-                        size = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? 2 : 1;
+                        if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index])
+                           size = 2;
+                        else if (reg_class[alu_instr->src[1].src.ssa->index] == s2 &&
+                                 reg_class[alu_instr->src[2].src.ssa->index] == s2)
+                           size = 2;
+                        else
+                           size = 1;
                      } else {
                         if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index]) {
                            type = vgpr;
@@ -215,9 +221,27 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                         type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
                      }
                      break;
-                  default:
+                  case nir_op_inot:
+                  case nir_op_ixor:
                      if (alu_instr->dest.dest.ssa.bit_size == 1) {
                         size = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? 2 : 1;
+                        break;
+                     } else {
+                        /* fallthrough */
+                     }
+                  default:
+                     if (alu_instr->dest.dest.ssa.bit_size == 1) {
+                        if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index]) {
+                           size = 2;
+                        } else {
+                           size = 2;
+                           for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
+                              if (reg_class[alu_instr->src[i].src.ssa->index] == s1) {
+                                 size = 1;
+                                 break;
+                              }
+                           }
+                        }
                      } else {
                         for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
                            if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr)
