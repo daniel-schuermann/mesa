@@ -163,6 +163,7 @@ struct copy_operation {
    Operand op;
    Definition def;
    unsigned uses;
+   unsigned size;
 };
 
 void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context* ctx, chip_class chip_class)
@@ -171,7 +172,8 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
    std::map<PhysReg, copy_operation>::iterator it = copy_map.begin();
    std::map<PhysReg, copy_operation>::iterator target;
 
-   /* count the number of uses for each dst reg */
+   /* count the number of uses for each dst reg and coalesce 32-bit sgpr copies
+    * to 64-bit copies */
    while (it != copy_map.end()) {
       if (it->second.op.isConstant()) {
          ++it;
@@ -187,7 +189,24 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
       if (target != copy_map.end()) {
          target->second.uses++;
       }
-      ++it;
+
+      /* coalesce 32-bit sgpr copies to 64-bit copies */
+      if (it->second.def.getTemp().type() != RegType::sgpr || !it->first.reg ||
+          it->second.uses || it->second.size != 1 || it->second.op.isConstant()) {
+         ++it;
+         continue;
+      }
+
+      std::map<PhysReg, copy_operation>::iterator second = copy_map.find(PhysReg{it->first.reg - 1});
+      if (second == copy_map.end() || second->second.uses || second->second.size != 1 ||
+          second->second.op.physReg().reg + 1 != it->second.op.physReg().reg ||
+          second->second.op.isConstant()) {
+         ++it;
+         continue;
+      }
+
+      second->second.size = 2;
+      it = copy_map.erase(it);
    }
 
    /* first, handle paths in the location transfer graph */
@@ -198,6 +217,11 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
          if (it->second.def.physReg().reg == scc.reg) {
             mov.reset(create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_i32, Format::SOPC, 2, 1));
             mov->getOperand(1) = Operand((uint32_t) 0);
+            mov->getOperand(0) = it->second.op;
+            mov->getDefinition(0) = it->second.def;
+            ctx->instructions.emplace_back(std::move(mov));
+         } else if (it->second.size == 2 && it->second.def.getTemp().type() == RegType::sgpr) {
+            mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
             mov->getOperand(0) = it->second.op;
             mov->getDefinition(0) = it->second.def;
             ctx->instructions.emplace_back(std::move(mov));
@@ -331,7 +355,7 @@ void lower_to_hw_instr(Program* program)
                   {
                      Operand op = Operand(PhysReg{instr->getOperand(i).physReg().reg + j}, rc_op);
                      Definition def = Definition(PhysReg{instr->getDefinition(0).physReg().reg + reg_idx}, rc_def);
-                     copy_operations[def.physReg()] = {op, def, 0};
+                     copy_operations[def.physReg()] = {op, def, 0, 1};
                      reg_idx++;
                   }
                }
@@ -348,7 +372,7 @@ void lower_to_hw_instr(Program* program)
                   for (unsigned j = 0; j < k; j++) {
                      Operand op = Operand(PhysReg{instr->getOperand(0).physReg().reg + (i*k+j)}, rc_op);
                      Definition def = Definition(PhysReg{instr->getDefinition(i).physReg().reg + j}, rc_def);
-                     copy_operations[def.physReg()] = {op, def, 0};
+                     copy_operations[def.physReg()] = {op, def, 0, 1};
                   }
                }
                handle_operands(copy_operations, &ctx, program->chip_class);
@@ -370,7 +394,7 @@ void lower_to_hw_instr(Program* program)
                      {
                         Operand op = Operand({instr->getOperand(i).physReg().reg + j}, op_rc);
                         Definition def = Definition(PhysReg{instr->getDefinition(i).physReg().reg + j}, def_rc);
-                        copy_operations[def.physReg()] = {op, def, 0};
+                        copy_operations[def.physReg()] = {op, def, 0, 1};
                      }
                   }
                }
