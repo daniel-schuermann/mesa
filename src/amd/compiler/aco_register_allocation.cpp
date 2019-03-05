@@ -996,15 +996,21 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             }
 
             ctx.assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
+            for (unsigned i = 0; i < definition.size(); i++)
+               register_file[definition.physReg().reg + i] = definition.tempId();
             /* set live if it has a kill point */
             if (!definition.isKill()) {
-               for (unsigned i = 0; i < definition.size(); i++)
-                  register_file[definition.physReg().reg + i] = definition.tempId();
                live.emplace(definition.getTemp());
             }
             /* add to renames table */
             renames[block->index][definition.tempId()] = definition.getTemp();
          }
+
+         /* kill definitions */
+         for (unsigned i = 0; i < instr->num_definitions; i++)
+             if (instr->getDefinition(i).isTemp() && instr->getDefinition(i).isKill())
+                for (unsigned j = 0; j < instr->getDefinition(i).size(); j++)
+                   register_file[instr->getDefinition(i).physReg().reg + j] = 0;
 
          /* emit parallelcopy */
          if (!parallelcopy.empty()) {
