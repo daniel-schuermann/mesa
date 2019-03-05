@@ -578,7 +578,7 @@ void schedule_program(Program *program, live& live_vars)
    update_vgpr_sgpr_demand(program, vgpr_demand, sgpr_demand);
 
    /* if enabled, this code asserts that register_demand is updated correctly */
-   #if 1
+   #if 0
    int prev_num_waves = program->num_waves;
    int prev_max_sgpr = program->max_sgpr;
    int prev_max_vgpr = program->max_vgpr;
