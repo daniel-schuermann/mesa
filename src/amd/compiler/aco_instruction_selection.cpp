@@ -5434,6 +5434,41 @@ aco_ptr<Instruction> create_s_mov(Definition dst, Operand src) {
    return mov;
 }
 
+void handle_bc_optimize(isel_context *ctx)
+{
+   uint32_t spi_ps_input_ena = ctx->program->config->spi_ps_input_ena;
+   bool uses_center = G_0286CC_PERSP_CENTER_ENA(spi_ps_input_ena) || G_0286CC_LINEAR_CENTER_ENA(spi_ps_input_ena);
+   bool uses_centroid = G_0286CC_PERSP_CENTROID_ENA(spi_ps_input_ena) || G_0286CC_LINEAR_CENTROID_ENA(spi_ps_input_ena);
+   if (uses_center && uses_centroid) {
+      /* needed when SPI_PS_IN_CONTROL.BC_OPTIMIZE_DISABLE is set to 0 */
+      Temp sel{ctx->program->allocateId(), s2};
+      aco_ptr<Instruction> instr{create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_lt_i32, static_cast<Format>((int)Format::VOPC | (int)Format::VOP3A), 2, 1)};
+      instr->getOperand(0) = Operand(ctx->prim_mask);
+      instr->getOperand(1) = Operand((uint32_t) 0);
+      instr->getDefinition(0) = Definition(sel);
+      instr->getDefinition(0).setHint(vcc);
+      ctx->block->instructions.emplace_back(std::move(instr));
+
+      if (G_0286CC_PERSP_CENTROID_ENA(spi_ps_input_ena)) {
+         for (unsigned i = 0; i < 2; i++) {
+            Temp new_coord{ctx->program->allocateId(), v1};
+            instr.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
+            instr->getOperand(0) = Operand(ctx->fs_inputs[fs_input::persp_centroid_p1 + i]);
+            instr->getOperand(1) = Operand(ctx->fs_inputs[fs_input::persp_center_p1 + i]);
+            instr->getOperand(2) = Operand(sel);
+            instr->getDefinition(0) = Definition(new_coord);
+            ctx->block->instructions.emplace_back(std::move(instr));
+            ctx->fs_inputs[fs_input::persp_centroid_p1 + i] = new_coord;
+         }
+      }
+
+      if (G_0286CC_LINEAR_CENTROID_ENA(spi_ps_input_ena)) {
+         /* TODO: implement when linear interpolation is implemented */
+         unreachable("Unimplemented\n");
+      }
+   }
+}
+
 std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         ac_shader_config* config,
                                         struct radv_shader_variant_info *info,
@@ -5452,6 +5487,9 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    }
 
    append_logical_start(ctx.block);
+
+   if (ctx.stage == MESA_SHADER_FRAGMENT)
+      handle_bc_optimize(&ctx);
 
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
    visit_cf_list(&ctx, &func->impl->body);
