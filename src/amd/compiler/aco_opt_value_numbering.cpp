@@ -20,17 +20,12 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *
- * Authors:
- *    Daniel Schürmann (daniel.schuermann@campus.tu-berlin.de)
- *
  */
 
-
-#include <unordered_map>
+#include <map>
 #include <unordered_set>
 
 #include "aco_ir.h"
-#include "aco_dominance.cpp"
 
 /*
  * Implements the algorithm for dominator-tree value numbering
@@ -38,6 +33,7 @@
  */
 
 namespace aco {
+namespace {
 
 struct InstrHash {
    std::size_t operator()(Instruction* instr) const
@@ -188,17 +184,17 @@ struct InstrPred {
 };
 
 
+typedef std::unordered_set<Instruction*, InstrHash, InstrPred> expr_set;
+
 void process_block(std::unique_ptr<Block>& block,
-                   std::unordered_set<Instruction*, InstrHash, InstrPred>& expr_values,
-                   std::unordered_map<uint32_t, Operand>& renames,
-                   std::set<unsigned>& worklist)
+                   expr_set& expr_values,
+                   std::map<uint32_t, Operand>& renames)
 {
-   bool process_successors = false;
    bool run = false;
-   Instruction* last_sopc = nullptr;
    std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
    std::vector<aco_ptr<Instruction>> new_instructions;
    new_instructions.reserve(block->instructions.size());
+   expr_set phi_values;
 
    while (it != block->instructions.end()) {
       aco_ptr<Instruction>& instr = *it;
@@ -206,25 +202,32 @@ void process_block(std::unique_ptr<Block>& block,
       for (unsigned i = 0; i < instr->num_operands; i++) {
          if (!instr->getOperand(i).isTemp())
             continue;
-         std::unordered_map<uint32_t, Operand>::iterator it = renames.find(instr->getOperand(i).tempId());
+         std::map<uint32_t, Operand>::iterator it = renames.find(instr->getOperand(i).tempId());
          if (it != renames.end())
             instr->getOperand(i) = it->second;
       }
 
-      if (instr->opcode == aco_opcode::p_logical_start)
-         run = true;
-      if (instr->opcode == aco_opcode::p_logical_end)
-         run = false;
-
       if (!instr->num_definitions || !run) {
+         if (instr->opcode == aco_opcode::p_logical_start)
+            run = true;
+         else if (instr->opcode == aco_opcode::p_logical_end)
+            run = false;
+         else if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi) {
+            std::pair<expr_set::iterator, bool> res = phi_values.emplace(instr.get());
+            if (!res.second) {
+               Instruction* orig_phi = *(res.first);
+               Operand new_op = Operand(orig_phi->getDefinition(0).getTemp());
+               renames.emplace(instr->getDefinition(0).tempId(), new_op).second;
+               ++it;
+               continue;
+            }
+         }
          new_instructions.emplace_back(std::move(instr));
          ++it;
          continue;
       }
 
-      // TODO: check if phi instructions are meaningless (i.e. all operands are the same)
-
-      std::pair<std::unordered_set<Instruction*, InstrHash, InstrPred>::iterator, bool> res = expr_values.emplace(instr.get());
+      std::pair<expr_set::iterator, bool> res = expr_values.emplace(instr.get());
 
       /* if there was already an expression with the same value number */
       if (!res.second) {
@@ -235,52 +238,53 @@ void process_block(std::unique_ptr<Block>& block,
             Operand new_op = Operand(orig_instr->getDefinition(i).getTemp());
             if (orig_instr->getDefinition(i).isFixed())
                new_op.setFixed(instr->getDefinition(i).physReg());
-            process_successors |= renames.emplace(instr->getDefinition(i).tempId(), new_op).second;
+            renames.emplace(instr->getDefinition(i).tempId(), new_op).second;
          }
-      } else if (instr->isSALU() &&
-                 instr->getDefinition(instr->num_definitions - 1).isFixed() &&
-                 instr->getDefinition(instr->num_definitions - 1).physReg().reg == scc.reg) {
-         /* if the current instructions overwrites scc, we remove the previous scc instruction from the map */
-         if (last_sopc)
-            expr_values.erase(last_sopc);
-
-         last_sopc = instr->getDefinition(instr->num_definitions - 1).isTemp() ? instr.get() : nullptr;
-      }
-      if (res.second)
+      } else {
          new_instructions.emplace_back(std::move(instr));
+      }
       ++it;
-   }
-   if (last_sopc)
-      expr_values.erase(last_sopc);
-
-   if (process_successors) {
-      for (Block* succ : block->logical_successors)
-         worklist.insert(succ->index);
    }
 
    block->instructions.swap(new_instructions);
 }
 
+void rename_phi_operands(std::unique_ptr<Block>& block, std::map<uint32_t, Operand>& renames)
+{
+   for (aco_ptr<Instruction>& phi : block->instructions) {
+      if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
+         break;
+
+      for (unsigned i = 0; i < phi->num_operands; i++) {
+         if (!phi->getOperand(i).isTemp())
+            continue;
+         std::map<uint32_t, Operand>::iterator it = renames.find(phi->getOperand(i).tempId());
+         if (it != renames.end())
+            phi->getOperand(i) = it->second;
+      }
+   }
+}
+} /* end namespace */
+
+
 void value_numbering(Program* program)
 {
-   std::vector<std::unordered_set<Instruction*, InstrHash, InstrPred>> expr_values(program->blocks.size());
-   std::unordered_map<uint32_t, Operand> renames;
+   std::vector<expr_set> expr_values(program->blocks.size());
+   std::map<uint32_t, Operand> renames;
+   expr_set empty;
 
-   /* we only process the logical cfg */
-   std::set<unsigned> worklist;
-   for (std::unique_ptr<Block>& block : program->blocks)
-      if (block->logical_idom != -1)
-         worklist.insert(block->index);
-
-   while (!worklist.empty()) {
-      std::set<unsigned>::iterator it = worklist.begin();
-      unsigned block_idx = *it;
-      worklist.erase(it);
-      std::unique_ptr<Block>& block = program->blocks[block_idx];
-      /* initialize expr_values from idom */
-      expr_values[block_idx] = expr_values[block->logical_idom];
-      process_block(block, expr_values[block_idx], renames, worklist);
+   for (std::unique_ptr<Block>& block : program->blocks) {
+      if (block->logical_idom != -1) {
+         /* initialize expr_values from idom */
+         expr_values[block->index] = expr_values[block->logical_idom];
+         process_block(block, expr_values[block->index], renames);
+      } else {
+         process_block(block, empty, renames);
+      }
    }
+
+   for (std::unique_ptr<Block>& block : program->blocks)
+      rename_phi_operands(block, renames);
 }
 
 }
