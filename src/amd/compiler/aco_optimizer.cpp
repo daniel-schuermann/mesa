@@ -555,13 +555,25 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    case aco_opcode::p_phi:
    case aco_opcode::p_linear_phi: {
       /* lower_bool_phis() can create phis like this */
-      bool all_same = instr->getOperand(0).isTemp();
-      for (unsigned i = 1; all_same && (i < instr->operandCount()); i++) {
+      bool all_same_temp = instr->getOperand(0).isTemp();
+      /* this check is needed when moving uniform loop counters out of a divergent loop */
+      if (all_same_temp)
+         all_same_temp = instr->getDefinition(0).regClass() == instr->getOperand(0).regClass();
+      for (unsigned i = 1; all_same_temp && (i < instr->num_operands); i++) {
          if (!instr->getOperand(i).isTemp() || instr->getOperand(i).tempId() != instr->getOperand(0).tempId())
-            all_same = false;
+            all_same_temp = false;
       }
-      if (all_same)
+      if (all_same_temp) {
          ctx.info[instr->getDefinition(0).tempId()].set_temp(instr->getOperand(0).getTemp());
+      } else {
+         bool all_undef = instr->getOperand(0).isUndefined();
+         for (unsigned i = 1; all_undef && (i < instr->num_operands); i++) {
+            if (!instr->getOperand(i).isUndefined())
+               all_undef = false;
+         }
+         if (all_undef)
+            ctx.info[instr->getDefinition(0).tempId()].set_undefined();
+      }
       break;
    }
    default:
