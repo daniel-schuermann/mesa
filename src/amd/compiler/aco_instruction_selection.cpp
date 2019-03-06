@@ -5116,15 +5116,7 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
 
       if (cond.regClass() == s2) {
          // TODO: in a post-RA optimizer, we could check if the condition is in VCC and omit this instruction
-         cond = emit_extract_vector(ctx, cond, 0, s1);
-         aco_ptr<Instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_and_b32, Format::SOP2, 2, 2)};
-         sop2->getOperand(0) = Operand((uint32_t) 1);
-         sop2->getOperand(1) = Operand(cond);
-         cond = {ctx->program->allocateId(), s1};
-         sop2->getDefinition(0) = Definition(ctx->program->allocateId(), s1);
-         sop2->getDefinition(1) = Definition(cond);
-         sop2->getDefinition(1).setFixed(scc);
-         ctx->block->instructions.emplace_back(std::move(sop2));
+         cond = as_uniform_bool(ctx, cond);
       }
 
       /* emit branch */
