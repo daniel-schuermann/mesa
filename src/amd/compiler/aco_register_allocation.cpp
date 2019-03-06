@@ -107,6 +107,20 @@ bool get_reg_for_copies(ra_ctx& ctx,
 }
 
 
+void adjust_max_used_regs(ra_ctx& ctx, RegClass rc, unsigned reg)
+{
+   unsigned max_addressible_sgpr = ctx.program->chip_class >= VI ? 102 : 104;
+   unsigned size = sizeOf(rc);
+   if (typeOf(rc) == vgpr) {
+      unsigned hi = reg - 256 + size - 1;
+      ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, hi);
+   } else if (reg + sizeOf(rc) <= max_addressible_sgpr) {
+      unsigned hi = reg + size - 1;
+      ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, std::min(hi, max_addressible_sgpr));
+   }
+}
+
+
 std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
                                       std::array<uint32_t, 512>& reg_file,
                                       std::vector<std::pair<Operand, Definition>>& parallelcopies,
@@ -135,10 +149,7 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
             }
          }
          if (found) {
-            if (is_sgpr)
-               ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, reg_hi);
-            else
-               ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, reg_hi - 256);
+            adjust_max_used_regs(ctx, is_sgpr ? s1 : v1, reg_hi);
             return std::make_pair(PhysReg{reg_lo}, true);
          }
          while (reg_lo <= reg_hi)
@@ -198,10 +209,7 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
          /* if everything worked out: insert parallelcopies, release [reg_lo,reg_hi], copy back reg_file */
          parallelcopies.insert(parallelcopies.end(), parallelcopy.begin(), parallelcopy.end());
          reg_file = register_file;
-         if (is_sgpr)
-            ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, reg_hi);
-         else
-            ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, reg_hi - 256);
+         adjust_max_used_regs(ctx, is_sgpr ? s1 : v1, reg_hi);
          return std::make_pair(PhysReg{reg_lo}, true);
       }
    }
@@ -363,10 +371,7 @@ bool get_reg_specified(ra_ctx& ctx,
          if (reg_file[i] != 0)
             return false;
       }
-      if (typeOf(rc) == sgpr)
-         ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, reg_hi);
-      else
-         ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, reg_hi - 256);
+      adjust_max_used_regs(ctx, rc, reg_lo);
       return true;
    }
 
@@ -424,10 +429,7 @@ bool get_reg_specified(ra_ctx& ctx,
       /* if everything worked out: insert parallelcopies, release [reg_lo,reg_hi], copy back reg_file */
       reg_file = register_file;
 
-      if (is_sgpr)
-         ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, reg_hi);
-      else
-         ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, reg_hi - 256);
+      adjust_max_used_regs(ctx, rc, reg_lo);
       parallelcopies.insert(parallelcopies.end(), parallelcopy.begin(), parallelcopy.end());
       /* allocate id's and rename operands: this is done transparently here */
       for (std::pair<Operand, Definition>& copy : parallelcopies) {
@@ -793,6 +795,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
             /* check if the operand is fixed */
             if (operand.isFixed()) {
+               adjust_max_used_regs(ctx, operand.regClass(), operand.physReg().reg);
+
                if (operand.physReg() == ctx.assignments[operand.tempId()].first) {
                   /* we are fine: the operand is already assigned the correct reg */
 
@@ -849,6 +853,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          for (unsigned i = 0; i < instr->num_definitions; ++i) {
             auto& definition = instr->getDefinition(i);
             if (definition.isFixed()) {
+               adjust_max_used_regs(ctx, definition.regClass(), definition.physReg().reg);
+
                /* check if target dst is blocked */
                if (register_file[definition.physReg().reg] != 0) {
                   /* create parallelcopy pair to move blocking var */
