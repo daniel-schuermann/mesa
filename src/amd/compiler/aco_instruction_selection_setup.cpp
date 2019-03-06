@@ -759,7 +759,6 @@ void add_startpgm(struct isel_context *ctx)
          add_arg(&args, v1, &ctx->fs_inputs[fs_input::persp_centroid_p2], vgpr_idx++);
          ctx->program->config->spi_ps_input_addr |= S_0286CC_PERSP_CENTROID_ENA(1);
          ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_CENTROID_ENA(1);
-         vgpr_idx += 2;
       }
       if (ctx->fs_vgpr_args[fs_input::persp_pull_model]) {
          add_arg(&args, v3, &ctx->fs_inputs[fs_input::persp_pull_model], vgpr_idx);
