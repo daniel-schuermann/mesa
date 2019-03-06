@@ -527,6 +527,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
    read_variable_recursive = [&](Temp val, Block* block) -> Temp {
       std::vector<Block*>& preds = val.is_linear() ? block->linear_predecessors : block->logical_predecessors;
+      if (preds.size() == 0 && block->index != 0)
+         return val;
       assert(preds.size() > 0);
 
       Temp new_val;
