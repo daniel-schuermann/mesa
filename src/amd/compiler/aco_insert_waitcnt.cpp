@@ -414,7 +414,7 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
 
             std::unordered_map<uint8_t,wait_entry>::iterator it;
             it = ctx.vgpr_map.find(reg);
-            if (it == ctx.vgpr_map.end())
+            if (it == ctx.vgpr_map.end() || !(it->second.type & ~exp_type))
                continue;
 
             needs_waitcnt = true;
