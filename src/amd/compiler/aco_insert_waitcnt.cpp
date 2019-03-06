@@ -548,8 +548,9 @@ bool gen(Instruction* instr, wait_ctx& ctx)
       for (unsigned i = 0; i < exp_instr->num_operands; i++)
       {
          if (exp_instr->enabled_mask & (1 << i)) {
-            ctx.vgpr_map.emplace(exp_instr->getOperand(idx++).physReg().reg,
-                                 wait_entry(t, max_vm_cnt, 0, max_lgkm_cnt));
+            auto it = ctx.vgpr_map.emplace(exp_instr->getOperand(idx++).physReg().reg,
+                                           wait_entry(t, max_vm_cnt, 0, max_lgkm_cnt)).first;
+            it->second.exp_cnt = 0;
 
          }
       }
