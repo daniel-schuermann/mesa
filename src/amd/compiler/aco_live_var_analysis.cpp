@@ -172,8 +172,8 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
       }
    }
 
-   assert(block->linear_predecessors.size() != 0 || (live_vgprs.empty() && live_sgprs.empty()));
-   assert(!reg_demand_cond || block->linear_predecessors.size() != 0 || (vgpr_demand == 0 && sgpr_demand == 0));
+   assert(block->index != 0 || (live_vgprs.empty() && live_sgprs.empty()));
+   assert(!reg_demand_cond || block->index != 0 || (vgpr_demand == 0 && sgpr_demand == 0));
 }
 
 void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr)
