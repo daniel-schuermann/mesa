@@ -132,7 +132,7 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
                   if (inserted) {
                      operand.setFirstKill(true);
                      for (unsigned j = i + 1; j < insn->operandCount(); ++j) {
-                        if (insn->getOperand(j).tempId() == operand.tempId()) {
+                        if (insn->getOperand(j).isTemp() && insn->getOperand(j).tempId() == operand.tempId()) {
                            insn->getOperand(j).setFirstKill(false);
                            insn->getOperand(j).setKill(true);
                         }
