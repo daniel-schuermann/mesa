@@ -1652,7 +1652,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          ctx->block->instructions.emplace_back(std::move(cmp));
       } else {
          assert(src.regClass() == s1 && dst.regClass() == s1);
-         aco_ptr<SOPK_instruction> sop{create_instruction<SOPK_instruction>(aco_opcode::s_cmp_lg_u32, Format::SOPC, 2, 1)};
+         aco_ptr<SOPC_instruction> sop{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_u32, Format::SOPC, 2, 1)};
          sop->getOperand(0) = Operand((uint32_t) 0);
          sop->getOperand(1) = Operand(src);
          sop->getDefinition(0) = Definition(dst);
