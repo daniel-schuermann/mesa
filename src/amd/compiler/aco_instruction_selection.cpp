@@ -4574,9 +4574,12 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tex->getOperand(0) = Operand(lod);
       tex->getOperand(1) = Operand(resource);
       tex->dmask = dmask;
-      tex->getDefinition(0) = Definition(dst);
+      tex->getDefinition(0) = Definition(tmp_dst);
       ctx->block->instructions.emplace_back(std::move(tex));
-      assert(util_bitcount(dmask) == instr->dest.ssa.num_components);
+      if (dst.id() != tmp_dst.id()) {
+         emit_split_vector(ctx, tmp_dst, tmp_dst.size());
+         expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, dmask);
+      }
       return;
    }
 
