@@ -262,7 +262,7 @@ std::pair<PhysReg, bool> get_reg_helper(ra_ctx& ctx,
    // TODO: it would be better to try to find another register than to insert more moves */
    for (unsigned i = 0; i < instr->num_operands; i++) {
       Operand op = instr->getOperand(i);
-      if (!op.isTemp() || op.getTemp().type() != typeOf(rc) || !op.isFirstKill())
+      if (!op.isTemp() || !op.isFixed() || op.getTemp().type() != typeOf(rc) || !op.isFirstKill())
          continue;
 
       for (unsigned j = 0; j < op.size(); j++) {
@@ -281,6 +281,12 @@ std::pair<PhysReg, bool> get_reg_helper(ra_ctx& ctx,
                   if (!reg_file[r])
                      reg_file[r] = 0xFFFF;
                }
+            }
+
+            /* prevent potential infinite recursion */
+            for (unsigned k = 0; k < instr->num_operands; k++) {
+               if (instr->getOperand(k).tempId() == op.tempId())
+                  instr->getOperand(k).setFixed((PhysReg){(unsigned)-1});
             }
 
             PhysReg reg = get_reg(ctx, reg_file, op.regClass(), pc, instr);
