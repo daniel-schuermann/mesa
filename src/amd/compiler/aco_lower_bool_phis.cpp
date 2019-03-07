@@ -50,7 +50,6 @@ struct ssa_state {
 
 Operand get_ssa(Program *program, Block *block, ssa_state *state)
 {
-   Temp res;
    while (true) {
       auto pos = state->latest.find(block);
       if (pos != state->latest.end())
@@ -161,7 +160,7 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
       assert(phi_src.regClass() == s2);
 
       Operand cur = get_ssa(program, pred, &state);
-      Temp new_cur = write_ssa(program, pred, &state, cur.tempId());
+      Temp new_cur = write_ssa(program, pred, &state, cur.isTemp() ? cur.tempId() : 0);
 
       if (cur.isUndefined()) {
          aco_ptr<Instruction> merge{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
