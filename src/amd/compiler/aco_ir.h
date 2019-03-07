@@ -381,7 +381,7 @@ public:
 
    void setFixed(PhysReg reg) noexcept
    {
-      control_[1] = 1;
+      control_[1] = reg.reg != (unsigned)-1;
       reg_ = reg;
    }
 
