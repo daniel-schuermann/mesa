@@ -554,7 +554,7 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
          aco_ptr<SOP2_instruction> select{create_instruction<SOP2_instruction>(op, Format::SOP2, 3, 1)};
          select->getOperand(0) = Operand(then);
          select->getOperand(1) = Operand(els);
-         select->getOperand(2) = Operand(cond);
+         select->getOperand(2) = Operand(as_uniform_bool(ctx, cond));
          select->getOperand(2).setFixed(scc);
          select->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(select));
