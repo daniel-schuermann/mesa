@@ -298,8 +298,13 @@ std::pair<PhysReg, bool> get_reg_helper(ra_ctx& ctx,
 
             def.setFixed(reg);
             pc.emplace_back(op, def);
-            instr->getOperand(i).setTemp(def.getTemp());
-            instr->getOperand(i).setFixed(reg);
+            /* update operands */
+            for (unsigned k = 0; k < instr->num_operands; k++) {
+               if (instr->getOperand(k).tempId() != op.tempId())
+                  continue;
+               instr->getOperand(k).setTemp(def.getTemp());
+               instr->getOperand(k).setFixed(reg);
+            }
             break;
          }
       }
