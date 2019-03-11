@@ -223,7 +223,7 @@ Temp emit_extract_vector(isel_context* ctx, Temp src, uint32_t idx, RegClass dst
    if (it != ctx->allocated_vec.end()) {
       if (it->second[idx].regClass() == dst_rc) {
          return it->second[idx];
-      } else {
+      } else if (sizeOf(dst_rc) == sizeOf(it->second[idx].regClass())) {
          assert(typeOf(dst_rc) == vgpr && it->second[idx].type() == sgpr);
          Temp dst = {ctx->program->allocateId(), dst_rc};
          emit_v_mov(ctx, it->second[idx], dst);
