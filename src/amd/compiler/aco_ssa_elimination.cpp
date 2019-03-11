@@ -36,9 +36,10 @@ typedef std::map<uint32_t, std::vector<std::pair<Definition, Operand>>> phi_info
 struct ssa_elimination_ctx {
    phi_info logical_phi_info;
    phi_info linear_phi_info;
+   std::vector<bool> empty_blocks;
    Program* program;
 
-   ssa_elimination_ctx(Program* program) : program(program) {}
+   ssa_elimination_ctx(Program* program) : empty_blocks(program->blocks.size(), true), program(program) {}
 };
 
 void collect_phi_info(ssa_elimination_ctx& ctx)
@@ -56,6 +57,7 @@ void collect_phi_info(ssa_elimination_ctx& ctx)
                phi_info& info = phi->opcode == aco_opcode::p_phi ? ctx.logical_phi_info : ctx.linear_phi_info;
                const auto result = info.emplace(preds[i]->index, std::vector<std::pair<Definition, Operand>>());
                result.first->second.emplace_back(phi->getDefinition(0), phi->getOperand(i));
+               ctx.empty_blocks[preds[i]->index] = false;
             }
          } else {
             break;
@@ -105,16 +107,165 @@ void insert_parallelcopies(ssa_elimination_ctx& ctx)
    }
 }
 
+void find_empty_blocks(ssa_elimination_ctx& ctx)
+{
+   for (unsigned i = 0; i < ctx.program->blocks.size(); i++) {
+      if (!ctx.empty_blocks[i])
+         continue;
+      std::unique_ptr<Block>& block = ctx.program->blocks[i];
+
+      /* linear helper blocks without to be inserted parallelcopies are considered empty */
+      if (block->logical_idom == -1)
+         continue;
+
+      /* check if there are other instructions between logical_start and logical_end */
+      std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
+      while ((*it)->opcode != aco_opcode::p_logical_start) {
+         ++it;
+         assert(it != block->instructions.end());
+      }
+      ++it;
+      if ((*it)->opcode != aco_opcode::p_logical_end)
+         ctx.empty_blocks[i] = false;
+   }
+}
+
+void remove_merge_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
+{
+   for (aco_ptr<Instruction>& instr : block->instructions) {
+
+      assert(instr->opcode == aco_opcode::p_linear_phi ||
+             instr->opcode == aco_opcode::s_mov_b64 ||
+             instr->opcode == aco_opcode::p_parallelcopy);
+
+      /* find the parallelcopy instruction which moves the else-mask to exec */
+      if (instr->opcode != aco_opcode::p_parallelcopy)
+         continue;
+
+      assert(instr->getDefinition(0).physReg() == exec);
+
+      for (aco_ptr<Instruction>& restore : block->linear_successors[0]->instructions) {
+         if (restore->opcode == aco_opcode::p_phi || restore->opcode == aco_opcode::p_linear_phi)
+            continue;
+
+         restore->getOperand(1) = instr->getOperand(0);
+
+         assert(block->linear_predecessors[0]->linear_successors.size() == 1 &&
+                block->linear_predecessors[1]->linear_successors.size() == 1);
+         block->linear_predecessors[0]->linear_successors[0] = block->linear_successors[0];
+         block->linear_predecessors[1]->linear_successors[0] = block->linear_successors[0];
+         block->linear_successors[0]->linear_predecessors[0] = block->linear_predecessors[0];
+         block->linear_successors[0]->linear_predecessors[1] = block->linear_predecessors[1];
+         block->instructions.clear();
+         for (unsigned i = 0; i < 2; i++) {
+            Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(block->linear_predecessors[0]->instructions.back().get());
+            assert(branch->opcode == aco_opcode::p_branch);
+            branch->targets[i] = block->linear_successors[0];
+         }
+         return;
+      }
+   }
+   assert(false);
+}
+
+void jump_threading(ssa_elimination_ctx& ctx)
+{
+   for (int i = ctx.program->blocks.size() - 1; i >= 0; i--) {
+      if (!ctx.empty_blocks[i])
+         continue;
+
+      std::unique_ptr<Block>& block = ctx.program->blocks[i];
+
+      if (block->linear_predecessors.size() == 2 &&
+          block->linear_successors.size() == 2 &&
+          block->linear_successors[0] == block->linear_successors[1]) {
+         remove_merge_block(ctx, block);
+         continue;
+      }
+
+      // TODO: we should also try to remove blocks with multiple pre- and successors
+      if (block->linear_predecessors.size() != 1 || block->linear_successors.size() != 1)
+         continue;
+
+      bool can_remove = true;
+      for (aco_ptr<Instruction>& instr : block->instructions) {
+         if (instr->format != Format::PSEUDO &&
+             instr->format != Format::PSEUDO_BRANCH) {
+            can_remove = false;
+            break;
+         }
+      }
+
+      if (!can_remove)
+         continue;
+
+      Block* pred = block->linear_predecessors[0];
+      Block* succ = block->linear_successors[0];
+      Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(pred->instructions.back().get());
+      if (branch->opcode == aco_opcode::p_branch) {
+         branch->targets[0] = succ;
+         branch->targets[1] = succ;
+      } else if (branch->targets[0] == block.get()) {
+         branch->targets[0] = succ;
+      } else if (branch->targets[0] == succ) {
+         assert(branch->targets[1] == block.get());
+         branch->targets[1] = succ;
+         branch->opcode = aco_opcode::p_branch;
+      } else if (branch->targets[1] == block.get()) {
+         /* check if there is a fall-through path from block to succ */
+         bool falls_through = true;
+         for (unsigned j = i + 1; falls_through && j < succ->index; j++) {
+            assert(ctx.program->blocks[j]->index == j);
+            if (!ctx.program->blocks[j]->instructions.empty()) {
+               assert(ctx.program->blocks[j].get() == branch->targets[0]);
+               falls_through = false;
+            }
+         }
+         if (falls_through) {
+            branch->targets[1] = succ;
+         } else {
+            /* This is a (uniform) break or continue block. The branch condition has to be inverted. */
+            if (branch->opcode == aco_opcode::p_cbranch_z)
+               branch->opcode = aco_opcode::p_cbranch_nz;
+            else if (branch->opcode == aco_opcode::p_cbranch_nz)
+               branch->opcode = aco_opcode::p_cbranch_z;
+            else
+               assert(false);
+            branch->targets[1] = branch->targets[0];
+            branch->targets[0] = succ;
+         }
+      } else {
+         assert(false);
+      }
+
+      if (branch->targets[0] == branch->targets[1])
+         branch->opcode = aco_opcode::p_branch;
+
+      for (unsigned i = 0; i < pred->linear_successors.size(); i++)
+         if (pred->linear_successors[i] == block.get())
+            pred->linear_successors[i] = succ;
+      for (unsigned i = 0; i < succ->linear_predecessors.size(); i++)
+         if (succ->linear_predecessors[i] == block.get())
+            succ->linear_predecessors[i] = pred;
+      block->instructions.clear();
+   }
+}
+
 } /* end namespace */
 
 
-void eliminate_phis(Program* program)
+void ssa_elimination(Program* program)
 {
    ssa_elimination_ctx ctx(program);
 
    /* Collect information about every phi-instruction */
    collect_phi_info(ctx);
 
+   /* eliminate empty blocks */
+   find_empty_blocks(ctx);
+   jump_threading(ctx);
+
+   /* insert parallelcopies from SSA elimination */
    insert_parallelcopies(ctx);
 
 }
