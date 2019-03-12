@@ -142,11 +142,15 @@ void remove_merge_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
       if (instr->opcode != aco_opcode::p_parallelcopy)
          continue;
 
-      assert(instr->getDefinition(0).physReg() == exec);
+      if (!(instr->getDefinition(0).physReg() == exec))
+         return;
 
       for (aco_ptr<Instruction>& restore : block->linear_successors[0]->instructions) {
          if (restore->opcode == aco_opcode::p_phi || restore->opcode == aco_opcode::p_linear_phi)
             continue;
+
+         if (restore->opcode != aco_opcode::s_or_b64)
+            return;
 
          restore->getOperand(1) = instr->getOperand(0);
 
