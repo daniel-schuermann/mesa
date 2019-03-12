@@ -2960,28 +2960,46 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
    bool is_ms = (dim == GLSL_SAMPLER_DIM_MS || dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
    bool gfx9_1d = ctx->options->chip_class >= GFX9 && dim == GLSL_SAMPLER_DIM_1D;
    int count = image_type_to_components_count(dim, is_array);
+   std::vector<Operand> coords(count);
+
+   if (is_ms) {
+      Temp sample_index = emit_extract_vector(ctx, get_ssa_temp(ctx, instr->src[2].ssa), 0, v1);
+
+      if (instr->intrinsic == nir_intrinsic_image_deref_load) {
+         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, is_array ? 3 : 2, 1)};
+         for (unsigned i = 0; i < vec->num_operands; i++)
+            vec->getOperand(i) = Operand(emit_extract_vector(ctx, src0, i, v1));
+         Temp fmask_load_address = {ctx->program->allocateId(), is_array ? v3 : v2};
+         vec->getDefinition(0) = Definition(fmask_load_address);
+         ctx->block->instructions.emplace_back(std::move(vec));
+
+         if (add_frag_pos) {
+            unreachable("add_frag_pos not implemented.");
+         }
+
+         Temp fmask_desc_ptr = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_FMASK, nullptr, false, false);
+         count--;
+         sample_index = adjust_sample_index_using_fmask(ctx, is_array, fmask_load_address, sample_index, fmask_desc_ptr);
+      }
+      count--;
+      coords[count] = Operand(sample_index);
+   }
 
    if (count == 1 && !gfx9_1d)
       return emit_extract_vector(ctx, src0, 0, v1);
-
-   std::vector<Operand> coords;
 
    if (add_frag_pos) {
       unreachable("add_frag_pos not implemented.");
    }
 
    if (gfx9_1d) {
-      coords.emplace_back(Operand(emit_extract_vector(ctx, src0, 0, v1)));
-      coords.emplace_back(Operand((uint32_t) 0));
+      coords[0] = Operand(emit_extract_vector(ctx, src0, 0, v1));
+      coords[1] = Operand((uint32_t) 0);
       if (is_array)
-         coords.emplace_back(Operand(emit_extract_vector(ctx, src0, 1, v1)));
+         coords[2] = Operand(emit_extract_vector(ctx, src0, 1, v1));
    } else {
       for (int i = 0; i < count; i++)
-         coords.emplace_back(Operand(emit_extract_vector(ctx, src0, i, v1)));
-   }
-
-   if (is_ms) {
-      unreachable("is_ms not implemented.");
+         coords[i] = Operand(emit_extract_vector(ctx, src0, i, v1));
    }
 
    aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, coords.size(), 1)};
