@@ -160,7 +160,7 @@ visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_load_deref: {
       nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
       switch (var->data.mode) {
-      case nir_var_shared:
+      case nir_var_mem_shared:
          is_divergent = divergent[instr->src[0].ssa->index];
          break;
       default:
