@@ -566,7 +566,6 @@ set_loc(struct radv_userdata_info *ud_info, uint8_t *sgpr_idx, uint8_t num_sgprs
 {
    ud_info->sgpr_idx = *sgpr_idx;
    ud_info->num_sgprs = num_sgprs;
-   ud_info->indirect = indirect;
    *sgpr_idx += num_sgprs;
 }
 
@@ -1029,7 +1028,7 @@ setup_isel_context(Program* program, nir_shader *nir,
    setup_variables(&ctx, nir);
 
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
-   nir_lower_io(nir, nir_var_shared, shared_var_size, (nir_lower_io_options)0);
+   nir_lower_io(nir, nir_var_mem_shared, shared_var_size, (nir_lower_io_options)0);
    nir_copy_prop(nir);
    nir_opt_idiv_const(nir, 32);
    nir_lower_idiv(nir, true);
