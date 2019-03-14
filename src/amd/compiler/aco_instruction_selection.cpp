@@ -4104,35 +4104,18 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    }
    case nir_intrinsic_vote_all: {
-      Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
-      assert(src.regClass() == v1);
+      Temp src = as_divergent_bool(ctx, get_ssa_temp(ctx, instr->src[0].ssa), false);
+      assert(src.regClass() == s2);
 
       Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
       assert(dst.regClass() == s1);
 
-      aco_ptr<Instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_eq_u32, Format::VOPC, 2, 1)};
-      cmp->getOperand(0) = Operand((uint32_t) 0);
-      cmp->getOperand(1) = Operand(src);
-      Temp tmp = {ctx->program->allocateId(), s2};
-      cmp->getDefinition(0) = Definition(tmp);
-      cmp->getDefinition(0).setHint(vcc);
-      ctx->block->instructions.emplace_back(std::move(cmp));
-
       aco_ptr<SOPC_instruction> scmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_eq_u64, Format::SOPC, 2, 1)};
-      scmp->getOperand(0) = Operand(tmp);
-      scmp->getOperand(1) = Operand((uint32_t) 0);
-      Temp scc_tmp = {ctx->program->allocateId(), b};
-      scmp->getDefinition(0) = Definition(scc_tmp);
+      scmp->getOperand(0) = Operand(src);
+      scmp->getOperand(1) = Operand(exec);
+      scmp->getDefinition(0) = Definition(dst);
       scmp->getDefinition(0).setFixed(scc);
       ctx->block->instructions.emplace_back(std::move(scmp));
-
-      aco_ptr<SOP2_instruction> to_sgpr{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
-      to_sgpr->getOperand(0) = Operand(0xFFFFFFFF);
-      to_sgpr->getOperand(1) = Operand((uint32_t) 0);
-      to_sgpr->getOperand(2) = Operand(scc_tmp);
-      to_sgpr->getOperand(2).setFixed(scc);
-      to_sgpr->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(to_sgpr));
       break;
    }
    case nir_intrinsic_reduce:
