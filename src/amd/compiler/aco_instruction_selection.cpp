@@ -2286,6 +2286,11 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
 
    assert(nir_intrinsic_base(instr) != VARYING_SLOT_CLIP_DIST0);
    uint64_t base = nir_intrinsic_base(instr) / 4;
+
+   nir_const_value* offset = nir_src_as_const_value(instr->src[1]);
+   assert(offset); // TODO: handle when the offset is not a constant
+   base += offset->u32[0];
+
    unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
    unsigned component = nir_intrinsic_component(instr);
 
