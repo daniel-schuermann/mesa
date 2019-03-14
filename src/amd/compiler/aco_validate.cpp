@@ -169,6 +169,7 @@ void validate(Program* program, FILE * output)
             check(instr->getOperand(0).isUndefined() || (instr->getOperand(0).isTemp() && instr->getOperand(0).getTemp().type() == vgpr),
                   "VADDR must be in vgpr for VMEM instructions", instr.get());
             check(instr->getOperand(1).isTemp() && instr->getOperand(1).getTemp().type() == sgpr, "VMEM resource constant must be sgpr", instr.get());
+            check(instr->num_operands < 4 || (instr->getOperand(3).isTemp() && instr->getOperand(3).getTemp().type() == vgpr), "VMEM write data must be vgpr", instr.get());
             break;
          }
          case Format::DS: {
