@@ -95,13 +95,10 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    //std::cerr << "After Eliminate Pseudo Instr:\n";
    //aco_print_program(program.get(), stderr);
 
-   /* Scheduling / Insert NOPs */
-   aco::schedule(program.get());
-   //std::cerr << "After PostRA Schedule:\n";
-   //aco_print_program(program.get(), stderr);
-
    /* Insert Waitcnt */
    aco::insert_wait_states(program.get());
+   aco::insert_NOPs(program.get());
+
    //std::cerr << "After Insert-Waitcnt:\n";
    //aco_print_program(program.get(), stderr);
 
