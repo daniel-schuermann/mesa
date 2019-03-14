@@ -160,16 +160,18 @@ void remove_merge_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
          block->linear_predecessors[1]->linear_successors[0] = block->linear_successors[0];
          block->linear_successors[0]->linear_predecessors[0] = block->linear_predecessors[0];
          block->linear_successors[0]->linear_predecessors[1] = block->linear_predecessors[1];
-         block->instructions.clear();
+
          for (unsigned i = 0; i < 2; i++) {
             Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(block->linear_predecessors[0]->instructions.back().get());
             assert(branch->opcode == aco_opcode::p_branch);
             branch->targets[i] = block->linear_successors[0];
          }
+         block->instructions.clear();
+         block->linear_predecessors.clear();
+         block->linear_successors.clear();
          return;
       }
    }
-   assert(false);
 }
 
 void jump_threading(ssa_elimination_ctx& ctx)
@@ -252,6 +254,8 @@ void jump_threading(ssa_elimination_ctx& ctx)
          if (succ->linear_predecessors[i] == block.get())
             succ->linear_predecessors[i] = pred;
       block->instructions.clear();
+      block->linear_predecessors.clear();
+      block->linear_successors.clear();
    }
 }
 
