@@ -4112,7 +4112,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 
       aco_ptr<SOPC_instruction> scmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_eq_u64, Format::SOPC, 2, 1)};
       scmp->getOperand(0) = Operand(src);
-      scmp->getOperand(1) = Operand(exec);
+      scmp->getOperand(1) = Operand(exec, s2);
       scmp->getDefinition(0) = Definition(dst);
       scmp->getDefinition(0).setFixed(scc);
       ctx->block->instructions.emplace_back(std::move(scmp));
