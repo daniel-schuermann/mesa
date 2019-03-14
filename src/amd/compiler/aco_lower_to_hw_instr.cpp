@@ -474,7 +474,6 @@ void lower_to_hw_instr(Program* program)
                break;
             }
             default:
-               ctx.instructions.emplace_back(std::move(instr));
                break;
             }
          } else if (instr->format == Format::PSEUDO_BRANCH) {
