@@ -867,7 +867,8 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
                                         struct radv_shader_variant_info *info,
                                         struct radv_nir_compiler_options *options);
 
-bool lower_wqm(Program* program);
+void lower_wqm(Program* program, live& live_vars,
+               const struct radv_nir_compiler_options *options);
 void lower_bool_phis(Program* program);
 void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr);
 template<bool condition>

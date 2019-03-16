@@ -346,21 +346,25 @@ void process_block(wqm_ctx &ctx, block_info *info, Block *block)
    }
 }
 
-bool lower_wqm(Program *program)
+void lower_wqm(Program *program, live& live_vars,
+               const struct radv_nir_compiler_options *options)
 {
    if (program->needs_wqm && !program->needs_exact) {
       Block *block = program->blocks[0].get();
       aco_ptr<Instruction> wqm{create_instruction<SOP1_instruction>(aco_opcode::s_wqm_b64, Format::SOP1, 1, 2)};
       wqm->getOperand(0) = Operand(exec, s2);
       wqm->getDefinition(0) = Definition(exec, s2);
-      wqm->getDefinition(1) = Definition(program->allocateId(), scc, b);
-      if (block->instructions.size() && block->instructions[0]->opcode == aco_opcode::p_startpgm)
+      wqm->getDefinition(1) = Definition(scc, b);
+      if (block->instructions.size() && block->instructions[0]->opcode == aco_opcode::p_startpgm) {
          block->instructions.emplace(std::next(block->instructions.begin()), std::move(wqm));
-      else
+         live_vars.register_demand[0].emplace(live_vars.register_demand[0].begin(), live_vars.register_demand[0][0]);
+      } else {
          block->instructions.emplace(block->instructions.begin(), std::move(wqm));
-      return false;
+         live_vars.register_demand[0].emplace(live_vars.register_demand[0].begin(), std::pair<uint16_t, uint16_t>(0, 0));
+      }
+      return;
    } else if (!program->needs_wqm) {
-      return false;
+      return;
    }
 
    wqm_ctx ctx;
@@ -388,6 +392,6 @@ bool lower_wqm(Program *program)
       process_block(ctx, info, block);
    }
 
-   return true;
+   live_vars = aco::live_var_analysis<true>(program, options);
 }
 }
