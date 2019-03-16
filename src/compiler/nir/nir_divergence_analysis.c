@@ -260,8 +260,6 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
    if (divergent[instr->dest.ssa.index])
       return false;
 
-   bool lcssa = exec_list_length(&instr->srcs) == 1;
-
    unsigned non_undef = 0;
    nir_foreach_phi_src(src, instr) {
       /* if any source value is divergent, the resulting value is divergent */
@@ -275,7 +273,7 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
          non_undef += 1;
    }
 
-   if (non_undef <= 1 && !lcssa) {
+   if (non_undef <= 1 && exec_list_length(&instr->srcs) != 1) {
       assert(divergent[instr->dest.ssa.index] == false);
       return false;
    }
@@ -333,8 +331,8 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
       /* eta: check if any loop exit condition is divergent */
       assert(prev->type == nir_cf_node_loop);
       nir_foreach_phi_src(src, instr) {
-         if (lcssa && never_divergent(src->src.ssa))
-            break;
+         if (never_divergent(src->src.ssa))
+            continue;
 
          nir_cf_node *current = src->pred->cf_node.parent;
          assert(current->type == nir_cf_node_if);
