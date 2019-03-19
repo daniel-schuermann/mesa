@@ -500,11 +500,13 @@ nir_compare_deref_paths(nir_deref_path *a_path,
     * different constant indices.
     */
    for (nir_deref_instr **t_p = a_p; *t_p; t_p++) {
-      if ((*t_p)->deref_type == nir_deref_type_ptr_as_array)
+      if ((*t_p)->deref_type == nir_deref_type_ptr_as_array ||
+          (*t_p)->deref_type == nir_deref_type_cast)
          return nir_derefs_may_alias_bit;
    }
    for (nir_deref_instr **t_p = b_p; *t_p; t_p++) {
-      if ((*t_p)->deref_type == nir_deref_type_ptr_as_array)
+      if ((*t_p)->deref_type == nir_deref_type_ptr_as_array ||
+          (*t_p)->deref_type == nir_deref_type_cast)
          return nir_derefs_may_alias_bit;
    }
 

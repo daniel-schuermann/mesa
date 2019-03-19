@@ -1215,10 +1215,9 @@ static inline nir_variable *
 nir_deref_instr_get_variable(const nir_deref_instr *instr)
 {
    while (instr->deref_type != nir_deref_type_var) {
-      if (instr->deref_type == nir_deref_type_cast)
-         return NULL;
-
       instr = nir_deref_instr_parent(instr);
+      if (!instr)
+         return NULL;
    }
 
    return instr->var;
