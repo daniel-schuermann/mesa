@@ -1888,6 +1888,8 @@ get_deref_offset(struct ac_nir_context *ctx, nir_deref_instr *instr,
 				offset = LLVMBuildAdd(ctx->ac.builder, offset, array_off, "");
 			else
 				offset = array_off;
+		} else if(path.path[idx_lvl]->deref_type == nir_deref_type_cast) {
+			/* continue */
 		} else
 			unreachable("Uhandled deref type in get_deref_instr_offset");
 	}
