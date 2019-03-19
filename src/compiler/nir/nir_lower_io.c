@@ -191,6 +191,8 @@ get_io_offset(nir_builder *b, nir_deref_instr *deref,
             field_offset += type_size(glsl_get_struct_field(parent->type, i), bts);
          }
          offset = nir_iadd_imm(b, offset, field_offset);
+      } else if ((*p)->deref_type == nir_deref_type_cast) {
+         /* continue */
       } else {
          unreachable("Unsupported deref type");
       }
