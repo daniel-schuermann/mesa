@@ -185,6 +185,7 @@ files_libnir = files(
   'nir_opt_if.c',
   'nir_opt_intrinsics.c',
   'nir_opt_large_constants.c',
+  'nir_opt_load_store_vectorize.c',
   'nir_opt_loop_unroll.c',
   'nir_opt_move.c',
   'nir_opt_peephole_select.c',
