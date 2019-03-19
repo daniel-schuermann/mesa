@@ -1788,7 +1788,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          }
 
          Operand rhs;
-         nir_const_value* const_base = nir_src_as_const_value(instr->src[3].src);
+         nir_const_value* const_base = nir_src_as_const_value(instr->src[2].src);
          if (const_base && const_bitmask) {
             rhs = Operand(const_base->u32[0] & ~const_bitmask->u32[0]);
          } else {
