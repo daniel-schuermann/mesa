@@ -348,7 +348,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      break;
                   /* due to copy propagation, the swizzled imov is removed if num dest components == 1 */
                   case nir_intrinsic_load_shared:
-                     if (intrinsic->dest.ssa.num_components != 1 || ctx->divergent_vals[intrinsic->dest.ssa.index])
+                     if (ctx->divergent_vals[intrinsic->dest.ssa.index])
                         type = vgpr;
                      else
                         type = sgpr;
