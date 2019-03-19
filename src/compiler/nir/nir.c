@@ -108,6 +108,7 @@ void
 nir_shader_add_variable(nir_shader *shader, nir_variable *var)
 {
    switch (var->data.mode) {
+   case nir_num_variable_modes:
    case nir_var_all:
       assert(!"invalid mode");
       break;
@@ -145,6 +146,10 @@ nir_shader_add_variable(nir_shader *shader, nir_variable *var)
 
    case nir_var_system_value:
       exec_list_push_tail(&shader->system_values, &var->node);
+      break;
+
+   case nir_var_mem_push_const:
+      assert(!"nir_var_push_constant is not supposed to be used for variables");
       break;
    }
 }
