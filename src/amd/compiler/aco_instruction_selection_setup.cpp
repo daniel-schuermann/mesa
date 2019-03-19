@@ -949,6 +949,33 @@ shared_var_size(const struct glsl_type *type)
    return type_size_scalar(type)*4;
 }
 
+int
+type_size_mode(nir_variable_mode mode, const struct glsl_type *type)
+{
+   assert(mode == nir_var_mem_shared);
+   return shared_var_size(type);
+}
+
+int
+get_align(nir_variable_mode mode, bool is_store, unsigned bit_size, unsigned num_components)
+{
+   /* TODO: ACO doesn't have good support for non-32-bit reads/writes yet */
+   if (bit_size != 32)
+      return -1;
+
+   switch (mode) {
+   case nir_var_mem_ubo:
+   case nir_var_mem_ssbo:
+      return num_components <= 4 ? (num_components > 1 ? 4 : 1) : -1;
+   case nir_var_mem_push_const:
+   case nir_var_mem_shared:
+      /* TODO: what are the alignment requirements for LDS? */
+      return num_components <= 4 ? 4 : -1;
+   default:
+      return -1;
+   }
+}
+
 unsigned
 total_shared_var_size(const struct glsl_type *type)
 {
@@ -1030,6 +1057,13 @@ setup_isel_context(Program* program, nir_shader *nir,
    setup_variables(&ctx, nir);
 
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
+   if (nir_opt_load_store_vectorize(nir,
+                                    (nir_variable_mode)(nir_var_mem_ssbo | nir_var_mem_ubo |
+                                                        nir_var_mem_push_const | nir_var_mem_shared),
+                                    type_size_mode, get_align)) {
+      nir_lower_alu_to_scalar(nir);
+      nir_lower_pack(nir);
+   }
    nir_lower_io(nir, nir_var_mem_shared, shared_var_size, (nir_lower_io_options)0);
    nir_copy_prop(nir);
    nir_opt_idiv_const(nir, 32);
