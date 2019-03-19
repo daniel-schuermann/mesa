@@ -3662,7 +3662,7 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    if (dst.type() == vgpr) {
       ds->getDefinition(0) = Definition(dst);
    } else {
-      tmp = {ctx->program->allocateId(), v1};
+      tmp = {ctx->program->allocateId(), getRegClass(vgpr, dst.size())};
       ds->getDefinition(0) = Definition(tmp);
    }
    ds->offset0 = offset;
@@ -3670,12 +3670,24 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
 
    if (dst.type() == vgpr) {
       emit_split_vector(ctx, dst, instr->num_components);
-   } else {
-      assert(dst.size() == 1);
+   } else if (dst.size() == 1) {
       aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
       readlane->getOperand(0) = Operand(tmp);
       readlane->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(readlane));
+   } else {
+      aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->num_components, 1)};
+      for (unsigned i = 0; i < instr->num_components; i++) {
+         aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+         readlane->getOperand(0) = Operand(emit_extract_vector(ctx, tmp, i, v1));
+         Temp tmp2{ctx->program->allocateId(), s1};
+         readlane->getDefinition(0) = Definition(tmp2);
+         ctx->block->instructions.emplace_back(std::move(readlane));
+         vec->getOperand(i) = Operand(tmp2);
+      }
+      vec->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(vec));
+      emit_split_vector(ctx, dst, instr->num_components);
    }
 
    return;
