@@ -21,22 +21,26 @@
  * IN THE SOFTWARE.
  */
 
-/*
-This doesn't handle copy_deref intrinsics and assumes that
-nir_lower_alu_to_scalar() has been called.
-
-After vectorization, the backend may want to call nir_lower_alu_to_scalar() and
-nir_lower_pack(). Also this creates cast instructions taking derefs are a
-source and some parts of NIR may not be able to handle that well.
-
-Situations where this doesn't vectorize as well as it could:
-- It won't turn four consecutive vec3 loads into 3 vec4 loads.
-- If it can't move the first store to the second, it doesn't try moving the
-  second to the first.
-- If it can't move the second load to the first, it doesn't try moving the first
-  to the second.
-- It doesn't do global vectorization.
-Handling these cases probably wouldn't provide much benefit though.
+/**
+ * Although it's called a load/store "vectorization" pass, this also combines
+ * intersecting and identical loads/stores. It currently supports derefs, ubo,
+ * ssbo and push constant loads/stores.
+ *
+ * This doesn't handle copy_deref intrinsics and assumes that
+ * nir_lower_alu_to_scalar() has been called.
+ *
+ * After vectorization, the backend may want to call nir_lower_alu_to_scalar()
+ * and nir_lower_pack(). Also this creates cast instructions taking derefs as a
+ * source and some parts of NIR may not be able to handle that well.
+ *
+ * There are a few situations where this doesn't vectorize as well as it could:
+ * - It won't turn four consecutive vec3 loads into 3 vec4 loads.
+ * - If it can't move the first store to the second, it doesn't try moving the
+ *   second to the first.
+ * - If it can't move the second load to the first, it doesn't try moving the
+ *   first to the second.
+ * - It doesn't do global vectorization.
+ * Handling these cases probably wouldn't provide much benefit though.
 */
 
 #include "nir.h"
