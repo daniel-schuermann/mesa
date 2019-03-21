@@ -3254,13 +3254,35 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
    return;
 }
 
+void get_buffer_size(isel_context *ctx, Temp desc, Temp dst, bool in_elements)
+{
+   if (in_elements && ctx->options->chip_class == VI) {
+      unreachable("unimplemented get_buffer_size in elements for VI");
+
+      Temp stride = emit_extract_vector(ctx, desc, 1, s1);
+      aco_ptr<Instruction> bfe{create_instruction<SOP2_instruction>(aco_opcode::s_bfe_u32, Format::SOP2, 2, 1)};
+      bfe->getOperand(0) = Operand(stride);
+      bfe->getOperand(1) = Operand((uint32_t) (5 << 16) | 16);
+      stride = {ctx->program->allocateId(), s1};
+      bfe->getDefinition(0) = Definition(stride);
+      ctx->block->instructions.emplace_back(std::move(bfe));
+
+      // TODO: we need some fast way to calculate size / stride{1,2,4,8,12,16} (probably with shifts and adds)
+
+   } else {
+      emit_extract_vector(ctx, desc, 2, dst);
+   }
+}
+
 void visit_image_size(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    const nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
    const struct glsl_type *type = glsl_without_array(var->type);
-   if (glsl_get_sampler_dim(type) == GLSL_SAMPLER_DIM_BUF)
-      assert(false && "image_deref_size: get buffer size");
-      /*return get_buffer_size(ctx, get_image_descriptor(ctx, instr, AC_DESC_BUFFER, false), true);*/
+
+   if (glsl_get_sampler_dim(type) == GLSL_SAMPLER_DIM_BUF) {
+      Temp desc = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_BUFFER, NULL, true, false);
+      return get_buffer_size(ctx, desc, get_ssa_temp(ctx, &instr->dest.ssa), true);
+   }
 
    /* LOD */
    aco_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
@@ -3582,7 +3604,7 @@ void visit_get_buffer_size(isel_context *ctx, nir_intrinsic_instr *instr) {
    load->getDefinition(0) = Definition(desc);
    ctx->block->instructions.emplace_back(std::move(load));
 
-   emit_extract_vector(ctx, desc, 2, get_ssa_temp(ctx, &instr->dest.ssa));
+   get_buffer_size(ctx, desc, get_ssa_temp(ctx, &instr->dest.ssa), false);
 }
 
 void emit_memory_barrier(isel_context *ctx, nir_intrinsic_instr *instr) {
@@ -4413,7 +4435,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    }
 // TODO: all other cases: structure taken from ac_nir_to_llvm.c
    if (instr->op == nir_texop_txs && instr->sampler_dim == GLSL_SAMPLER_DIM_BUF)
-      unreachable("Unimplemented tex instr type");
+      return get_buffer_size(ctx, resource, get_ssa_temp(ctx, &instr->dest.ssa), true);
 
    if (instr->op == nir_texop_texture_samples) {
       Temp dword3 = emit_extract_vector(ctx, resource, 3, s1);
