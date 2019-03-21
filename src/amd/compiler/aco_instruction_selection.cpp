@@ -2140,6 +2140,9 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 
    } else {
       index = index - FRAG_RESULT_DATA0;
+      nir_const_value* offset = nir_src_as_const_value(instr->src[1]);
+      assert(offset && "Non-const offsets on exports not yet supported");
+      index += offset->u32[0];
       target = V_008DFC_SQ_EXP_MRT + index;
       col_format = (ctx->options->key.fs.col_format >> (4 * index)) & 0xf;
    }
