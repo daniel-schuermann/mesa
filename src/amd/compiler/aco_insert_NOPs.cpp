@@ -127,7 +127,7 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
 
       /* Write VGPRs holding writedata > 64 bit from MIMG/MUBUF instructions */
       if (new_idx > 0) { //FIXME: handle case if the last instruction of a block without branch is such store
-         aco_ptr<Instruction>& pred = new_instructions[new_idx - 1];
+         aco_ptr<Instruction>& pred = new_instructions.back();
          if (pred->isVMEM() &&
              pred->num_operands == 3 &&
              pred->getOperand(2).size() > 2 &&
@@ -178,7 +178,7 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
    }
 
    /* SALU writes M0 */
-   if (ctx.chip_class >= GFX9 && instr->format == Format::VINTRP) {
+   if (new_idx > 0 && ctx.chip_class >= GFX9 && instr->format == Format::VINTRP) {
       aco_ptr<Instruction>& pred = new_instructions.back();
       if (pred->isSALU() &&
           pred->num_definitions &&
