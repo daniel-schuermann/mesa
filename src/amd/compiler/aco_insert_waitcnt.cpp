@@ -544,11 +544,12 @@ bool gen(Instruction* instr, wait_ctx& ctx)
       }
 
       /* insert new entries for exported vgprs */
-      unsigned idx = 0;
-      for (unsigned i = 0; i < exp_instr->num_operands; i++)
+      for (unsigned i = 0; i < 4; i++)
       {
          if (exp_instr->enabled_mask & (1 << i)) {
-            auto it = ctx.vgpr_map.emplace(exp_instr->getOperand(idx++).physReg().reg,
+            unsigned idx = exp_instr->compressed ? i >> 1 : i;
+            assert(idx < exp_instr->num_operands);
+            auto it = ctx.vgpr_map.emplace(exp_instr->getOperand(idx).physReg().reg,
                                            wait_entry(t, max_vm_cnt, 0, max_lgkm_cnt)).first;
             it->second.exp_cnt = 0;
 
