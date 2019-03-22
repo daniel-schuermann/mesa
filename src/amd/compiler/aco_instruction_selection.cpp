@@ -1279,7 +1279,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          inst->getDefinition(0) = Definition(mul);
          ctx->block->instructions.emplace_back(std::move(inst));
 
-         inst.reset(create_instruction<VOP2_instruction>(aco_opcode::v_subrev_f32, Format::VOP2, 2, 1));
+         inst.reset(create_instruction<VOP2_instruction>(aco_opcode::v_sub_f32, Format::VOP2, 2, 1));
          inst->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
          inst->getOperand(1) = Operand(mul);
          inst->getDefinition(0) = Definition(dst);
