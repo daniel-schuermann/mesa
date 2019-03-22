@@ -103,6 +103,20 @@ static std::pair<uint16_t, uint16_t> getTempRegisters(aco_ptr<Instruction>& inst
    return temp_registers;
 }
 
+bool handle_barrier(aco_ptr<Instruction>& barrier, bool moving_ds)
+{
+   if (barrier->format != Format::PSEUDO_BARRIER)
+      return false;
+
+   switch (barrier->opcode) {
+   case aco_opcode::p_memory_barrier_all:
+   case aco_opcode::p_memory_barrier_shared:
+      return moving_ds;
+   default:
+      return false;
+   }
+}
+
 void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
                    std::vector<std::pair<uint16_t,uint16_t>>& register_demand,
                    Instruction* current, int idx)
@@ -135,10 +149,12 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       if (can_stall_prev_smem && ctx.last_SMEM_stall >= 0)
          break;
 
-      /* break when encountering another MEM instruction or logical_start */
+      /* break when encountering another MEM instruction, logical_start or barriers */
       if (candidate->isVMEM() || candidate->format == Format::SMEM)
          break;
       if (candidate->opcode == aco_opcode::p_logical_start)
+         break;
+      if (handle_barrier(candidate, moving_ds))
          break;
 
       sgpr_pressure = std::max(sgpr_pressure, (int) register_demand[candidate_idx].first);
@@ -232,6 +248,8 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
 
       if (candidate->opcode == aco_opcode::p_logical_end)
+         break;
+      if (handle_barrier(candidate, moving_ds))
          break;
 
       /* check if candidate depends on current */
@@ -358,10 +376,12 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       assert(candidate_idx >= 0);
       aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
 
-      /* break when encountering another VMEM instruction or logical_start */
+      /* break when encountering another VMEM instruction, logical_start or barriers */
       if (candidate->isVMEM())
          break;
       if (candidate->opcode == aco_opcode::p_logical_start)
+         break;
+      if (handle_barrier(candidate, moving_ds))
          break;
 
       /* break if we'd make the previous SMEM instruction stall */
@@ -458,6 +478,8 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
 
       if (candidate->opcode == aco_opcode::p_logical_end)
+         break;
+      if (handle_barrier(candidate, moving_ds))
          break;
 
       /* check if candidate depends on current */
