@@ -124,6 +124,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
    /* first, check if we have instructions before current to move down */
    int insert_idx = idx + 1;
+   bool moving_ds = false;
 
    for (int candidate_idx = idx - 1; candidate_idx > (int) idx - window_size; candidate_idx--) {
       assert(candidate_idx >= 0);
@@ -149,6 +150,9 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          if (candidate->getDefinition(i).isTemp() && depends_on.find(candidate->getDefinition(i).getTemp()) != depends_on.end())
             can_move_down = false;
       }
+      if (moving_ds && candidate->format == Format::DS)
+         can_move_down = false;
+      moving_ds = moving_ds || candidate->format == Format::DS;
       if (!can_move_down) {
          for (unsigned i = 0; i < candidate->num_operands; i++) {
             if (candidate->getOperand(i).isTemp())
@@ -219,6 +223,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
    /* find the first instruction depending on current or find another MEM */
    insert_idx = idx + 1;
+   moving_ds = false;
 
    bool found_dependency = false;
    /* second, check if we have instructions after current to move up */
@@ -235,6 +240,9 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          if (candidate->getOperand(i).isTemp() && depends_on.find(candidate->getOperand(i).getTemp()) != depends_on.end())
             is_dependency = true;
       }
+      if (moving_ds && candidate->format == Format::DS)
+         is_dependency = true;
+      moving_ds = moving_ds || candidate->format == Format::DS;
       if (is_dependency) {
          for (unsigned j = 0; j < candidate->num_definitions; j++) {
             if (candidate->getDefinition(j).isTemp())
@@ -344,6 +352,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
    /* first, check if we have instructions before current to move down */
    int insert_idx = idx + 1;
+   bool moving_ds = false;
 
    for (int candidate_idx = idx - 1; candidate_idx > (int) idx - window_size; candidate_idx--) {
       assert(candidate_idx >= 0);
@@ -369,6 +378,9 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          if (candidate->getDefinition(i).isTemp() && depends_on.find(candidate->getDefinition(i).getTemp()) != depends_on.end())
             can_move_down = false;
       }
+      if (moving_ds && candidate->format == Format::DS)
+         can_move_down = false;
+      moving_ds = moving_ds || candidate->format == Format::DS;
       if (!can_move_down) {
          for (unsigned i = 0; i < candidate->num_operands; i++) {
             if (candidate->getOperand(i).isTemp())
@@ -437,6 +449,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
    /* find the first instruction depending on current or find another VMEM */
    insert_idx = idx;
+   moving_ds = false;
 
    bool found_dependency = false;
    /* second, check if we have instructions after current to move up */
@@ -453,6 +466,9 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          if (candidate->getOperand(i).isTemp() && depends_on.find(candidate->getOperand(i).getTemp()) != depends_on.end())
             is_dependency = true;
       }
+      if (moving_ds && candidate->format == Format::DS)
+         is_dependency = true;
+      moving_ds = moving_ds || candidate->format == Format::DS;
       if (is_dependency) {
          for (unsigned j = 0; j < candidate->num_definitions; j++) {
             if (candidate->getDefinition(j).isTemp())
