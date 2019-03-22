@@ -2589,6 +2589,13 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
 void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Temp index = get_ssa_temp(ctx, instr->src[0].ssa);
+   if (index.type() != RegType::sgpr) {
+      aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+      readlane->getOperand(0) = Operand(index);
+      index = {ctx->program->allocateId(), s1};
+      readlane->getDefinition(0) = Definition(index);
+      ctx->block->instructions.emplace_back(std::move(readlane));
+   }
    unsigned offset = nir_intrinsic_base(instr);
    if (offset != 0) { // TODO check if index != 0 as well
       aco_ptr<SOP2_instruction> add{create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 2)};
