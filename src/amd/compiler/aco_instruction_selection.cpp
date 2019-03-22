@@ -2110,14 +2110,45 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    aco_opcode compr_op = (aco_opcode)0;
 
    assert(index != FRAG_RESULT_COLOR);
-   assert(index != FRAG_RESULT_SAMPLE_MASK);
 
-   if (index == FRAG_RESULT_DEPTH) {
+   /* Unlike vertex shader exports, it's fine to use multiple exports to
+    * export separate channels of one target. So shaders which export both
+    * FRAG_RESULT_SAMPLE_MASK and FRAG_RESULT_DEPTH should work fine.
+    * TODO: combine the exports in those cases and create better code
+    */
+
+   if (index == FRAG_RESULT_SAMPLE_MASK) {
+
+      if (ctx->program->info->info.ps.writes_z) {
+         target = V_008DFC_SQ_EXP_MRTZ;
+         enabled_channels = 0x4;
+         col_format = (unsigned) -1;
+
+         values[2] = values[0];
+         values[0] = Operand();
+      } else {
+         aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
+         exp->valid_mask = false;
+         exp->done = false;
+         exp->compressed = true;
+         exp->dest = V_008DFC_SQ_EXP_MRTZ;
+         exp->enabled_mask = 0xc;
+         for (int i = 0; i < 4; i++)
+            exp->getOperand(i) = Operand();
+         exp->getOperand(1) = Operand(values[0]);
+         ctx->block->instructions.emplace_back(std::move(exp));
+         return;
+      }
+
+   } else if (index == FRAG_RESULT_DEPTH) {
+
       target = V_008DFC_SQ_EXP_MRTZ;
       enabled_channels = 0x1;
       col_format = (unsigned) -1;
 
    } else if (index == FRAG_RESULT_STENCIL) {
+
+      assert(!ctx->program->info->info.ps.writes_z && "unimplemented");
 
       aco_ptr<Instruction> shift{create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1)};
       shift->getOperand(0) = Operand((uint32_t) 16);
