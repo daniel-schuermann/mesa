@@ -273,7 +273,7 @@ std::pair<PhysReg, bool> get_reg_helper(ra_ctx& ctx,
             /* re-enable other killed operands */
             for (unsigned k = 0; k < instr->num_operands; k++) {
                Operand& op_ = instr->getOperand(k);
-               if (!op_.isTemp() || !op_.isFirstKill() || op_.getTemp() == op.getTemp())
+               if (!op_.isTemp() || !op_.isFirstKill() || !op_.isFixed() || op_.getTemp() == op.getTemp())
                   continue;
 
                assert(op_.isFixed());
@@ -294,7 +294,7 @@ std::pair<PhysReg, bool> get_reg_helper(ra_ctx& ctx,
             /* disable the killed operands */
             for (unsigned k = 0; k < instr->num_operands; k++) {
                Operand& op = instr->getOperand(k);
-               if (!op.isTemp() || !op.isFirstKill())
+               if (!op.isTemp() || !op.isFirstKill() || !op.isFixed())
                   continue;
                for (unsigned r = op.physReg().reg; r < op.physReg().reg + op.size(); r++) {
                   if (reg_file[r] == 0xFFFF)
