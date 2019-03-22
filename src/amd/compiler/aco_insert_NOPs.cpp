@@ -69,7 +69,7 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
          /* VALU DPP reads VGPR written by VALU */
          for (int pred_idx = new_idx - 1; pred_idx >= 0 && pred_idx >= new_idx - 2; pred_idx--) {
             aco_ptr<Instruction>& pred = new_instructions[pred_idx];
-            if (pred->isVALU() &&
+            if ((pred->isVALU() || pred->format == Format::VINTRP) &&
                 pred->num_definitions &&
                 pred->getDefinition(0).physReg() == instr->getOperand(0).physReg()) {
                NOPs = std::max(NOPs, 2 + pred_idx - new_idx + 1);
