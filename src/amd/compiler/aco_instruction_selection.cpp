@@ -1937,7 +1937,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_fne: {
-      emit_comparison(ctx, instr, aco_opcode::v_cmp_lg_f32, dst);
+      emit_comparison(ctx, instr, aco_opcode::v_cmp_neq_f32, dst);
       break;
    }
    case nir_op_ilt: {
