@@ -164,6 +164,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_fddy_fine:
                   case nir_op_fddx_coarse:
                   case nir_op_fddy_coarse:
+                  case nir_op_fquantize2f16:
                      type = vgpr;
                      break;
                   case nir_op_flt:
