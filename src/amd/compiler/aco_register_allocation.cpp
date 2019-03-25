@@ -828,6 +828,15 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                         register_file[pc_def.physReg().reg + i] = pc_def.tempId();
                      }
                      parallelcopy.emplace_back(pc_op, pc_def);
+
+                     /* handle renames of previous operands */
+                     for (unsigned j = 0; j < i; j++) {
+                        Operand& op = instr->getOperand(j);
+                        if (op.isTemp() && op.tempId() == blocking_id) {
+                           op = Operand(pc_def.getTemp());
+                           op.setFixed(reg);
+                        }
+                     }
                   }
                   /* move operand to fixed reg and create parallelcopy pair */
                   Operand pc_op = operand;
