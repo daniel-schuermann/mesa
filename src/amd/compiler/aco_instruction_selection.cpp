@@ -4409,7 +4409,7 @@ Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
    aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, coords.size(), 1)};
    for (unsigned i = 0; i < coords.size(); i++)
       vec->getOperand(i) = Operand(coord_vec[i]);
-   Temp res = {ctx->program->allocateId(), coords.regClass()};
+   Temp res = {ctx->program->allocateId(), getRegClass(vgpr, coords.size())};
    vec->getDefinition(0) = Definition(res);
    ctx->block->instructions.emplace_back(std::move(vec));
    return res;
