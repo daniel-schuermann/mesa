@@ -1736,6 +1736,39 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_fquantize2f16: {
+      aco_ptr<Instruction> cvt{create_instruction<VOP1_instruction>(aco_opcode::v_cvt_f16_f32, Format::VOP1, 1, 1)};
+      cvt->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
+      Temp f16 = {ctx->program->allocateId(), v1};
+      cvt->getDefinition(0) = Definition(f16);
+      ctx->block->instructions.emplace_back(std::move(cvt));
+
+      Temp mask = {ctx->program->allocateId(), s1};
+      aco_ptr<Instruction> mov = create_s_mov(Definition(mask), Operand((uint32_t) 0x36F)); /* value is NOT negative/positive denormal value */
+      ctx->block->instructions.emplace_back(std::move(mov));
+
+      aco_ptr<Instruction> cmp{create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_class_f16, (Format) ((uint32_t) Format::VOPC | (uint32_t) Format::VOP3), 2, 1)};
+      cmp->getOperand(0) = Operand(f16);
+      cmp->getOperand(1) = Operand(mask);
+      Temp cmp_res = {ctx->program->allocateId(), s2};
+      cmp->getDefinition(0) = Definition(cmp_res);
+      cmp->getDefinition(0).setHint(vcc);
+      ctx->block->instructions.emplace_back(std::move(cmp));
+
+      aco_ptr<Instruction> cv{create_instruction<VOP1_instruction>(aco_opcode::v_cvt_f32_f16, Format::VOP1, 1, 1)};
+      cv->getOperand(0) = Operand(f16);
+      Temp f32 = {ctx->program->allocateId(), v1};
+      cv->getDefinition(0) = Definition(f32);
+      ctx->block->instructions.emplace_back(std::move(cv));
+
+      aco_ptr<Instruction> cnd(create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
+      cnd->getOperand(0) = Operand((uint32_t) 0); // else
+      cnd->getOperand(1) = Operand(f32);
+      cnd->getOperand(2) = Operand(cmp_res);
+      cnd->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(cnd));
+      break;
+   }
    case nir_op_bfm: {
       Temp bits = get_alu_src(ctx, instr->src[0]);
       Temp offset = get_alu_src(ctx, instr->src[1]);
