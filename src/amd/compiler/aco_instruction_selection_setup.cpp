@@ -138,6 +138,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_fmax:
                   case nir_op_fmin:
                   case nir_op_fmod:
+                  case nir_op_frem:
                   case nir_op_fneg:
                   case nir_op_fabs:
                   case nir_op_fsat:

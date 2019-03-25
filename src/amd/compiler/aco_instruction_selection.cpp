@@ -1250,7 +1250,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_fmod: {
+   case nir_op_fmod:
+   case nir_op_frem: {
       if (dst.size() == 1) {
          Temp rcp = {ctx->program->allocateId(), v1};
          aco_ptr<Instruction> inst;
@@ -1267,7 +1268,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          ctx->block->instructions.emplace_back(std::move(inst));
 
          Temp floor = {ctx->program->allocateId(), v1};
-         inst.reset(create_instruction<VOP1_instruction>(aco_opcode::v_floor_f32, Format::VOP1, 1, 1));
+         aco_opcode op = instr->op == nir_op_fmod ? aco_opcode::v_floor_f32 : aco_opcode::v_trunc_f32;
+         inst.reset(create_instruction<VOP1_instruction>(op, Format::VOP1, 1, 1));
          inst->getOperand(0) = Operand(mul);
          inst->getDefinition(0) = Definition(floor);
          ctx->block->instructions.emplace_back(std::move(inst));
