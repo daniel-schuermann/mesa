@@ -342,7 +342,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             instr->getOperand(i) = Operand(info.temp);
             info = ctx.info[info.temp.id()];
          }
-         if (info.is_constant() || (info.is_literal() && instr->format == Format::PSEUDO)) {
+         if ((info.is_constant() || (info.is_literal() && instr->format == Format::PSEUDO)) && !instr->getOperand(i).isFixed()) {
             instr->getOperand(i) = Operand(info.val);
             continue;
          }
