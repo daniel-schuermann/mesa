@@ -194,8 +194,8 @@ std::vector<std::map<Temp, uint32_t>> local_next_uses(spill_ctx& ctx, std::uniqu
    for (std::pair<Temp, std::pair<uint32_t, uint32_t>> pair : ctx.next_use_distances_end[block->index])
       next_uses[pair.first] = pair.second.second + block->instructions.size();
 
-   for (unsigned i = block->instructions.size() - 1; i >= 0; i--) {
-      aco_ptr<Instruction>& instr = block->instructions[i];
+   for (unsigned idx = block->instructions.size() - 1; idx >= 0; idx--) {
+      aco_ptr<Instruction>& instr = block->instructions[idx];
       if (!instr)
          break;
       if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi)
@@ -203,13 +203,13 @@ std::vector<std::map<Temp, uint32_t>> local_next_uses(spill_ctx& ctx, std::uniqu
 
       for (unsigned i = 0; i < instr->num_operands; i++) {
          if (instr->getOperand(i).isTemp())
-            next_uses[instr->getOperand(i).getTemp()] = i;
+            next_uses[instr->getOperand(i).getTemp()] = idx;
       }
       for (unsigned i = 0; i < instr->num_definitions; i++) {
          if (instr->getDefinition(i).isTemp())
             next_uses.erase(instr->getDefinition(i).getTemp());
       }
-      local_next_uses[i] = next_uses;
+      local_next_uses[idx] = next_uses;
    }
    return local_next_uses;
 }
