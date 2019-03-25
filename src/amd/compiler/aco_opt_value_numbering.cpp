@@ -188,7 +188,7 @@ typedef std::unordered_set<Instruction*, InstrHash, InstrPred> expr_set;
 
 void process_block(std::unique_ptr<Block>& block,
                    expr_set& expr_values,
-                   std::map<uint32_t, Operand>& renames)
+                   std::map<uint32_t, Temp>& renames)
 {
    bool run = false;
    std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
@@ -202,9 +202,9 @@ void process_block(std::unique_ptr<Block>& block,
       for (unsigned i = 0; i < instr->num_operands; i++) {
          if (!instr->getOperand(i).isTemp())
             continue;
-         std::map<uint32_t, Operand>::iterator it = renames.find(instr->getOperand(i).tempId());
+         std::map<uint32_t, Temp>::iterator it = renames.find(instr->getOperand(i).tempId());
          if (it != renames.end())
-            instr->getOperand(i) = it->second;
+            instr->getOperand(i).setTemp(it->second);
       }
 
       if (!instr->num_definitions || !run) {
@@ -216,8 +216,7 @@ void process_block(std::unique_ptr<Block>& block,
             std::pair<expr_set::iterator, bool> res = phi_values.emplace(instr.get());
             if (!res.second) {
                Instruction* orig_phi = *(res.first);
-               Operand new_op = Operand(orig_phi->getDefinition(0).getTemp());
-               renames.emplace(instr->getDefinition(0).tempId(), new_op).second;
+               renames.emplace(instr->getDefinition(0).tempId(), orig_phi->getDefinition(0).getTemp()).second;
                ++it;
                continue;
             }
@@ -235,10 +234,7 @@ void process_block(std::unique_ptr<Block>& block,
          assert(instr->num_definitions == orig_instr->num_definitions);
          for (unsigned i = 0; i < instr->num_definitions; i++) {
             assert(instr->getDefinition(i).regClass() == orig_instr->getDefinition(i).regClass());
-            Operand new_op = Operand(orig_instr->getDefinition(i).getTemp());
-            if (orig_instr->getDefinition(i).isFixed())
-               new_op.setFixed(instr->getDefinition(i).physReg());
-            renames.emplace(instr->getDefinition(i).tempId(), new_op).second;
+            renames.emplace(instr->getDefinition(i).tempId(), orig_instr->getDefinition(i).getTemp()).second;
          }
       } else {
          new_instructions.emplace_back(std::move(instr));
@@ -249,7 +245,7 @@ void process_block(std::unique_ptr<Block>& block,
    block->instructions.swap(new_instructions);
 }
 
-void rename_phi_operands(std::unique_ptr<Block>& block, std::map<uint32_t, Operand>& renames)
+void rename_phi_operands(std::unique_ptr<Block>& block, std::map<uint32_t, Temp>& renames)
 {
    for (aco_ptr<Instruction>& phi : block->instructions) {
       if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
@@ -258,9 +254,9 @@ void rename_phi_operands(std::unique_ptr<Block>& block, std::map<uint32_t, Opera
       for (unsigned i = 0; i < phi->num_operands; i++) {
          if (!phi->getOperand(i).isTemp())
             continue;
-         std::map<uint32_t, Operand>::iterator it = renames.find(phi->getOperand(i).tempId());
+         std::map<uint32_t, Temp>::iterator it = renames.find(phi->getOperand(i).tempId());
          if (it != renames.end())
-            phi->getOperand(i) = it->second;
+            phi->getOperand(i).setTemp(it->second);
       }
    }
 }
@@ -270,7 +266,7 @@ void rename_phi_operands(std::unique_ptr<Block>& block, std::map<uint32_t, Opera
 void value_numbering(Program* program)
 {
    std::vector<expr_set> expr_values(program->blocks.size());
-   std::map<uint32_t, Operand> renames;
+   std::map<uint32_t, Temp> renames;
    expr_set empty;
 
    for (std::unique_ptr<Block>& block : program->blocks) {
