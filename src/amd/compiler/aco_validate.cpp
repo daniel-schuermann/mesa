@@ -20,12 +20,12 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *
- * Authors:
- *    Daniel Schürmann (daniel.schuermann@campus.tu-berlin.de)
- *
  */
 
 #include "aco_ir.h"
+
+#include <stdarg.h>
+#include <map>
 
 namespace aco {
 
@@ -192,5 +192,162 @@ void validate(Program* program, FILE * output)
       }
    }
    assert(is_valid);
+}
+
+/* RA validation */
+namespace {
+
+struct Location {
+   Location() : block(NULL), instr(NULL) {}
+
+   Block *block;
+   Instruction *instr; //NULL if it's the block's live-in
+};
+
+struct Assignment {
+   Location defloc;
+   Location firstloc;
+   PhysReg reg;
+};
+
+bool ra_fail(FILE *output, Location loc, Location loc2, const char *fmt, ...) {
+   va_list args;
+   va_start(args, fmt);
+   char msg[1024];
+   vsprintf(msg, fmt, args);
+   va_end(args);
+
+   fprintf(stderr, "RA error found at instruction in BB%d:\n", loc.block->index);
+   aco_print_instr(loc.instr, stderr);
+   fprintf(stderr, "\n%s", msg);
+   if (loc2.block) {
+      fprintf(stderr, " in BB%d:\n", loc2.block->index);
+      aco_print_instr(loc2.instr, stderr);
+   }
+   fprintf(stderr, "\n\n");
+
+   return true;
+}
+
+} /* end namespace */
+
+bool validate_ra(Program *program, const struct radv_nir_compiler_options *options, FILE *output) {
+   bool err = false;
+   aco::live live_vars = aco::live_var_analysis<true>(program, options);
+
+   std::map<unsigned, Assignment> assignments;
+   for (auto& block : program->blocks) {
+      Location loc;
+      loc.block = block.get();
+      for (auto& instr : block->instructions) {
+         loc.instr = instr.get();
+         for (unsigned i = 0; i < instr->num_operands; i++) {
+            Operand& op = instr->getOperand(i);
+            if (!op.isTemp())
+               continue;
+            if (!op.isFixed())
+               err |= ra_fail(output, loc, Location(), "Operand %d is not assigned a register", i);
+            if (assignments.count(op.tempId()) && assignments[op.tempId()].reg.reg != op.physReg().reg)
+               err |= ra_fail(output, loc, assignments.at(op.tempId()).firstloc, "Operand %d has an inconsistent register assignment with instruction");
+            if (!assignments[op.tempId()].firstloc.block)
+               assignments[op.tempId()].firstloc = loc;
+            if (!assignments[op.tempId()].defloc.block)
+               assignments[op.tempId()].reg.reg = op.physReg().reg;
+         }
+
+         for (unsigned i = 0; i < instr->num_definitions; i++) {
+            Definition& def = instr->getDefinition(i);
+            if (!def.isTemp())
+               continue;
+            if (!def.isFixed())
+               err |= ra_fail(output, loc, Location(), "Definition %d is not assigned a register", i);
+            if (assignments[def.tempId()].defloc.block)
+               err |= ra_fail(output, loc, assignments.at(def.tempId()).defloc, "Temporary %%%d also defined by instruction", def.tempId());
+            if (!assignments[def.tempId()].firstloc.block)
+               assignments[def.tempId()].firstloc = loc;
+            assignments[def.tempId()].defloc = loc;
+            assignments[def.tempId()].reg.reg = def.physReg().reg;
+         }
+      }
+   }
+
+   for (auto& block : program->blocks) {
+      Location loc;
+      loc.block = block.get();
+
+      std::array<unsigned, 512> regs;
+      regs.fill(0);
+
+      std::set<Temp> live;
+      live.insert(live_vars.live_out[block->index].begin(), live_vars.live_out[block->index].end());
+
+      for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
+         aco_ptr<Instruction>& instr = *it;
+
+         for (unsigned i = 0; i < instr->num_definitions; i++) {
+            Definition& def = instr->getDefinition(i);
+            if (!def.isTemp())
+               continue;
+            live.erase(def.getTemp());
+         }
+
+         /* don't count phi operands as live-in, since they are actually
+          * killed when they are copied at the predecessor */
+         if (instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi) {
+            for (unsigned i = 0; i < instr->num_operands; i++) {
+               Operand& op = instr->getOperand(i);
+               if (!op.isTemp())
+                  continue;
+               live.insert(op.getTemp());
+            }
+         }
+      }
+
+      for (Temp tmp : live) {
+         PhysReg reg = assignments.at(tmp.id()).reg;
+         for (unsigned i = 0; i < tmp.size(); i++)
+            regs[reg.reg + i] = tmp.id();
+      }
+
+      for (auto& instr : block->instructions) {
+         loc.instr = instr.get();
+         if (instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi) {
+            for (unsigned i = 0; i < instr->num_operands; i++) {
+               Operand& op = instr->getOperand(i);
+               if (!op.isTemp())
+                  continue;
+               if (op.isFirstKill()) {
+                  for (unsigned j = 0; j < op.getTemp().size(); j++)
+                     regs[op.physReg().reg + j] = 0;
+               }
+            }
+         }
+
+         for (unsigned i = 0; i < instr->num_definitions; i++) {
+            Definition& def = instr->getDefinition(i);
+            if (!def.isTemp())
+               continue;
+            Temp tmp = def.getTemp();
+            PhysReg reg = assignments.at(tmp.id()).reg;
+            for (unsigned i = 0; i < tmp.size(); i++) {
+               if (regs[reg.reg + i])
+                  err |= ra_fail(output, loc, assignments.at(regs[reg.reg + i]).defloc, "Assignment of element %d of %%%d already taken by %%%d from instruction", i, tmp.id(), regs[reg.reg + i]);
+               regs[reg.reg + i] = tmp.id();
+            }
+         }
+
+         for (unsigned i = 0; i < instr->num_definitions; i++) {
+            Definition& def = instr->getDefinition(i);
+            if (!def.isTemp())
+               continue;
+            if (def.isKill()) {
+               for (unsigned j = 0; j < def.getTemp().size(); j++)
+                  regs[def.physReg().reg + j] = 0;
+            }
+         }
+      }
+   }
+
+   return err;
 }
 }
