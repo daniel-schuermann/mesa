@@ -473,6 +473,21 @@ void lower_to_hw_instr(Program* program)
                assert(instr->getOperand(0).physReg() == instr->getDefinition(0).physReg());
                break;
             }
+            case aco_opcode::p_as_uniform:
+            {
+               assert(typeOf(instr->getOperand(0).regClass()) == RegType::vgpr);
+               assert(typeOf(instr->getDefinition(0).regClass()) == RegType::sgpr);
+               assert(instr->getOperand(0).size() == instr->getDefinition(0).size());
+               for (unsigned i = 0; i < instr->getDefinition(0).size(); i++) {
+                  aco_ptr<VOP1_instruction> readfirstlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+                  readfirstlane->getOperand(0) = instr->getOperand(0);
+                  readfirstlane->getOperand(0).setFixed(PhysReg{instr->getOperand(0).physReg().reg + i});
+                  readfirstlane->getDefinition(0) = instr->getDefinition(0);
+                  readfirstlane->getDefinition(0).setFixed(PhysReg{instr->getDefinition(0).physReg().reg + i});
+                  ctx.instructions.emplace_back(std::move(readfirstlane));
+               }
+               break;
+            }
             default:
                break;
             }
