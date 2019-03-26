@@ -4206,8 +4206,16 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
       assert(dst.regClass() == s1);
 
+      Temp tmp{ctx->program->allocateId(), s2};
+      aco_ptr<SOPC_instruction> sand{create_instruction<SOPC_instruction>(aco_opcode::s_and_b64, Format::SOP2, 2, 2)};
+      sand->getOperand(0) = Operand(src);
+      sand->getOperand(1) = Operand(exec, s2);
+      sand->getDefinition(0) = Definition(tmp);
+      sand->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
+      ctx->block->instructions.emplace_back(std::move(sand));
+
       aco_ptr<SOPC_instruction> scmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_eq_u64, Format::SOPC, 2, 1)};
-      scmp->getOperand(0) = Operand(src);
+      scmp->getOperand(0) = Operand(tmp);
       scmp->getOperand(1) = Operand(exec, s2);
       scmp->getDefinition(0) = Definition(dst);
       scmp->getDefinition(0).setFixed(scc);
