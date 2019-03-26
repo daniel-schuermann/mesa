@@ -87,6 +87,11 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
       aco_print_program(program.get(), stderr);
    }
 
+   if (getenv("ACO_VALIDATE_RA") && aco::validate_ra(program.get(), options, stderr)) {
+      std::cerr << "Program after RA validation failure:\n";
+      aco_print_program(program.get(), stderr);
+   }
+
    aco::ssa_elimination(program.get());
    /* Lower to HW Instructions */
    aco::lower_to_hw_instr(program.get());
