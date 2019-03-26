@@ -53,8 +53,8 @@ void setup_reduce_temp(Program* program)
       return;
 
    assert(maxSize == 1 || maxSize == 2);
-   Temp reduceTmp{program->allocateId(), maxSize == 2 ? v2_linear : v1_linear};
-   bool inserted = false;
+   Temp reduceTmp(0, maxSize == 2 ? v2_linear : v1_linear);
+   int inserted_at = -1;
 
    for (std::unique_ptr<Block>& block : program->blocks) {
       if (block->loop_nest_depth == 0 && block->linear_predecessors.size() == 2)
@@ -68,7 +68,8 @@ void setup_reduce_temp(Program* program)
          if ((*it)->format != Format::PSEUDO_REDUCTION)
             continue;
 
-         if (!inserted) {
+         if ((int)last_top_level_block_idx != inserted_at) {
+            reduceTmp = {program->allocateId(), reduceTmp.regClass()};
             aco_ptr<Instruction> create{create_instruction<Instruction>(aco_opcode::p_start_linear_vgpr, Format::PSEUDO, 0, 1)};
             create->getDefinition(0) = Definition(reduceTmp);
             /* find the right place to insert this definition */
@@ -76,11 +77,14 @@ void setup_reduce_temp(Program* program)
                /* insert right before the current instruction */
                it = block->instructions.insert(it, std::move(create));
                it++;
+               /* inserted_at is intentionally not updated here, so later blocks
+                * would insert at the end instead of using this one. */
             } else {
                assert(last_top_level_block_idx < block->index);
                /* insert before the branch at last top level block */
                std::vector<aco_ptr<Instruction>>& instructions = program->blocks[last_top_level_block_idx]->instructions;
                instructions.insert(std::next(instructions.begin(), instructions.size() - 1), std::move(create));
+               inserted_at = last_top_level_block_idx;
             }
          }
 
