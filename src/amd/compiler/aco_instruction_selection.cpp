@@ -997,19 +997,60 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_find_lsb: {
-      aco_ptr<Instruction> find_lsb;
       if (dst.regClass() == s1) {
-         find_lsb.reset(create_instruction<SOP1_instruction>(aco_opcode::s_ff1_i32_b32, Format::SOP1, 1, 1));
+         aco_ptr<Instruction> find_lsb{create_instruction<SOP1_instruction>(aco_opcode::s_ff1_i32_b32, Format::SOP1, 1, 1)};
+         find_lsb->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
+         find_lsb->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(find_lsb));
       } else if (dst.regClass() == v1) {
-         find_lsb.reset(create_instruction<VOP1_instruction>(aco_opcode::v_ffbl_b32, Format::VOP1, 1, 1));
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_ffbl_b32, dst);
       } else {
-         fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
+         unreachable("Unsupported NIR instr bit size.");
       }
-      find_lsb->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-      find_lsb->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(find_lsb));
+      break;
+   }
+   case nir_op_ufind_msb:
+   case nir_op_ifind_msb: {
+      if (dst.regClass() == s1) {
+         aco_opcode op = instr->op == nir_op_ufind_msb ? aco_opcode::s_flbit_i32_b32 : aco_opcode::s_flbit_i32;
+         aco_ptr<Instruction> find_msb{create_instruction<SOP1_instruction>(op, Format::SOP1, 1, 1)};
+         find_msb->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
+         Temp msb_rev = {ctx->program->allocateId(), s1};
+         find_msb->getDefinition(0) = Definition(msb_rev);
+         ctx->block->instructions.emplace_back(std::move(find_msb));
+         aco_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_sub_u32, Format::SOP2, 2, 2)};
+         sop2->getOperand(0) = Operand((uint32_t) 31);
+         sop2->getOperand(1) = Operand(msb_rev);
+         Temp msb = {ctx->program->allocateId(), s1};
+         sop2->getDefinition(0) = Definition(msb);
+         Temp carry = {ctx->program->allocateId(), s1};
+         sop2->getDefinition(1) = Definition(carry);
+         sop2->getDefinition(1).setFixed(scc);
+         ctx->block->instructions.emplace_back(std::move(sop2));
+         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1));
+         sop2->getOperand(0) = Operand((uint32_t) -1);
+         sop2->getOperand(1) = Operand(msb);
+         sop2->getOperand(2) = Operand(carry);
+         sop2->getOperand(2).setFixed(scc);
+         sop2->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(sop2));
+      } else if (dst.regClass() == v1) {
+         aco_opcode op = instr->op == nir_op_ufind_msb ? aco_opcode::v_ffbh_u32 : aco_opcode::v_ffbh_i32;
+         Temp msb_rev = {ctx->program->allocateId(), v1};
+         emit_vop1_instruction(ctx, instr, op, msb_rev);
+         Temp msb = {ctx->program->allocateId(), v1};
+         Temp carry = emit_v_sub32(ctx, msb, Operand((uint32_t) 31), Operand(msb_rev), true);
+         aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, (Format) ((uint32_t) Format::VOP2 | (uint32_t) Format::VOP3), 3, 1)};
+         bcsel->getOperand(0) = Operand(msb);
+         bcsel->getOperand(1) = Operand((uint32_t) -1);
+         bcsel->getOperand(2) = Operand(carry);
+         bcsel->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(bcsel));
+      } else {
+         nir_print_instr(&instr->instr, stderr);
+         unreachable("Unsupported NIR instr bit size.");
+      }
       break;
    }
    case nir_op_bitfield_reverse: {
