@@ -117,7 +117,7 @@ void emit_reduce(lower_context *ctx, aco_opcode op, ReduceOp reduce_op, unsigned
 
    for (unsigned k = 0; k < src.size(); k++) {
       aco_ptr<Instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
-      mov->getOperand(0) = Operand((uint32_t) 0); // TODO get identity for op!
+      mov->getOperand(0) = Operand((uint32_t) -1); // TODO get identity for op!
       mov->getDefinition(0) = Definition(PhysReg{tmp.reg + k}, v1);
       ctx->instructions.emplace_back(std::move(mov));
    }
