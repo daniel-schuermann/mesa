@@ -945,6 +945,12 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_ushr: {
       if (dst.regClass() == v1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_lshrrev_b32, dst, false, true);
+      } else if (dst.regClass() == v2) {
+         aco_ptr<Instruction> vop3{create_instruction<VOP3A_instruction>(aco_opcode::v_lshrrev_b64, Format::VOP3, 2, 1)};
+         vop3->getOperand(0) = Operand(get_alu_src(ctx, instr->src[1]));
+         vop3->getOperand(1) = Operand(get_alu_src(ctx, instr->src[0]));
+         vop3->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vop3));
       } else if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_lshr_b32, dst, true);
       } else {
@@ -957,6 +963,12 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_ishl: {
       if (dst.regClass() == v1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_lshlrev_b32, dst, false, true);
+      } else if (dst.regClass() == v2) {
+         aco_ptr<Instruction> vop3{create_instruction<VOP3A_instruction>(aco_opcode::v_lshlrev_b64, Format::VOP3, 2, 1)};
+         vop3->getOperand(0) = Operand(get_alu_src(ctx, instr->src[1]));
+         vop3->getOperand(1) = Operand(get_alu_src(ctx, instr->src[0]));
+         vop3->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vop3));
       } else if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_lshl_b32, dst, true);
       } else {
@@ -969,6 +981,12 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_ishr: {
       if (dst.regClass() == v1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_ashrrev_i32, dst, false, true);
+      } else if (dst.regClass() == v2) {
+         aco_ptr<Instruction> vop3{create_instruction<VOP3A_instruction>(aco_opcode::v_ashrrev_i64, Format::VOP3, 2, 1)};
+         vop3->getOperand(0) = Operand(get_alu_src(ctx, instr->src[1]));
+         vop3->getOperand(1) = Operand(get_alu_src(ctx, instr->src[0]));
+         vop3->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vop3));
       } else if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_ashr_i32, dst, true);
       } else {
@@ -1663,6 +1681,13 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       tmp->getOperand(1) = Operand(src1);
       tmp->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(tmp));
+      break;
+   }
+   case nir_op_unpack_64_2x32_split_x:
+   case nir_op_unpack_64_2x32_split_y: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      emit_split_vector(ctx, src, 2);
+      emit_extract_vector(ctx, src, instr->op == nir_op_unpack_64_2x32_split_x ? 0 : 1, dst);
       break;
    }
    case nir_op_pack_half_2x16: {
