@@ -624,10 +624,14 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
       /* reroute all uses to same and remove phi */
       std::vector<std::map<unsigned, phi_info>::iterator> phi_users;
+      std::map<unsigned, phi_info>::iterator same_phi_info = phi_map.find(same.id());
       for (Instruction* instr : info->second.uses) {
          for (unsigned i = 0; i < instr->num_operands; i++) {
-            if (instr->getOperand(i).isTemp() && instr->getOperand(i).tempId() == def.id())
+            if (instr->getOperand(i).isTemp() && instr->getOperand(i).tempId() == def.id()) {
                instr->getOperand(i).setTemp(same);
+               if (same_phi_info != phi_map.end())
+                  same_phi_info->second.uses.emplace(instr);
+            }
          }
          /* recursively try to remove trivial phis */
          if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi) {
