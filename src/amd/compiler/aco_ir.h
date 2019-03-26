@@ -889,6 +889,7 @@ void insert_NOPs(Program* program);
 std::vector<uint32_t> emit_program(Program* program);
 void print_asm(std::vector<uint32_t>& binary, enum radeon_family family, std::ostream& out);
 void validate(Program* program, FILE *output);
+bool validate_ra(Program* program, const struct radv_nir_compiler_options *options, FILE *output);
 
 void aco_print_instr(Instruction *instr, FILE *output);
 void aco_print_program(Program *program, FILE *output);
