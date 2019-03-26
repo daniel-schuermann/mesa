@@ -113,9 +113,9 @@ Temp get_ssa_temp(struct isel_context *ctx, nir_ssa_def *def)
 
 Temp emit_v_add32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_out=false)
 {
-   if (b.isTemp() && typeOf(b.regClass()) != RegType::vgpr)
+   if (!b.isTemp() || typeOf(b.regClass()) != RegType::vgpr)
       std::swap(a, b);
-   assert(typeOf(b.regClass()) == RegType::vgpr); // in case two SGPRs are given
+   assert(b.isTemp() && typeOf(b.regClass()) == RegType::vgpr); // in case two SGPRs are given
 
    if (ctx->options->chip_class < GFX9)
       carry_out = true;
@@ -135,6 +135,45 @@ Temp emit_v_add32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_
       add->getDefinition(1).setHint(vcc);
    }
    ctx->block->instructions.emplace_back(std::move(add));
+
+   return carry;
+}
+
+Temp emit_v_sub32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_out = false, Operand borrow = Operand())
+{
+   if (!borrow.isUndefined() || ctx->options->chip_class < GFX9)
+      carry_out = true;
+
+   bool reverse = !b.isTemp() || typeOf(b.regClass()) != RegType::vgpr;
+   if (reverse)
+      std::swap(a, b);
+   assert(b.isTemp() && typeOf(b.regClass()) == RegType::vgpr);
+
+   aco_opcode op;
+   Temp carry;
+   if (carry_out) {
+      carry = {ctx->program->allocateId(), s2};
+      if (borrow.isUndefined())
+         op = reverse ? aco_opcode::v_subrev_co_u32 : aco_opcode::v_sub_co_u32;
+      else
+         op = reverse ? aco_opcode::v_subbrev_co_u32 : aco_opcode::v_subb_co_u32;
+   } else {
+      op = reverse ? aco_opcode::v_subrev_u32 : aco_opcode::v_sub_u32;
+   }
+
+   int num_ops = borrow.isUndefined() ? 2 : 3;
+   int num_defs = carry_out ? 2 : 1;
+   aco_ptr<Instruction> sub{create_instruction<VOP2_instruction>(op, Format::VOP2, num_ops, num_defs)};
+   sub->getOperand(0) = Operand(a);
+   sub->getOperand(1) = Operand(b);
+   if (!borrow.isUndefined())
+      sub->getOperand(2) = borrow;
+   sub->getDefinition(0) = Definition(dst);
+   if (carry_out) {
+      sub->getDefinition(1) = Definition(carry);
+      sub->getDefinition(1).setHint(vcc);
+   }
+   ctx->block->instructions.emplace_back(std::move(sub));
 
    return carry;
 }
@@ -659,14 +698,15 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
          else
             unreachable("wrong src register class for nir_op_imov");
-      } else if (dst.regClass() == v1) {
-         mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
       } else if (dst.regClass() == s2) {
          mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
+      } else if (dst.regClass() == v1) {
+         mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+      } else if (dst.regClass() == v2) {
+         mov.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 1, 1));
       } else {
-         fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
+         unreachable("Should have been lowered to scalar.");
       }
       mov->getOperand(0) = Operand(src);
       mov->getDefinition(0) = Definition(dst);
@@ -729,24 +769,24 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_ineg: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
       if (dst.regClass() == v1) {
-         aco_ptr<VOP2_instruction> sub;
-         if (dst.regClass() == v1 && ctx->options->chip_class >= GFX9) {
-            sub.reset(create_instruction<VOP2_instruction>(aco_opcode::v_sub_u32, Format::VOP2, 2, 1));
-         } else {
-            sub.reset(create_instruction<VOP2_instruction>(aco_opcode::v_sub_co_u32, Format::VOP2, 2, 2));
-            Temp tmp = {ctx->program->allocateId(), s2};
-            sub->getDefinition(1) = Definition(tmp);
-            sub->getDefinition(1).setHint(vcc);
-         }
-         sub->getOperand(0) = Operand((uint32_t) 0);
-         sub->getOperand(1) = Operand(get_alu_src(ctx, instr->src[0]));
-         sub->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(sub));
+         emit_v_sub32(ctx, dst, Operand((uint32_t) 0), Operand(src));
+      } else if (dst.regClass() == v2) {
+         emit_split_vector(ctx, src, 2);
+         Temp lower = {ctx->program->allocateId(), v1};
+         Temp borrow = emit_v_sub32(ctx, lower, Operand((uint32_t) 0), Operand(emit_extract_vector(ctx, src, 0, v1)), true);
+         Temp upper = {ctx->program->allocateId(), v1};
+         emit_v_sub32(ctx, upper, Operand((uint32_t) 0), Operand(emit_extract_vector(ctx, src, 1, v1)), false, Operand(borrow));
+         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+         vec->getOperand(0) = Operand(lower);
+         vec->getOperand(1) = Operand(upper);
+         vec->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vec));
       } else if (dst.regClass() == s1) {
          aco_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1)};
          sop2->getOperand(1) = Operand((uint32_t) -1);
-         sop2->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
+         sop2->getOperand(0) = Operand(src);
          sop2->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(sop2));
       } else {
@@ -1073,75 +1113,26 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_isub: {
-      if (dst.regClass() == s1) {
-         emit_sop2_instruction(ctx, instr, aco_opcode::s_sub_i32, dst, true);
-         break;
-      }
       Temp src0 = get_alu_src(ctx, instr->src[0]);
       Temp src1 = get_alu_src(ctx, instr->src[1]);
-
-      if (dst.regClass() == v1 && ctx->options->chip_class >= GFX9) {
-         if (src1.type() == vgpr)
-            emit_vop2_instruction(ctx, instr, aco_opcode::v_sub_u32, dst, false);
-         else
-            emit_vop2_instruction(ctx, instr, aco_opcode::v_subrev_u32, dst, true);
-         break;
-      }
-      aco_opcode op = aco_opcode::v_sub_co_u32;
-      aco_opcode opc = aco_opcode::v_subb_co_u32;
-      if (src1.type() != vgpr) {
-         op = aco_opcode::v_subrev_co_u32;
-         opc = aco_opcode::v_subbrev_co_u32;
-         Temp t = src0;
-         src0 = src1;
-         src1 = t;
-      }
-
-      aco_ptr<Instruction> sub;
-      if (dst.regClass() == v1) {
-         sub.reset(create_instruction<VOP2_instruction>(op, Format::VOP2, 2, 2));
-         sub->getOperand(0) = Operand(src0);
-         sub->getOperand(1) = Operand(src1);
-         sub->getDefinition(0) = Definition(dst);
-         Temp tmp = {ctx->program->allocateId(), s2};
-         sub->getDefinition(1) = Definition(tmp);
-         sub->getDefinition(1).setHint(vcc);
-         ctx->block->instructions.emplace_back(std::move(sub));
+      if (dst.regClass() == s1) {
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_sub_i32, dst, true);
+      } else if (dst.regClass() == v1) {
+         emit_v_sub32(ctx, dst, Operand(src0), Operand(src1));
       } else if (dst.regClass() == v2) {
-         assert(src0.size() == 2 && src1.size() == 2);
          emit_split_vector(ctx, src0, 2);
          emit_split_vector(ctx, src1, 2);
-         Temp src00 = emit_extract_vector(ctx, src0, 0, getRegClass(src0.type(), 1));
-         Temp src10 = emit_extract_vector(ctx, src1, 0, getRegClass(src1.type(), 1));
-
-         sub.reset(create_instruction<VOP2_instruction>(op, Format::VOP2, 2, 2));
-         sub->getOperand(0) = Operand(src00);
-         sub->getOperand(1) = Operand(src10);
-         Temp dst0 = {ctx->program->allocateId(), v1};
-         sub->getDefinition(0) = Definition(dst0);
-         Temp tmp = {ctx->program->allocateId(), s2};
-         sub->getDefinition(1) = Definition(tmp);
-         sub->getDefinition(1).setHint(vcc);
-         ctx->block->instructions.emplace_back(std::move(sub));
-
-         sub.reset(create_instruction<VOP2_instruction>(opc, Format::VOP2, 3, 2));
-         Temp src01 = emit_extract_vector(ctx, src0, 1, getRegClass(src0.type(), 1));
-         Temp src11 = emit_extract_vector(ctx, src1, 1, getRegClass(src1.type(), 1));
-         sub->getOperand(0) = Operand(src01);
-         sub->getOperand(1) = Operand(src11);
-         sub->getOperand(2) = Operand(tmp);
-         Temp dst1 = {ctx->program->allocateId(), v1};
-         sub->getDefinition(0) = Definition(dst1);
-         tmp = {ctx->program->allocateId(), s2};
-         sub->getDefinition(1) = Definition(tmp);
-         sub->getDefinition(1).setHint(vcc);
-         ctx->block->instructions.emplace_back(std::move(sub));
-
-         sub.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1));
-         sub->getOperand(0) = Operand(dst0);
-         sub->getOperand(1) = Operand(dst1);
-         sub->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(sub));
+         Temp lower = {ctx->program->allocateId(), v1};
+         Temp borrow = emit_v_sub32(ctx, lower, Operand(emit_extract_vector(ctx, src0, 0, v1)),
+                                    Operand(emit_extract_vector(ctx, src1, 0, v1)), true);
+         Temp upper = {ctx->program->allocateId(), v1};
+         emit_v_sub32(ctx, upper, Operand(emit_extract_vector(ctx, src0, 1, v1)),
+                      Operand(emit_extract_vector(ctx, src1, 1, v1)), false, Operand(borrow));
+         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
+         vec->getOperand(0) = Operand(lower);
+         vec->getOperand(1) = Operand(upper);
+         vec->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vec));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
