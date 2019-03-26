@@ -654,7 +654,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       aco_ptr<Instruction> mov;
       if (dst.regClass() == s1) {
          if (src.regClass() == v1)
-            mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1));
+            mov.reset(create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1));
          else if (src.regClass() == s1)
             mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
          else
@@ -1179,7 +1179,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          Temp vgpr_dst = {ctx->program->allocateId(), v1};
          mul->getDefinition(0) = Definition(vgpr_dst);
          ctx->block->instructions.emplace_back(std::move(mul));
-         aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+         aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
          readlane->getOperand(0) = Operand(vgpr_dst);
          readlane->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(readlane));
@@ -1204,7 +1204,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          Temp vgpr_dst = {ctx->program->allocateId(), v1};
          mul->getDefinition(0) = Definition(vgpr_dst);
          ctx->block->instructions.emplace_back(std::move(mul));
-         aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+         aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
          readlane->getOperand(0) = Operand(vgpr_dst);
          readlane->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(readlane));
@@ -1546,7 +1546,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (dst.regClass() == s1) {
          Temp tmp = {ctx->program->allocateId(), v1};
          emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_i32_f32, tmp);
-         aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+         aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
          readlane->getOperand(0) = Operand(tmp);
          readlane->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(readlane));
@@ -1559,7 +1559,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (dst.regClass() == s1) {
          Temp tmp = {ctx->program->allocateId(), v1};
          emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_u32_f32, tmp);
-         aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+         aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
          readlane->getOperand(0) = Operand(tmp);
          readlane->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(readlane));
@@ -2082,7 +2082,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          ctx->block->instructions.emplace_back(std::move(instr));
 
          if (dst.regClass() == s1) {
-            instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1));
+            instr.reset(create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1));
             instr->getOperand(0) = Operand(tmp);
             instr->getDefinition(0) = Definition(dst);
             ctx->block->instructions.emplace_back(std::move(instr));
@@ -2625,7 +2625,7 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Temp index = get_ssa_temp(ctx, instr->src[0].ssa);
    if (index.type() != RegType::sgpr) {
-      aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+      aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
       readlane->getOperand(0) = Operand(index);
       index = {ctx->program->allocateId(), s1};
       readlane->getDefinition(0) = Definition(index);
@@ -2796,7 +2796,7 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
             Temp indirect = get_ssa_temp(ctx, deref_instr->arr.index.ssa);
             /* check if index is in sgpr */
             if (indirect.type() == vgpr) {
-               aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+               aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
                readlane->getOperand(0) = Operand(indirect);
                indirect = {ctx->program->allocateId(), s1};
                readlane->getDefinition(0) = Definition(indirect);
@@ -3766,27 +3766,13 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    ds->offset0 = offset;
    ctx->block->instructions.emplace_back(std::move(ds));
 
-   if (dst.type() == vgpr) {
-      emit_split_vector(ctx, dst, instr->num_components);
-   } else if (dst.size() == 1) {
-      aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
+   if (dst.type() == sgpr) {
+      aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
       readlane->getOperand(0) = Operand(tmp);
       readlane->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(readlane));
-   } else {
-      aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->num_components, 1)};
-      for (unsigned i = 0; i < instr->num_components; i++) {
-         aco_ptr<VOP1_instruction> readlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
-         readlane->getOperand(0) = Operand(emit_extract_vector(ctx, tmp, i, v1));
-         Temp tmp2{ctx->program->allocateId(), s1};
-         readlane->getDefinition(0) = Definition(tmp2);
-         ctx->block->instructions.emplace_back(std::move(readlane));
-         vec->getOperand(i) = Operand(tmp2);
-      }
-      vec->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(vec));
-      emit_split_vector(ctx, dst, instr->num_components);
    }
+   emit_split_vector(ctx, dst, instr->num_components);
 
    return;
 }
