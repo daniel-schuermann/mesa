@@ -209,12 +209,15 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                         if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index]) {
                            type = vgpr;
                         } else {
-                           for (unsigned i = 1; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
-                              if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr) {
-                                 type = vgpr;
-                                 break;
-                              }
+                           if (typeOf(reg_class[alu_instr->src[1].src.ssa->index]) == vgpr ||
+                               typeOf(reg_class[alu_instr->src[2].src.ssa->index]) == vgpr) {
+                              type = vgpr;
                            }
+                        }
+                        /* vulkan_ressource_index has 64bit on GCN */
+                        if (alu_instr->src[1].src.ssa->num_components == 1 && alu_instr->src[2].src.ssa->num_components == 1) {
+                           assert(sizeOf(reg_class[alu_instr->src[1].src.ssa->index]) == sizeOf(reg_class[alu_instr->src[2].src.ssa->index]));
+                           size = sizeOf(reg_class[alu_instr->src[1].src.ssa->index]);
                         }
                      }
                      break;
