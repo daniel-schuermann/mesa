@@ -1043,7 +1043,7 @@ void apply_literals(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       } else if (!info->needs_vop3 &&
                  instr->getOperand(2).isTemp() &&
                  instr->getOperand(2).getTemp().type() == vgpr &&
-                 ctx.info[instr->getOperand(2).tempId()].uses == 1) {
+                 instr->getOperand(2).isKill()) {
          new_mad.reset(create_instruction<VOP2_instruction>(aco_opcode::v_mac_f32, Format::VOP2, 3, 1));
          for (unsigned i = 0; i < 3; i++)
             new_mad->getOperand(i) = instr->getOperand(i);
@@ -1071,7 +1071,7 @@ void optimize(Program* program)
    }
 
    /* Backward pass to calculate the number of uses for each instruction */
-   std::vector<std::set<Temp>> live_out_per_block = live_var_analysis<false>(program, nullptr).live_out;
+   std::vector<std::set<Temp>> live_out_per_block = live_var_analysis<true>(program, nullptr).live_out;
    for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it)
    {
       Block* block = it->get();
