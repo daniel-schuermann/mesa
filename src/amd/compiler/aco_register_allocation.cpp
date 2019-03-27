@@ -872,6 +872,20 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                   register_file[instr->getOperand(i).physReg().reg + j] = 0;
 
+         /* handle definitions which must have the same register as an operand */
+         if (instr->opcode == aco_opcode::v_interp_p2_f32 ||
+             instr->opcode == aco_opcode::v_mac_f32)
+            instr->getDefinition(0).setFixed(instr->getOperand(2).physReg());
+         else if (instr->opcode == aco_opcode::s_addk_i32 ||
+                  instr->opcode == aco_opcode::s_mulk_i32)
+            instr->getDefinition(0).setFixed(instr->getOperand(0).physReg());
+         else if (instr->opcode == aco_opcode::p_wqm)
+            instr->getDefinition(0).setFixed(instr->getOperand(0).physReg());
+         else if ((instr->format == Format::MUBUF ||
+                   instr->format == Format::MIMG) &&
+                  instr->num_definitions == 1 &&
+                  instr->num_operands == 4)
+            instr->getDefinition(0).setFixed(instr->getOperand(3).physReg());
 
          /* handle definitions */
          for (unsigned i = 0; i < instr->num_definitions; ++i) {
@@ -921,21 +935,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                }
             } else if (definition.isTemp()) {
                /* find free reg */
-               if (instr->opcode == aco_opcode::v_interp_p2_f32 ||
-                   instr->opcode == aco_opcode::v_mac_f32)
-                  definition.setFixed(instr->getOperand(2).physReg());
-               else if (instr->opcode == aco_opcode::s_addk_i32 ||
-                        instr->opcode == aco_opcode::s_mulk_i32)
-                  definition.setFixed(instr->getOperand(0).physReg());
-               else if (instr->opcode == aco_opcode::p_wqm) {
-                  assert(instr->getOperand(0).isKill());
-                  definition.setFixed(instr->getOperand(0).physReg());
-               } else if ((instr->format == Format::MUBUF ||
-                         instr->format == Format::MIMG) &&
-                        instr->num_definitions == 1 &&
-                        instr->num_operands == 4)
-                  definition.setFixed(instr->getOperand(3).physReg());
-               else if (definition.hasHint() && register_file[definition.physReg().reg] == 0)
+               if (definition.hasHint() && register_file[definition.physReg().reg] == 0)
                   definition.setFixed(definition.physReg());
                else if (instr->opcode == aco_opcode::p_split_vector) {
                   PhysReg reg = PhysReg{instr->getOperand(0).physReg().reg + i};
