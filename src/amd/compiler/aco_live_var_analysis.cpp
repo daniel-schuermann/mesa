@@ -200,6 +200,7 @@ void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr)
    }
 }
 
+// TODO: still setKill() when reg_demand_cond = false and then call this with reg_demand_cond = false where possible
 template<bool register_demand>
 live live_var_analysis(Program* program,
                        const struct radv_nir_compiler_options *options)
