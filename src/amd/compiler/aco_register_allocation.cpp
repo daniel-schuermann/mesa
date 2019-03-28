@@ -1133,7 +1133,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
             /* change the instruction to VOP3 to enable an arbitrary register pair as dst */
             aco_ptr<Instruction> tmp = std::move(instr);
-            Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
+            Format format = asVOP3(tmp->format);
             instr.reset(create_instruction<VOP3A_instruction>(tmp->opcode, format, tmp->num_operands, tmp->num_definitions));
             for (unsigned i = 0; i < instr->num_operands; i++) {
                Operand& operand = tmp->getOperand(i);
