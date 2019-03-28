@@ -130,13 +130,15 @@ void find_empty_blocks(ssa_elimination_ctx& ctx)
    }
 }
 
-void remove_merge_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
+void try_shrink_branch_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
 {
    for (aco_ptr<Instruction>& instr : block->instructions) {
 
-      assert(instr->opcode == aco_opcode::p_linear_phi ||
-             instr->opcode == aco_opcode::s_mov_b64 ||
-             instr->opcode == aco_opcode::p_parallelcopy);
+      /* TODO: shrink other pattern */
+      if (!(instr->opcode == aco_opcode::p_linear_phi ||
+            instr->opcode == aco_opcode::s_mov_b64 ||
+            instr->opcode == aco_opcode::p_parallelcopy))
+         return;
 
       /* find the parallelcopy instruction which moves the else-mask to exec */
       if (instr->opcode != aco_opcode::p_parallelcopy)
@@ -174,88 +176,85 @@ void remove_merge_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
    }
 }
 
+void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
+{
+   for (aco_ptr<Instruction>& instr : block->instructions) {
+      if (instr->format != Format::PSEUDO &&
+          instr->format != Format::PSEUDO_BRANCH) {
+         return;
+      }
+   }
+
+   Block* pred = block->linear_predecessors[0];
+   Block* succ = block->linear_successors[0];
+   Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(pred->instructions.back().get());
+   if (branch->opcode == aco_opcode::p_branch) {
+      branch->targets[0] = succ;
+      branch->targets[1] = succ;
+   } else if (branch->targets[0] == block.get()) {
+      branch->targets[0] = succ;
+   } else if (branch->targets[0] == succ) {
+      assert(branch->targets[1] == block.get());
+      branch->targets[1] = succ;
+      branch->opcode = aco_opcode::p_branch;
+   } else if (branch->targets[1] == block.get()) {
+      /* check if there is a fall-through path from block to succ */
+      bool falls_through = true;
+      for (unsigned j = block->index + 1; falls_through && j < succ->index; j++) {
+         assert(ctx.program->blocks[j]->index == j);
+         if (!ctx.program->blocks[j]->instructions.empty()) {
+            assert(ctx.program->blocks[j].get() == branch->targets[0]);
+            falls_through = false;
+         }
+      }
+      if (falls_through) {
+         branch->targets[1] = succ;
+      } else {
+         /* This is a (uniform) break or continue block. The branch condition has to be inverted. */
+         if (branch->opcode == aco_opcode::p_cbranch_z)
+            branch->opcode = aco_opcode::p_cbranch_nz;
+         else if (branch->opcode == aco_opcode::p_cbranch_nz)
+            branch->opcode = aco_opcode::p_cbranch_z;
+         else
+            assert(false);
+         branch->targets[1] = branch->targets[0];
+         branch->targets[0] = succ;
+      }
+   } else {
+      assert(false);
+   }
+
+   if (branch->targets[0] == branch->targets[1])
+      branch->opcode = aco_opcode::p_branch;
+
+   for (unsigned i = 0; i < pred->linear_successors.size(); i++)
+      if (pred->linear_successors[i] == block.get())
+         pred->linear_successors[i] = succ;
+   for (unsigned i = 0; i < succ->linear_predecessors.size(); i++)
+      if (succ->linear_predecessors[i] == block.get())
+         succ->linear_predecessors[i] = pred;
+   block->instructions.clear();
+   block->linear_predecessors.clear();
+   block->linear_successors.clear();
+}
+
 void jump_threading(ssa_elimination_ctx& ctx)
 {
    for (int i = ctx.program->blocks.size() - 1; i >= 0; i--) {
+      std::unique_ptr<Block>& block = ctx.program->blocks[i];
+
+      if (block->linear_successors.size() == 2 &&
+          block->linear_successors[0] == block->linear_successors[1]) {
+         try_shrink_branch_block(ctx, block);
+         continue;
+      }
+
       if (!ctx.empty_blocks[i])
          continue;
 
-      std::unique_ptr<Block>& block = ctx.program->blocks[i];
-
-      if (block->linear_predecessors.size() == 2 &&
-          block->linear_successors.size() == 2 &&
-          block->linear_successors[0] == block->linear_successors[1]) {
-         remove_merge_block(ctx, block);
-         continue;
-      }
-
       // TODO: we should also try to remove blocks with multiple pre- and successors
-      if (block->linear_predecessors.size() != 1 || block->linear_successors.size() != 1)
-         continue;
-
-      bool can_remove = true;
-      for (aco_ptr<Instruction>& instr : block->instructions) {
-         if (instr->format != Format::PSEUDO &&
-             instr->format != Format::PSEUDO_BRANCH) {
-            can_remove = false;
-            break;
-         }
-      }
-
-      if (!can_remove)
-         continue;
-
-      Block* pred = block->linear_predecessors[0];
-      Block* succ = block->linear_successors[0];
-      Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(pred->instructions.back().get());
-      if (branch->opcode == aco_opcode::p_branch) {
-         branch->targets[0] = succ;
-         branch->targets[1] = succ;
-      } else if (branch->targets[0] == block.get()) {
-         branch->targets[0] = succ;
-      } else if (branch->targets[0] == succ) {
-         assert(branch->targets[1] == block.get());
-         branch->targets[1] = succ;
-         branch->opcode = aco_opcode::p_branch;
-      } else if (branch->targets[1] == block.get()) {
-         /* check if there is a fall-through path from block to succ */
-         bool falls_through = true;
-         for (unsigned j = i + 1; falls_through && j < succ->index; j++) {
-            assert(ctx.program->blocks[j]->index == j);
-            if (!ctx.program->blocks[j]->instructions.empty()) {
-               assert(ctx.program->blocks[j].get() == branch->targets[0]);
-               falls_through = false;
-            }
-         }
-         if (falls_through) {
-            branch->targets[1] = succ;
-         } else {
-            /* This is a (uniform) break or continue block. The branch condition has to be inverted. */
-            if (branch->opcode == aco_opcode::p_cbranch_z)
-               branch->opcode = aco_opcode::p_cbranch_nz;
-            else if (branch->opcode == aco_opcode::p_cbranch_nz)
-               branch->opcode = aco_opcode::p_cbranch_z;
-            else
-               assert(false);
-            branch->targets[1] = branch->targets[0];
-            branch->targets[0] = succ;
-         }
-      } else {
-         assert(false);
-      }
-
-      if (branch->targets[0] == branch->targets[1])
-         branch->opcode = aco_opcode::p_branch;
-
-      for (unsigned i = 0; i < pred->linear_successors.size(); i++)
-         if (pred->linear_successors[i] == block.get())
-            pred->linear_successors[i] = succ;
-      for (unsigned i = 0; i < succ->linear_predecessors.size(); i++)
-         if (succ->linear_predecessors[i] == block.get())
-            succ->linear_predecessors[i] = pred;
-      block->instructions.clear();
-      block->linear_predecessors.clear();
-      block->linear_successors.clear();
+      if (block->linear_predecessors.size() == 1 && block->linear_successors.size() == 1)
+         try_remove_simple_block(ctx, block);
    }
 }
 
