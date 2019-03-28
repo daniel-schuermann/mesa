@@ -1270,9 +1270,12 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
 
             if (vgpr_slot.find(spill_id) != vgpr_slot.end()) {
                /* spill vgpr */
-               assert(false && "vgpr spilling not yet implemented.");
+               ctx.program->config->spilled_vgprs += (*it)->getOperand(0).size();
 
+               assert(false && "vgpr spilling not yet implemented.");
             } else if (sgpr_slot.find(spill_id) != sgpr_slot.end()) {
+               ctx.program->config->spilled_sgprs += (*it)->getOperand(0).size();
+
                uint32_t spill_slot = sgpr_slot[spill_id];
 
                /* check if the linear vgpr already exists */
@@ -1355,6 +1358,9 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
 
 void spill(Program* program, live& live_vars, const struct radv_nir_compiler_options *options)
 {
+   program->config->spilled_vgprs = 0;
+   program->config->spilled_sgprs = 0;
+
    /* no spilling when wave count is already high */
    if (program->num_waves >= 6)
       return;
