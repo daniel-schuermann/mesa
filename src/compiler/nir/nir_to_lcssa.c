@@ -1,5 +1,6 @@
 /*
  * Copyright © 2015 Thomas Helland
+ * Copyright © 2019 Valve Corporation
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -45,10 +46,12 @@ typedef struct {
    /* The loop we store information for */
    nir_loop *loop;
 
+   /* Whether to skip loop invariant variables */
+   bool skip_invariants;
 } lcssa_state;
 
 static bool
-is_if_use_inside_loop(nir_src *use, nir_loop* loop)
+is_if_use_inside_loop(nir_src *use, nir_loop *loop)
 {
    nir_block *block_before_loop =
       nir_cf_node_as_block(nir_cf_node_prev(&loop->cf_node));
@@ -66,7 +69,7 @@ is_if_use_inside_loop(nir_src *use, nir_loop* loop)
 }
 
 static bool
-is_use_inside_loop(nir_src *use, nir_loop* loop)
+is_use_inside_loop(nir_src *use, nir_loop *loop)
 {
    nir_block *block_before_loop =
       nir_cf_node_as_block(nir_cf_node_prev(&loop->cf_node));
@@ -82,10 +85,146 @@ is_use_inside_loop(nir_src *use, nir_loop* loop)
 }
 
 static bool
+is_defined_before_loop(nir_ssa_def *def, nir_loop *loop)
+{
+   nir_instr *instr = def->parent_instr;
+   nir_block *block_before_loop =
+      nir_cf_node_as_block(nir_cf_node_prev(&loop->cf_node));
+
+   if (instr->block->index <= block_before_loop->index) {
+      return true;
+   }
+
+   return false;
+}
+
+typedef enum instr_invariance {
+   undefined = 0,
+   invariant,
+   not_invariant,
+} instr_invariance;
+
+static instr_invariance
+instr_is_invariant(nir_instr *instr, nir_loop *loop);
+
+static instr_invariance
+def_is_invariant(nir_ssa_def *def, nir_loop *loop)
+{
+   if (is_defined_before_loop(def, loop))
+      return invariant;
+
+   if (def->parent_instr->pass_flags == undefined)
+      def->parent_instr->pass_flags = instr_is_invariant(def->parent_instr, loop);
+
+   return def->parent_instr->pass_flags;
+}
+
+static instr_invariance
+instr_is_invariant(nir_instr *instr, nir_loop *loop)
+{
+   assert(instr->pass_flags == undefined);
+
+   switch (instr->type) {
+   case nir_instr_type_load_const:
+   case nir_instr_type_ssa_undef: {
+      return invariant;
+   }
+   case nir_instr_type_phi: {
+      /* base case: it's a phi at the loop header */
+      if (instr->block == nir_loop_first_block(loop))
+         return not_invariant;
+
+      /* break potential cycles */
+      instr->pass_flags = invariant;
+
+      nir_phi_instr *phi = nir_instr_as_phi(instr);
+
+      nir_foreach_phi_src(src, phi) {
+         if (def_is_invariant(src->src.ssa, loop) == not_invariant)
+            return not_invariant;
+      }
+      return invariant;
+   }
+   case nir_instr_type_alu: {
+      nir_alu_instr *alu = nir_instr_as_alu(instr);
+      unsigned num_src = nir_op_infos[alu->op].num_inputs;
+      for (unsigned i = 0; i < num_src; i++) {
+         if (def_is_invariant(alu->src[i].src.ssa, loop) == not_invariant)
+            return not_invariant;
+      }
+      return invariant;
+   }
+   case nir_instr_type_parallel_copy: {
+      nir_parallel_copy_instr *copy = nir_instr_as_parallel_copy(instr);
+      nir_foreach_parallel_copy_entry(entry, copy) {
+         if (def_is_invariant(entry->src.ssa, loop) == not_invariant)
+            return not_invariant;
+      }
+      return invariant;
+   }
+   case nir_instr_type_tex: {
+      nir_tex_instr *tex = nir_instr_as_tex(instr);
+      for (unsigned i = 0; i < tex->num_srcs; i++) {
+         if (def_is_invariant(tex->src[i].src.ssa, loop) == not_invariant)
+            return not_invariant;
+      }
+      return invariant;
+   }
+   case nir_instr_type_deref: {
+      nir_deref_instr *deref = nir_instr_as_deref(instr);
+      instr_invariance invariance = invariant;
+      if (deref->deref_type != nir_deref_type_var)
+         invariance = def_is_invariant(deref->parent.ssa, loop);
+      if (invariance == invariant && deref->deref_type == nir_deref_type_array)
+         invariance = def_is_invariant(deref->arr.index.ssa, loop);
+      return invariance;
+   }
+   case nir_instr_type_intrinsic: {
+      nir_intrinsic_instr *intrinsic = nir_instr_as_intrinsic(instr);
+      if (!(nir_intrinsic_infos[intrinsic->intrinsic].flags & NIR_INTRINSIC_CAN_REORDER))
+         return not_invariant;
+
+      for (unsigned i = 0; i < nir_intrinsic_infos[intrinsic->intrinsic].num_srcs; i++) {
+         if (def_is_invariant(intrinsic->src[i].ssa, loop) == not_invariant)
+            return not_invariant;
+      }
+      return invariant;
+   }
+   default:
+      return invariant;
+   }
+
+   return invariant;
+}
+
+static void
+prepare_loop_invariance(nir_cf_node *cf_node)
+{
+   nir_foreach_block_in_cf_node(block, cf_node) {
+      nir_foreach_instr(instr, block)
+         instr->pass_flags = undefined;
+   }
+
+   nir_foreach_block_in_cf_node(block, cf_node) {
+      nir_foreach_instr(instr, block)
+         if (instr->pass_flags == undefined)
+            instr->pass_flags = instr_is_invariant(instr, nir_cf_node_as_loop(cf_node));
+   }
+}
+
+
+static bool
 convert_loop_exit_for_ssa(nir_ssa_def *def, void *void_state)
 {
    lcssa_state *state = void_state;
    bool all_uses_inside_loop = true;
+
+   /* Don't create LCSSA-Phis for loop-invariant variables */
+   if (state->skip_invariants) {
+      assert(def->parent_instr->pass_flags != undefined);
+      if (def->parent_instr->pass_flags == invariant)
+         return true;
+   }
 
    nir_block *block_after_loop =
       nir_cf_node_as_block(nir_cf_node_next(&state->loop->cf_node));
@@ -163,10 +302,6 @@ convert_to_lcssa(nir_cf_node *cf_node, lcssa_state *state)
 {
    switch (cf_node->type) {
    case nir_cf_node_block:
-      if (state->loop) {
-         nir_foreach_instr(instr, nir_cf_node_as_block(cf_node))
-            nir_foreach_ssa_def(instr, convert_loop_exit_for_ssa, state);
-      }
       return;
    case nir_cf_node_if: {
       nir_if *if_stmt = nir_cf_node_as_if(cf_node);
@@ -177,13 +312,20 @@ convert_to_lcssa(nir_cf_node *cf_node, lcssa_state *state)
       return;
    }
    case nir_cf_node_loop: {
-      nir_loop *parent_loop = state->loop;
-      state->loop = nir_cf_node_as_loop(cf_node);
-
-      foreach_list_typed(nir_cf_node, nested_node, node, &state->loop->body)
+      /* first, convert inner loops */
+      nir_loop *loop = nir_cf_node_as_loop(cf_node);
+      foreach_list_typed(nir_cf_node, nested_node, node, &loop->body)
          convert_to_lcssa(nested_node, state);
 
-      state->loop = parent_loop;
+      if (state->skip_invariants)
+         prepare_loop_invariance(cf_node);
+
+      state->loop = loop;
+      nir_foreach_block_in_cf_node(block, cf_node) {
+         nir_foreach_instr(instr, block)
+            nir_foreach_ssa_def(instr, convert_loop_exit_for_ssa, state);
+      }
+
       return;
    }
    default:
@@ -200,9 +342,12 @@ nir_convert_loop_to_lcssa(nir_loop *loop) {
    lcssa_state *state = rzalloc(NULL, lcssa_state);
    state->loop = loop;
    state->shader = impl->function->shader;
+   state->skip_invariants = false;
 
-   foreach_list_typed(nir_cf_node, node, node, &state->loop->body)
-      convert_to_lcssa(node, state);
+   nir_foreach_block_in_cf_node (block, &loop->cf_node) {
+      nir_foreach_instr(instr, block)
+         nir_foreach_ssa_def(instr, convert_loop_exit_for_ssa, state);
+   }
 
    ralloc_free(state);
 }
@@ -212,6 +357,7 @@ nir_to_lcssa(nir_shader *shader) {
 
    lcssa_state *state = rzalloc(NULL, lcssa_state);
    state->shader = shader;
+   state->skip_invariants = true;
 
    nir_foreach_function(function, shader) {
       if (function->impl == NULL) 
