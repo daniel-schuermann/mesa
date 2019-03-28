@@ -197,7 +197,8 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
    it = copy_map.begin();
    while (it != copy_map.end()) {
       if (it->second.def.getTemp().type() != RegType::sgpr || !it->first.reg ||
-          it->second.uses || it->second.size != 1 || it->second.op.isConstant()) {
+          it->second.uses || it->second.size != 1 || it->second.op.isConstant() ||
+          it->first.reg % 2 != 1 || it->second.op.physReg().reg % 2 != 1) {
          ++it;
          continue;
       }
