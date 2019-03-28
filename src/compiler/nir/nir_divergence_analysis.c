@@ -37,39 +37,6 @@
 
 
 static bool
-never_divergent(nir_ssa_def *def) {
-   nir_instr *instr = def->parent_instr;
-   switch (instr->type) {
-   case nir_instr_type_intrinsic: {
-      nir_intrinsic_instr *intrinsic = nir_instr_as_intrinsic(instr);
-      switch (intrinsic->intrinsic) {
-      case nir_intrinsic_vulkan_resource_index:
-      case nir_intrinsic_load_work_group_id:
-      case nir_intrinsic_load_num_work_groups:
-      case nir_intrinsic_get_buffer_size:
-      case nir_intrinsic_vote_any:
-      case nir_intrinsic_vote_all:
-      case nir_intrinsic_vote_feq:
-      case nir_intrinsic_vote_ieq:
-      case nir_intrinsic_ballot: {
-         return true;
-      }
-      default: {
-         break;
-      }
-      }
-   }
-   case nir_instr_type_load_const:
-   case nir_instr_type_ssa_undef:
-      return true;
-   default: {
-      break;
-   }
-   }
-   return false;
-}
-
-static bool
 alu_src_is_divergent(bool *divergent, nir_alu_src src, unsigned num_input_components)
 {
    /* If the alu src is swizzled and defined by a vec-instruction,
@@ -94,10 +61,32 @@ alu_src_is_divergent(bool *divergent, nir_alu_src src, unsigned num_input_compon
 }
 
 static bool
+is_dynamically_uniform(nir_src * src)
+{
+   // TODO: we want to keep track of this property through multiple instructions
+
+   if (src->ssa->parent_instr->type != nir_instr_type_intrinsic)
+      return false;
+
+   nir_intrinsic_instr *instr = nir_instr_as_intrinsic(src->ssa->parent_instr);
+   if (instr->intrinsic == nir_intrinsic_vulkan_resource_index)
+      return true;
+   else
+      return false;
+}
+
+static bool
 visit_alu(bool *divergent, nir_alu_instr *instr)
 {
    if (divergent[instr->dest.dest.ssa.index])
       return false;
+
+   /* check if any bcsel operand is dynamically uniform */
+   if (instr->op == nir_op_bcsel) {
+      if (is_dynamically_uniform (&instr->src[1].src) ||
+          is_dynamically_uniform (&instr->src[2].src))
+         return false;
+   }
 
    unsigned num_src = nir_op_infos[instr->op].num_inputs;
 
@@ -108,7 +97,6 @@ visit_alu(bool *divergent, nir_alu_instr *instr)
       }
    }
 
-   divergent[instr->dest.dest.ssa.index] = false;
    return false;
 }
 
@@ -253,29 +241,23 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
     *     is associated with a different ssa-def.
     *
     * (3) eta: represent values that leave a loop.
-    *     The resulting value is divergent iff any loop exit condition
-    *     or source value is divergent.
+    *     The resulting value is divergent if the source value is divergent
+    *     or any loop exit condition is divergent for a value which is
+    *     not loop-invariant.
     */
 
    if (divergent[instr->dest.ssa.index])
       return false;
 
-   unsigned non_undef = 0;
    nir_foreach_phi_src(src, instr) {
+      if (is_dynamically_uniform(&src->src))
+         return false;
+
       /* if any source value is divergent, the resulting value is divergent */
       if (divergent[src->src.ssa->index]) {
          divergent[instr->dest.ssa.index] = true;
          return true;
       }
-
-      /* if all values but one are undef, the resulting value is uniform */
-      if (src->src.ssa->parent_instr->type != nir_instr_type_ssa_undef)
-         non_undef += 1;
-   }
-
-   if (non_undef <= 1 && exec_list_length(&instr->srcs) != 1) {
-      assert(divergent[instr->dest.ssa.index] == false);
-      return false;
    }
 
    nir_cf_node *prev = nir_cf_node_prev(&instr->instr.block->cf_node);
@@ -304,8 +286,11 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
              src->src.ssa->index == unconditional[1])
             continue;
 
-         nir_cf_node *current = src->pred->cf_node.parent;
+         /* if the value is undef, we don't need to check the condition */
+         if (src->src.ssa->parent_instr->type == nir_instr_type_ssa_undef)
+            continue;
 
+         nir_cf_node *current = src->pred->cf_node.parent;
          /* check recursively the conditions if any is divergent */
          while (current->type != nir_cf_node_loop) {
             if (current->type == nir_cf_node_if) {
@@ -320,6 +305,12 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
       }
 
    } else if (prev->type == nir_cf_node_if) {
+      /* if any of the two incoming values is undef, the resulting value is uniform */
+      nir_foreach_phi_src(src, instr) {
+         if (src->src.ssa->parent_instr->type == nir_instr_type_ssa_undef)
+            return false;
+      }
+
       /* gamma: check if the condition is divergent */
       nir_if *if_node = nir_cf_node_as_if(prev);
       if (divergent[if_node->condition.ssa->index]) {
@@ -328,12 +319,11 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
       }
 
    } else {
-      /* eta: check if any loop exit condition is divergent */
+      /* eta: the predecessor must be a loop */
       assert(prev->type == nir_cf_node_loop);
-      nir_foreach_phi_src(src, instr) {
-         if (never_divergent(src->src.ssa))
-            continue;
 
+      /* check if any loop exit condition is divergent */
+      nir_foreach_phi_src(src, instr) {
          nir_cf_node *current = src->pred->cf_node.parent;
          assert(current->type == nir_cf_node_if);
 
@@ -351,7 +341,6 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
       }
    }
 
-   divergent[instr->dest.ssa.index] = false;
    return false;
 }
 
@@ -374,31 +363,29 @@ visit_parallel_copy(bool *divergent, nir_parallel_copy_instr *instr)
 static bool
 visit_load_const(bool *divergent, nir_load_const_instr *instr)
 {
-   divergent[instr->def.index] = false;
    return false;
 }
 
 static bool
 visit_ssa_undef(bool *divergent, nir_ssa_undef_instr *instr)
 {
-   divergent[instr->def.index] = false;
    return false;
 }
 
 static bool
 visit_deref(bool *divergent, nir_deref_instr *instr)
 {
+   if (divergent[instr->dest.ssa.index])
+      return false;
+
    nir_foreach_use(src, &instr->dest.ssa)
    {
-      if (src->parent_instr->type != nir_instr_type_tex) {
-         divergent[instr->dest.ssa.index] = false;
+      if (src->parent_instr->type != nir_instr_type_tex)
          return false;
-      }
    }
 
-   bool before = divergent[instr->dest.ssa.index];
    divergent[instr->dest.ssa.index] = true;
-   return !before;
+   return true;
 }
 
 bool*
