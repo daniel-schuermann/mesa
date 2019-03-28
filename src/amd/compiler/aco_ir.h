@@ -142,6 +142,10 @@ enum class Format : std::uint16_t {
    SDWA = 1 << 15,
 };
 
+static inline Format asVOP3(Format format) {
+   return (Format) ((uint32_t) Format::VOP3 | (uint32_t) format);
+};
+
 enum RegType {
    scc_bit,
    sgpr,
