@@ -248,7 +248,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
             if (!op.isFixed())
                err |= ra_fail(output, loc, Location(), "Operand %d is not assigned a register", i);
             if (assignments.count(op.tempId()) && assignments[op.tempId()].reg.reg != op.physReg().reg)
-               err |= ra_fail(output, loc, assignments.at(op.tempId()).firstloc, "Operand %d has an inconsistent register assignment with instruction");
+               err |= ra_fail(output, loc, assignments.at(op.tempId()).firstloc, "Operand %d has an inconsistent register assignment with instruction", i);
             if (!assignments[op.tempId()].firstloc.block)
                assignments[op.tempId()].firstloc = loc;
             if (!assignments[op.tempId()].defloc.block)
