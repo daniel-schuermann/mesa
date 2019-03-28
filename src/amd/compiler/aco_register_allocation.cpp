@@ -608,26 +608,26 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       assert(info->second.block_idx != 0);
       Instruction* instr = info->second.phi;
       Temp same = Temp();
-      Temp def = instr->getDefinition(0).getTemp();
+      Definition def = instr->getDefinition(0);
       /* a phi node is trivial iff all operands are the same or the definition of the phi */
       for (unsigned i = 0; i < instr->num_operands; i++) {
          Temp op = instr->getOperand(i).getTemp();
-         if (op == same || op == def)
+         if (op == same || op == def.getTemp())
             continue;
-         if (!(same == Temp())) {
+         if (!(same == Temp()) || !(instr->getOperand(i).physReg() == def.physReg())) {
             /* phi is not trivial */
-            return def;
+            return def.getTemp();
          }
          same = op;
       }
-      assert(!(same == Temp() || same == def));
+      assert(!(same == Temp() || same == def.getTemp()));
 
       /* reroute all uses to same and remove phi */
       std::vector<std::map<unsigned, phi_info>::iterator> phi_users;
       std::map<unsigned, phi_info>::iterator same_phi_info = phi_map.find(same.id());
       for (Instruction* instr : info->second.uses) {
          for (unsigned i = 0; i < instr->num_operands; i++) {
-            if (instr->getOperand(i).isTemp() && instr->getOperand(i).tempId() == def.id()) {
+            if (instr->getOperand(i).isTemp() && instr->getOperand(i).tempId() == def.tempId()) {
                instr->getOperand(i).setTemp(same);
                if (same_phi_info != phi_map.end())
                   same_phi_info->second.uses.emplace(instr);
@@ -645,7 +645,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       unsigned orig_var = it != orig_names.end() ? it->second.id() : same.id();
       for (unsigned i = 0; i < program->blocks.size(); i++) {
          auto it = renames[i].find(orig_var);
-         if (it != renames[i].end() && it->second == def)
+         if (it != renames[i].end() && it->second == def.getTemp())
             renames[i][orig_var] = same;
       }
 
