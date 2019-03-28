@@ -10,6 +10,7 @@ Fixes:
 	%tmp = active_lanes_at_start_of_program
 	%tmp = %tmp & ~cond . EXEC &= %tmp. if %tmp == 0 endpgm
 	- also schedule discard_if
+- p_parallelcopy clobbers scc when swapping sgprs
 
 Optimizations:
 - optimize V_OR3_B32/V_AND_OR_B32/V_LSHL_ADD_U32/etc (VEGA)
@@ -34,16 +35,20 @@ Optimizations:
 - Spilling/Rematerialization
 	- currently, we only spill sgprs, and sometimes even const values
 	- it might be beneficial to spill if it helps to squeeze in an additional wave (we can easily test different thresholds here)
+- the RA should avoid moving temporaries that are created by VMEM/SMEM/DS instructions if they haven't yet been used
+- implement inline push constants like the LLVM baackend
+- global dead code elimination
+    - this combined with exports taking undef instead of temporaries when it's operand is disabled can cause some shaders to be mostly dead-code eliminated
+- don't always try to keep vectors intact during RA
+    - often, a vector will only ever be split. so, when moving, it makes little sense to create extra moves when only a some of it's elements needs to be moved
+    - if this is always done, the number of moves required should always be less than the amount of space required
 
 Refactorings (lower priority):
 - create an Instruction Builder class to be used for isel
-- change schedule_postRA to be either a single forward insert_NOPs pass or really schedule to avoid NOPs (or both)
 - nir_opt_sink() should either be merged with nir_opt_move_load_ubo() or be done by GCM
 
 
 NIR TODOs
 - pointer analysis / alias analysis
 	- we really want to schedule independent memory operations
-- memory coalescing
-	- currently, we have tons of loads of single dwords
 - ABI lowering for future hardware and maybe in very far future radeonSI
