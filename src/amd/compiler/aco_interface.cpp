@@ -90,6 +90,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    if (getenv("ACO_VALIDATE_RA") && aco::validate_ra(program.get(), options, stderr)) {
       std::cerr << "Program after RA validation failure:\n";
       aco_print_program(program.get(), stderr);
+      abort();
    }
 
    aco::ssa_elimination(program.get());
