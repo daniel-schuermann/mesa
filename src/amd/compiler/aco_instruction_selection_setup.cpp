@@ -972,7 +972,6 @@ get_align(nir_variable_mode mode, bool is_store, unsigned bit_size, unsigned num
    switch (mode) {
    case nir_var_mem_ubo:
    case nir_var_mem_ssbo:
-      return num_components <= 4 ? (num_components > 1 ? 4 : 1) : -1;
    case nir_var_mem_push_const:
    case nir_var_mem_shared:
       /* TODO: what are the alignment requirements for LDS? */
