@@ -173,8 +173,7 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
    std::map<PhysReg, copy_operation>::iterator it = copy_map.begin();
    std::map<PhysReg, copy_operation>::iterator target;
 
-   /* count the number of uses for each dst reg and coalesce 32-bit sgpr copies
-    * to 64-bit copies */
+   /* count the number of uses for each dst reg */
    while (it != copy_map.end()) {
       if (it->second.op.isConstant()) {
          ++it;
@@ -191,7 +190,12 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
          target->second.uses++;
       }
 
-      /* coalesce 32-bit sgpr copies to 64-bit copies */
+      ++it;
+   }
+
+   /* coalesce 32-bit sgpr copies to 64-bit copies */
+   it = copy_map.begin();
+   while (it != copy_map.end()) {
       if (it->second.def.getTemp().type() != RegType::sgpr || !it->first.reg ||
           it->second.uses || it->second.size != 1 || it->second.op.isConstant()) {
          ++it;
