@@ -594,6 +594,7 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
 
       /* combine new reload instructions with original block */
       if (!instructions.empty()) {
+         ctx.register_demand[block->index].insert(ctx.register_demand[block->index].begin(), instructions.size(), std::pair<uint16_t, uint16_t>(0, 0));
          instructions.insert(instructions.end(),
                              std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(block->instructions.begin()),
                              std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(block->instructions.end()));
@@ -868,6 +869,10 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
    while (!block->instructions[idx]) {
       idx++;
    }
+
+   ctx.register_demand[block->index].erase(ctx.register_demand[block->index].begin(), ctx.register_demand[block->index].begin() + idx);
+   ctx.register_demand[block->index].insert(ctx.register_demand[block->index].begin(), instructions.size(), std::pair<uint16_t, uint16_t>(0, 0));
+
    std::vector<aco_ptr<Instruction>>::iterator start = std::next(block->instructions.begin(), idx);
    instructions.insert(instructions.end(), std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(start),
                std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(block->instructions.end()));
