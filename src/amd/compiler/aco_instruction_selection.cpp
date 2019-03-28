@@ -403,7 +403,7 @@ void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
                  op != aco_opcode::v_madmk_f16 &&
                  op != aco_opcode::v_madak_f16) {
          /* If the instruction is not commutative, we emit a VOP3A instruction */
-         Format format = (Format) ((int) Format::VOP2 | (int) Format::VOP3A);
+         Format format = asVOP3(Format::VOP2);
          vop2.reset(create_instruction<VOP3A_instruction>(op, format, 2, 1));
       } else {
          Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, src1.size()));
@@ -1041,7 +1041,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          emit_vop1_instruction(ctx, instr, op, msb_rev);
          Temp msb = {ctx->program->allocateId(), v1};
          Temp carry = emit_v_sub32(ctx, msb, Operand((uint32_t) 31), Operand(msb_rev), true);
-         aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, (Format) ((uint32_t) Format::VOP2 | (uint32_t) Format::VOP3), 3, 1)};
+         aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, asVOP3(Format::VOP2), 3, 1)};
          bcsel->getOperand(0) = Operand(msb);
          bcsel->getOperand(1) = Operand((uint32_t) -1);
          bcsel->getOperand(2) = Operand(carry);
@@ -1137,7 +1137,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          ctx->block->instructions.emplace_back(std::move(clamp));
       } else if (dst.regClass() == v1) {
          if (ctx->options->chip_class >= GFX9) {
-            aco_ptr<VOP3A_instruction> add{create_instruction<VOP3A_instruction>(aco_opcode::v_add_u32, static_cast<Format>((int)Format::VOP2 | (int)Format::VOP3A), 2, 1)};
+            aco_ptr<VOP3A_instruction> add{create_instruction<VOP3A_instruction>(aco_opcode::v_add_u32, asVOP3(Format::VOP2), 2, 1)};
             add->getOperand(0) = Operand(src0);
             add->getOperand(1) = Operand(src1);
             add->getDefinition(0) = Definition(dst);
@@ -1157,7 +1157,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             add->getDefinition(1).setHint(vcc);
             ctx->block->instructions.emplace_back(std::move(add));
 
-            aco_ptr<VOP3A_instruction> clamp{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, static_cast<Format>((int)Format::VOP2 | (int)Format::VOP3A), 3, 1)};
+            aco_ptr<VOP3A_instruction> clamp{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, asVOP3(Format::VOP2), 3, 1)};
             clamp->getOperand(0) = Operand(tmp);
             clamp->getOperand(1) = Operand((uint32_t) 0xffffffff);
             clamp->getOperand(2) = Operand(carry);
@@ -1519,7 +1519,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       aco_ptr<Instruction> norm;
       if (dst.size() == 1) {
          if (src.type() == sgpr) {
-            Format format = (Format) ((int) Format::VOP3A | (int) Format::VOP2);
+            Format format = asVOP3(Format::VOP2);
             norm.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_mul_f32, format, 2, 1));
          } else
             norm.reset(create_instruction<VOP2_instruction>(aco_opcode::v_mul_f32, Format::VOP2, 2, 1));
@@ -1639,7 +1639,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             ctx->block->instructions.emplace_back(std::move(sop2));
          }
       } else if (dst.regClass() == v1) {
-         Format format = (Format) ((uint32_t) Format::VOP2 | (uint32_t) Format::VOP3A);
+         Format format = asVOP3(Format::VOP2);
          aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, format, 3, 1)};
          bcsel->getOperand(0) = Operand((uint32_t) 0);
          bcsel->getOperand(1) = Operand((uint32_t) 0x3f800000);
@@ -1682,7 +1682,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          }
       } else {
          assert(dst.regClass() == v1 && src.regClass() == s2);
-         Format format = (Format) ((uint32_t) Format::VOP2 | (uint32_t) Format::VOP3A);
+         Format format = asVOP3(Format::VOP2);
          aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, format, 3, 1)};
          bcsel->getOperand(0) = Operand((uint32_t) 0);
          bcsel->getOperand(1) = Operand((uint32_t) 1);
@@ -1806,7 +1806,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       aco_ptr<Instruction> mov = create_s_mov(Definition(mask), Operand((uint32_t) 0x36F)); /* value is NOT negative/positive denormal value */
       ctx->block->instructions.emplace_back(std::move(mov));
 
-      aco_ptr<Instruction> cmp{create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_class_f16, (Format) ((uint32_t) Format::VOPC | (uint32_t) Format::VOP3), 2, 1)};
+      aco_ptr<Instruction> cmp{create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_class_f16, asVOP3(Format::VOPC), 2, 1)};
       cmp->getOperand(0) = Operand(f16);
       cmp->getOperand(1) = Operand(mask);
       Temp cmp_res = {ctx->program->allocateId(), s2};
@@ -3064,7 +3064,7 @@ static Temp adjust_sample_index_using_fmask(isel_context *ctx, bool da, Temp coo
     */
    Temp fmask_word1 = emit_extract_vector(ctx, fmask_desc_ptr, 1, s1);
 
-   Format format = (Format) ((uint32_t) Format::VOPC | (uint32_t) Format::VOP3A);
+   Format format = asVOP3(Format::VOPC);
    instr.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_lg_u32, format, 2, 1));
    instr->getOperand(0) = Operand((uint32_t) 0);
    instr->getOperand(1) = Operand(fmask_word1);
@@ -4419,7 +4419,7 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
    ma = {ctx->program->allocateId(), v1};
    tmp->getDefinition(0) = Definition(ma);
    ctx->block->instructions.emplace_back(std::move(tmp));
-   aco_ptr<VOP3A_instruction> vop3a{create_instruction<VOP3A_instruction>(aco_opcode::v_rcp_f32, (Format) ((uint16_t) Format::VOP3A | (uint16_t) Format::VOP1), 1, 1)};
+   aco_ptr<VOP3A_instruction> vop3a{create_instruction<VOP3A_instruction>(aco_opcode::v_rcp_f32, asVOP3(Format::VOP1), 1, 1)};
    vop3a->getOperand(0) = Operand(ma);
    vop3a->abs[0] = true;
    ma = {ctx->program->allocateId(), v1};
@@ -4853,7 +4853,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          cmp->getDefinition(0).setHint(vcc);
          ctx->block->instructions.emplace_back(std::move(cmp));
 
-         aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, static_cast<Format>((int)Format::VOP2 | (int)Format::VOP3A), 3, 1)};
+         aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, asVOP3(Format::VOP2), 3, 1)};
          bcsel->getOperand(0) = Operand((uint32_t) 0);
          bcsel->getOperand(1) = Operand((uint32_t) -1);
          bcsel->getOperand(2) = Operand{tmp};
@@ -5676,7 +5676,7 @@ void handle_bc_optimize(isel_context *ctx)
    if (uses_center && uses_centroid) {
       /* needed when SPI_PS_IN_CONTROL.BC_OPTIMIZE_DISABLE is set to 0 */
       Temp sel{ctx->program->allocateId(), s2};
-      aco_ptr<Instruction> instr{create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_lt_i32, static_cast<Format>((int)Format::VOPC | (int)Format::VOP3A), 2, 1)};
+      aco_ptr<Instruction> instr{create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_lt_i32, asVOP3(Format::VOPC), 2, 1)};
       instr->getOperand(0) = Operand(ctx->prim_mask);
       instr->getOperand(1) = Operand((uint32_t) 0);
       instr->getDefinition(0) = Definition(sel);
@@ -5686,7 +5686,7 @@ void handle_bc_optimize(isel_context *ctx)
       if (G_0286CC_PERSP_CENTROID_ENA(spi_ps_input_ena)) {
          for (unsigned i = 0; i < 2; i++) {
             Temp new_coord{ctx->program->allocateId(), v1};
-            instr.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
+            instr.reset(create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
             instr->getOperand(0) = Operand(ctx->fs_inputs[fs_input::persp_centroid_p1 + i]);
             instr->getOperand(1) = Operand(ctx->fs_inputs[fs_input::persp_center_p1 + i]);
             instr->getOperand(2) = Operand(sel);
