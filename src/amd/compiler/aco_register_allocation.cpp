@@ -519,29 +519,25 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
    bool sealed[program->blocks.size()];
    memset(filled, 0, sizeof filled);
    memset(sealed, 0, sizeof sealed);
-   std::vector<std::vector<aco_ptr<Instruction>>> phis(program->blocks.size());
-   std::vector<std::vector<aco_ptr<Instruction>>> incomplete_phis(program->blocks.size());
+   std::vector<std::vector<Instruction*>> incomplete_phis(program->blocks.size());
    std::map<unsigned, phi_info> phi_map;
+   std::map<unsigned, unsigned> affinities;
    std::function<Temp(Temp,Block*)> read_variable;
-   std::function<Temp(Temp,Block*)> read_variable_recursive;
+   std::function<Temp(Temp,Block*)> handle_live_in;
    std::function<Temp(std::map<unsigned, phi_info>::iterator)> try_remove_trivial_phi;
 
    read_variable = [&](Temp val, Block* block) -> Temp {
       std::unordered_map<unsigned, Temp>::iterator it = renames[block->index].find(val.id());
-
-      /* check if the variable got a name in the current block */
-      if (it != renames[block->index].end()) {
-         return it->second;
-      /* if not, look up the predecessor blocks */
-      } else {
-         return read_variable_recursive(val, block);
-      }
+      assert(it != renames[block->index].end());
+      return it->second;
    };
 
-   read_variable_recursive = [&](Temp val, Block* block) -> Temp {
+   handle_live_in = [&](Temp val, Block *block) -> Temp {
       std::vector<Block*>& preds = val.is_linear() ? block->linear_predecessors : block->logical_predecessors;
-      if (preds.size() == 0 && block->index != 0)
+      if (preds.size() == 0 && block->index != 0) {
+         renames[block->index][val.id()] = val;
          return val;
+      }
       assert(preds.size() > 0);
 
       Temp new_val;
@@ -554,13 +550,13 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          aco_opcode opcode = val.is_linear() ? aco_opcode::p_linear_phi : aco_opcode::p_phi;
          aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
          phi->getDefinition(0) = Definition(new_val);
-         phi->getDefinition(0).setFixed(ctx.assignments[tmp.id()].first);
-         ctx.assignments[new_val.id()] = {phi->getDefinition(0).physReg(), phi->getDefinition(0).regClass()};
          for (unsigned i = 0; i < preds.size(); i++)
             phi->getOperand(i) = Operand(val);
+         affinities[new_val.id()] = tmp.id();
 
          phi_map.emplace(new_val.id(), phi_info{phi.get(), block->index});
-         incomplete_phis[block->index].emplace_back(std::move(phi));
+         incomplete_phis[block->index].emplace_back(phi.get());
+         block->instructions.insert(block->instructions.begin(), std::move(phi));
 
       } else if (preds.size() == 1) {
          /* if the block has only one predecessor, just look there for the name */
@@ -588,18 +584,18 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
             new_val = Temp{program->allocateId(), val.regClass()};
             phi->getDefinition(0) = Definition(new_val);
-            phi->getDefinition(0).setFixed(ctx.assignments[val.id()].first);
-            ctx.assignments[new_val.id()] = {phi->getDefinition(0).physReg(), phi->getDefinition(0).regClass()};
             for (unsigned i = 0; i < preds.size(); i++) {
                phi->getOperand(i) = Operand(ops[i]);
                phi->getOperand(i).setFixed(ctx.assignments[ops[i].id()].first);
+               affinities[new_val.id()] = ops[i].id();
             }
             phi_map.emplace(new_val.id(), phi_info{phi.get(), block->index});
-            phis[block->index].emplace_back(std::move(phi));
+            block->instructions.insert(block->instructions.begin(), std::move(phi));
          }
       }
 
       renames[block->index][val.id()] = new_val;
+      renames[block->index][new_val.id()] = new_val;
       orig_names[new_val.id()] = val;
       return new_val;
    };
@@ -659,7 +655,6 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       return renames[block_idx][orig_var];
    };
 
-   std::map<unsigned, unsigned> affinities;
    std::map<unsigned, Instruction*> vectors;
    std::vector<std::vector<Temp>> phi_ressources;
    std::map<unsigned, unsigned> temp_to_phi_ressources;
@@ -725,10 +720,11 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       std::array<uint32_t, 512> register_file = {0};
 
       for (Temp t : live) {
-         Temp renamed = read_variable(t, block.get());
-         assert(ctx.assignments.find(renamed.id()) != ctx.assignments.end());
-         for (unsigned i = 0; i < t.size(); i++)
-            register_file[ctx.assignments[renamed.id()].first.reg + i] = renamed.id();
+         Temp renamed = handle_live_in(t, block.get());
+         if (ctx.assignments.find(renamed.id()) != ctx.assignments.end()) {
+            for (unsigned i = 0; i < t.size(); i++)
+               register_file[ctx.assignments[renamed.id()].first.reg + i] = renamed.id();
+         }
       }
 
       std::vector<aco_ptr<Instruction>> instructions;
@@ -1172,7 +1168,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          }
          if (all_filled) {
             /* finish incomplete phis and check if they became trivial */
-            for (aco_ptr<Instruction>& phi : incomplete_phis[succ->index]) {
+            for (Instruction* phi : incomplete_phis[succ->index]) {
                std::vector<Block*> preds = phi->getDefinition(0).getTemp().is_linear() ? succ->linear_predecessors : succ->logical_predecessors;
                for (unsigned i = 0; i < phi->num_operands; i++) {
                   phi->getOperand(i).setTemp(read_variable(phi->getOperand(i).getTemp(), preds[i]));
@@ -1197,27 +1193,22 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      phi->second.uses.emplace(instr.get());
                }
             }
-            /* merge incomplete phis */
-            phis[succ->index].insert(phis[succ->index].end(),
-                                     std::make_move_iterator(incomplete_phis[succ->index].begin()),
-                                     std::make_move_iterator(incomplete_phis[succ->index].end()));
             sealed[succ->index] = true;
          }
       }
    } /* end for BB */
 
-   /* merge new phis with normal instructions */
+   /* remove trivial phis */
    for (std::unique_ptr<Block>& block : program->blocks) {
-      std::vector<aco_ptr<Instruction>> tmp;
-      std::vector<aco_ptr<Instruction>>::iterator it = phis[block->index].begin();
-      while (it != phis[block->index].end()) {
-         if ((*it)->num_definitions != 0)
-            tmp.emplace_back(std::move(*it));
-         ++it;
+      std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
+      for (; it != block->instructions.end();) {
+         if ((*it)->opcode != aco_opcode::p_phi && (*it)->opcode != aco_opcode::p_linear_phi)
+            break;
+         if (!(*it)->num_definitions)
+            it = block->instructions.erase(it);
+         else
+            ++it;
       }
-      block->instructions.insert(block->instructions.begin(),
-                                 std::make_move_iterator(tmp.begin()),
-                                 std::make_move_iterator(tmp.end()));
    }
 
    program->config->num_vgprs = ctx.max_used_vgpr + 1;
