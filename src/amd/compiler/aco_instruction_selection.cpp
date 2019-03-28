@@ -1542,8 +1542,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_fsign: {
-      Temp src = get_alu_src(ctx, instr->src[0]);
-      assert(src.type() == vgpr);
+      Temp src = as_vgpr(ctx, get_alu_src(ctx, instr->src[0]));
       if (dst.size() == 1) {
          aco_ptr<VOPC_instruction> vopc{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_nlt_f32, Format::VOPC, 2, 1)};
          vopc->getOperand(0) = Operand((uint32_t) 0);
