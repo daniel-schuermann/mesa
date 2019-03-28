@@ -260,10 +260,16 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
       return;
 
    /* all target regs are needed as operand somewhere which means, all entries are part of a cycle */
+   bool constants = false;
    for (it = copy_map.begin(); it != copy_map.end(); ++it) {
       assert(it->second.op.isFixed());
       if (it->first == it->second.op.physReg())
          continue;
+      /* do constants later */
+      if (it->second.op.isConstant()) {
+         constants = true;
+         continue;
+      }
 
       /* to resolve the cycle, we have to swap the src reg with the dst reg */
       copy_operation swap = it->second;
@@ -304,6 +310,22 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
          if (target->second.op.physReg() == it->first) {
             target->second.op.setFixed(swap.op.physReg());
             break;
+         }
+      }
+   }
+
+   /* copy constants into a registers which were operands */
+   if (constants) {
+      for (it = copy_map.begin(); it != copy_map.end(); ++it) {
+         if (!it->second.op.isConstant())
+            continue;
+         if (it->second.def.getTemp().type() == RegType::sgpr) {
+            ctx->instructions.emplace_back(std::move(create_s_mov(it->second.def, it->second.op)));
+         } else {
+            mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+            mov->getOperand(0) = it->second.op;
+            mov->getDefinition(0) = it->second.def;
+            ctx->instructions.emplace_back(std::move(mov));
          }
       }
    }
