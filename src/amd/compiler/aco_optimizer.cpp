@@ -310,7 +310,7 @@ void to_VOP3(opt_ctx& ctx, aco_ptr<Instruction>& instr)
 
    assert(!instr->getOperand(0).isLiteral());
    aco_ptr<Instruction> tmp = std::move(instr);
-   Format format = (Format) ((int) tmp->format | (int) Format::VOP3A);
+   Format format = asVOP3(tmp->format);
    instr.reset(create_instruction<VOP3A_instruction>(tmp->opcode, format, tmp->num_operands, tmp->num_definitions));
    for (unsigned i = 0; i < instr->num_operands; i++)
       instr->getOperand(i) = tmp->getOperand(i);
