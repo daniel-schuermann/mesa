@@ -155,6 +155,11 @@ struct InstrPred {
          case Format::SMEM: {
             SMEM_instruction* aS = static_cast<SMEM_instruction*>(a);
             SMEM_instruction* bS = static_cast<SMEM_instruction*>(b);
+            if (a->opcode != aco_opcode::s_load_dword &&
+                a->opcode != aco_opcode::s_load_dwordx2 &&
+                a->opcode != aco_opcode::s_load_dwordx4 &&
+                a->opcode != aco_opcode::s_load_dwordx8)
+               return false;
             return aS->glc == bS->glc && aS->nv == bS->nv;
          }
          case Format::VINTRP: {
