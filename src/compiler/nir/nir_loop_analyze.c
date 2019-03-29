@@ -573,7 +573,7 @@ try_find_limit_of_alu(nir_loop_variable *limit, nir_const_value *limit_val,
 
 static int32_t
 get_iteration(nir_op cond_op, nir_const_value *initial, nir_const_value *step,
-              nir_const_value *limit)
+              nir_const_value *limit, bool neg)
 {
    int32_t iter;
 
@@ -584,14 +584,16 @@ get_iteration(nir_op cond_op, nir_const_value *initial, nir_const_value *step,
    case nir_op_ine: {
       int32_t initial_val = initial->i32;
       int32_t span = limit->i32 - initial_val;
-      iter = span / step->i32;
+      int32_t step_val = neg ? -(step->i32) : step->i32;
+      iter = span / step_val;
       break;
    }
    case nir_op_uge:
    case nir_op_ult: {
       uint32_t initial_val = initial->u32;
       uint32_t span = limit->u32 - initial_val;
-      iter = span / step->u32;
+      uint32_t step_val = neg ? -(step->u32) : step->u32;
+      iter = span / step_val;
       break;
    }
    case nir_op_fge:
@@ -600,7 +602,8 @@ get_iteration(nir_op cond_op, nir_const_value *initial, nir_const_value *step,
    case nir_op_fne: {
       float initial_val = initial->f32;
       float span = limit->f32 - initial_val;
-      iter = span / step->f32;
+      float step_val = neg ? -(step->f32) : step->f32;
+      iter = span / step_val;
       break;
    }
    default:
@@ -613,25 +616,22 @@ get_iteration(nir_op cond_op, nir_const_value *initial, nir_const_value *step,
 static bool
 test_iterations(int32_t iter_int, nir_const_value *step,
                 nir_const_value *limit, nir_op cond_op, unsigned bit_size,
-                nir_alu_type induction_base_type,
+                nir_alu_type induction_base_type, nir_op add_op,
                 nir_const_value *initial, bool limit_rhs, bool invert_cond)
 {
    assert(nir_op_infos[cond_op].num_inputs == 2);
 
    nir_const_value iter_src = {0, };
    nir_op mul_op;
-   nir_op add_op;
    switch (induction_base_type) {
    case nir_type_float:
       iter_src.f32 = (float) iter_int;
       mul_op = nir_op_fmul;
-      add_op = nir_op_fadd;
       break;
    case nir_type_int:
    case nir_type_uint:
       iter_src.i32 = iter_int;
       mul_op = nir_op_imul;
-      add_op = nir_op_iadd;
       break;
    default:
       unreachable("Unhandled induction variable base type!");
@@ -645,7 +645,7 @@ test_iterations(int32_t iter_int, nir_const_value *step,
    nir_eval_const_opcode(mul_op, &mul_result, 1, bit_size, mul_src);
 
    /* Add the initial value to the accumulated induction variable total */
-   nir_const_value *add_src[2] = { &mul_result, initial };
+   nir_const_value *add_src[2] = { initial, &mul_result };
    nir_const_value add_result;
    nir_eval_const_opcode(add_op, &add_result, 1, bit_size, add_src);
 
@@ -670,9 +670,6 @@ calculate_iterations(nir_const_value *initial, nir_const_value *step,
 
    nir_alu_instr *alu = nir_instr_as_alu(alu_def->def->parent_instr);
 
-   /* nir_op_isub should have been lowered away by this point */
-   assert(alu->op != nir_op_isub);
-
    /* Make sure the alu type for our induction variable is compatible with the
     * conditional alus input type. If its not something has gone really wrong.
     */
@@ -686,8 +683,9 @@ calculate_iterations(nir_const_value *initial, nir_const_value *step,
              induction_base_type);
    }
 
-   /* Check for nsupported alu operations */
-   if (alu->op != nir_op_iadd && alu->op != nir_op_fadd)
+   /* Check for unsupported alu operations */
+   if (alu->op != nir_op_iadd && alu->op != nir_op_isub &&
+       alu->op != nir_op_fadd && alu->op != nir_op_fsub)
       return -1;
 
    /* do-while loops can increment the starting value before the condition is
@@ -706,7 +704,8 @@ calculate_iterations(nir_const_value *initial, nir_const_value *step,
       trip_offset = 1;
    }
 
-   int iter_int = get_iteration(alu_op, initial, step, limit);
+   bool neg = alu->op == nir_op_isub || alu->op == nir_op_fsub;
+   int iter_int = get_iteration(alu_op, initial, step, limit, neg);
 
    /* If iter_int is negative the loop is ill-formed or is the conditional is
     * unsigned with a huge iteration count so don't bother going any further.
@@ -730,7 +729,7 @@ calculate_iterations(nir_const_value *initial, nir_const_value *step,
       const int iter_bias = iter_int + bias;
 
       if (test_iterations(iter_bias, step, limit, alu_op, bit_size,
-                          induction_base_type, initial,
+                          induction_base_type, alu->op, initial,
                           limit_rhs, invert_cond)) {
          return iter_bias > 0 ? iter_bias - trip_offset : iter_bias;
       }
