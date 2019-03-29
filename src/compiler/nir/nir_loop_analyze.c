@@ -650,25 +650,22 @@ get_iteration(nir_op cond_op, nir_const_value initial, nir_const_value step,
 static bool
 test_iterations(int32_t iter_int, nir_const_value step,
                 nir_const_value limit, nir_op cond_op, unsigned bit_size,
-                nir_alu_type induction_base_type,
+                nir_alu_type induction_base_type, nir_op add_op,
                 nir_const_value initial, bool limit_rhs, bool invert_cond)
 {
    assert(nir_op_infos[cond_op].num_inputs == 2);
 
    nir_const_value iter_src;
    nir_op mul_op;
-   nir_op add_op;
    switch (induction_base_type) {
    case nir_type_float:
       iter_src = nir_const_value_for_float(iter_int, bit_size);
       mul_op = nir_op_fmul;
-      add_op = nir_op_fadd;
       break;
    case nir_type_int:
    case nir_type_uint:
       iter_src = nir_const_value_for_int(iter_int, bit_size);
       mul_op = nir_op_imul;
-      add_op = nir_op_iadd;
       break;
    default:
       unreachable("Unhandled induction variable base type!");
@@ -682,7 +679,7 @@ test_iterations(int32_t iter_int, nir_const_value step,
 
    /* Add the initial value to the accumulated induction variable total */
    nir_const_value add_result =
-      eval_const_binop(add_op, bit_size, mul_result, initial);
+      eval_const_binop(add_op, bit_size, initial, mul_result);
 
    nir_const_value *src[2];
    src[limit_rhs ? 0 : 1] = &add_result;
@@ -701,9 +698,6 @@ calculate_iterations(nir_const_value initial, nir_const_value step,
                      nir_ssa_scalar cond, nir_op alu_op, bool limit_rhs,
                      bool invert_cond)
 {
-   /* nir_op_isub should have been lowered away by this point */
-   assert(alu->op != nir_op_isub);
-
    /* Make sure the alu type for our induction variable is compatible with the
     * conditional alus input type. If its not something has gone really wrong.
     */
@@ -717,8 +711,9 @@ calculate_iterations(nir_const_value initial, nir_const_value step,
              induction_base_type);
    }
 
-   /* Check for nsupported alu operations */
-   if (alu->op != nir_op_iadd && alu->op != nir_op_fadd)
+   /* Check for unsupported alu operations */
+   if (alu->op != nir_op_iadd && alu->op != nir_op_isub &&
+       alu->op != nir_op_fadd && alu->op != nir_op_fsub)
       return -1;
 
    /* do-while loops can increment the starting value before the condition is
@@ -741,6 +736,11 @@ calculate_iterations(nir_const_value initial, nir_const_value step,
    assert(nir_src_bit_size(alu->src[0].src) ==
           nir_src_bit_size(alu->src[1].src));
    unsigned bit_size = nir_src_bit_size(alu->src[0].src);
+   if (alu->op == nir_op_isub)
+      step = eval_const_unop(nir_op_ineg, bit_size, step);
+   else if (alu->op == nir_op_fsub)
+      step = eval_const_unop(nir_op_fneg, bit_size, step);
+
    int iter_int = get_iteration(alu_op, initial, step, limit, bit_size);
 
    /* If iter_int is negative the loop is ill-formed or is the conditional is
@@ -762,7 +762,7 @@ calculate_iterations(nir_const_value initial, nir_const_value step,
       const int iter_bias = iter_int + bias;
 
       if (test_iterations(iter_bias, step, limit, alu_op, bit_size,
-                          induction_base_type, initial,
+                          induction_base_type, alu->op, initial,
                           limit_rhs, invert_cond)) {
          return iter_bias > 0 ? iter_bias - trip_offset : iter_bias;
       }
