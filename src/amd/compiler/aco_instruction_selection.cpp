@@ -817,6 +817,60 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_isign: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      if (dst.regClass() == s1) {
+         aco_ptr<Instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_ashr_i32, Format::SOP2, 2, 2)};
+         sop2->getOperand(0) = Operand(src);
+         sop2->getOperand(1) = Operand((uint32_t) 31);
+         Temp tmp = {ctx->program->allocateId(), s1};
+         sop2->getDefinition(0) = Definition(tmp);
+         sop2->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
+         ctx->block->instructions.emplace_back(std::move(sop2));
+
+         aco_ptr<Instruction> sopc{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_gt_i32, Format::SOPC, 2, 1)};
+         sopc->getOperand(0) = Operand(src);
+         sopc->getOperand(1) = Operand((uint32_t) 0);
+         Temp gtz = {ctx->program->allocateId(), s1};
+         sopc->getDefinition(0) = Definition(gtz);
+         sopc->getDefinition(0).setFixed(scc);
+         ctx->block->instructions.emplace_back(std::move(sopc));
+
+         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 2));
+         sop2->getOperand(0) = Operand(gtz);
+         sop2->getOperand(1) = Operand(tmp);
+         sop2->getDefinition(0) = Definition(dst);
+         sop2->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
+         ctx->block->instructions.emplace_back(std::move(sop2));
+      } else if (dst.regClass() == v1) {
+         aco_ptr<Instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_ashrrev_i32, Format::VOP2, 2, 1)};
+         vop2->getOperand(0) = Operand((uint32_t) 31);
+         vop2->getOperand(1) = Operand(src);
+         Temp tmp = {ctx->program->allocateId(), v1};
+         vop2->getDefinition(0) = Definition(tmp);
+         ctx->block->instructions.emplace_back(std::move(vop2));
+
+         aco_ptr<Instruction> vopc{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_ge_i32, Format::VOPC, 2, 1)};
+         vopc->getOperand(0) = Operand((uint32_t) 0);
+         vopc->getOperand(1) = Operand(src);
+         Temp gtz = {ctx->program->allocateId(), s2};
+         vopc->getDefinition(0) = Definition(gtz);
+         vopc->getDefinition(0).setHint(vcc);
+         ctx->block->instructions.emplace_back(std::move(vopc));
+
+         vop2.reset(create_instruction<SOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
+         vop2->getOperand(0) = Operand((uint32_t) 1);
+         vop2->getOperand(1) = Operand(tmp);
+         vop2->getOperand(2) = Operand(gtz);
+         vop2->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vop2));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_imax: {
       if (dst.regClass() == v1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_max_i32, dst, true);
