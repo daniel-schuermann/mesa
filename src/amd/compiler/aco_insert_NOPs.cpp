@@ -45,7 +45,7 @@ bool VALU_writes_sgpr(aco_ptr<Instruction>& instr)
       return true;
    if (instr->isVOP3() && instr->num_definitions == 2)
       return true;
-   if (instr->opcode == aco_opcode::v_readfirstlane_b32)
+   if (instr->opcode == aco_opcode::v_readfirstlane_b32 || instr->opcode == aco_opcode::v_readlane_b32)
       return true;
    return false;
 }
