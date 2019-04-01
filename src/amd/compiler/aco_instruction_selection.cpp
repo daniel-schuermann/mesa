@@ -2085,6 +2085,26 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_bit_count: {
+      if (dst.regClass() == s1) {
+         aco_ptr<Instruction> sop1{create_instruction<SOP1_instruction>(aco_opcode::s_bcnt1_i32_b32, Format::SOP1, 1, 2)};
+         sop1->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
+         sop1->getDefinition(0) = Definition(dst);
+         sop1->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
+         ctx->block->instructions.emplace_back(std::move(sop1));
+      } else if (dst.regClass() == v1) {
+         aco_ptr<Instruction> vop3{create_instruction<VOP3A_instruction>(aco_opcode::v_bcnt_u32_b32, Format::VOP3, 2, 1)};
+         vop3->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
+         vop3->getOperand(1) = Operand((uint32_t) 0);
+         vop3->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vop3));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_flt: {
       emit_comparison(ctx, instr, aco_opcode::v_cmp_lt_f32, dst);
       break;
