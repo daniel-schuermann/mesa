@@ -2680,6 +2680,13 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
 void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Temp index = get_ssa_temp(ctx, instr->src[0].ssa);
+   if (index.type() != RegType::sgpr) {
+      aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
+      readlane->getOperand(0) = Operand(index);
+      index = {ctx->program->allocateId(), s1};
+      readlane->getDefinition(0) = Definition(index);
+      ctx->block->instructions.emplace_back(std::move(readlane));
+   }
    unsigned desc_set = nir_intrinsic_desc_set(instr);
    unsigned binding = nir_intrinsic_binding(instr);
 
