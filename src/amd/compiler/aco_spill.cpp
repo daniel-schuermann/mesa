@@ -194,7 +194,7 @@ std::vector<std::map<Temp, uint32_t>> local_next_uses(spill_ctx& ctx, std::uniqu
    for (std::pair<Temp, std::pair<uint32_t, uint32_t>> pair : ctx.next_use_distances_end[block->index])
       next_uses[pair.first] = pair.second.second + block->instructions.size();
 
-   for (unsigned idx = block->instructions.size() - 1; idx >= 0; idx--) {
+   for (int idx = block->instructions.size() - 1; idx >= 0; idx--) {
       aco_ptr<Instruction>& instr = block->instructions[idx];
       if (!instr)
          break;
