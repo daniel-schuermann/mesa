@@ -5167,8 +5167,11 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
 
    aco_opcode opcode = ctx->divergent_vals[instr->dest.ssa.index] ? aco_opcode::p_phi : aco_opcode::p_linear_phi;
-   if (instr->dest.ssa.bit_size == 1 && opcode == aco_opcode::p_phi && num_src == 1)
-      opcode = aco_opcode::p_linear_phi; /* just a linear phi will do and will avoid expensive lowering */
+   if (instr->dest.ssa.bit_size == 1 && opcode == aco_opcode::p_phi && num_src == 1) {
+      nir_phi_src *src = (nir_phi_src*)exec_list_get_head(&instr->srcs);
+      if (get_ssa_temp(ctx, src->src.ssa).regClass() == s2)
+         opcode = aco_opcode::p_linear_phi; /* just a linear phi will do and will avoid expensive lowering */
+   }
 
    phi.reset(create_instruction<Instruction>(opcode, Format::PSEUDO, num_src, 1));
    std::map<unsigned, nir_ssa_def*> phi_src;
