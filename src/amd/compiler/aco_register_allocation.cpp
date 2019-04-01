@@ -552,7 +552,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          phi->getDefinition(0) = Definition(new_val);
          for (unsigned i = 0; i < preds.size(); i++)
             phi->getOperand(i) = Operand(val);
-         affinities[new_val.id()] = tmp.id();
+         if (tmp.regClass() == new_val.regClass())
+            affinities[new_val.id()] = tmp.id();
 
          phi_map.emplace(new_val.id(), phi_info{phi.get(), block->index});
          incomplete_phis[block->index].emplace_back(phi.get());
@@ -587,7 +588,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             for (unsigned i = 0; i < preds.size(); i++) {
                phi->getOperand(i) = Operand(ops[i]);
                phi->getOperand(i).setFixed(ctx.assignments[ops[i].id()].first);
-               affinities[new_val.id()] = ops[i].id();
+               if (ops[i].regClass() == new_val.regClass())
+                  affinities[new_val.id()] = ops[i].id();
             }
             phi_map.emplace(new_val.id(), phi_info{phi.get(), block->index});
             block->instructions.insert(block->instructions.begin(), std::move(phi));
