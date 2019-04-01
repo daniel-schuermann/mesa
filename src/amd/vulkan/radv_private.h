@@ -334,6 +334,9 @@ struct radv_physical_device {
 	/* Whether DISABLE_CONSTANT_ENCODE_REG is supported. */
 	bool has_dcc_constant_encode;
 
+	/* Whether to use the experimental compiler backend */
+	bool use_aco;
+
 	/* This is the drivers on-disk cache used as a fallback as opposed to
 	 * the pipeline cache defined by apps.
 	 */

@@ -305,23 +305,23 @@ radv_shader_compile_to_nir(struct radv_device *device,
 				.descriptor_indexing = true,
 				.device_group = true,
 				.draw_parameters = true,
-				.float16 = true,
-				.float64 = true,
+				.float16 = !(device->instance->perftest_flags & RADV_PERFTEST_ACO),
+				.float64 = !(device->instance->perftest_flags & RADV_PERFTEST_ACO),
 				.geometry_streams = true,
 				.image_read_without_format = true,
 				.image_write_without_format = true,
-				.int8 = true,
-				.int16 = true,
-				.int64 = true,
-				.int64_atomics = true,
+				.int8 = !(device->instance->perftest_flags & RADV_PERFTEST_ACO),
+				.int16 = !(device->instance->perftest_flags & RADV_PERFTEST_ACO),
+				.int64 = !(device->instance->perftest_flags & RADV_PERFTEST_ACO),
+				.int64_atomics = !(device->instance->perftest_flags & RADV_PERFTEST_ACO),
 				.multiview = true,
 				.physical_storage_buffer_address = true,
 				.post_depth_coverage = true,
 				.runtime_descriptor_array = true,
 				.shader_viewport_index_layer = true,
 				.stencil_export = true,
-				.storage_8bit = true,
-				.storage_16bit = true,
+				.storage_8bit = !(device->instance->perftest_flags & RADV_PERFTEST_ACO),
+				.storage_16bit = !(device->instance->perftest_flags & RADV_PERFTEST_ACO),
 				.storage_image_ms = true,
 				.subgroup_arithmetic = true,
 				.subgroup_ballot = true,
@@ -1149,12 +1149,17 @@ shader_variant_compile(struct radv_device *device,
 	radv_init_llvm_compiler(&ac_llvm,
 				thread_compiler,
 				chip_family, tm_options);
+
+	bool use_aco = device->instance->perftest_flags & RADV_PERFTEST_ACO &&
+		       (shaders[0]->info.stage == MESA_SHADER_FRAGMENT ||
+		        shaders[0]->info.stage == MESA_SHADER_COMPUTE);
+
 	if (gs_copy_shader) {
 		assert(shader_count == 1);
 		radv_compile_gs_copy_shader(&ac_llvm, *shaders, &binary,
 					    &variant_info, options);
 	} else {
-		if (shaders[0]->info.stage == MESA_SHADER_FRAGMENT || shaders[0]->info.stage == MESA_SHADER_COMPUTE) {
+		if (use_aco) {
 			bool aco_compile_time = device->instance->debug_flags & RADV_DEBUG_COMPILETIME;
 			struct timespec user1,user2;
 
