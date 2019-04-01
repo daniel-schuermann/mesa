@@ -4875,8 +4875,27 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       sample_index = adjust_sample_index_using_fmask(ctx, da, coords, sample_index, fmask_ptr);
    }
 
-   if (has_offset && instr->op == nir_texop_txf)
-      unreachable("Unimplemented tex instr type");
+   if (has_offset && instr->op == nir_texop_txf) {
+      Temp split_coords[coords.size()];
+      emit_split_vector(ctx, coords, coords.size());
+      for (unsigned i = 0; i < coords.size(); i++)
+         split_coords[i] = emit_extract_vector(ctx, coords, i, v1);
+
+      unsigned i = 0;
+      for (; i < std::min(offset.size(), instr->coord_components); i++) {
+         Temp off = emit_extract_vector(ctx, offset, i, v1);
+         Temp dst{ctx->program->allocateId(), v1};
+         emit_v_add32(ctx, dst, Operand(split_coords[i]), Operand(off));
+         split_coords[i] = dst;
+      }
+
+      aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, coords.size(), 1)};
+      for (unsigned i = 0; i < coords.size(); i++)
+         vec->getOperand(i) = Operand(split_coords[i]);
+      coords = {ctx->program->allocateId(), coords.regClass()};
+      vec->getDefinition(0) = Definition(coords);
+      ctx->block->instructions.emplace_back(std::move(vec));
+   }
 
    /* Build tex instruction */
    unsigned dmask = nir_ssa_def_components_read(&instr->dest.ssa);
