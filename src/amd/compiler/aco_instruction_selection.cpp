@@ -1595,6 +1595,20 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_ldexp: {
+      if (dst.size() == 1) {
+         aco_ptr<Instruction> vop3{create_instruction<VOP3A_instruction>(aco_opcode::v_ldexp_f32, Format::VOP3, 2, 1)};
+         vop3->getOperand(0) = Operand(as_vgpr(ctx, get_alu_src(ctx, instr->src[0])));
+         vop3->getOperand(1) = Operand(get_alu_src(ctx, instr->src[1]));
+         vop3->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vop3));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_fsign: {
       Temp src = as_vgpr(ctx, get_alu_src(ctx, instr->src[0]));
       if (dst.size() == 1) {
