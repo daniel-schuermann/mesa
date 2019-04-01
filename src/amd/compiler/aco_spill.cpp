@@ -667,10 +667,10 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
 
          /* rename if necessary */
          Temp var = phi->getOperand(i).getTemp();
-         std::map<Temp, Temp>::iterator rename_it = ctx.renames[block_idx].find(var);
-         if (rename_it != ctx.renames[block_idx].end()) {
+         std::map<Temp, Temp>::iterator rename_it = ctx.renames[pred_idx].find(var);
+         if (rename_it != ctx.renames[pred_idx].end()) {
             var = rename_it->second;
-            ctx.renames[block_idx].erase(rename_it);
+            ctx.renames[pred_idx].erase(rename_it);
          }
 
          uint32_t spill_id = ctx.allocate_spill_id(phi->getDefinition(0).regClass());
@@ -721,10 +721,10 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
          /* variable is in register at predecessor and has to be spilled */
          /* rename if necessary */
          Temp var = pair.first;
-         std::map<Temp, Temp>::iterator rename_it = ctx.renames[block_idx].find(var);
-         if (rename_it != ctx.renames[block_idx].end()) {
+         std::map<Temp, Temp>::iterator rename_it = ctx.renames[pred->index].find(var);
+         if (rename_it != ctx.renames[pred->index].end()) {
             var = rename_it->second;
-            ctx.renames[block_idx].erase(rename_it);
+            ctx.renames[pred->index].erase(rename_it);
          }
 
          aco_ptr<Instruction> spill{create_instruction<Instruction>(aco_opcode::p_spill, Format::PSEUDO, 2, 0)};
