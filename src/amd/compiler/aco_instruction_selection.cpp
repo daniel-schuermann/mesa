@@ -1706,8 +1706,24 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_u2u32: {
       Temp src = get_alu_src(ctx, instr->src[0]);
-      if (src.size() == 2) {
-         /* we could actually just say dst = src, as it would map the lower register */
+      if (instr->src[0].src.ssa->bit_size == 16) {
+         if (dst.regClass() == s1) {
+            aco_ptr<Instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_and_b32, Format::SOP2, 2, 2)};
+            sop2->getOperand(0) = Operand((uint32_t) 0xFFFF);
+            sop2->getOperand(1) = Operand(src);
+            sop2->getDefinition(0) = Definition(dst);
+            sop2->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
+            ctx->block->instructions.emplace_back(std::move(sop2));
+         } else {
+            // TODO: do better with SDWA
+            aco_ptr<Instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_and_b32, Format::VOP2, 2, 1)};
+            vop2->getOperand(0) = Operand((uint32_t) 0xFFFF);
+            vop2->getOperand(1) = Operand(src);
+            vop2->getDefinition(0) = Definition(dst);
+            ctx->block->instructions.emplace_back(std::move(vop2));
+         }
+      } else if (instr->src[0].src.ssa->bit_size == 64) {
+         /* we can actually just say dst = src, as it would map the lower register */
          emit_extract_vector(ctx, src, 0, dst);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
