@@ -3658,15 +3658,16 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp rsrc = {ctx->program->allocateId(), s4};
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
 
-   aco_ptr<Instruction> load;
+   aco_ptr<SMEM_instruction> load;
    load.reset(create_instruction<SMEM_instruction>(aco_opcode::s_load_dwordx4, Format::SMEM, 2, 1));
    load->getOperand(0) = Operand(get_ssa_temp(ctx, instr->src[0].ssa));
    load->getOperand(1) = Operand((uint32_t) 0);
    load->getDefinition(0) = Definition(rsrc);
    ctx->block->instructions.emplace_back(std::move(load));
 
+   bool glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
    aco_opcode op;
-   if (dst.type() == vgpr) {
+   if (dst.type() == vgpr || (glc && ctx->options->chip_class < VI)) {
       Temp offset;
       if (ctx->options->chip_class < VI)
          offset = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
@@ -3693,10 +3694,21 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       mubuf->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand();
       mubuf->getOperand(1) = Operand(rsrc);
       mubuf->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand((uint32_t) 0);
-      mubuf->getDefinition(0) = Definition(dst);
       mubuf->offen = (offset.type() == vgpr);
-      mubuf->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
-      ctx->block->instructions.emplace_back(std::move(mubuf));
+      mubuf->glc = glc;
+
+      if (dst.type() == sgpr) {
+         Temp vec = {ctx->program->allocateId(), getRegClass(vgpr, dst.size())};
+         mubuf->getDefinition(0) = Definition(vec);
+         ctx->block->instructions.emplace_back(std::move(mubuf));
+         aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
+         readlane->getOperand(0) = Operand(vec);
+         readlane->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(readlane));
+      } else {
+         mubuf->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(mubuf));
+      }
    } else {
       switch (num_bytes) {
          case 4:
@@ -3717,6 +3729,8 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       load->getOperand(1) = Operand(get_ssa_temp(ctx, instr->src[1].ssa));
       assert(load->getOperand(1).getTemp().type() == sgpr);
       load->getDefinition(0) = Definition(dst);
+      load->glc = glc;
+      assert(ctx->options->chip_class >= VI || !glc);
 
       if (dst.size() == 3) {
       /* trim vector */
