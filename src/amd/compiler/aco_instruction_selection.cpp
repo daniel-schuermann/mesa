@@ -2545,27 +2545,33 @@ void emit_interp_instr(isel_context *ctx, unsigned idx, unsigned component, Temp
    ctx->block->instructions.emplace_back(std::move(p2));
 }
 
+void emit_load_frag_coord(isel_context *ctx, Temp dst, unsigned num_components)
+{
+   aco_ptr<Instruction> vec(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, num_components, 1));
+   for (unsigned i = 0; i < num_components; i++)
+      vec->getOperand(i) = Operand(ctx->fs_inputs[fs_input::frag_pos_0 + i]);
+
+   if (ctx->fs_vgpr_args[fs_input::frag_pos_3]) {
+      assert(num_components == 4);
+      aco_ptr<Instruction> rcp{create_instruction<VOP1_instruction>(aco_opcode::v_rcp_f32, Format::VOP1, 1, 1)};
+      rcp->getOperand(0) = Operand(ctx->fs_inputs[fs_input::frag_pos_3]);
+      Temp frag_pos_3 = {ctx->program->allocateId(), v1};
+      rcp->getDefinition(0) = Definition(frag_pos_3);
+      ctx->block->instructions.emplace_back(std::move(rcp));
+      vec->getOperand(3) = Operand(frag_pos_3);
+   }
+
+   vec->getDefinition(0) = Definition(dst);
+   ctx->block->instructions.emplace_back(std::move(vec));
+   emit_split_vector(ctx, dst, num_components);
+   return;
+}
+
 void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    if (nir_intrinsic_base(instr) == VARYING_SLOT_POS) {
-      aco_ptr<Instruction> vec(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->dest.ssa.num_components, 1));
-      for (unsigned i = 0; i < instr->dest.ssa.num_components; i++)
-         vec->getOperand(i) = Operand(ctx->fs_inputs[fs_input::frag_pos_0 + i]);
-
-      if (ctx->fs_vgpr_args[fs_input::frag_pos_3]) {
-         assert(instr->dest.ssa.num_components == 4);
-         aco_ptr<Instruction> rcp{create_instruction<VOP1_instruction>(aco_opcode::v_rcp_f32, Format::VOP1, 1, 1)};
-         rcp->getOperand(0) = Operand(ctx->fs_inputs[fs_input::frag_pos_3]);
-         Temp frag_pos_3 = {ctx->program->allocateId(), v1};
-         rcp->getDefinition(0) = Definition(frag_pos_3);
-         ctx->block->instructions.emplace_back(std::move(rcp));
-         vec->getOperand(3) = Operand(frag_pos_3);
-      }
-
       Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      vec->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(vec));
-      emit_split_vector(ctx, dst, instr->dest.ssa.num_components);
+      emit_load_frag_coord(ctx, dst, instr->dest.ssa.num_components);
       return;
    }
 
@@ -4265,6 +4271,10 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       cmp->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
       cmp->getDefinition(0).setHint(vcc);
       ctx->block->instructions.emplace_back(std::move(cmp));
+      break;
+   }
+   case nir_intrinsic_load_frag_coord: {
+      emit_load_frag_coord(ctx, get_ssa_temp(ctx, &instr->dest.ssa), 4);
       break;
    }
    case nir_intrinsic_load_interpolated_input:
