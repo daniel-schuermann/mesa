@@ -486,7 +486,12 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
    /* keep variables spilled on all incoming paths */
    for (std::pair<Temp, std::pair<uint32_t, uint32_t>> pair : ctx.next_use_distances_start[block_idx]) {
       std::vector<Block*>& preds = pair.first.type() == vgpr ? block->logical_predecessors : block->linear_predecessors;
-      bool spill = true;
+      /* If it can be rematerialized, keep the variable spilled if all predecessors do not reload it.
+       * Otherwise, if any predecessor reloads it, ensure it's reloaded on all other predecessors.
+       * The idea is that it's better in practice to rematerialize redundantly than to create lots of phis. */
+      /* TODO: test this idea with more than Dawn of War III shaders (the current pipeline-db doesn't seem to exercise this path much) */
+      bool remat = ctx.remat.count(pair.first);
+      bool spill = !remat;
       uint32_t spill_id = 0;
       for (Block* pred : preds) {
          /* variable is not even live at the predecessor: probably from a phi */
@@ -495,11 +500,14 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
             break;
          }
          if (ctx.spills_exit[pred->index].find(pair.first) == ctx.spills_exit[pred->index].end()) {
-            spill = false;
+            if (!remat)
+               spill = false;
          } else {
             partial_spills.insert(pair.first);
             /* it might be that on one incoming path, the variable has a different spill_id, but add_couple_code() will take care of that. */
             spill_id = ctx.spills_exit[pred->index][pair.first];
+            if (remat)
+               spill = true;
          }
       }
       if (spill) {
