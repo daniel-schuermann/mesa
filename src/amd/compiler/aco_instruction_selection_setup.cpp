@@ -299,6 +299,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_barycentric_pixel:
                   case nir_intrinsic_load_barycentric_centroid:
                   case nir_intrinsic_load_interpolated_input:
+                  case nir_intrinsic_load_frag_coord:
                   case nir_intrinsic_load_local_invocation_id:
                   case nir_intrinsic_load_local_invocation_index:
                   case nir_intrinsic_ssbo_atomic_add:
@@ -389,6 +390,15 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                         }
                      }
                      break;
+                  case nir_intrinsic_load_frag_coord: {
+                     uint8_t mask = nir_ssa_def_components_read(&intrinsic->dest.ssa);
+                     for (unsigned i = 0; i < 4; i++) {
+                        if (mask & (1 << i))
+                           ctx->fs_vgpr_args[fs_input::frag_pos_0 + i] = true;
+
+                     }
+                     break;
+                  }
                   case nir_intrinsic_load_sample_id:
                      ctx->fs_vgpr_args[fs_input::ancillary] = true;
                      break;
