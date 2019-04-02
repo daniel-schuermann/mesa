@@ -942,7 +942,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   definition.setFixed(reg);
                } else if (instr->opcode == aco_opcode::p_extract_vector) {
                   PhysReg reg;
-                  if (instr->getOperand(0).isKill()) {
+                  if (instr->getOperand(0).isKill() &&
+                      instr->getOperand(0).getTemp().type() == definition.getTemp().type()) {
                      reg = instr->getOperand(0).physReg();
                      reg.reg += definition.size() * instr->getOperand(1).constantValue();
                      assert(register_file[reg.reg] == 0);
