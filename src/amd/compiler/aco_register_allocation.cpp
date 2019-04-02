@@ -745,6 +745,19 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
              ctx.assignments.find(affinities[definition.tempId()]) != ctx.assignments.end()) {
             assert(ctx.assignments[affinities[definition.tempId()]].second == phi->getDefinition(0).regClass());
             PhysReg reg = ctx.assignments[affinities[definition.tempId()]].first;
+            if (reg == scc) {
+               bool can_use_scc = true;
+               for (unsigned i = 0; i < phi->num_operands; i++) {
+                  if (!phi->getOperand(i).isTemp() ||
+                      ctx.assignments.find(phi->getOperand(i).tempId()) == ctx.assignments.end() ||
+                      !(ctx.assignments[phi->getOperand(i).tempId()].first == scc)) {
+                     can_use_scc = false;
+                     break;
+                  }
+               }
+               if (!can_use_scc)
+                  continue;
+            }
             bool reg_free = true;
             for (unsigned i = reg.reg; i < reg.reg + definition.size(); i++) {
                if (register_file[i] != 0) {
