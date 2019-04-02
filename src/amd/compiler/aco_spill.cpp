@@ -56,6 +56,7 @@ struct spill_ctx {
    std::vector<std::map<Temp, std::pair<uint32_t, uint32_t>>> next_use_distances_end;
    std::vector<std::pair<RegClass, std::set<uint32_t>>> interferences;
    std::vector<std::pair<uint32_t, uint32_t>> affinities;
+   std::map<uint32_t, unsigned> reload_count;
 
    spill_ctx(uint16_t target_vgpr, uint16_t target_sgpr, Program* program,
              std::vector<std::vector<std::pair<uint16_t,uint16_t>>> register_demand)
@@ -560,6 +561,7 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
             /* variable is spilled at predecessor and live at current block: create reload instruction */
             aco_ptr<Instruction> reload{create_instruction<Instruction>(aco_opcode::p_reload, Format::PSEUDO, 1, 1)};
             reload->getOperand(0) = Operand(ctx.spills_exit[pred_idx][live.first]);
+            ctx.reload_count[reload->getOperand(0).constantValue()]++;
             Temp new_name = {ctx.program->allocateId(), live.first.regClass()};
             reload->getDefinition(0) = Definition(new_name);
             instructions.emplace_back(std::move(reload));
@@ -586,6 +588,7 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
          /* variable is spilled at predecessor and live at current block: create reload instruction */
          aco_ptr<Instruction> reload{create_instruction<Instruction>(aco_opcode::p_reload, Format::PSEUDO, 1, 1)};
          reload->getOperand(0) = Operand(ctx.spills_exit[pred_idx][live.first]);
+         ctx.reload_count[reload->getOperand(0).constantValue()]++;
          Temp new_name = {ctx.program->allocateId(), live.first.regClass()};
          reload->getDefinition(0) = Definition(new_name);
          instructions.emplace_back(std::move(reload));
@@ -772,6 +775,7 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
 
          aco_ptr<Instruction> reload{create_instruction<Instruction>(aco_opcode::p_reload, Format::PSEUDO, 1, 1)};
          reload->getOperand(0) = Operand(ctx.spills_exit[pred_idx][phi->getOperand(i).getTemp()]);
+         ctx.reload_count[reload->getOperand(0).constantValue()]++;
          reload->getDefinition(0) = Definition(new_name);
          preds[i]->instructions.insert(it, std::move(reload));
 
@@ -813,6 +817,7 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
 
          aco_ptr<Instruction> reload{create_instruction<Instruction>(aco_opcode::p_reload, Format::PSEUDO, 1, 1)};
          reload->getOperand(0) = Operand(ctx.spills_exit[pred->index][pair.first]);
+         ctx.reload_count[reload->getOperand(0).constantValue()]++;
          reload->getDefinition(0) = Definition(new_name);
          pred->instructions.insert(it, std::move(reload));
 
@@ -1005,6 +1010,7 @@ void process_block(spill_ctx& ctx, unsigned block_idx, std::unique_ptr<Block>& b
          reload->getOperand(0) = Operand(pair.second);
          reload->getDefinition(0) = Definition(pair.first);
          instructions.emplace_back(std::move(reload));
+         ctx.reload_count[pair.second]++;
       }
       instructions.emplace_back(std::move(instr));
       idx++;
@@ -1156,7 +1162,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
    while (!done) {
       done = true;
       for (unsigned id = 0; id < ctx.interferences.size(); id++) {
-         if (is_assigned[id])
+         if (is_assigned[id] || !ctx.reload_count[id])
             continue;
          if (typeOf(ctx.interferences[id].first) != sgpr)
             continue;
@@ -1192,7 +1198,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
    while (!done) {
       done = true;
       for (unsigned id = 0; id < ctx.interferences.size(); id++) {
-         if (is_assigned[id])
+         if (is_assigned[id] || !ctx.reload_count[id])
             continue;
          if (typeOf(ctx.interferences[id].first) != vgpr)
             continue;
@@ -1222,8 +1228,8 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
       slot_idx++;
    }
 
-   for (bool has_spill_slot : is_assigned)
-      assert(has_spill_slot);
+   for (unsigned id = 0; id < is_assigned.size(); id++)
+      assert(is_assigned[id] || !ctx.reload_count[id]);
 
    /* hope, we didn't mess up */
    std::vector<Temp> vgpr_spill_temps((spill_slot_interferences.size() + 63) / 64);
@@ -1268,12 +1274,16 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
       }
 
       std::vector<aco_ptr<Instruction>>::iterator it;
+      std::vector<aco_ptr<Instruction>> instructions;
+      instructions.reserve(block->instructions.size());
       for (it = block->instructions.begin(); it != block->instructions.end(); ++it) {
 
          if ((*it)->opcode == aco_opcode::p_spill) {
             uint32_t spill_id = (*it)->getOperand(1).constantValue();
 
-            if (vgpr_slot.find(spill_id) != vgpr_slot.end()) {
+            if (!ctx.reload_count[spill_id]) {
+               /* never reloaded, so don't spill */
+            } else if (vgpr_slot.find(spill_id) != vgpr_slot.end()) {
                /* spill vgpr */
                ctx.program->config->spilled_vgprs += (*it)->getOperand(0).size();
 
@@ -1292,8 +1302,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
                   /* find the right place to insert this definition */
                   if (last_top_level_block_idx == block->index) {
                      /* insert right before the current instruction */
-                     it = block->instructions.insert(it, std::move(create));
-                     it++;
+                     instructions.emplace_back(std::move(create));
                   } else {
                      assert(last_top_level_block_idx < block->index);
                      /* insert before the branch at last top level block */
@@ -1307,13 +1316,14 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
                spill->getOperand(0) = Operand(vgpr_spill_temps[spill_slot / 64]);
                spill->getOperand(1) = Operand(spill_slot % 64);
                spill->getOperand(2) = (*it)->getOperand(0);
-               (*it).reset(spill);
+               instructions.emplace_back(aco_ptr<Instruction>(spill));
             } else {
                unreachable("No spill slot assigned for spill id");
             }
 
          } else if ((*it)->opcode == aco_opcode::p_reload) {
             uint32_t spill_id = (*it)->getOperand(0).constantValue();
+            assert(ctx.reload_count[spill_id]);
 
             if (vgpr_slot.find(spill_id) != vgpr_slot.end()) {
                /* reload vgpr */
@@ -1331,8 +1341,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
                   /* find the right place to insert this definition */
                   if (last_top_level_block_idx == block->index) {
                      /* insert right before the current instruction */
-                     it = block->instructions.insert(it, std::move(create));
-                     it++;
+                     instructions.emplace_back(std::move(create));
                   } else {
                      assert(last_top_level_block_idx < block->index);
                      /* insert before the branch at last top level block */
@@ -1346,13 +1355,16 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
                reload->getOperand(0) = Operand(vgpr_spill_temps[spill_slot / 64]);
                reload->getOperand(1) = Operand(spill_slot % 64);
                reload->getDefinition(0) = (*it)->getDefinition(0);
-               (*it).reset(reload);
+               instructions.emplace_back(aco_ptr<Instruction>(reload));
             } else {
                unreachable("No spill slot assigned for spill id");
             }
+         } else {
+            instructions.emplace_back(std::move(*it));
          }
 
       }
+      block->instructions = std::move(instructions);
       if (block->loop_nest_depth == 0 && block->linear_successors.size() == 2)
          nesting_depth++;
    }
