@@ -786,7 +786,22 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
          if (!definition.isFixed()) {
             std::vector<std::pair<Operand, Definition>> parallelcopy;
-            definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, phi));
+            /* try to find a register that is used by at least one operand */
+            for (unsigned i = 0; i < phi->num_operands; i++) {
+               if (!phi->getOperand(i).isTemp() ||
+                   ctx.assignments.find(phi->getOperand(i).tempId()) == ctx.assignments.end())
+                  continue;
+               PhysReg reg = ctx.assignments[phi->getOperand(i).tempId()].first;
+               /* we tried this already on the previous loop */
+               if (reg == scc)
+                  continue;
+               if (get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, phi, reg, 0)) {
+                  definition.setFixed(reg);
+                  break;
+               }
+            }
+            if (!definition.isFixed())
+               definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, phi));
             assert(parallelcopy.empty());
             for (unsigned i = 0; i < definition.size(); i++)
                register_file[definition.physReg().reg + i] = definition.tempId();
