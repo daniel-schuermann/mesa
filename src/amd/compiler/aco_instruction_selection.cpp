@@ -3598,25 +3598,45 @@ void visit_image_size(isel_context *ctx, nir_intrinsic_instr *instr)
    aco_ptr<MIMG_instruction> mimg{create_instruction<MIMG_instruction>(aco_opcode::image_get_resinfo, Format::MIMG, 2, 1)};
    mimg->getOperand(0) = Operand(lod);
    mimg->getOperand(1) = Operand(resource);
+   unsigned& dmask = mimg->dmask;
    mimg->dmask = (1 << instr->dest.ssa.num_components) - 1;
+   mimg->da = glsl_sampler_type_is_array(type);
    Definition& def = mimg->getDefinition(0);
    ctx->block->instructions.emplace_back(std::move(mimg));
 
    if (glsl_get_sampler_dim(type) == GLSL_SAMPLER_DIM_CUBE &&
        glsl_sampler_type_is_array(type)) {
-      Temp tmp = {ctx->program->allocateId(), v4};
+
+      assert(instr->dest.ssa.num_components == 3);
+      Temp tmp = {ctx->program->allocateId(), v3};
       def = Definition(tmp);
-      /* TODO: split vector and divide 3nd value by 6 */
-      assert(false && "Unimplemented image_deref_size");
+      emit_split_vector(ctx, tmp, 3);
+
+      /* divide 3rd value by 6 by multiplying with magic number */
+      Temp c = {ctx->program->allocateId(), s1};
+      aco_ptr<Instruction> mov{create_s_mov(Definition(c), Operand((uint32_t) 0x2AAAAAAB))};
+      ctx->block->instructions.emplace_back(std::move(mov));
+
+      aco_ptr<Instruction> mul{create_instruction<VOP3A_instruction>(aco_opcode::v_mul_hi_i32, Format::VOP3, 2, 1)};
+      mul->getOperand(0) = Operand(emit_extract_vector(ctx, tmp, 2, v1));
+      mul->getOperand(1) = Operand(c);
+      Temp by_6 = {ctx->program->allocateId(), v1};
+      mul->getDefinition(0) = Definition(by_6);
+      ctx->block->instructions.emplace_back(std::move(mul));
+
+      aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1)};
+      vec->getOperand(0) = Operand(emit_extract_vector(ctx, tmp, 0, v1));
+      vec->getOperand(1) = Operand(emit_extract_vector(ctx, tmp, 1, v1));
+      vec->getOperand(2) = Operand(by_6);
+      vec->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(vec));
 
    } else if (ctx->options->chip_class >= GFX9 &&
               glsl_get_sampler_dim(type) == GLSL_SAMPLER_DIM_1D &&
               glsl_sampler_type_is_array(type)) {
-      Temp tmp = {ctx->program->allocateId(), v4};
-      def = Definition(tmp);
-      /* TODO: split vector, extract 3nd value and insert as 2nd */
-      assert(false && "Unimplemented image_deref_size");
-
+      assert(instr->dest.ssa.num_components == 2);
+      def = Definition(dst);
+      dmask = 0x5;
    } else {
       def = Definition(dst);
    }
