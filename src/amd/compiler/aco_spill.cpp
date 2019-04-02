@@ -954,7 +954,7 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
 }
 
 void process_block(spill_ctx& ctx, unsigned block_idx, std::unique_ptr<Block>& block,
-                   std::map<Temp, uint32_t> &current_spills, unsigned spilled_sgprs, unsigned spilled_vgprs)
+                   std::map<Temp, uint32_t> &current_spills, int spilled_sgprs, int spilled_vgprs)
 {
    std::vector<std::map<Temp, uint32_t>> local_next_use_distance;
    std::vector<aco_ptr<Instruction>> instructions;
@@ -1007,8 +1007,8 @@ void process_block(spill_ctx& ctx, unsigned block_idx, std::unique_ptr<Block>& b
       /* check if register demand is low enough before and after the current instruction */
       if (block->vgpr_demand > ctx.target_vgpr || block->sgpr_demand > ctx.target_sgpr) {
 
-         uint16_t sgpr_demand = ctx.register_demand[block_idx][idx].first;
-         uint16_t vgpr_demand = ctx.register_demand[block_idx][idx].second;
+         int sgpr_demand = ctx.register_demand[block_idx][idx].first;
+         int vgpr_demand = ctx.register_demand[block_idx][idx].second;
          if (idx == 0) {
             for (unsigned i = 0; i < instr->num_definitions; i++) {
                if (!instr->getDefinition(i).isTemp())
@@ -1019,8 +1019,8 @@ void process_block(spill_ctx& ctx, unsigned block_idx, std::unique_ptr<Block>& b
                   sgpr_demand += instr->getDefinition(i).size();
             }
          } else {
-            sgpr_demand = std::max(ctx.register_demand[block_idx][idx - 1].first, sgpr_demand);
-            vgpr_demand = std::max(ctx.register_demand[block_idx][idx - 1].second, vgpr_demand);
+            sgpr_demand = std::max<int>(ctx.register_demand[block_idx][idx - 1].first, sgpr_demand);
+            vgpr_demand = std::max<int>(ctx.register_demand[block_idx][idx - 1].second, vgpr_demand);
          }
 
          /* compute local next use distances on demand */
@@ -1029,8 +1029,8 @@ void process_block(spill_ctx& ctx, unsigned block_idx, std::unique_ptr<Block>& b
             local_next_use_distance = local_next_uses(ctx, block);
 
          /* if reg pressure is too high, spill variable with furthest next use */
-         while (vgpr_demand - spilled_vgprs > ctx.target_vgpr ||
-                sgpr_demand - spilled_sgprs > ctx.target_sgpr) {
+         while (std::max(vgpr_demand - spilled_vgprs, 0) > ctx.target_vgpr ||
+                std::max(sgpr_demand - spilled_sgprs, 0) > ctx.target_sgpr) {
             unsigned distance = 0;
             Temp to_spill;
             bool do_rematerialize = false;
