@@ -300,6 +300,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_barycentric_centroid:
                   case nir_intrinsic_load_interpolated_input:
                   case nir_intrinsic_load_frag_coord:
+                  case nir_intrinsic_load_layer_id:
                   case nir_intrinsic_load_local_invocation_id:
                   case nir_intrinsic_load_local_invocation_index:
                   case nir_intrinsic_ssbo_atomic_add:
@@ -405,6 +406,10 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_sample_mask_in:
                      ctx->fs_vgpr_args[fs_input::ancillary] = true;
                      ctx->fs_vgpr_args[fs_input::sample_coverage] = true;
+                     break;
+                  case nir_intrinsic_load_layer_id:
+                     ctx->input_mask |= 1ull << VARYING_SLOT_LAYER;
+                     break;
                   default:
                      break;
                }
@@ -854,6 +859,9 @@ void add_startpgm(struct isel_context *ctx)
       unsigned interp_mode = needs_interp_mode ? S_0286CC_PERSP_CENTER_ENA(1) : 0;
       ctx->program->config->spi_ps_input_addr |= interp_mode;
       ctx->program->config->spi_ps_input_ena |= interp_mode;
+
+      ctx->program->info->fs.input_mask |= ctx->input_mask >> VARYING_SLOT_VAR0;
+      ctx->program->info->fs.num_interp = util_bitcount64(ctx->input_mask);
       break;
    }
    case MESA_SHADER_COMPUTE: {
@@ -1020,8 +1028,6 @@ setup_variables(isel_context *ctx, nir_shader *nir)
              idx == VARYING_SLOT_PRIMITIVE_ID || idx == VARYING_SLOT_LAYER)
             ctx->input_mask |= ((1ull << attrib_count) - 1ull) << idx;
       }
-      ctx->program->info->fs.num_interp = util_bitcount64(ctx->input_mask);
-      ctx->program->info->fs.input_mask = ctx->input_mask >> VARYING_SLOT_VAR0;
       ctx->program->info->fs.can_discard = nir->info.fs.uses_discard;
       ctx->program->info->fs.early_fragment_test = nir->info.fs.early_fragment_tests;
       break;
