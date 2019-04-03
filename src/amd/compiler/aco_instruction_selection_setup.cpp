@@ -301,6 +301,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_interpolated_input:
                   case nir_intrinsic_load_frag_coord:
                   case nir_intrinsic_load_layer_id:
+                  case nir_intrinsic_load_view_index:
                   case nir_intrinsic_load_local_invocation_id:
                   case nir_intrinsic_load_local_invocation_index:
                   case nir_intrinsic_ssbo_atomic_add:
@@ -1028,6 +1029,8 @@ setup_variables(isel_context *ctx, nir_shader *nir)
              idx == VARYING_SLOT_PRIMITIVE_ID || idx == VARYING_SLOT_LAYER)
             ctx->input_mask |= ((1ull << attrib_count) - 1ull) << idx;
       }
+      if (ctx->program->info->info.needs_multiview_view_index)
+         ctx->input_mask |= 1 << VARYING_SLOT_LAYER;
       ctx->program->info->fs.can_discard = nir->info.fs.uses_discard;
       ctx->program->info->fs.early_fragment_test = nir->info.fs.early_fragment_tests;
       break;
