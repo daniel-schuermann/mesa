@@ -4273,6 +4273,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       ctx->block->instructions.emplace_back(std::move(cmp));
       break;
    }
+   case nir_intrinsic_load_view_index:
    case nir_intrinsic_load_layer_id: {
       unsigned base = VARYING_SLOT_LAYER / 4;
       unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
