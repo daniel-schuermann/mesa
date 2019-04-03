@@ -607,7 +607,7 @@ anv_pipeline_lower_nir(struct anv_pipeline *pipeline,
 
    if (nir->info.stage == MESA_SHADER_FRAGMENT) {
       NIR_PASS_V(nir, nir_lower_wpos_center, pipeline->sample_shading_enable);
-      NIR_PASS_V(nir, anv_nir_lower_input_attachments);
+      NIR_PASS_V(nir, nir_lower_input_attachments);
    }
 
    NIR_PASS_V(nir, anv_nir_lower_ycbcr_textures, layout);
