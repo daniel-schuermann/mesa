@@ -4273,6 +4273,21 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       ctx->block->instructions.emplace_back(std::move(cmp));
       break;
    }
+   case nir_intrinsic_load_layer_id: {
+      unsigned base = VARYING_SLOT_LAYER / 4;
+      unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
+      unsigned component = 0;
+      aco_ptr<Interp_instruction> mov{create_instruction<Interp_instruction>(aco_opcode::v_interp_mov_f32, Format::VINTRP, 2, 1)};
+      mov->getOperand(0) = Operand();
+      mov->getOperand(0).setFixed(PhysReg{2}); /* P0 */
+      mov->getOperand(1) = Operand(ctx->prim_mask);
+      mov->getOperand(1).setFixed(m0);
+      mov->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      mov->attribute = idx;
+      mov->component = component;
+      ctx->block->instructions.emplace_back(std::move(mov));
+      break;
+   }
    case nir_intrinsic_load_frag_coord: {
       emit_load_frag_coord(ctx, get_ssa_temp(ctx, &instr->dest.ssa), 4);
       break;
