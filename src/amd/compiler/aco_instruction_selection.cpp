@@ -2740,14 +2740,18 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
       }
    }
 
-   aco_ptr<Instruction> tmp;
-   tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 2));
-   tmp->getOperand(0) = nir_const_index ? Operand(const_index) : Operand(index);
-   tmp->getOperand(1) = Operand(desc_ptr);
-   index = {ctx->program->allocateId(), index.regClass()};
-   tmp->getDefinition(0) = Definition(index);
-   tmp->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
-   ctx->block->instructions.emplace_back(std::move(tmp));
+   if (nir_const_index && const_index == 0) {
+      index = desc_ptr;
+   } else {
+      aco_ptr<Instruction> tmp;
+      tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 2));
+      tmp->getOperand(0) = nir_const_index ? Operand(const_index) : Operand(index);
+      tmp->getOperand(1) = Operand(desc_ptr);
+      index = {ctx->program->allocateId(), index.regClass()};
+      tmp->getDefinition(0) = Definition(index);
+      tmp->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
+      ctx->block->instructions.emplace_back(std::move(tmp));
+   }
 
    index = convert_pointer_to_64_bit(ctx, index);
    ctx->allocated.insert({instr->dest.ssa.index, index.id()});
