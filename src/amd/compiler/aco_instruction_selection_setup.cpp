@@ -1081,7 +1081,7 @@ setup_isel_context(Program* program, nir_shader *nir,
    /* the variable setup has to be done before lower_io / CSE */
    setup_variables(&ctx, nir);
 
-   nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
+   /* optimize and lower memory operations */
    if (nir_opt_load_store_vectorize(nir,
                                     (nir_variable_mode)(nir_var_mem_ssbo | nir_var_mem_ubo |
                                                         nir_var_mem_push_const | nir_var_mem_shared),
@@ -1089,22 +1089,28 @@ setup_isel_context(Program* program, nir_shader *nir,
       nir_lower_alu_to_scalar(nir);
       nir_lower_pack(nir);
    }
+   nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
    nir_lower_io(nir, nir_var_mem_shared, shared_var_size, (nir_lower_io_options)0);
-   nir_copy_prop(nir);
+
+   /* lower ALU operations */
    nir_opt_idiv_const(nir, 32);
    nir_lower_idiv(nir, true);
    nir_lower_int64(nir, (nir_lower_int64_options) (nir_lower_imul_high64 | nir_lower_divmod64));
    nir_lower_int64(nir, (nir_lower_int64_options) (nir_lower_iabs64));
-   nir_opt_shrink_load(nir);
-   nir_opt_cse(nir);
-   nir_opt_dce(nir);
+
+   /* optimize the lowered ALU operations */
+   nir_copy_prop(nir);
    nir_opt_algebraic(nir);
    nir_opt_algebraic_late(nir);
    nir_opt_constant_folding(nir);
+
+   /* cleanup passes */
    nir_lower_load_const_to_scalar(nir);
+   nir_opt_cse(nir);
    nir_to_lcssa(nir);
    nir_lower_phis_to_scalar(nir);
    nir_opt_dce(nir);
+   nir_opt_shrink_load(nir);
    nir_opt_sink(nir);
    nir_opt_move_load_ubo(nir);
 
