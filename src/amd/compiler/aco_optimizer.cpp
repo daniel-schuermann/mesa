@@ -402,6 +402,22 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          }
       }
 
+      /* MUBUF: propagate constants */
+      else if (instr->format == Format::MUBUF) {
+
+         MUBUF_instruction *mubuf = static_cast<MUBUF_instruction *>(instr.get());
+         if (mubuf->offen && i == 0 && info.is_constant() && mubuf->offset + info.val < 4096) {
+            assert(!mubuf->idxen);
+            instr->getOperand(i) = Operand();
+            mubuf->offset += info.val;
+            mubuf->offen = false;
+            continue;
+         } else if (i == 2 && info.is_constant() && mubuf->offset + info.val < 4096) {
+            instr->getOperand(2) = Operand((uint32_t) 0);
+            mubuf->offset += info.val;
+            continue;
+         }
+      }
    }
 
    /* if this instruction doesn't define anything, return */
