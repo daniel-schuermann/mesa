@@ -3824,7 +3824,7 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       store->getOperand(1) = Operand(rsrc);
       store->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand((uint32_t) 0);
       store->getOperand(3) = Operand(write_data);
-      store->offset = start;
+      store->offset = start * elem_size_bytes;
       store->offen = (offset.type() == vgpr);
       store->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
       store->disable_wqm = true;
