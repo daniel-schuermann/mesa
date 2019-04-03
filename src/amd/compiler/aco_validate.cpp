@@ -135,7 +135,6 @@ void validate(Program* program, FILE * output)
             } else if (instr->opcode == aco_opcode::p_extract_vector) {
                check(instr->getOperand(0).isTemp() && instr->getOperand(1).isConstant(), "Wrong Operand types", instr.get());
                check(instr->getOperand(1).constantValue() <= instr->getOperand(0).size(), "Index out of range", instr.get());
-               check(instr->getDefinition(0).size() == 1, "Definition size must be 1", instr.get());
                check(instr->getDefinition(0).getTemp().type() == vgpr || instr->getOperand(0).getTemp().type() == sgpr,
                      "Cannot extract SGPR value from VGPR vector", instr.get());
             } else if (instr->opcode == aco_opcode::p_parallelcopy) {
