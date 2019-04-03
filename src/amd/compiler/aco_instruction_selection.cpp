@@ -4027,12 +4027,12 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
          assert(false);
       }
 
-      unsigned offset = instr->const_index[0] + bytes_read;
+      unsigned offset = nir_intrinsic_base(instr) + bytes_read;
       unsigned max_offset = op == aco_opcode::ds_read2_b32 ? 1019 : 65535;
       Temp address_offset = address;
       if (offset > max_offset) {
          Temp new_addr{ctx->program->allocateId(), v1};
-         emit_v_add32(ctx, new_addr, Operand((uint32_t) instr->const_index[0]), Operand(address_offset));
+         emit_v_add32(ctx, new_addr, Operand((uint32_t) nir_intrinsic_base(instr)), Operand(address_offset));
          address_offset = new_addr;
          offset = bytes_read;
       }
@@ -4137,8 +4137,8 @@ void ds_write_helper(isel_context *ctx, Operand m, Temp address, Temp data, unsi
 
 void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
 {
-   unsigned offset = instr->const_index[0];
-   unsigned writemask = instr->const_index[1];
+   unsigned offset = nir_intrinsic_base(instr);
+   unsigned writemask = nir_intrinsic_write_mask(instr);
    Operand m = load_lds_size_m0(ctx);
    Temp data = get_ssa_temp(ctx, instr->src[0].ssa);
    Temp address = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
@@ -4186,7 +4186,7 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
 
 void visit_shared_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
-   unsigned offset = instr->const_index[0];
+   unsigned offset = nir_intrinsic_base(instr);
    Operand m = load_lds_size_m0(ctx);
    Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
    Temp address = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
