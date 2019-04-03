@@ -348,19 +348,16 @@ void lower_to_hw_instr(Program* program)
             {
                unsigned reg = instr->getOperand(0).physReg().reg + instr->getOperand(1).constantValue();
                RegClass rc = getRegClass(instr->getOperand(0).getTemp().type(), 1);
+               RegClass rc_def = getRegClass(instr->getDefinition(0).getTemp().type(), 1);
                if (reg == instr->getDefinition(0).physReg().reg)
                   break;
 
-               if (instr->getDefinition(0).getTemp().type() == RegType::sgpr)
-               {
-                  assert(instr->getOperand(0).getTemp().type() == RegType::sgpr);
-                  mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
-               } else {
-                  mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+               std::map<PhysReg, copy_operation> copy_operations;
+               for (unsigned i = 0; i < instr->getDefinition(0).size(); i++) {
+                  Definition def = Definition(PhysReg{instr->getDefinition(0).physReg().reg + i}, rc_def);
+                  copy_operations[def.physReg()] = {Operand(PhysReg{reg + i}, rc), def, 0, 1};
                }
-               mov->getOperand(0) = Operand(PhysReg{reg}, rc);
-               mov->getDefinition(0) = instr->getDefinition(0);
-               ctx.instructions.emplace_back(std::move(mov));
+               handle_operands(copy_operations, &ctx, program->chip_class);
                break;
             }
             case aco_opcode::p_create_vector:
