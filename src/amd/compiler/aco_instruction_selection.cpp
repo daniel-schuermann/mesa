@@ -3271,6 +3271,7 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
    enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
    bool is_array = glsl_sampler_type_is_array(type);
    bool add_frag_pos = (dim == GLSL_SAMPLER_DIM_SUBPASS || dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
+   assert(!add_frag_pos && "Input attachments should be lowered.");
    bool is_ms = (dim == GLSL_SAMPLER_DIM_MS || dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
    bool gfx9_1d = ctx->options->chip_class >= GFX9 && dim == GLSL_SAMPLER_DIM_1D;
    int count = image_type_to_components_count(dim, is_array);
@@ -3287,10 +3288,6 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
          vec->getDefinition(0) = Definition(fmask_load_address);
          ctx->block->instructions.emplace_back(std::move(vec));
 
-         if (add_frag_pos) {
-            unreachable("add_frag_pos not implemented.");
-         }
-
          Temp fmask_desc_ptr = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_FMASK, nullptr, false, false);
          count--;
          sample_index = adjust_sample_index_using_fmask(ctx, is_array, fmask_load_address, sample_index, fmask_desc_ptr);
@@ -3301,10 +3298,6 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
 
    if (count == 1 && !gfx9_1d)
       return emit_extract_vector(ctx, src0, 0, v1);
-
-   if (add_frag_pos) {
-      unreachable("add_frag_pos not implemented.");
-   }
 
    if (gfx9_1d) {
       coords[0] = Operand(emit_extract_vector(ctx, src0, 0, v1));
@@ -5026,8 +5019,9 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (instr->op == nir_texop_samples_identical)
       resource = fmask_ptr;
 
-   else if (instr->sampler_dim == GLSL_SAMPLER_DIM_MS &&
-       instr->op != nir_texop_txs) {
+   else if ((instr->sampler_dim == GLSL_SAMPLER_DIM_MS ||
+             instr->sampler_dim == GLSL_SAMPLER_DIM_SUBPASS_MS) &&
+            instr->op != nir_texop_txs) {
       assert(has_sample_index);
       sample_index = adjust_sample_index_using_fmask(ctx, da, coords, sample_index, fmask_ptr);
    }
