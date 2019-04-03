@@ -119,7 +119,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       uint32_t encoding = (0b110110 << 26);
       encoding |= opcode_infos[(int)instr->opcode].opcode << 17;
       encoding |= (ds->gds ? 1 : 0) << 16;
-      encoding |= (0xFF & ds->offset1 << 8);
+      encoding |= ((0xFF & ds->offset1) << 8);
       encoding |= (0xFFFF & ds->offset0);
       out.push_back(encoding);
       encoding = 0;
