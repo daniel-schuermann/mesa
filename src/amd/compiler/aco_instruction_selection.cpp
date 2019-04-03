@@ -3992,44 +3992,80 @@ Operand load_lds_size_m0(isel_context *ctx)
 
 void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
 {
+   // TODO: implement sparse reads using ds_read2_b32 and nir_ssa_def_components_read()
    Operand m = load_lds_size_m0(ctx);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    assert(instr->dest.ssa.bit_size == 32 && "Bitsize not supported in load_shared.");
    Temp address = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
 
-   unsigned offset = instr->const_index[0];
-   aco_opcode op;
-   switch (instr->num_components) {
-      case 1:
-         op = aco_opcode::ds_read_b32;
-         break;
-      case 2:
-         op = aco_opcode::ds_read_b64;
-         break;
-      case 3:
-         op = aco_opcode::ds_read_b96;
-         break;
-      case 4:
+   unsigned bytes_read = 0;
+   unsigned result_size = 0;
+   Temp result[instr->num_components];
+
+   unsigned align = nir_intrinsic_align_mul(instr) ? nir_intrinsic_align(instr) : instr->dest.ssa.bit_size / 8;
+
+   while (bytes_read < instr->num_components * 4) {
+      unsigned todo = instr->num_components * 4 - bytes_read;
+      bool aligned8 = bytes_read % 8 == 0 && align % 8 == 0;
+      bool aligned16 = bytes_read % 16 == 0 && align % 16 == 0;
+
+      aco_opcode op;
+      unsigned size = 0;
+      if (todo >= 16 && aligned16) {
          op = aco_opcode::ds_read_b128;
-         break;
-      default:
-         unreachable("unreachable");
-   }
+         size = 4;
+      } else if (todo >= 12 && aligned16) {
+         op = aco_opcode::ds_read_b96;
+         size = 3;
+      } else if (todo >= 8) {
+         op = aligned8 ? aco_opcode::ds_read_b64 : aco_opcode::ds_read2_b32;
+         size = 2;
+      } else if (todo >= 4) {
+         op = aco_opcode::ds_read_b32;
+         size = 1;
+      } else {
+         assert(false);
+      }
 
-   aco_ptr<DS_instruction> ds{create_instruction<DS_instruction>(op, Format::DS, 2, 1)};
-   ds->getOperand(0) = Operand(address);
-   ds->getOperand(1) = m;
-   Temp tmp = Temp();
-   if (dst.type() == vgpr) {
-      ds->getDefinition(0) = Definition(dst);
-   } else {
-      tmp = {ctx->program->allocateId(), getRegClass(vgpr, dst.size())};
+      unsigned offset = instr->const_index[0] + bytes_read;
+      unsigned max_offset = op == aco_opcode::ds_read2_b32 ? 1019 : 65535;
+      Temp address_offset = address;
+      if (offset > max_offset) {
+         Temp new_addr{ctx->program->allocateId(), v1};
+         emit_v_add32(ctx, new_addr, Operand((uint32_t) instr->const_index[0]), Operand(address_offset));
+         address_offset = new_addr;
+         offset = bytes_read;
+      }
+      assert(offset <= max_offset); /* bytes_read shouldn't be large enough for this to happen */
+
+      aco_ptr<DS_instruction> ds{create_instruction<DS_instruction>(op, Format::DS, 2, 1)};
+      ds->getOperand(0) = Operand(address_offset);
+      ds->getOperand(1) = m;
+      Temp tmp{ctx->program->allocateId(), getRegClass(vgpr, size)};
       ds->getDefinition(0) = Definition(tmp);
-   }
-   ds->offset0 = offset;
-   ctx->block->instructions.emplace_back(std::move(ds));
+      if (op == aco_opcode::ds_read2_b32) {
+         ds->offset0 = offset >> 2;
+         ds->offset1 = (offset >> 2) + 1;
+      } else {
+         ds->offset0 = offset;
+      }
+      ctx->block->instructions.emplace_back(std::move(ds));
 
-   if (dst.type() == sgpr) {
+      result[result_size++] = tmp;
+      bytes_read += size * 4;
+   }
+
+   aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, result_size, 1)};
+   for (unsigned i = 0; i < result_size; i++)
+      vec->getOperand(i) = Operand(result[i]);
+   if (dst.type() == vgpr) {
+      vec->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(vec));
+   } else {
+      Temp tmp{ctx->program->allocateId(), getRegClass(vgpr, dst.size())};
+      vec->getDefinition(0) = Definition(tmp);
+      ctx->block->instructions.emplace_back(std::move(vec));
+
       aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
       readlane->getOperand(0) = Operand(tmp);
       readlane->getDefinition(0) = Definition(dst);
@@ -4038,6 +4074,65 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    emit_split_vector(ctx, dst, instr->num_components);
 
    return;
+}
+
+void ds_write_helper(isel_context *ctx, Operand m, Temp address, Temp data, unsigned offset0, unsigned offset1, unsigned align)
+{
+   unsigned bytes_written = 0;
+   while (bytes_written < data.size() * 4) {
+      unsigned todo = data.size() * 4 - bytes_written;
+      bool aligned8 = bytes_written % 8 == 0 && align % 8 == 0;
+      bool aligned16 = bytes_written % 16 == 0 && align % 16 == 0;
+
+      aco_opcode op;
+      unsigned size = 0;
+      if (todo >= 16 && aligned16) {
+         op = aco_opcode::ds_write_b128;
+         size = 4;
+      } else if (todo >= 12 && aligned16) {
+         op = aco_opcode::ds_write_b96;
+         size = 3;
+      } else if (todo >= 8) {
+         op = aligned8 ? aco_opcode::ds_write_b64 : aco_opcode::ds_write2_b32;
+         size = 2;
+      } else if (todo >= 4) {
+         op = aco_opcode::ds_write_b32;
+         size = 1;
+      } else {
+         assert(false);
+      }
+
+      bool write2 = op == aco_opcode::ds_write2_b32;
+      unsigned offset = offset0 + offset1 + bytes_written;
+      unsigned max_offset = write2 ? 1020 : 65535;
+      Temp address_offset = address;
+      if (offset > max_offset) {
+         Temp new_addr{ctx->program->allocateId(), v1};
+         emit_v_add32(ctx, new_addr, Operand(offset0), Operand(address_offset));
+         address_offset = new_addr;
+         offset = offset1 + bytes_written;
+      }
+      assert(offset <= max_offset); /* offset1 shouldn't be large enough for this to happen */
+
+      aco_ptr<DS_instruction> ds(create_instruction<DS_instruction>(op, Format::DS, write2 ? 4 : 3, 0));
+      ds->getOperand(0) = Operand(address_offset);
+      if (write2) {
+         ds->getOperand(1) = Operand(emit_extract_vector(ctx, data, bytes_written >> 2, v1));
+         ds->getOperand(2) = Operand(emit_extract_vector(ctx, data, (bytes_written >> 2) + 1, v1));
+      } else {
+         ds->getOperand(1) = Operand(emit_extract_vector(ctx, data, bytes_written >> 2, getRegClass(vgpr, size)));
+      }
+      ds->getOperand(ds->num_operands - 1) = m;
+      if (write2) {
+         ds->offset0 = offset >> 2;
+         ds->offset1 = (offset >> 2) + 1;
+      } else {
+         ds->offset0 = offset;
+      }
+      ctx->block->instructions.emplace_back(std::move(ds));
+
+      bytes_written += size * 4;
+   }
 }
 
 void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
@@ -4056,12 +4151,19 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    u_bit_scan_consecutive_range(&writemask, &start[1], &count[1]);
    assert(writemask == 0);
 
-   aco_ptr<DS_instruction> ds;
    /* one combined store is sufficient */
    if (count[0] == count[1]) {
+      Temp address_offset = address;
+      if ((offset >> 2) + start[1] > 255) {
+         Temp new_addr{ctx->program->allocateId(), v1};
+         emit_v_add32(ctx, new_addr, Operand(offset), Operand(address_offset));
+         address_offset = new_addr;
+         offset = 0;
+      }
+
       assert(count[0] == 1);
-      ds.reset(create_instruction<DS_instruction>(aco_opcode::ds_write2_b32, Format::DS, 4, 0));
-      ds->getOperand(0) = Operand(address);
+      aco_ptr<DS_instruction> ds(create_instruction<DS_instruction>(aco_opcode::ds_write2_b32, Format::DS, 4, 0));
+      ds->getOperand(0) = Operand(address_offset);
       ds->getOperand(1) = Operand(emit_extract_vector(ctx, data, start[0], v1));
       ds->getOperand(2) = Operand(emit_extract_vector(ctx, data, start[1], v1));
       ds->getOperand(3) = m;
@@ -4071,29 +4173,13 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
       return;
    }
 
+   unsigned align = nir_intrinsic_align_mul(instr) ? nir_intrinsic_align(instr) : elem_size_bytes;
    for (unsigned i = 0; i < 2; i++) {
       if (count[i] == 0)
          continue;
 
-      aco_opcode op;
-      if (count[i] == 1)
-         op = aco_opcode::ds_write_b32;
-      else if (count[i] == 2)
-         op = aco_opcode::ds_write_b64;
-      else if (count[i] == 3)
-         op = aco_opcode::ds_write_b96;
-      else if (count[i] == 4)
-         op = aco_opcode::ds_write_b128;
-      else
-         unreachable("Unhandled LDS write size");
-
       Temp write_data = emit_extract_vector(ctx, data, start[i], getRegClass(vgpr, count[i]));
-      ds.reset(create_instruction<DS_instruction>(op, Format::DS, 3, 0));
-      ds->getOperand(0) = Operand(address);
-      ds->getOperand(1) = Operand(write_data);
-      ds->getOperand(2) = m;
-      ds->offset0 = offset + (start[i] * elem_size_bytes);
-      ctx->block->instructions.emplace_back(std::move(ds));
+      ds_write_helper(ctx, m, address, write_data, offset, start[i] * elem_size_bytes, align);
    }
    return;
 }
@@ -4191,6 +4277,13 @@ void visit_shared_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
    } else {
       assert(instr->dest.ssa.bit_size == 64);
       op = return_previous ? op64_rtn : op64;
+   }
+
+   if (offset > 65535) {
+      Temp new_addr{ctx->program->allocateId(), v1};
+      emit_v_add32(ctx, new_addr, Operand(offset), Operand(address));
+      address = new_addr;
+      offset = 0;
    }
 
    aco_ptr<DS_instruction> ds;

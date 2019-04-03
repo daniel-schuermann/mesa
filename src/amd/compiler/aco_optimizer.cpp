@@ -409,7 +409,8 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          }
          assert(k == num_ops);
       }
-      ctx.info[instr->getDefinition(0).tempId()].set_vec(instr.get());
+      if (instr->getDefinition(0).getTemp().size() == instr->num_operands)
+         ctx.info[instr->getDefinition(0).tempId()].set_vec(instr.get());
       break;
    }
    case aco_opcode::p_split_vector: {
