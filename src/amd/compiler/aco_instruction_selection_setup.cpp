@@ -857,8 +857,8 @@ void add_startpgm(struct isel_context *ctx)
       bool needs_interp_mode = !(ctx->program->config->spi_ps_input_addr & 0x7F) ||
                                (G_0286CC_POS_W_FLOAT_ENA(ctx->program->config->spi_ps_input_addr)
                                 && !(ctx->program->config->spi_ps_input_addr & 0xF));
+
       unsigned interp_mode = needs_interp_mode ? S_0286CC_PERSP_CENTER_ENA(1) : 0;
-      ctx->program->config->spi_ps_input_addr |= interp_mode;
       ctx->program->config->spi_ps_input_ena |= interp_mode;
 
       ctx->program->info->fs.input_mask |= ctx->input_mask >> VARYING_SLOT_VAR0;
