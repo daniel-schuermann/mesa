@@ -337,10 +337,30 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       }
 
       /* SALU / PSEUDO: propagate inline constants */
-      if (instr->isSALU() || (instr->format == Format::PSEUDO && instr->opcode != aco_opcode::p_extract_vector)) {
+      if (instr->isSALU() || instr->format == Format::PSEUDO) {
          if (info.is_temp() && info.temp.type() == sgpr) {
             instr->getOperand(i) = Operand(info.temp);
             info = ctx.info[info.temp.id()];
+         } else if (info.is_temp() && info.temp.type() == vgpr) {
+            /* propagate vgpr if it can take it */
+            switch (instr->opcode) {
+            case aco_opcode::p_create_vector:
+            case aco_opcode::p_split_vector:
+            case aco_opcode::p_extract_vector: {
+               bool all_vgpr = true;
+               for (unsigned i = 0; all_vgpr && i < instr->num_definitions; i++) {
+                  if (instr->getDefinition(i).getTemp().type() != vgpr)
+                     all_vgpr = false;
+               }
+               if (all_vgpr) {
+                  instr->getOperand(i) = Operand(info.temp);
+                  info = ctx.info[info.temp.id()];
+               }
+               break;
+            }
+            default:
+               break;
+            }
          }
          if ((info.is_constant() || (info.is_literal() && instr->format == Format::PSEUDO)) && !instr->getOperand(i).isFixed()) {
             instr->getOperand(i) = Operand(info.val);
@@ -381,6 +401,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             }
          }
       }
+
    }
 
    /* if this instruction doesn't define anything, return */
