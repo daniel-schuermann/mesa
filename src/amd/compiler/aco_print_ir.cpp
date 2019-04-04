@@ -2,6 +2,35 @@
 
 namespace aco {
 
+static const char *reduce_ops[] = {
+   [iadd32] = "iadd32",
+   [iadd64] = "iadd64",
+   [imul32] = "imul32",
+   [imul64] = "imul64",
+   [fadd32] = "fadd32",
+   [fadd64] = "fadd64",
+   [fmul32] = "fmul32",
+   [fmul64] = "fmul64",
+   [imin32] = "imin32",
+   [imin64] = "imin64",
+   [imax32] = "imax32",
+   [imax64] = "imax64",
+   [umin32] = "umin32",
+   [umin64] = "umin64",
+   [umax32] = "umax32",
+   [umax64] = "umax64",
+   [fmin32] = "fmin32",
+   [fmin64] = "fmin64",
+   [fmax32] = "fmax32",
+   [fmax64] = "fmax64",
+   [iand32] = "iand32",
+   [iand64] = "iand64",
+   [ior32] = "ior32",
+   [ior64] = "ior64",
+   [ixor32] = "ixor32",
+   [ixor64] = "ixor64",
+};
+
 static
 void aco_print_reg_class(const RegClass rc, FILE *output)
 {
@@ -72,6 +101,215 @@ void aco_print_definition(const Definition *definition, FILE *output)
       aco_print_physReg(definition->physReg().reg, definition->size(), output);
 }
 
+static
+void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
+{
+   switch (instr->format) {
+   case Format::SOPK: {
+      SOPK_instruction* sopk = static_cast<SOPK_instruction*>(instr);
+      fprintf(output, " imm:%d", sopk->imm & 0x8000 ? (sopk->imm - 65536) : sopk->imm);
+      break;
+   }
+   case Format::SOPP: {
+      SOPP_instruction* sopp = static_cast<SOPP_instruction*>(instr);
+      uint16_t imm = sopp->imm;
+      switch (instr->opcode) {
+      case aco_opcode::s_waitcnt: {
+         if ((imm & 0xF) < 0xF) fprintf(output, " vmcnt(%d)", imm & 0xF);
+         if (((imm >> 4) & 0x7) < 0x7) fprintf(output, " expcnt(%d)", (imm >> 4) & 0x7);
+         if (((imm >> 8) & 0xF) < 0xF) fprintf(output, " lgkmcnt(%d)", (imm >> 8) & 0xF);
+         break;
+      }
+      case aco_opcode::s_endpgm:
+      case aco_opcode::s_endpgm_saved:
+      case aco_opcode::s_endpgm_ordered_ps_done:
+      case aco_opcode::s_wakeup:
+      case aco_opcode::s_barrier:
+      case aco_opcode::s_icache_inv:
+      case aco_opcode::s_ttracedata:
+      case aco_opcode::s_set_grp_idx_off: {
+         break;
+      }
+      default: {
+         fprintf(output, " imm:%u", imm);
+         break;
+      }
+      }
+      break;
+   }
+   case Format::SMEM: {
+      SMEM_instruction* smem = static_cast<SMEM_instruction*>(instr);
+      if (smem->glc)
+         fprintf(output, " glc");
+      if (smem->nv)
+         fprintf(output, " nv");
+      break;
+   }
+   case Format::VINTRP: {
+      Interp_instruction* vintrp = static_cast<Interp_instruction*>(instr);
+      fprintf(output, " attr%d.%c", vintrp->attribute, "xyzw"[vintrp->component]);
+      break;
+   }
+   case Format::DS: {
+      DS_instruction* ds = static_cast<DS_instruction*>(instr);
+      if (ds->offset0)
+         fprintf(output, " offset0:%u", ds->offset0);
+      if (ds->offset1)
+         fprintf(output, " offset1:%u", ds->offset1);
+      if (ds->gds)
+         fprintf(output, " gds");
+      break;
+   }
+   case Format::MUBUF: {
+      MUBUF_instruction* mubuf = static_cast<MUBUF_instruction*>(instr);
+      if (mubuf->offset)
+         fprintf(output, " offset:%u", mubuf->offset);
+      if (mubuf->offen)
+         fprintf(output, " offen");
+      if (mubuf->idxen)
+         fprintf(output, " idxen");
+      if (mubuf->glc)
+         fprintf(output, " glc");
+      if (mubuf->slc)
+         fprintf(output, " slc");
+      if (mubuf->tfe)
+         fprintf(output, " tfe");
+      if (mubuf->lds)
+         fprintf(output, " lds");
+      if (mubuf->disable_wqm)
+         fprintf(output, " disable_wqm");
+      break;
+   }
+   case Format::MIMG: {
+      MIMG_instruction* mimg = static_cast<MIMG_instruction*>(instr);
+      unsigned identity_dmask = instr->num_definitions ?
+                                (1 << instr->getDefinition(0).size()) - 1 :
+                                0xf;
+      if ((mimg->dmask & identity_dmask) != identity_dmask)
+         fprintf(output, " dmask:%s%s%s%s",
+                 mimg->dmask & 0x1 ? "x" : "",
+                 mimg->dmask & 0x2 ? "y" : "",
+                 mimg->dmask & 0x4 ? "z" : "",
+                 mimg->dmask & 0x8 ? "w" : "");
+      if (mimg->unrm)
+         fprintf(output, " unrm");
+      if (mimg->glc)
+         fprintf(output, " glc");
+      if (mimg->slc)
+         fprintf(output, " slc");
+      if (mimg->tfe)
+         fprintf(output, " tfe");
+      if (mimg->da)
+         fprintf(output, " da");
+      if (mimg->lwe)
+         fprintf(output, " lwe");
+      if (mimg->r128 || mimg->a16)
+         fprintf(output, " r128/a16");
+      if (mimg->d16)
+         fprintf(output, " d16");
+      if (mimg->disable_wqm)
+         fprintf(output, " disable_wqm");
+      break;
+   }
+   case Format::EXP: {
+      Export_instruction* exp = static_cast<Export_instruction*>(instr);
+      unsigned identity_mask = exp->compressed ? 0x5 : 0xf;
+      if ((exp->enabled_mask & identity_mask) != identity_mask)
+         fprintf(output, " en:%c%c%c%c",
+                 exp->enabled_mask & 0x1 ? 'r' : '*',
+                 exp->enabled_mask & 0x2 ? 'g' : '*',
+                 exp->enabled_mask & 0x4 ? 'b' : '*',
+                 exp->enabled_mask & 0x8 ? 'a' : '*');
+      if (exp->compressed)
+         fprintf(output, " compr");
+      if (exp->done)
+         fprintf(output, " done");
+      if (exp->valid_mask)
+         fprintf(output, " vm");
+      break;
+   }
+   case Format::PSEUDO_BRANCH: {
+      Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(instr);
+      fprintf(output, " BB%d", branch->targets[0]->index);
+      if (branch->targets[1])
+         fprintf(output, ", BB%d", branch->targets[1]->index);
+      break;
+   }
+   case Format::PSEUDO_REDUCTION: {
+      Pseudo_reduction_instruction* reduce = static_cast<Pseudo_reduction_instruction*>(instr);
+      fprintf(output, " op:%s\n", reduce_ops[reduce->reduce_op]);
+      if (reduce->cluster_size)
+         fprintf(output, " cluster_size:%u\n", reduce->cluster_size);
+      break;
+   }
+   case Format::MTBUF:
+   case Format::FLAT:
+   case Format::GLOBAL:
+   case Format::SCRATCH: {
+      fprintf(output, " (printing unimplemented)");
+      break;
+   }
+   default: {
+      break;
+   }
+   }
+   if (instr->isVOP3()) {
+      VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr);
+      switch (vop3->omod) {
+      case 1:
+         fprintf(output, " *2");
+         break;
+      case 2:
+         fprintf(output, " *4");
+         break;
+      case 3:
+         fprintf(output, " *0.5");
+         break;
+      }
+      if (vop3->clamp)
+         fprintf(output, " clamp");
+   } else if (instr->isDPP()) {
+      DPP_instruction* dpp = static_cast<DPP_instruction*>(instr);
+      if (dpp->dpp_ctrl <= 0xff) {
+         fprintf(output, " quad_perm:[%d,%d,%d,%d]",
+                 dpp->dpp_ctrl & 0x3, (dpp->dpp_ctrl >> 2) & 0x3,
+                 (dpp->dpp_ctrl >> 4) & 0x3, (dpp->dpp_ctrl >> 6) & 0x3);
+      } else if (dpp->dpp_ctrl >= 0x101 && dpp->dpp_ctrl <= 0x10f) {
+         fprintf(output, " row_shl:%d", dpp->dpp_ctrl & 0xf);
+      } else if (dpp->dpp_ctrl >= 0x111 && dpp->dpp_ctrl <= 0x11f) {
+         fprintf(output, " row_shr:%d", dpp->dpp_ctrl & 0xf);
+      } else if (dpp->dpp_ctrl >= 0x121 && dpp->dpp_ctrl <= 0x12f) {
+         fprintf(output, " row_ror:%d", dpp->dpp_ctrl & 0xf);
+      } else if (dpp->dpp_ctrl == 0x130) {
+         fprintf(output, " wave_shl:1");
+      } else if (dpp->dpp_ctrl == 0x134) {
+         fprintf(output, " wave_rol:1");
+      } else if (dpp->dpp_ctrl == 0x138) {
+         fprintf(output, " wave_shr:1");
+      } else if (dpp->dpp_ctrl == 0x13c) {
+         fprintf(output, " wave_ror:1");
+      } else if (dpp->dpp_ctrl == 0x140) {
+         fprintf(output, " row_mirror");
+      } else if (dpp->dpp_ctrl == 0x141) {
+         fprintf(output, " row_half_mirror");
+      } else if (dpp->dpp_ctrl == 0x142) {
+         fprintf(output, " row_bcast:15");
+      } else if (dpp->dpp_ctrl == 0x143) {
+         fprintf(output, " row_bcast:31");
+      } else {
+         fprintf(output, " dpp_ctrl:0x%.3x", dpp->dpp_ctrl);
+      }
+      if (dpp->row_mask != 0xf)
+         fprintf(output, " row_mask:0x%.1x", dpp->row_mask);
+      if (dpp->bank_mask != 0xf)
+         fprintf(output, " bank_mask:0x%.1x", dpp->bank_mask);
+      if (dpp->bound_ctrl)
+         fprintf(output, " bound_ctrl:1");
+   } else if ((int)instr->format & (int)Format::SDWA) {
+      fprintf(output, " (printing unimplemented)");
+   }
+}
+
 void aco_print_instr(struct Instruction *instr, FILE *output)
 {
    if (instr->definitionCount()) {
@@ -91,6 +329,13 @@ void aco_print_instr(struct Instruction *instr, FILE *output)
          for (unsigned i = 0; i < instr->operandCount(); ++i) {
             abs[i] = vop3->abs[i];
             neg[i] = vop3->neg[i];
+         }
+      } else if (instr->isDPP()) {
+         DPP_instruction* dpp = static_cast<DPP_instruction*>(instr);
+         assert(instr->operandCount() <= 2);
+         for (unsigned i = 0; i < instr->operandCount(); ++i) {
+            abs[i] = dpp->abs[i];
+            neg[i] = dpp->neg[i];
          }
       } else {
          for (unsigned i = 0; i < instr->operandCount(); ++i) {
@@ -113,19 +358,7 @@ void aco_print_instr(struct Instruction *instr, FILE *output)
             fprintf(output, "|");
        }
    }
-   if (instr->opcode == aco_opcode::s_waitcnt) {
-      SOPP_instruction* waitcnt = static_cast<SOPP_instruction*>(instr);
-      uint16_t imm = waitcnt->imm;
-      if ((imm & 0xF) < 0xF) fprintf(output, " vmcnt(%d)", imm & 0xF);
-      if (((imm >> 4) & 0x7) < 0x7) fprintf(output, " expcnt(%d)", (imm >> 4) & 0x7);
-      if (((imm >> 8) & 0xF) < 0xF) fprintf(output, " lgkmcnt(%d)", (imm >> 8) & 0xF);
-   }
-   if (instr->format == Format::PSEUDO_BRANCH) {
-      Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(instr);
-      fprintf(output, " BB%d", branch->targets[0]->index);
-      if (branch->targets[1])
-         fprintf(output, ", BB%d", branch->targets[1]->index);
-   }
+   aco_print_instr_format_specific(instr, output);
 }
 
 void aco_print_block(const struct Block* block, FILE *output)
