@@ -3222,6 +3222,9 @@ static void visit_intrinsic(struct ac_nir_context *ctx,
 		                       ac_build_gather_values(&ctx->ac, values, 4));
 		break;
 	}
+	case nir_intrinsic_load_layer_id:
+		result = ctx->abi->inputs[ac_llvm_reg_index_soa(VARYING_SLOT_LAYER, 0)];
+		break;
 	case nir_intrinsic_load_front_face:
 		result = ctx->abi->front_face;
 		break;

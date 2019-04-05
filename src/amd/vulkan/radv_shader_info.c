@@ -265,6 +265,10 @@ gather_intrinsic_info(const nir_shader *nir, const nir_intrinsic_instr *instr,
 		if (nir->info.stage == MESA_SHADER_FRAGMENT)
 			info->ps.layer_input = true;
 		break;
+	case nir_intrinsic_load_layer_id:
+		if (nir->info.stage == MESA_SHADER_FRAGMENT)
+			info->ps.layer_input = true;
+		break;
 	case nir_intrinsic_load_invocation_id:
 		info->uses_invocation_id = true;
 		break;

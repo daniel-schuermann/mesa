@@ -2479,7 +2479,8 @@ handle_fs_inputs(struct radv_shader_context *ctx,
 	unsigned index = 0;
 
 	if (ctx->shader_info->info.ps.uses_input_attachments ||
-	    ctx->shader_info->info.needs_multiview_view_index) {
+	    ctx->shader_info->info.needs_multiview_view_index ||
+	    ctx->shader_info->info.ps.layer_input) {
 		ctx->input_mask |= 1ull << VARYING_SLOT_LAYER;
 		ctx->inputs[ac_llvm_reg_index_soa(VARYING_SLOT_LAYER, 0)] = LLVMGetUndef(ctx->ac.i32);
 	}
