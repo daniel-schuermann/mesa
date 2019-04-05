@@ -212,7 +212,6 @@ struct radv_shader_info {
 	struct {
 		bool force_persample;
 		bool needs_sample_positions;
-		bool uses_input_attachments;
 		bool writes_memory;
 		bool writes_z;
 		bool writes_stencil;

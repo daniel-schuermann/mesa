@@ -2357,12 +2357,12 @@ static void get_image_coords(struct ac_nir_context *ctx,
 	bool is_ms = (dim == GLSL_SAMPLER_DIM_MS ||
 		      dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
 	bool gfx9_1d = ctx->ac.chip_class >= GFX9 && dim == GLSL_SAMPLER_DIM_1D;
+	assert(!add_frag_pos && "Input attachments should be lowered by this point.");
 	count = image_type_to_components_count(dim, is_array);
 
 	if (is_ms && (instr->intrinsic == nir_intrinsic_image_deref_load ||
 		      instr->intrinsic == nir_intrinsic_bindless_image_load)) {
 		LLVMValueRef fmask_load_address[3];
-		int chan;
 
 		fmask_load_address[0] = LLVMBuildExtractElement(ctx->ac.builder, src0, masks[0], "");
 		fmask_load_address[1] = LLVMBuildExtractElement(ctx->ac.builder, src0, masks[1], "");
@@ -2370,14 +2370,7 @@ static void get_image_coords(struct ac_nir_context *ctx,
 			fmask_load_address[2] = LLVMBuildExtractElement(ctx->ac.builder, src0, masks[2], "");
 		else
 			fmask_load_address[2] = NULL;
-		if (add_frag_pos) {
-			for (chan = 0; chan < 2; ++chan)
-				fmask_load_address[chan] =
-					LLVMBuildAdd(ctx->ac.builder, fmask_load_address[chan],
-						LLVMBuildFPToUI(ctx->ac.builder, ctx->abi->frag_pos[chan],
-								ctx->ac.i32, ""), "");
-			fmask_load_address[2] = ac_to_integer(&ctx->ac, ctx->abi->inputs[ac_llvm_reg_index_soa(VARYING_SLOT_LAYER, 0)]);
-		}
+
 		sample_index = adjust_sample_index_using_fmask(&ctx->ac,
 							       fmask_load_address[0],
 							       fmask_load_address[1],
@@ -2397,18 +2390,6 @@ static void get_image_coords(struct ac_nir_context *ctx,
 			count--;
 		for (chan = 0; chan < count; ++chan) {
 			args->coords[chan] = ac_llvm_extract_elem(&ctx->ac, src0, chan);
-		}
-		if (add_frag_pos) {
-			for (chan = 0; chan < 2; ++chan) {
-				args->coords[chan] = LLVMBuildAdd(
-					ctx->ac.builder, args->coords[chan],
-					LLVMBuildFPToUI(
-						ctx->ac.builder, ctx->abi->frag_pos[chan],
-						ctx->ac.i32, ""), "");
-			}
-			args->coords[2] = ac_to_integer(&ctx->ac,
-				ctx->abi->inputs[ac_llvm_reg_index_soa(VARYING_SLOT_LAYER, 0)]);
-			count++;
 		}
 
 		if (gfx9_1d) {
@@ -3895,7 +3876,8 @@ static void visit_tex(struct ac_nir_context *ctx, nir_tex_instr *instr)
 		goto write_result;
 	}
 
-	if (instr->sampler_dim == GLSL_SAMPLER_DIM_MS &&
+	if ((instr->sampler_dim == GLSL_SAMPLER_DIM_SUBPASS_MS ||
+	     instr->sampler_dim == GLSL_SAMPLER_DIM_MS) &&
 	    instr->op != nir_texop_txs) {
 		unsigned sample_chan = instr->is_array ? 3 : 2;
 		args.coords[sample_chan] = adjust_sample_index_using_fmask(
