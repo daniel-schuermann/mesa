@@ -462,7 +462,7 @@ public:
    Definition() = default;
    Definition(uint32_t index, RegClass type) noexcept
       : temp(index, type) {}
-   Definition(Temp tmp) noexcept
+   explicit Definition(Temp tmp) noexcept
       : temp(tmp) {}
    Definition(PhysReg reg, RegClass type) noexcept
       : temp(Temp(0, type))
@@ -897,8 +897,6 @@ bool validate_ra(Program* program, const struct radv_nir_compiler_options *optio
 
 void aco_print_instr(Instruction *instr, FILE *output);
 void aco_print_program(Program *program, FILE *output);
-
-aco_ptr<Instruction> create_s_mov(Definition dst, Operand src);
 
 }
 #endif /* __cplusplus */
