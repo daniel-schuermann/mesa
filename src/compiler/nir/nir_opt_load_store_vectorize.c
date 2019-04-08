@@ -315,10 +315,8 @@ create_entry_key_from_deref(void *mem_ctx, struct vectorize_ctx *ctx, nir_deref_
          break;
       }
       case nir_deref_type_cast: {
-         if (!parent) {
+         if (!parent)
             key.resource = deref->parent.ssa;
-            assert(nir_instr_as_intrinsic(key.resource->parent_instr)->intrinsic == nir_intrinsic_load_vulkan_descriptor);
-         }
          break;
       }
       default:
