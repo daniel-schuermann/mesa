@@ -38,6 +38,15 @@ aco_opcodes_c = custom_target(
   depend_files : aco_depends,
 )
 
+aco_builder_h = custom_target(
+  'aco_builder.h',
+  input : 'aco_builder_h.py',
+  output : 'aco_builder.h',
+  command : [prog_python, '@INPUT@'],
+  capture : true,
+  depend_files : aco_depends,
+)
+
 # Headers-only dependency
 idep_aco_headers = declare_dependency(
   sources : [aco_opcodes_h],
@@ -73,7 +82,7 @@ libaco_files = files(
 
 libaco = static_library(
   'aco',
-  [libaco_files, aco_opcodes_c, aco_opcodes_h],
+  [libaco_files, aco_opcodes_c, aco_opcodes_h, aco_builder_h],
   include_directories : [
    inc_common, inc_compiler, inc_mesa, inc_mapi, inc_amd, inc_amd_common,
   ],

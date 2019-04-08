@@ -903,7 +903,7 @@ void add_startpgm(struct isel_context *ctx)
    for (unsigned i = 0; i < args.count; i++) {
       if (args.assign[i]) {
          *args.assign[i] = Temp{ctx->program->allocateId(), args.types[i]};
-         startpgm->getDefinition(i) = *args.assign[i];
+         startpgm->getDefinition(i) = Definition(*args.assign[i]);
          startpgm->getDefinition(i).setFixed(args.reg[i]);
       }
    }
