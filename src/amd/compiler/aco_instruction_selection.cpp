@@ -2926,14 +2926,30 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
 void get_buffer_size(isel_context *ctx, Temp desc, Temp dst, bool in_elements)
 {
    if (in_elements && ctx->options->chip_class == VI) {
-      unreachable("unimplemented get_buffer_size in elements for VI");
-
       Builder bld(ctx->program, ctx->block);
 
       Temp stride = emit_extract_vector(ctx, desc, 1, s1);
       stride = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), stride, Operand((5u << 16) | 16u));
+      stride = bld.vop1(aco_opcode::v_cvt_f32_ubyte0, bld.def(v1), stride);
+      stride = bld.vop1(aco_opcode::v_rcp_iflag_f32, bld.def(v1), stride);
 
-      // TODO: we need some fast way to calculate size / stride{1,2,4,8,12,16} (probably with shifts and adds)
+      Temp size = emit_extract_vector(ctx, desc, 2, s1);
+      size = bld.vop1(aco_opcode::v_cvt_f32_u32, bld.def(v1), size);
+
+      Temp res = bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), size, stride);
+      res = bld.vop1(aco_opcode::v_cvt_u32_f32, bld.def(v1), res);
+      bld.pseudo(aco_opcode::p_as_uniform, Definition(dst), res);
+
+      // TODO: we can probably calculate this faster on the scalar unit to do: size / stride{1,2,4,8,12,16}
+      /* idea
+       * for 1,2,4,8,16, the result is just (stride >> S_FF1_I32_B32)
+       * in case 12 (or 3?), we have to divide by 3:
+       * set v_skip in case it's 12 (if we also have to take care of 3, shift first)
+       * use v_mul_hi_u32 with magic number to divide
+       * we need some pseudo merge opcode to overwrite the original SALU result with readfirstlane
+       * disable v_skip
+       * total: 6 SALU + 2 VALU instructions vs 1 SALU + 6 VALU instructions
+       */
 
    } else {
       emit_extract_vector(ctx, desc, 2, dst);
