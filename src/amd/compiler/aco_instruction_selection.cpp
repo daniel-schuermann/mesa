@@ -29,6 +29,7 @@
 #include <stack>
 
 #include "aco_ir.h"
+#include "aco_builder.h"
 #include "aco_interface.h"
 #include "aco_instruction_selection_setup.cpp"
 
