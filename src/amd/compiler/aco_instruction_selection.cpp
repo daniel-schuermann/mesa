@@ -3912,6 +3912,7 @@ void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
 void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is_array, bool is_lod)
 {
 
+   Builder bld(ctx->program, ctx->block);
    Temp coord_args[4], ma, tc, sc, id;
    aco_ptr<Instruction> tmp;
    emit_split_vector(ctx, *coords, is_array ? 4 : 3);
@@ -3919,83 +3920,33 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
       coord_args[i] = emit_extract_vector(ctx, *coords, i, v1);
 
    if (is_array && !is_lod) {
-      tmp.reset(create_instruction<VOP1_instruction>(aco_opcode::v_rndne_f32, Format::VOP1, 1, 1));
-      tmp->getOperand(0) = Operand(coord_args[3]);
-      coord_args[3] = {ctx->program->allocateId(), v1};
-      tmp->getDefinition(0) = Definition(coord_args[3]);
-      ctx->block->instructions.emplace_back(std::move(tmp));
+      coord_args[3] = bld.vop1(aco_opcode::v_rndne_f32, bld.def(v1), coord_args[3]);
 
       // see comment in ac_prepare_cube_coords()
-      if (ctx->options->chip_class <= VI) {
-         tmp.reset(create_instruction<VOP2_instruction>(aco_opcode::v_max_f32, Format::VOP2, 2, 1));
-         tmp->getOperand(0) = Operand((uint32_t) 0);
-         tmp->getOperand(1) = Operand(coord_args[3]);
-         coord_args[3] = {ctx->program->allocateId(), v1};
-         tmp->getDefinition(0) = Definition(coord_args[3]);
-         ctx->block->instructions.emplace_back(std::move(tmp));
-      }
+      if (ctx->options->chip_class <= VI)
+         coord_args[3] = bld.vop2(aco_opcode::v_max_f32, bld.def(v1), Operand(0u), coord_args[3]);
    }
 
-   tmp.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cubema_f32, Format::VOP3A, 3, 1));
-   for (unsigned i = 0; i < 3; i++)
-      tmp->getOperand(i) = Operand(coord_args[i]);
-   ma = {ctx->program->allocateId(), v1};
-   tmp->getDefinition(0) = Definition(ma);
-   ctx->block->instructions.emplace_back(std::move(tmp));
+   ma = bld.vop3(aco_opcode::v_cubema_f32, bld.def(v1), coord_args[0], coord_args[1], coord_args[2]);
+
    aco_ptr<VOP3A_instruction> vop3a{create_instruction<VOP3A_instruction>(aco_opcode::v_rcp_f32, asVOP3(Format::VOP1), 1, 1)};
    vop3a->getOperand(0) = Operand(ma);
    vop3a->abs[0] = true;
    ma = {ctx->program->allocateId(), v1};
    vop3a->getDefinition(0) = Definition(ma);
    ctx->block->instructions.emplace_back(std::move(vop3a));
-   tmp.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cubesc_f32, Format::VOP3A, 3, 1));
-   for (unsigned i = 0; i < 3; i++)
-      tmp->getOperand(i) = Operand(coord_args[i]);
-   sc = {ctx->program->allocateId(), v1};
-   tmp->getDefinition(0) = Definition(sc);
-   ctx->block->instructions.emplace_back(std::move(tmp));
-   tmp.reset(create_instruction<VOP2_instruction>(aco_opcode::v_madak_f32, Format::VOP2, 3, 1));
-   tmp->getOperand(0) = Operand(sc);
-   tmp->getOperand(1) = Operand(ma);
-   tmp->getOperand(2) = Operand((uint32_t) 0x3fc00000); /* 1.5 */
-   sc = {ctx->program->allocateId(), v1};
-   tmp->getDefinition(0) = Definition(sc);
-   ctx->block->instructions.emplace_back(std::move(tmp));
-   tmp.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cubetc_f32, Format::VOP3A, 3, 1));
-   for (unsigned i = 0; i < 3; i++)
-      tmp->getOperand(i) = Operand(coord_args[i]);
-   tc = {ctx->program->allocateId(), v1};
-   tmp->getDefinition(0) = Definition(tc);
-   ctx->block->instructions.emplace_back(std::move(tmp));
-   tmp.reset(create_instruction<VOP2_instruction>(aco_opcode::v_madak_f32, Format::VOP2, 3, 1));
-   tmp->getOperand(0) = Operand(tc);
-   tmp->getOperand(1) = Operand(ma);
-   tmp->getOperand(2) = Operand((uint32_t) 0x3fc00000); /* 1.5 */
-   tc = {ctx->program->allocateId(), v1};
-   tmp->getDefinition(0) = Definition(tc);
-   ctx->block->instructions.emplace_back(std::move(tmp));
-   tmp.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_cubeid_f32, Format::VOP3A, 3, 1));
-   for (unsigned i = 0; i < 3; i++)
-      tmp->getOperand(i) = Operand(coord_args[i]);
-   id = {ctx->program->allocateId(), v1};
-   tmp->getDefinition(0) = Definition(id);
-   ctx->block->instructions.emplace_back(std::move(tmp));
-   if (is_array) {
-      tmp.reset(create_instruction<VOP2_instruction>(aco_opcode::v_madmk_f32, Format::VOP2, 3, 1));
-      tmp->getOperand(0) = Operand(coord_args[3]);
-      tmp->getOperand(1) = Operand(id);
-      tmp->getOperand(2) = Operand((uint32_t) 0x41000000); /* 8.0 */
-      id = {ctx->program->allocateId(), v1};
-      tmp->getDefinition(0) = Definition(id);
-      ctx->block->instructions.emplace_back(std::move(tmp));
-   }
-   tmp.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1));
-   tmp->getOperand(0) = Operand(sc);
-   tmp->getOperand(1) = Operand(tc);
-   tmp->getOperand(2) = Operand(id);
-   *coords = {ctx->program->allocateId(), v3};
-   tmp->getDefinition(0) = Definition(*coords);
-   ctx->block->instructions.emplace_back(std::move(tmp));
+
+   sc = bld.vop3(aco_opcode::v_cubesc_f32, bld.def(v1), coord_args[0], coord_args[1], coord_args[2]);
+   sc = bld.vop2(aco_opcode::v_madak_f32, bld.def(v1), sc, ma, Operand(0x3fc00000u/*1.5*/));
+
+   tc = bld.vop3(aco_opcode::v_cubetc_f32, bld.def(v1), coord_args[0], coord_args[1], coord_args[2]);
+   tc = bld.vop2(aco_opcode::v_madak_f32, bld.def(v1), tc, ma, Operand(0x3fc00000u/*1.5*/));
+
+   id = bld.vop3(aco_opcode::v_cubeid_f32, bld.def(v1), coord_args[0], coord_args[1], coord_args[2]);
+
+   if (is_array)
+      id = bld.vop2(aco_opcode::v_madmk_f32, bld.def(v1), coord_args[3], id, Operand(0x41000000u/*8.0*/));
+   *coords = bld.pseudo(aco_opcode::p_create_vector, bld.def(v3), sc, tc, id);
 
    if (is_deriv)
       fprintf(stderr, "Unimplemented tex instr type: cube coords2");
@@ -4009,11 +3960,8 @@ Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
    for (unsigned i = 0; i < coords.size(); i++)
       coord_vec[i] = emit_extract_vector(ctx, coords, i, v1);
 
-   aco_ptr<VOP1_instruction> rne{create_instruction<VOP1_instruction>(aco_opcode::v_rndne_f32, Format::VOP1, 1, 1)};
-   rne->getOperand(0) = Operand(coord_vec[idx]);
-   coord_vec[idx] = {ctx->program->allocateId(), v1};
-   rne->getDefinition(0) = Definition(coord_vec[idx]);
-   ctx->block->instructions.emplace_back(std::move(rne));
+   Builder bld(ctx->program, ctx->block);
+   coord_vec[idx] = bld.vop1(aco_opcode::v_rndne_f32, bld.def(v1), coord_vec[idx]);
 
    aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, coords.size(), 1)};
    for (unsigned i = 0; i < coords.size(); i++)
@@ -4026,6 +3974,7 @@ Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
 
 void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
+   Builder bld(ctx->program, ctx->block);
    bool has_bias = false, has_lod = false, level_zero = false, has_compare = false,
         has_offset = false, has_ddx = false, has_ddy = false, has_derivs = false, has_sample_index = false;
    Temp resource, sampler, fmask_ptr, bias, coords, compare, sample_index,
@@ -4090,43 +4039,13 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (instr->op == nir_texop_texture_samples) {
       Temp dword3 = emit_extract_vector(ctx, resource, 3, s1);
 
-      aco_ptr<Instruction> tmp_instr{create_instruction<SOP2_instruction>(aco_opcode::s_bfe_u32, Format::SOP2, 2, 1)};
-      tmp_instr->getOperand(0) = Operand(dword3);
-      tmp_instr->getOperand(1) = Operand((uint32_t) 16 | 4<<16);
-      Temp samples_log2 = {ctx->program->allocateId(), s1};
-      tmp_instr->getDefinition(0) = Definition(samples_log2);
-      ctx->block->instructions.emplace_back(std::move(tmp_instr));
+      Temp samples_log2 = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), dword3, Operand(16u | 4u<<16));
+      Temp samples = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), Operand(1u), samples_log2);
+      Temp type = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), dword3, Operand(28u | 4u<<16 /* offset=28, width=4 */));
+      Temp is_msaa = bld.sopc(aco_opcode::s_cmp_ge_u32, bld.def(s1, scc), type, Operand(14u));
 
-      tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_lshl_b32, Format::SOP2, 2, 2));
-      tmp_instr->getOperand(0) = Operand((uint32_t) 1);
-      tmp_instr->getOperand(1) = Operand(samples_log2);
-      Temp samples = {ctx->program->allocateId(), s1};
-      tmp_instr->getDefinition(0) = Definition(samples);
-      tmp_instr->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
-      ctx->block->instructions.emplace_back(std::move(tmp_instr));
-
-      tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_bfe_u32, Format::SOP2, 2, 1));
-      tmp_instr->getOperand(0) = Operand(dword3);
-      tmp_instr->getOperand(1) = Operand((uint32_t) 28 | 4<<16); //offset=28, width=4
-      Temp type = {ctx->program->allocateId(), s1};
-      tmp_instr->getDefinition(0) = Definition(type);
-      ctx->block->instructions.emplace_back(std::move(tmp_instr));
-
-      tmp_instr.reset(create_instruction<SOPC_instruction>(aco_opcode::s_cmp_ge_u32, Format::SOPC, 2, 1));
-      tmp_instr->getOperand(0) = Operand(type);
-      tmp_instr->getOperand(1) = Operand((uint32_t) 14);
-      Temp is_msaa = {ctx->program->allocateId(), b};
-      tmp_instr->getDefinition(0) = Definition(is_msaa);
-      tmp_instr->getDefinition(0).setFixed(scc);
-      ctx->block->instructions.emplace_back(std::move(tmp_instr));
-
-      tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1));
-      tmp_instr->getOperand(0) = Operand(samples);
-      tmp_instr->getOperand(1) = Operand((uint32_t) 1);
-      tmp_instr->getOperand(2) = Operand(is_msaa);
-      tmp_instr->getOperand(2).setFixed(scc);
-      tmp_instr->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
-      ctx->block->instructions.emplace_back(std::move(tmp_instr));
+      bld.sop2(aco_opcode::s_cselect_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)),
+               samples, Operand(1u), bld.scc(is_msaa));
       return;
    }
 
@@ -4135,33 +4054,13 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       Temp acc, pack = Temp();
       for (unsigned i = 0; i < offset.size(); i++) {
          acc = emit_extract_vector(ctx, offset, i, s1);
-
-         tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_and_b32, Format::SOP2, 2, 2));
-         tmp_instr->getOperand(0) = Operand(acc);
-         tmp_instr->getOperand(1) = Operand((uint32_t) 0x3F);
-         acc = {ctx->program->allocateId(), s1};
-         tmp_instr->getDefinition(0) = Definition(acc);
-         tmp_instr->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
-         ctx->block->instructions.emplace_back(std::move(tmp_instr));
+         acc = bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), acc, Operand(0x3Fu));
 
          if (i == 0) {
             pack = acc;
          } else {
-            tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_lshl_b32, Format::SOP2, 2, 2));
-            tmp_instr->getOperand(0) = Operand(pack);
-            tmp_instr->getOperand(1) = Operand((uint32_t) 8 * i);
-            acc = {ctx->program->allocateId(), s1};
-            tmp_instr->getDefinition(0) = Definition(acc);
-            tmp_instr->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
-            ctx->block->instructions.emplace_back(std::move(tmp_instr));
-
-            tmp_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b32, Format::SOP2, 2, 2));
-            tmp_instr->getOperand(0) = Operand(pack);
-            tmp_instr->getOperand(1) = Operand(acc);
-            pack = {ctx->program->allocateId(), s1};
-            tmp_instr->getDefinition(0) = Definition(pack);
-            tmp_instr->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
-            ctx->block->instructions.emplace_back(std::move(tmp_instr));
+            acc = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), pack, Operand(8u * i));
+            pack = bld.sop2(aco_opcode::s_or_b32, bld.def(s1), bld.def(s1, scc), pack, acc);
          }
       }
       offset = pack;
@@ -4169,22 +4068,12 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
    /* pack derivatives */
    if (has_ddx || has_ddy) {
-      aco_ptr<Instruction> pack_derivs;
       if (instr->sampler_dim == GLSL_SAMPLER_DIM_1D && ctx->options->chip_class >= GFX9) {
-         pack_derivs.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 4, 1));
-         pack_derivs->getOperand(0) = Operand((uint32_t) 0);
-         pack_derivs->getOperand(1) = Operand(ddx);
-         pack_derivs->getOperand(2) = Operand((uint32_t) 0);
-         pack_derivs->getOperand(3) = Operand(ddy);
-         derivs = {ctx->program->allocateId(), v4};
+         derivs = bld.pseudo(aco_opcode::p_create_vector, bld.def(v4),
+                             Operand(0u), ddx, Operand(0u), ddy);
       } else {
-         pack_derivs.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1));
-         pack_derivs->getOperand(0) = Operand(ddx);
-         pack_derivs->getOperand(1) = Operand(ddy);
-         derivs = {ctx->program->allocateId(), getRegClass(vgpr, ddx.size() + ddy.size())};
+         derivs = bld.pseudo(aco_opcode::p_create_vector, bld.def(vgpr, ddx.size() + ddy.size()), ddx, ddy);
       }
-      pack_derivs->getDefinition(0) = Definition(derivs);
-      ctx->block->instructions.emplace_back(std::move(pack_derivs));
       has_derivs = true;
    }
 
@@ -4274,13 +4163,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
    aco_ptr<MIMG_instruction> tex;
    if (instr->op == nir_texop_txs) {
-      if (!has_lod) {
-         aco_ptr<VOP1_instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
-         mov->getOperand(0) = Operand((uint32_t) 0);
-         lod = Temp{ctx->program->allocateId(), v1};
-         mov->getDefinition(0) = Definition(lod);
-         ctx->block->instructions.emplace_back(std::move(mov));
-      }
+      if (!has_lod)
+         lod = bld.vop1(aco_opcode::v_mov_b32, bld.def(v1), Operand(0u));
       tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_get_resinfo, Format::MIMG, 2, 1));
       tex->getOperand(0) = Operand(as_vgpr(ctx,lod));
       tex->getOperand(1) = Operand(resource);
@@ -4388,20 +4272,9 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       if (instr->op == nir_texop_samples_identical) {
          assert(dmask == 1 && instr->dest.ssa.num_components == 1);
 
-         aco_ptr<Instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_eq_u32, Format::VOPC, 2, 1)};
-         cmp->getOperand(0) = Operand((uint32_t) 0);
-         cmp->getOperand(1) = Operand(tmp_dst);
-         Temp tmp = {ctx->program->allocateId(), s2};
-         cmp->getDefinition(0) = Definition(tmp);
-         cmp->getDefinition(0).setHint(vcc);
-         ctx->block->instructions.emplace_back(std::move(cmp));
-
-         aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, asVOP3(Format::VOP2), 3, 1)};
-         bcsel->getOperand(0) = Operand((uint32_t) 0);
-         bcsel->getOperand(1) = Operand((uint32_t) -1);
-         bcsel->getOperand(2) = Operand{tmp};
-         bcsel->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(bcsel));
+         Temp tmp = bld.tmp(s2);
+         bld.vopc(aco_opcode::v_cmp_eq_u32, Definition(tmp), Operand(0u), tmp_dst).def(0).setHint(vcc);
+         bld.vop2_e64(aco_opcode::v_cndmask_b32, Definition(dst), Operand(0u), Operand((uint32_t)-1), tmp);
       } else {
          emit_split_vector(ctx, tmp_dst, tmp_dst.size());
          expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, dmask);
