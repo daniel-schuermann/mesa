@@ -28,6 +28,7 @@
 #include <map>
 
 #include "aco_ir.h"
+#include "aco_builder.h"
 
 
 namespace aco {
@@ -35,42 +36,6 @@ namespace aco {
 struct lower_context {
    std::vector<aco_ptr<Instruction>> instructions;
 };
-
-enum dpp_ctrl {
-	_dpp_quad_perm = 0x000,
-	_dpp_row_sl = 0x100,
-	_dpp_row_sr = 0x110,
-	_dpp_row_rr = 0x120,
-	dpp_wf_sl1 = 0x130,
-	dpp_wf_rl1 = 0x134,
-	dpp_wf_sr1 = 0x138,
-	dpp_wf_rr1 = 0x13C,
-	dpp_row_mirror = 0x140,
-	dpp_row_half_mirror = 0x141,
-	dpp_row_bcast15 = 0x142,
-	dpp_row_bcast31 = 0x143
-};
-
-static inline dpp_ctrl
-dpp_quad_perm(unsigned lane0, unsigned lane1, unsigned lane2, unsigned lane3)
-{
-	assert(lane0 < 4 && lane1 < 4 && lane2 < 4 && lane3 < 4);
-	return (dpp_ctrl)(lane0 | (lane1 << 2) | (lane2 << 4) | (lane3 << 6));
-}
-
-static inline dpp_ctrl
-dpp_row_sl(unsigned amount)
-{
-	assert(amount > 0 && amount < 16);
-	return (dpp_ctrl)(((unsigned) _dpp_row_sl) | amount);
-}
-
-static inline dpp_ctrl
-dpp_row_sr(unsigned amount)
-{
-	assert(amount > 0 && amount < 16);
-	return (dpp_ctrl)(((unsigned) _dpp_row_sr) | amount);
-}
 
 void emit_dpp_op(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1,
                  aco_opcode op, unsigned dpp_ctrl, unsigned row_mask, unsigned bank_mask,

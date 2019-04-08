@@ -73,6 +73,73 @@ class Format(Enum):
    DPP = 1 << 14
    SDWA = 1 << 15
 
+   def get_builder_fields(self):
+      if self == Format.SOPK:
+         return [('uint16_t', 'imm', None)]
+      elif self == Format.SOPP:
+         return [('Block *', 'block', 'NULL'),
+                 ('uint32_t', 'imm', '0')]
+      elif self == Format.SMEM:
+         return [('bool', 'glc', 'false'),
+                 ('bool', 'nv', 'false')]
+      elif self == Format.DS:
+         return [('int16_t', 'offset0', '0'),
+                 ('int8_t', 'offset1', '0'),
+                 ('bool', 'gds', 'false')]
+      elif self == Format.MUBUF:
+         return [('unsigned', 'offset', None),
+                 ('bool', 'offen', None),
+                 ('bool', 'idxen', 'false'),
+                 ('bool', 'disable_wqm', 'false'),
+                 ('bool', 'glc', 'false'),
+                 ('bool', 'slc', 'false'),
+                 ('bool', 'tfe', 'false'),
+                 ('bool', 'lds', 'false')]
+      elif self == Format.MIMG:
+         return [('unsigned', 'dmask', '0xF'),
+                 ('bool', 'da', 'false'),
+                 ('bool', 'unrm', 'true'),
+                 ('bool', 'disable_wqm', 'false'),
+                 ('bool', 'glc', 'false'),
+                 ('bool', 'slc', 'false'),
+                 ('bool', 'tfe', 'false'),
+                 ('bool', 'lwe', 'false'),
+                 ('bool', 'r128_a16', 'false', 'r128'),
+                 ('bool', 'd16', 'false')]
+         return [('unsigned', 'attribute', None),
+                 ('unsigned', 'component', None)]
+      elif self == Format.EXP:
+         return [('unsigned', 'enabled_mask', None),
+                 ('unsigned', 'dest', None),
+                 ('bool', 'compr', 'false', 'compressed'),
+                 ('bool', 'done', 'false'),
+                 ('bool', 'vm', 'false', 'valid_mask')]
+      elif self == Format.PSEUDO_BRANCH:
+         return [('Block*', 'target0', None, 'targets[0]'),
+                 ('Block*', 'target1', 'NULL', 'targets[1]')]
+      elif self == Format.PSEUDO_REDUCTION:
+         return [('ReduceOp', 'op', None, 'reduce_op'),
+                 ('unsigned', 'cluster_size', '0')]
+      elif self == Format.VINTRP:
+         return [('unsigned', 'attribute', None),
+                 ('unsigned', 'component', None)]
+      elif self == Format.DPP:
+         return [('uint16_t', 'dpp_ctrl', None),
+                 ('uint8_t', 'row_mask', '0xF'),
+                 ('uint8_t', 'bank_mask', '0xF'),
+                 ('bool', 'bound_ctrl', 'false')]
+      else:
+         return []
+
+   def get_builder_field_names(self):
+      return [f[1] for f in self.get_builder_fields()]
+
+   def get_builder_field_dests(self):
+      return [(f[3] if len(f) >= 4 else f[1]) for f in self.get_builder_fields()]
+
+   def get_builder_field_decls(self):
+      return [('%s %s=%s' % (f[0], f[1], f[2]) if f[2] else '%s %s' % (f[0], f[1])) for f in self.get_builder_fields()]
+
 
 class Opcode(object):
    """Class that represents all the information we have about the opcode
