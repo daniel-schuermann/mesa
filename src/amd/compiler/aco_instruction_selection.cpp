@@ -674,6 +674,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       fprintf(stderr, "\n");
       abort();
    }
+   Builder bld(ctx->program, ctx->block);
    Temp dst = get_ssa_temp(ctx, &instr->dest.dest.ssa);
    switch(instr->op) {
    case nir_op_vec2:
@@ -695,40 +696,33 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       aco_ptr<Instruction> mov;
       if (dst.regClass() == s1) {
          if (src.regClass() == v1)
-            mov.reset(create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1));
+            bld.pseudo(aco_opcode::p_as_uniform, Definition(dst), src);
          else if (src.regClass() == s1)
-            mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+            bld.sop1(aco_opcode::s_mov_b32, Definition(dst), src);
          else
             unreachable("wrong src register class for nir_op_imov");
       } else if (dst.regClass() == s2) {
-         mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
+         bld.sop1(aco_opcode::s_mov_b64, Definition(dst), src);
       } else if (dst.regClass() == v1) {
-         mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+         bld.vop1(aco_opcode::v_mov_b32, Definition(dst), src);
       } else if (dst.regClass() == v2) {
-         mov.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 1, 1));
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), src);
       } else {
          nir_print_instr(&instr->instr, stderr);
          unreachable("Should have been lowered to scalar.");
       }
-      mov->getOperand(0) = Operand(src);
-      mov->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(mov));
       break;
    }
    case nir_op_fmov: {
-      aco_ptr<Instruction> mov;
       if (dst.regClass() == s1) {
-         mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+         bld.sop1(aco_opcode::s_mov_b32, Definition(dst), get_alu_src(ctx, instr->src[0]));
       } else if (dst.regClass() == v1) {
-         mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
+         bld.vop1(aco_opcode::v_mov_b32, Definition(dst), get_alu_src(ctx, instr->src[0]));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
          fprintf(stderr, "\n");
       }
-      mov->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-      mov->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(mov));
       break;
    }
    case nir_op_inot: {
@@ -737,32 +731,17 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (instr->dest.dest.ssa.bit_size == 1 && dst.regClass() == s1) {
          if (src.regClass() == s1) {
             /* in this case, src is either 1 or 0 */
-            aco_ptr<Instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_xor_b32, Format::SOP2, 2, 2)};
-            sop2->getOperand(0) = Operand((uint32_t) 1);
-            sop2->getOperand(1) = Operand(src);
-            sop2->getDefinition(0) = Definition(ctx->program->allocateId(), s1);
-            sop2->getDefinition(1) = Definition(dst);
-            sop2->getDefinition(1).setFixed(scc);
-            ctx->block->instructions.emplace_back(std::move(sop2));
+            bld.sop2(aco_opcode::s_xor_b32, bld.def(s1), bld.scc(Definition(dst)), Operand(1u), src);
          } else {
             /* src is either exec_mask or 0 */
             assert(src.regClass() == s2);
-            aco_ptr<Instruction> sopc{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_eq_u64, Format::SOPC, 2, 1)};
-            sopc->getOperand(0) = Operand((uint32_t) 0);
-            sopc->getOperand(1) = Operand(src);
-            sopc->getDefinition(0) = Definition(dst);
-            sopc->getDefinition(0).setFixed(scc);
-            ctx->block->instructions.emplace_back(std::move(sopc));
+            bld.sopc(aco_opcode::s_cmp_eq_u64, bld.scc(Definition(dst)), Operand(0u), src);
          }
       } else if (dst.regClass() == v1) {
          emit_vop1_instruction(ctx, instr, aco_opcode::v_not_b32, dst);
       } else if (dst.type() == sgpr) {
          aco_opcode opcode = dst.size() == 1 ? aco_opcode::s_not_b32 : aco_opcode::s_not_b64;
-         aco_ptr<Instruction> sop1{create_instruction<SOP1_instruction>(opcode, Format::SOP1, 1, 2)};
-         sop1->getOperand(0) = Operand(src);
-         sop1->getDefinition(0) = Definition(dst);
-         sop1->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
-         ctx->block->instructions.emplace_back(std::move(sop1));
+         bld.sop1(opcode, Definition(dst), bld.def(s1, scc), src);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -776,21 +755,13 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          emit_v_sub32(ctx, dst, Operand((uint32_t) 0), Operand(src));
       } else if (dst.regClass() == v2) {
          emit_split_vector(ctx, src, 2);
-         Temp lower = {ctx->program->allocateId(), v1};
+         Temp lower = bld.tmp(v1);
          Temp borrow = emit_v_sub32(ctx, lower, Operand((uint32_t) 0), Operand(emit_extract_vector(ctx, src, 0, v1)), true);
-         Temp upper = {ctx->program->allocateId(), v1};
+         Temp upper = bld.tmp(v1);
          emit_v_sub32(ctx, upper, Operand((uint32_t) 0), Operand(emit_extract_vector(ctx, src, 1, v1)), false, Operand(borrow));
-         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-         vec->getOperand(0) = Operand(lower);
-         vec->getOperand(1) = Operand(upper);
-         vec->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(vec));
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), lower, upper);
       } else if (dst.regClass() == s1) {
-         aco_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1)};
-         sop2->getOperand(1) = Operand((uint32_t) -1);
-         sop2->getOperand(0) = Operand(src);
-         sop2->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(sop2));
+         bld.sop2(aco_opcode::s_mul_i32, Definition(dst), Operand((uint32_t) -1), src);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -800,18 +771,9 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_iabs: {
       if (dst.regClass() == s1) {
-         aco_ptr<Instruction> sop1{create_instruction<SOP1_instruction>(aco_opcode::s_abs_i32, Format::SOP1, 2, 2)};
-         sop1->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
-         sop1->getDefinition(0) = Definition(dst);
-         sop1->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
-         ctx->block->instructions.emplace_back(std::move(sop1));
+         bld.sop1(aco_opcode::s_abs_i32, Definition(dst), bld.def(s1, scc), get_alu_src(ctx, instr->src[0]));
       } else if (dst.regClass() == v1) {
-         aco_ptr<Instruction> vop3{create_instruction<VOP3A_instruction>(aco_opcode::v_sad_u32, Format::VOP3A, 3, 1)};
-         vop3->getOperand(0) = Operand(get_alu_src(ctx, instr->src[0]));
-         vop3->getOperand(1) = Operand((uint32_t) 0);
-         vop3->getOperand(2) = Operand((uint32_t) 0);
-         vop3->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(vop3));
+         bld.vop3(aco_opcode::v_sad_u32, Definition(dst), get_alu_src(ctx, instr->src[0]), Operand(0u), Operand(0u));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -822,50 +784,14 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_isign: {
       Temp src = get_alu_src(ctx, instr->src[0]);
       if (dst.regClass() == s1) {
-         aco_ptr<Instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_ashr_i32, Format::SOP2, 2, 2)};
-         sop2->getOperand(0) = Operand(src);
-         sop2->getOperand(1) = Operand((uint32_t) 31);
-         Temp tmp = {ctx->program->allocateId(), s1};
-         sop2->getDefinition(0) = Definition(tmp);
-         sop2->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
-         ctx->block->instructions.emplace_back(std::move(sop2));
-
-         aco_ptr<Instruction> sopc{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_gt_i32, Format::SOPC, 2, 1)};
-         sopc->getOperand(0) = Operand(src);
-         sopc->getOperand(1) = Operand((uint32_t) 0);
-         Temp gtz = {ctx->program->allocateId(), s1};
-         sopc->getDefinition(0) = Definition(gtz);
-         sopc->getDefinition(0).setFixed(scc);
-         ctx->block->instructions.emplace_back(std::move(sopc));
-
-         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 2));
-         sop2->getOperand(0) = Operand(gtz);
-         sop2->getOperand(1) = Operand(tmp);
-         sop2->getDefinition(0) = Definition(dst);
-         sop2->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
-         ctx->block->instructions.emplace_back(std::move(sop2));
+         Temp tmp = bld.sop2(aco_opcode::s_ashr_i32, bld.def(s1), bld.def(s1, scc), src, Operand(31u));
+         Temp gtz = bld.sopc(aco_opcode::s_cmp_gt_i32, bld.def(s1, scc), src, Operand(0u));
+         bld.sop2(aco_opcode::s_add_i32, Definition(dst), bld.def(s1, scc), gtz, tmp);
       } else if (dst.regClass() == v1) {
-         aco_ptr<Instruction> vop2{create_instruction<VOP2_instruction>(aco_opcode::v_ashrrev_i32, Format::VOP2, 2, 1)};
-         vop2->getOperand(0) = Operand((uint32_t) 31);
-         vop2->getOperand(1) = Operand(src);
-         Temp tmp = {ctx->program->allocateId(), v1};
-         vop2->getDefinition(0) = Definition(tmp);
-         ctx->block->instructions.emplace_back(std::move(vop2));
-
-         aco_ptr<Instruction> vopc{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_ge_i32, Format::VOPC, 2, 1)};
-         vopc->getOperand(0) = Operand((uint32_t) 0);
-         vopc->getOperand(1) = Operand(src);
-         Temp gtz = {ctx->program->allocateId(), s2};
-         vopc->getDefinition(0) = Definition(gtz);
-         vopc->getDefinition(0).setHint(vcc);
-         ctx->block->instructions.emplace_back(std::move(vopc));
-
-         vop2.reset(create_instruction<SOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
-         vop2->getOperand(0) = Operand((uint32_t) 1);
-         vop2->getOperand(1) = Operand(tmp);
-         vop2->getOperand(2) = Operand(gtz);
-         vop2->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(vop2));
+         Temp tmp = bld.vop2(aco_opcode::v_ashrrev_i32, bld.def(v1), Operand(31u), src);
+         Temp gtz = bld.tmp(s2);
+         bld.vopc(aco_opcode::v_cmp_ge_i32, Definition(gtz), Operand(0u), src).def(0).setHint(vcc);
+         bld.vop2(aco_opcode::v_cndmask_b32, Definition(dst), Operand(1u), tmp, gtz);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -887,26 +813,15 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_lt_u64, cmp);
          emit_split_vector(ctx, src0, 2);
          emit_split_vector(ctx, src1, 2);
-         aco_ptr<Instruction> bcsel;
-         bcsel.reset(create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
-         bcsel->getOperand(0) = Operand(emit_extract_vector(ctx, src0, 0, v1));
-         bcsel->getOperand(1) = Operand(emit_extract_vector(ctx, src1, 0, v1));
-         bcsel->getOperand(2) = Operand(cmp);
-         Temp dst0 = {ctx->program->allocateId(), v1};
-         bcsel->getDefinition(0) = Definition(dst0);
-         ctx->block->instructions.emplace_back(std::move(bcsel));
-         bcsel.reset(create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
-         bcsel->getOperand(0) = Operand(emit_extract_vector(ctx, src0, 1, v1));
-         bcsel->getOperand(1) = Operand(emit_extract_vector(ctx, src1, 1, v1));
-         bcsel->getOperand(2) = Operand(cmp);
-         Temp dst1 = {ctx->program->allocateId(), v1};
-         bcsel->getDefinition(0) = Definition(dst1);
-         ctx->block->instructions.emplace_back(std::move(bcsel));
-         bcsel.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1));
-         bcsel->getOperand(0) = Operand(dst0);
-         bcsel->getOperand(1) = Operand(dst1);
-         bcsel->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(bcsel));
+         Temp dst0 = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1),
+                              emit_extract_vector(ctx, src0, 0, v1),
+                              emit_extract_vector(ctx, src1, 0, v1),
+                              cmp);
+         Temp dst1 = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1),
+                              emit_extract_vector(ctx, src0, 1, v1),
+                              emit_extract_vector(ctx, src1, 1, v1),
+                              cmp);
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), dst0, dst1);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -1002,11 +917,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (dst.regClass() == v1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_lshrrev_b32, dst, false, true);
       } else if (dst.regClass() == v2) {
-         aco_ptr<Instruction> vop3{create_instruction<VOP3A_instruction>(aco_opcode::v_lshrrev_b64, Format::VOP3, 2, 1)};
-         vop3->getOperand(0) = Operand(get_alu_src(ctx, instr->src[1]));
-         vop3->getOperand(1) = Operand(get_alu_src(ctx, instr->src[0]));
-         vop3->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(vop3));
+         bld.vop3(aco_opcode::v_lshrrev_b64, Definition(dst),
+                  get_alu_src(ctx, instr->src[1]), get_alu_src(ctx, instr->src[0]));
       } else if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_lshr_b32, dst, true);
       } else {
@@ -1020,11 +932,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (dst.regClass() == v1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_lshlrev_b32, dst, false, true);
       } else if (dst.regClass() == v2) {
-         aco_ptr<Instruction> vop3{create_instruction<VOP3A_instruction>(aco_opcode::v_lshlrev_b64, Format::VOP3, 2, 1)};
-         vop3->getOperand(0) = Operand(get_alu_src(ctx, instr->src[1]));
-         vop3->getOperand(1) = Operand(get_alu_src(ctx, instr->src[0]));
-         vop3->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(vop3));
+         bld.vop3(aco_opcode::v_lshlrev_b64, Definition(dst),
+                  get_alu_src(ctx, instr->src[1]), get_alu_src(ctx, instr->src[0]));
       } else if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_lshl_b32, dst, true);
       } else {
@@ -1038,11 +947,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (dst.regClass() == v1) {
          emit_vop2_instruction(ctx, instr, aco_opcode::v_ashrrev_i32, dst, false, true);
       } else if (dst.regClass() == v2) {
-         aco_ptr<Instruction> vop3{create_instruction<VOP3A_instruction>(aco_opcode::v_ashrrev_i64, Format::VOP3, 2, 1)};
-         vop3->getOperand(0) = Operand(get_alu_src(ctx, instr->src[1]));
-         vop3->getOperand(1) = Operand(get_alu_src(ctx, instr->src[0]));
-         vop3->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(vop3));
+         bld.vop3(aco_opcode::v_ashrrev_i64, Definition(dst),
+                  get_alu_src(ctx, instr->src[1]), get_alu_src(ctx, instr->src[0]));
       } else if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_ashr_i32, dst, true);
       } else {
@@ -1054,10 +960,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_find_lsb: {
       if (dst.regClass() == s1) {
-         aco_ptr<Instruction> find_lsb{create_instruction<SOP1_instruction>(aco_opcode::s_ff1_i32_b32, Format::SOP1, 1, 1)};
-         find_lsb->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-         find_lsb->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(find_lsb));
+         bld.sop1(aco_opcode::s_ff1_i32_b32, Definition(dst), get_alu_src(ctx, instr->src[0]));
       } else if (dst.regClass() == v1) {
          emit_vop1_instruction(ctx, instr, aco_opcode::v_ffbl_b32, dst);
       } else {
@@ -1070,39 +973,21 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_ifind_msb: {
       if (dst.regClass() == s1) {
          aco_opcode op = instr->op == nir_op_ufind_msb ? aco_opcode::s_flbit_i32_b32 : aco_opcode::s_flbit_i32;
-         aco_ptr<Instruction> find_msb{create_instruction<SOP1_instruction>(op, Format::SOP1, 1, 1)};
-         find_msb->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-         Temp msb_rev = {ctx->program->allocateId(), s1};
-         find_msb->getDefinition(0) = Definition(msb_rev);
-         ctx->block->instructions.emplace_back(std::move(find_msb));
-         aco_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_sub_u32, Format::SOP2, 2, 2)};
-         sop2->getOperand(0) = Operand((uint32_t) 31);
-         sop2->getOperand(1) = Operand(msb_rev);
-         Temp msb = {ctx->program->allocateId(), s1};
-         sop2->getDefinition(0) = Definition(msb);
-         Temp carry = {ctx->program->allocateId(), s1};
-         sop2->getDefinition(1) = Definition(carry);
-         sop2->getDefinition(1).setFixed(scc);
-         ctx->block->instructions.emplace_back(std::move(sop2));
-         sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1));
-         sop2->getOperand(0) = Operand((uint32_t) -1);
-         sop2->getOperand(1) = Operand(msb);
-         sop2->getOperand(2) = Operand(carry);
-         sop2->getOperand(2).setFixed(scc);
-         sop2->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(sop2));
+         Temp msb_rev = bld.sop1(op, bld.def(s1), get_alu_src(ctx, instr->src[0]));
+
+         Builder::Result sub = bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.def(s1, scc),
+                                        Operand(31u), msb_rev);
+         Temp msb = sub.def(0).getTemp();
+         Temp carry = sub.def(1).getTemp();
+
+         bld.sop2(aco_opcode::s_cselect_b32, Definition(dst), Operand((uint32_t)-1), msb, carry);
       } else if (dst.regClass() == v1) {
          aco_opcode op = instr->op == nir_op_ufind_msb ? aco_opcode::v_ffbh_u32 : aco_opcode::v_ffbh_i32;
-         Temp msb_rev = {ctx->program->allocateId(), v1};
+         Temp msb_rev = bld.tmp(v1);
          emit_vop1_instruction(ctx, instr, op, msb_rev);
-         Temp msb = {ctx->program->allocateId(), v1};
+         Temp msb = bld.tmp(v1);
          Temp carry = emit_v_sub32(ctx, msb, Operand((uint32_t) 31), Operand(msb_rev), true);
-         aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, asVOP3(Format::VOP2), 3, 1)};
-         bcsel->getOperand(0) = Operand(msb);
-         bcsel->getOperand(1) = Operand((uint32_t) -1);
-         bcsel->getOperand(2) = Operand(carry);
-         bcsel->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(bcsel));
+         bld.vop2_e64(aco_opcode::v_cndmask_b32, Definition(dst), msb, Operand((uint32_t)-1), carry);
       } else {
          nir_print_instr(&instr->instr, stderr);
          unreachable("Unsupported NIR instr bit size.");
@@ -1110,19 +995,15 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_bitfield_reverse: {
-      aco_ptr<Instruction> brev;
       if (dst.regClass() == s1) {
-         brev.reset(create_instruction<SOP1_instruction>(aco_opcode::s_brev_b32, Format::SOP1, 1, 1));
+         bld.sop1(aco_opcode::s_brev_b32, Definition(dst), get_alu_src(ctx, instr->src[0]));
       } else if (dst.regClass() == v1) {
-         brev.reset(create_instruction<VOP1_instruction>(aco_opcode::v_bfrev_b32, Format::VOP1, 1, 1));
+         bld.vop1(aco_opcode::v_bfrev_b32, Definition(dst), get_alu_src(ctx, instr->src[0]));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
          fprintf(stderr, "\n");
       }
-      brev->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-      brev->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(brev));
       break;
    }
    case nir_op_iadd: {
@@ -1142,27 +1023,14 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          Temp src00 = emit_extract_vector(ctx, src0, 0, getRegClass(src0.type(), 1));
          Temp src10 = emit_extract_vector(ctx, src1, 0, getRegClass(src1.type(), 1));
 
-         Temp dst0 = {ctx->program->allocateId(), v1};
+         Temp dst0 = bld.tmp(v1), dst1 = bld.tmp(v1);
          Temp carry = emit_v_add32(ctx, dst0, Operand(src00), Operand(src10), true);
+         bld.vop2(aco_opcode::v_addc_co_u32, Definition(dst1), bld.def(s2),
+                  emit_extract_vector(ctx, src0, 1, getRegClass(src0.type(), 1)),
+                  emit_extract_vector(ctx, src1, 1, getRegClass(src0.type(), 1)),
+                  carry).def(1).setHint(vcc);
 
-         add.reset(create_instruction<VOP2_instruction>(aco_opcode::v_addc_co_u32, Format::VOP2, 3, 2));
-         Temp src01 = emit_extract_vector(ctx, src0, 1, getRegClass(src0.type(), 1));
-         Temp src11 = emit_extract_vector(ctx, src1, 1, getRegClass(src1.type(), 1));
-         add->getOperand(0) = Operand(src01);
-         add->getOperand(1) = Operand(src11);
-         add->getOperand(2) = Operand(carry);
-         Temp dst1 = {ctx->program->allocateId(), v1};
-         add->getDefinition(0) = Definition(dst1);
-         Temp tmp = {ctx->program->allocateId(), s2};
-         add->getDefinition(1) = Definition(tmp);
-         add->getDefinition(1).setHint(vcc);
-         ctx->block->instructions.emplace_back(std::move(add));
-
-         add.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1));
-         add->getOperand(0) = Operand(dst0);
-         add->getOperand(1) = Operand(dst1);
-         add->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(add));
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), dst0, dst1);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -1174,23 +1042,10 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       Temp src0 = get_alu_src(ctx, instr->src[0]);
       Temp src1 = get_alu_src(ctx, instr->src[1]);
       if (dst.regClass() == s1) {
-         aco_ptr<SOP2_instruction> add{create_instruction<SOP2_instruction>(aco_opcode::s_add_u32, Format::SOP2, 2, 2)};
-         add->getOperand(0) = Operand(src0);
-         add->getOperand(1) = Operand(src1);
-         Temp tmp = {ctx->program->allocateId(), s1};
-         add->getDefinition(0) = Definition(tmp);
-         Temp carry = {ctx->program->allocateId(), b};
-         add->getDefinition(1) = Definition(carry);
-         add->getDefinition(1).setFixed(PhysReg{253}); /* scc */
-         ctx->block->instructions.emplace_back(std::move(add));
-
-         aco_ptr<SOP2_instruction> clamp{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b32, Format::SOP2, 3, 1)};
-         clamp->getOperand(0) = Operand((uint32_t) 0xffffffff);
-         clamp->getOperand(1) = Operand(tmp);
-         clamp->getOperand(2) = Operand(carry);
-         clamp->getOperand(2).setFixed({253}); /* scc */
-         clamp->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(clamp));
+         Temp tmp = bld.tmp(s1), carry = bld.tmp(s1);
+         bld.sop2(aco_opcode::s_add_u32, Definition(tmp), bld.scc(Definition(carry)),
+                  src0, src1);
+         bld.sop2(aco_opcode::s_cselect_b32, Definition(dst), Operand((uint32_t) -1), tmp, bld.scc(carry));
       } else if (dst.regClass() == v1) {
          if (ctx->options->chip_class >= GFX9) {
             aco_ptr<VOP3A_instruction> add{create_instruction<VOP3A_instruction>(aco_opcode::v_add_u32, asVOP3(Format::VOP2), 2, 1)};
@@ -1203,22 +1058,10 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             if (src1.regClass() != v1)
                std::swap(src0, src1);
             assert(src1.regClass() == v1);
-            aco_ptr<VOP2_instruction> add{create_instruction<VOP2_instruction>(aco_opcode::v_add_co_u32, Format::VOP2, 2, 2)};
-            add->getOperand(0) = Operand(src0);
-            add->getOperand(1) = Operand(src1);
-            Temp tmp = {ctx->program->allocateId(), v1};
-            add->getDefinition(0) = Definition(tmp);
-            Temp carry = {ctx->program->allocateId(), s2};
-            add->getDefinition(1) = Definition(carry);
-            add->getDefinition(1).setHint(vcc);
-            ctx->block->instructions.emplace_back(std::move(add));
-
-            aco_ptr<VOP3A_instruction> clamp{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, asVOP3(Format::VOP2), 3, 1)};
-            clamp->getOperand(0) = Operand(tmp);
-            clamp->getOperand(1) = Operand((uint32_t) 0xffffffff);
-            clamp->getOperand(2) = Operand(carry);
-            clamp->getDefinition(0) = Definition(dst);
-            ctx->block->instructions.emplace_back(std::move(clamp));
+            Temp tmp = bld.tmp(v1), carry = bld.tmp(v1);
+            bld.vop2(aco_opcode::v_add_co_u32, Definition(tmp), Definition(carry),
+                     src0, src1).def(1).setHint(vcc);
+            bld.vop2_e64(aco_opcode::v_cndmask_b32, Definition(dst), tmp, Operand((uint32_t) -1), carry);
          }
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
@@ -1231,23 +1074,10 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       Temp src0 = get_alu_src(ctx, instr->src[0]);
       Temp src1 = get_alu_src(ctx, instr->src[1]);
       if (dst.regClass() == s1) {
-         aco_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_add_u32, Format::SOP2, 2, 2)};
-         sop2->getOperand(0) = Operand(src0);
-         sop2->getOperand(1) = Operand(src1);
-         sop2->getDefinition(0) = Definition(ctx->program->allocateId(), s1);
-         sop2->getDefinition(1) = Definition(dst);
-         sop2->getDefinition(1).setFixed(scc);
-         ctx->block->instructions.emplace_back(std::move(sop2));
+         bld.sop2(aco_opcode::s_add_u32, bld.def(s1), bld.scc(Definition(dst)), src0, src1);
       } else if (dst.regClass() == v1) {
-         Temp tmp = {ctx->program->allocateId(), v1};
-         Temp carry = emit_v_add32(ctx, tmp, Operand(src0), Operand(src1), true);
-         Format format = asVOP3(Format::VOP2);
-         aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, format, 3, 1)};
-         bcsel->getOperand(0) = Operand((uint32_t) 0);
-         bcsel->getOperand(1) = Operand((uint32_t) 1);
-         bcsel->getOperand(2) = Operand(carry);
-         bcsel->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(bcsel));
+         Temp carry = emit_v_add32(ctx, bld.tmp(v1), Operand(src0), Operand(src1), true);
+         bld.vop2_e64(aco_opcode::v_cndmask_b32, Definition(dst), Operand(0u), Operand(1u), carry);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -1265,17 +1095,13 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       } else if (dst.regClass() == v2) {
          emit_split_vector(ctx, src0, 2);
          emit_split_vector(ctx, src1, 2);
-         Temp lower = {ctx->program->allocateId(), v1};
+         Temp lower = bld.tmp(v1);
          Temp borrow = emit_v_sub32(ctx, lower, Operand(emit_extract_vector(ctx, src0, 0, v1)),
                                     Operand(emit_extract_vector(ctx, src1, 0, v1)), true);
-         Temp upper = {ctx->program->allocateId(), v1};
+         Temp upper = bld.tmp(v1);
          emit_v_sub32(ctx, upper, Operand(emit_extract_vector(ctx, src0, 1, v1)),
                       Operand(emit_extract_vector(ctx, src1, 1, v1)), false, Operand(borrow));
-         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-         vec->getOperand(0) = Operand(lower);
-         vec->getOperand(1) = Operand(upper);
-         vec->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(vec));
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), lower, upper);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -1287,23 +1113,11 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       Temp src0 = get_alu_src(ctx, instr->src[0]);
       Temp src1 = get_alu_src(ctx, instr->src[1]);
       if (dst.regClass() == s1) {
-         aco_ptr<SOP2_instruction> sop2{create_instruction<SOP2_instruction>(aco_opcode::s_sub_u32, Format::SOP2, 2, 2)};
-         sop2->getOperand(0) = Operand(src0);
-         sop2->getOperand(1) = Operand(src1);
-         sop2->getDefinition(0) = Definition(ctx->program->allocateId(), s1);
-         sop2->getDefinition(1) = Definition(dst);
-         sop2->getDefinition(1).setFixed(scc);
-         ctx->block->instructions.emplace_back(std::move(sop2));
+         bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.scc(Definition(dst)), src0, src1);
       } else if (dst.regClass() == v1) {
          Temp tmp = {ctx->program->allocateId(), v1};
          Temp borrow = emit_v_sub32(ctx, tmp, Operand(src0), Operand(src1), true);
-         Format format = asVOP3(Format::VOP2);
-         aco_ptr<Instruction> bcsel{create_instruction<VOP3A_instruction>(aco_opcode::v_cndmask_b32, format, 3, 1)};
-         bcsel->getOperand(0) = Operand((uint32_t) 0);
-         bcsel->getOperand(1) = Operand((uint32_t) 1);
-         bcsel->getOperand(2) = Operand(borrow);
-         bcsel->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(bcsel));
+         bld.vop2_e64(aco_opcode::v_cndmask_b32, Definition(dst), Operand(0u), Operand(1u), borrow);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -1313,11 +1127,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_imul: {
       if (dst.regClass() == v1) {
-         aco_ptr<VOP3A_instruction> mul{create_instruction<VOP3A_instruction>(aco_opcode::v_mul_lo_u32, Format::VOP3A, 2, 1)};
-         mul->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-         mul->getOperand(1) = Operand{get_alu_src(ctx, instr->src[1])};
-         mul->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(mul));
+         bld.vop3(aco_opcode::v_mul_lo_u32, Definition(dst),
+                  get_alu_src(ctx, instr->src[0]), get_alu_src(ctx, instr->src[1]));
       } else if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_mul_i32, dst, false);
       } else {
@@ -1329,22 +1140,11 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_umul_high: {
       if (dst.regClass() == v1) {
-         aco_ptr<VOP3A_instruction> mul{create_instruction<VOP3A_instruction>(aco_opcode::v_mul_hi_u32, Format::VOP3A, 2, 1)};
-         mul->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-         mul->getOperand(1) = Operand{get_alu_src(ctx, instr->src[1])};
-         mul->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(mul));
+         bld.vop3(aco_opcode::v_mul_hi_u32, Definition(dst), get_alu_src(ctx, instr->src[0]), get_alu_src(ctx, instr->src[1]));
       } else if (dst.regClass() == s1) {
-         aco_ptr<VOP3A_instruction> mul{create_instruction<VOP3A_instruction>(aco_opcode::v_mul_hi_u32, Format::VOP3A, 2, 1)};
-         mul->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-         mul->getOperand(1) = Operand{as_vgpr(ctx, get_alu_src(ctx, instr->src[1]))};
-         Temp vgpr_dst = {ctx->program->allocateId(), v1};
-         mul->getDefinition(0) = Definition(vgpr_dst);
-         ctx->block->instructions.emplace_back(std::move(mul));
-         aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
-         readlane->getOperand(0) = Operand(vgpr_dst);
-         readlane->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(readlane));
+         Temp tmp = bld.vop3(aco_opcode::v_mul_hi_u32, bld.def(v1), get_alu_src(ctx, instr->src[0]),
+                             as_vgpr(ctx, get_alu_src(ctx, instr->src[1])));
+         bld.pseudo(aco_opcode::p_as_uniform, Definition(dst), tmp);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -1354,22 +1154,11 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_imul_high: {
       if (dst.regClass() == v1) {
-         aco_ptr<VOP3A_instruction> mul{create_instruction<VOP3A_instruction>(aco_opcode::v_mul_hi_i32, Format::VOP3A, 2, 1)};
-         mul->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-         mul->getOperand(1) = Operand{get_alu_src(ctx, instr->src[1])};
-         mul->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(mul));
+         bld.vop3(aco_opcode::v_mul_hi_i32, Definition(dst), get_alu_src(ctx, instr->src[0]), get_alu_src(ctx, instr->src[1]));
       } else if (dst.regClass() == s1) {
-         aco_ptr<VOP3A_instruction> mul{create_instruction<VOP3A_instruction>(aco_opcode::v_mul_hi_i32, Format::VOP3A, 2, 1)};
-         mul->getOperand(0) = Operand{get_alu_src(ctx, instr->src[0])};
-         mul->getOperand(1) = Operand{as_vgpr(ctx, get_alu_src(ctx, instr->src[1]))};
-         Temp vgpr_dst = {ctx->program->allocateId(), v1};
-         mul->getDefinition(0) = Definition(vgpr_dst);
-         ctx->block->instructions.emplace_back(std::move(mul));
-         aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
-         readlane->getOperand(0) = Operand(vgpr_dst);
-         readlane->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(readlane));
+         Temp tmp = bld.vop3(aco_opcode::v_mul_hi_i32, bld.def(v1), get_alu_src(ctx, instr->src[0]),
+                             as_vgpr(ctx, get_alu_src(ctx, instr->src[1])));
+         bld.pseudo(aco_opcode::p_as_uniform, Definition(dst), tmp);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -2274,37 +2063,15 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          Temp src0 = get_alu_src(ctx, instr->src[0]);
          aco_ptr<Instruction> instr;
 
-         instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_cvt_f32_u32, Format::VOP1, 1, 1));
-         instr->getOperand(0) = Operand(src0);
-         Temp f_src0 = {ctx->program->allocateId(), v1};
-         instr->getDefinition(0) = Definition(f_src0);
-         ctx->block->instructions.emplace_back(std::move(instr));
+         Temp f_src0 = bld.vop1(aco_opcode::v_cvt_f32_u32, bld.def(v1), src0);
+         Temp rcp = bld.vop1(aco_opcode::v_rcp_iflag_f32, bld.def(v1), f_src0);
+         Temp f_dst = bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), Operand(0x4f800000u), rcp);
 
-         instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_rcp_iflag_f32, Format::VOP1, 1, 1));
-         instr->getOperand(0) = Operand(f_src0);
-         Temp rcp = {ctx->program->allocateId(), v1};
-         instr->getDefinition(0) = Definition(rcp);
-         ctx->block->instructions.emplace_back(std::move(instr));
+         Temp tmp = dst.regClass() == s1 ? bld.tmp(v1) : dst;
+         bld.vop1(aco_opcode::v_cvt_u32_f32, Definition(tmp), f_dst);
 
-         instr.reset(create_instruction<VOP2_instruction>(aco_opcode::v_mul_f32, Format::VOP2, 2, 1));
-         instr->getOperand(0) = Operand((uint32_t) 0x4f800000);
-         instr->getOperand(1) = Operand(rcp);
-         Temp f_dst = {ctx->program->allocateId(), v1};
-         instr->getDefinition(0) = Definition(f_dst);
-         ctx->block->instructions.emplace_back(std::move(instr));
-
-         Temp tmp = dst.regClass() == s1 ? Temp{ctx->program->allocateId(), v1} : dst;
-         instr.reset(create_instruction<VOP1_instruction>(aco_opcode::v_cvt_u32_f32, Format::VOP1, 1, 1));
-         instr->getOperand(0) = Operand(f_dst);
-         instr->getDefinition(0) = Definition(tmp);
-         ctx->block->instructions.emplace_back(std::move(instr));
-
-         if (dst.regClass() == s1) {
-            instr.reset(create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1));
-            instr->getOperand(0) = Operand(tmp);
-            instr->getDefinition(0) = Definition(dst);
-            ctx->block->instructions.emplace_back(std::move(instr));
-         }
+         if (dst.regClass() == s1)
+            bld.pseudo(aco_opcode::p_as_uniform, Definition(dst), tmp);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
