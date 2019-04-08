@@ -32,6 +32,7 @@
 #include "aco_builder.h"
 #include "aco_interface.h"
 #include "aco_instruction_selection_setup.cpp"
+#include "aco_builder.h"
 
 namespace aco {
 namespace {
@@ -2525,25 +2526,9 @@ void emit_interp_instr(isel_context *ctx, unsigned idx, unsigned component, Temp
    Temp coord1 = emit_extract_vector(ctx, src, 0, v1);
    Temp coord2 = emit_extract_vector(ctx, src, 1, v1);
 
-   Temp tmp{ctx->program->allocateId(), v1};
-   aco_ptr<Interp_instruction> p1{create_instruction<Interp_instruction>(aco_opcode::v_interp_p1_f32, Format::VINTRP, 2, 1)};
-   p1->getOperand(0) = Operand(coord1);
-   p1->getOperand(1) = Operand(ctx->prim_mask);
-   p1->getOperand(1).setFixed(m0);
-   p1->getDefinition(0) = Definition(tmp);
-   p1->attribute = idx;
-   p1->component = component;
-   aco_ptr<Interp_instruction> p2{create_instruction<Interp_instruction>(aco_opcode::v_interp_p2_f32, Format::VINTRP, 3, 1)};
-   p2->getOperand(0) = Operand(coord2);
-   p2->getOperand(1) = Operand(ctx->prim_mask);
-   p2->getOperand(1).setFixed(m0);
-   p2->getOperand(2) = Operand(tmp);
-   p2->getDefinition(0) = Definition(dst);
-   p2->attribute = idx;
-   p2->component = component;
-
-   ctx->block->instructions.emplace_back(std::move(p1));
-   ctx->block->instructions.emplace_back(std::move(p2));
+   Builder bld(ctx->program, ctx->block);
+   Temp tmp = bld.vintrp(aco_opcode::v_interp_p1_f32, bld.def(v1), coord1, bld.m0(ctx->prim_mask), idx, component);
+   bld.vintrp(aco_opcode::v_interp_p2_f32, Definition(dst), coord2, bld.m0(ctx->prim_mask), tmp, idx, component);
 }
 
 void emit_load_frag_coord(isel_context *ctx, Temp dst, unsigned num_components)
@@ -2603,6 +2588,7 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
 
 void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
 {
+   Builder bld(ctx->program, ctx->block);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    if (ctx->stage == MESA_SHADER_VERTEX) {
 
@@ -2613,13 +2599,7 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
       }
 
       unsigned offset = (nir_intrinsic_base(instr) / 4 - VERT_ATTRIB_GENERIC0) * 16;
-      aco_ptr<Instruction> load;
-      load.reset(create_instruction<SMEM_instruction>(aco_opcode::s_load_dwordx4, Format::SMEM, 2, 1));
-      load->getOperand(0) = Operand(vertex_buffers);
-      load->getOperand(1) = Operand((uint32_t) offset);
-      Temp list = {ctx->program->allocateId(), s4};
-      load->getDefinition(0) = Definition(list);
-      ctx->block->instructions.emplace_back(std::move(load));
+      Temp list = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), vertex_buffers, Operand(offset));
 
       Temp index = {ctx->program->allocateId(), v1};
       if (ctx->options->key.vs.instance_rate_inputs & (1u << offset)) {
@@ -2670,15 +2650,9 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
       unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
       unsigned component = nir_intrinsic_component(instr);
 
-      aco_ptr<Interp_instruction> mov{create_instruction<Interp_instruction>(aco_opcode::v_interp_mov_f32, Format::VINTRP, 2, 1)};
-      mov->getOperand(0) = Operand();
-      mov->getOperand(0).setFixed(PhysReg{2});
-      mov->getOperand(1) = Operand(ctx->prim_mask);
-      mov->getOperand(1).setFixed(m0);
-      mov->getDefinition(0) = Definition(dst);
-      mov->attribute = idx;
-      mov->component = component;
-      ctx->block->instructions.emplace_back(std::move(mov));
+      Operand P0;
+      P0.setFixed(PhysReg{2});
+      bld.vintrp(aco_opcode::v_interp_mov_f32, Definition(dst), P0, bld.m0(ctx->prim_mask), idx, component);
    } else {
       unreachable("Shader stage not implemented");
    }
@@ -3945,31 +3919,28 @@ void visit_get_buffer_size(isel_context *ctx, nir_intrinsic_instr *instr) {
 }
 
 void emit_memory_barrier(isel_context *ctx, nir_intrinsic_instr *instr) {
-   aco_ptr<Instruction> barrier;
-   aco_opcode op;
+   Builder bld(ctx->program, ctx->block);
    switch(instr->intrinsic) {
       case nir_intrinsic_group_memory_barrier:
       case nir_intrinsic_memory_barrier:
-         op = aco_opcode::p_memory_barrier_all;
+         bld.barrier(aco_opcode::p_memory_barrier_all);
          break;
       case nir_intrinsic_memory_barrier_atomic_counter:
-         op = aco_opcode::p_memory_barrier_atomic;
+         bld.barrier(aco_opcode::p_memory_barrier_atomic);
          break;
       case nir_intrinsic_memory_barrier_buffer:
-         op = aco_opcode::p_memory_barrier_buffer;
+         bld.barrier(aco_opcode::p_memory_barrier_buffer);
          break;
       case nir_intrinsic_memory_barrier_image:
-         op = aco_opcode::p_memory_barrier_image;
+         bld.barrier(aco_opcode::p_memory_barrier_image);
          break;
       case nir_intrinsic_memory_barrier_shared:
-         op = aco_opcode::p_memory_barrier_shared;
+         bld.barrier(aco_opcode::p_memory_barrier_shared);
          break;
       default:
          unreachable("Unimplemented memory barrier intrinsic");
          break;
    }
-   barrier.reset(create_instruction<Pseudo_barrier_instruction>(op, Format::PSEUDO_BARRIER, 0, 0));
-   ctx->block->instructions.emplace_back(std::move(barrier));
 }
 
 Operand load_lds_size_m0(isel_context *ctx)
@@ -4308,7 +4279,7 @@ void visit_load_sample_mask_in(isel_context *ctx, nir_intrinsic_instr *instr) {
 
    /* The bit pattern matches that used by fixed function fragment
     * processing. */
-   static const uint16_t ps_iter_masks[] = {
+   static const unsigned ps_iter_masks[] = {
       0xffff, /* not used */
       0x5555,
       0x1111,
@@ -4317,81 +4288,48 @@ void visit_load_sample_mask_in(isel_context *ctx, nir_intrinsic_instr *instr) {
    };
    assert(log2_ps_iter_samples < ARRAY_SIZE(ps_iter_masks));
 
-   Temp sample_id{ctx->program->allocateId(), v1};
-   aco_ptr<Instruction> instruction{create_instruction<VOP3A_instruction>(aco_opcode::v_bfe_u32, Format::VOP3A, 3, 1)};
-   instruction->getOperand(0) = Operand(ctx->fs_inputs[fs_input::ancillary]);
-   instruction->getOperand(1) = Operand((uint32_t) 8);
-   instruction->getOperand(2) = Operand((uint32_t) 4);
-   instruction->getDefinition(0) = Definition(sample_id);
-   ctx->block->instructions.emplace_back(std::move(instruction));
+   Builder bld(ctx->program, ctx->block);
 
-   Temp ps_iter_mask{ctx->program->allocateId(), v1};
-   instruction.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
-   instruction->getOperand(0) = Operand((uint32_t) ps_iter_masks[log2_ps_iter_samples]);
-   instruction->getDefinition(0) = Definition(ps_iter_mask);
-   ctx->block->instructions.emplace_back(std::move(instruction));
-
-   Temp mask{ctx->program->allocateId(), v1};
-   instruction.reset(create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1));
-   instruction->getOperand(0) = Operand(sample_id);
-   instruction->getOperand(1) = Operand(ps_iter_mask);
-   instruction->getDefinition(0) = Definition(mask);
-   ctx->block->instructions.emplace_back(std::move(instruction));
-
+   Temp sample_id = bld.vop3(aco_opcode::v_bfe_u32, bld.def(v1), ctx->fs_inputs[fs_input::ancillary], Operand(8u), Operand(4u));
+   Temp ps_iter_mask = bld.vop1(aco_opcode::v_mov_b32, bld.def(v1), Operand(ps_iter_masks[log2_ps_iter_samples]));
+   Temp mask = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), sample_id, ps_iter_mask);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-   instruction.reset(create_instruction<VOP2_instruction>(aco_opcode::v_and_b32, Format::VOP2, 2, 1));
-   instruction->getOperand(0) = Operand(mask);
-   instruction->getOperand(1) = Operand(ctx->fs_inputs[fs_input::sample_coverage]);
-   instruction->getDefinition(0) = Definition(dst);
-   ctx->block->instructions.emplace_back(std::move(instruction));
+   bld.vop2(aco_opcode::v_and_b32, Definition(dst), mask, ctx->fs_inputs[fs_input::sample_coverage]);
 }
 
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
+   Builder bld(ctx->program, ctx->block);
    switch(instr->intrinsic) {
    case nir_intrinsic_load_barycentric_pixel: {
-      aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-      vec->getOperand(0) = Operand(ctx->fs_inputs[fs_input::persp_center_p1]);
-      vec->getOperand(1) = Operand(ctx->fs_inputs[fs_input::persp_center_p2]);
       Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      vec->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(vec));
+      bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
+                 ctx->fs_inputs[fs_input::persp_center_p1],
+                 ctx->fs_inputs[fs_input::persp_center_p2]);
       emit_split_vector(ctx, dst, 2);
       break;
    }
    case nir_intrinsic_load_barycentric_centroid: {
-      aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 2, 1)};
-      vec->getOperand(0) = Operand(ctx->fs_inputs[fs_input::persp_centroid_p1]);
-      vec->getOperand(1) = Operand(ctx->fs_inputs[fs_input::persp_centroid_p2]);
       Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      vec->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(vec));
+      bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
+                 ctx->fs_inputs[fs_input::persp_centroid_p1],
+                 ctx->fs_inputs[fs_input::persp_centroid_p2]);
       emit_split_vector(ctx, dst, 2);
       break;
    }
    case nir_intrinsic_load_front_face: {
-      aco_ptr<Instruction> cmp{create_instruction<VOPC_instruction>(aco_opcode::v_cmp_lg_u32, Format::VOPC, 2, 1)};
-      cmp->getOperand(0) = Operand((uint32_t) 0);
-      cmp->getOperand(1) = Operand(ctx->fs_inputs[fs_input::front_face]);
-      cmp->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
-      cmp->getDefinition(0).setHint(vcc);
-      ctx->block->instructions.emplace_back(std::move(cmp));
+      bld.vopc(aco_opcode::v_cmp_lg_u32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)),
+               Operand(0u), ctx->fs_inputs[fs_input::front_face]).def(0).setHint(vcc);
       break;
    }
    case nir_intrinsic_load_view_index:
    case nir_intrinsic_load_layer_id: {
       unsigned base = VARYING_SLOT_LAYER / 4;
       unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
-      unsigned component = 0;
-      aco_ptr<Interp_instruction> mov{create_instruction<Interp_instruction>(aco_opcode::v_interp_mov_f32, Format::VINTRP, 2, 1)};
-      mov->getOperand(0) = Operand();
-      mov->getOperand(0).setFixed(PhysReg{2}); /* P0 */
-      mov->getOperand(1) = Operand(ctx->prim_mask);
-      mov->getOperand(1).setFixed(m0);
-      mov->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
-      mov->attribute = idx;
-      mov->component = component;
-      ctx->block->instructions.emplace_back(std::move(mov));
+      Operand P0;
+      P0.setFixed(PhysReg{2});
+      bld.vintrp(aco_opcode::v_interp_mov_f32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)),
+                 P0, bld.m0(ctx->prim_mask), idx, 0);
       break;
    }
    case nir_intrinsic_load_frag_coord: {
@@ -4417,10 +4355,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       visit_load_resource(ctx, instr);
       break;
    case nir_intrinsic_discard: {
-      aco_ptr<Instruction> zero{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
-      zero->getOperand(0) = Operand((uint32_t) 0);
-      zero->getDefinition(0) = Definition{exec, s2};
-      ctx->block->instructions.emplace_back(std::move(zero));
+      bld.sop1(aco_opcode::s_mov_b64, Definition(exec, s2), Operand(0u));
       break;
    }
    case nir_intrinsic_discard_if:
@@ -4487,10 +4422,8 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_barrier: {
       unsigned* bsize = ctx->program->info->cs.block_size;
       unsigned workgroup_size = bsize[0] * bsize[1] * bsize[2];
-      if (workgroup_size > 64) {
-         aco_ptr<Instruction> barrier{create_instruction<SOPP_instruction>(aco_opcode::s_barrier, Format::SOPP, 0, 0)};
-         ctx->block->instructions.emplace_back(std::move(barrier));
-      }
+      if (workgroup_size > 64)
+         bld.sopp(aco_opcode::s_barrier);
       break;
    }
    case nir_intrinsic_group_memory_barrier:
@@ -4504,7 +4437,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_load_num_work_groups:
    case nir_intrinsic_load_work_group_id:
    case nir_intrinsic_load_local_invocation_id: {
-      aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 3, 1)};
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
       Temp* ids;
       if (instr->intrinsic == nir_intrinsic_load_num_work_groups)
          ids = ctx->num_workgroups;
@@ -4512,49 +4445,20 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
          ids = ctx->workgroup_ids;
       else
          ids = ctx->local_invocation_ids;
-      vec->getOperand(0) = Operand(ids[0]);
-      vec->getOperand(1) = Operand(ids[1]);
-      vec->getOperand(2) = Operand(ids[2]);
-      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      vec->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(vec));
+      bld.pseudo(aco_opcode::p_create_vector, Definition(dst), ids[0], ids[1], ids[2]);
       emit_split_vector(ctx, dst, 3);
       break;
    }
    case nir_intrinsic_load_local_invocation_index: {
-      aco_ptr<Instruction> mbcnt{create_instruction<VOP3A_instruction>(aco_opcode::v_mbcnt_lo_u32_b32, Format::VOP3A, 2, 1)};
-      mbcnt->getOperand(0) = Operand((uint32_t) -1);
-      mbcnt->getOperand(1) = Operand((uint32_t) 0);
-      Temp tmp = {ctx->program->allocateId(), v1};
-      mbcnt->getDefinition(0) = Definition(tmp);
-      ctx->block->instructions.emplace_back(std::move(mbcnt));
-      mbcnt.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_mbcnt_hi_u32_b32, Format::VOP3A, 2, 1));
-      mbcnt->getOperand(0) = Operand((uint32_t) -1);
-      mbcnt->getOperand(1) = Operand(tmp);
-      Temp id = {ctx->program->allocateId(), v1};
-      mbcnt->getDefinition(0) = Definition(id);
-      ctx->block->instructions.emplace_back(std::move(mbcnt));
-      mbcnt.reset(create_instruction<SOP2_instruction>(aco_opcode::s_and_b32, Format::SOP2, 2, 1));
-      mbcnt->getOperand(0) = Operand((uint32_t) 0xfc0);
-      mbcnt->getOperand(1) = Operand(ctx->tg_size);
-      Temp tg_num = {ctx->program->allocateId(), s1};
-      mbcnt->getDefinition(0) = Definition(tg_num);
-      ctx->block->instructions.emplace_back(std::move(mbcnt));
-      mbcnt.reset(create_instruction<VOP2_instruction>(aco_opcode::v_or_b32, Format::VOP2, 2, 1));
-      mbcnt->getOperand(0) = Operand(tg_num);
-      mbcnt->getOperand(1) = Operand(id);
-      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      mbcnt->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(mbcnt));
+      Temp id = bld.vop3(aco_opcode::v_mbcnt_hi_u32_b32, bld.def(v1), Operand((uint32_t) -1),
+                         bld.vop3(aco_opcode::v_mbcnt_lo_u32_b32, bld.def(v1), Operand((uint32_t) -1), Operand(0u)));
+      Temp tg_num = bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), Operand(0xfc0u), ctx->tg_size);
+      bld.vop2(aco_opcode::v_or_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), tg_num, id);
       break;
    }
    case nir_intrinsic_load_sample_id: {
-      aco_ptr<Instruction> bfe{create_instruction<VOP3A_instruction>(aco_opcode::v_bfe_u32, Format::VOP3A, 3, 1)};
-      bfe->getOperand(0) = Operand(ctx->fs_inputs[ancillary]);
-      bfe->getOperand(1) = Operand((uint32_t) 8);
-      bfe->getOperand(2) = Operand((uint32_t) 4);
-      bfe->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
-      ctx->block->instructions.emplace_back(std::move(bfe));
+      bld.vop3(aco_opcode::v_bfe_u32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)),
+               ctx->fs_inputs[ancillary], Operand(8u), Operand(4u));
       break;
    }
    case nir_intrinsic_load_sample_mask_in: {
@@ -4562,38 +4466,22 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    }
    case nir_intrinsic_read_first_invocation: {
-      aco_ptr<Instruction> rfl;
       Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
       if (src.regClass() == v1)
-         rfl.reset(create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1));
+         bld.vop1(aco_opcode::v_readfirstlane_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), src);
       else
-         rfl.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
-      rfl->getOperand(0) = Operand(src);
-      rfl->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
-      ctx->block->instructions.emplace_back(std::move(rfl));
+         bld.sop1(aco_opcode::s_mov_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), src);
       break;
    }
    case nir_intrinsic_vote_all: {
       Temp src = as_divergent_bool(ctx, get_ssa_temp(ctx, instr->src[0].ssa), false);
-      assert(src.regClass() == s2);
-
       Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      assert(src.regClass() == s2);
       assert(dst.regClass() == s1);
 
-      Temp tmp{ctx->program->allocateId(), s2};
-      aco_ptr<SOPC_instruction> sand{create_instruction<SOPC_instruction>(aco_opcode::s_and_b64, Format::SOP2, 2, 2)};
-      sand->getOperand(0) = Operand(src);
-      sand->getOperand(1) = Operand(exec, s2);
-      sand->getDefinition(0) = Definition(tmp);
-      sand->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
-      ctx->block->instructions.emplace_back(std::move(sand));
-
-      aco_ptr<SOPC_instruction> scmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_eq_u64, Format::SOPC, 2, 1)};
-      scmp->getOperand(0) = Operand(tmp);
-      scmp->getOperand(1) = Operand(exec, s2);
-      scmp->getDefinition(0) = Definition(dst);
-      scmp->getDefinition(0).setFixed(scc);
-      ctx->block->instructions.emplace_back(std::move(scmp));
+      bld.sopc(aco_opcode::s_cmp_eq_u64, bld.scc(Definition(dst)),
+               bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2)),
+               Operand(exec, s2));
       break;
    }
    case nir_intrinsic_reduce:
