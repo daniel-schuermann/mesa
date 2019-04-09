@@ -57,11 +57,11 @@ struct mad_info {
 };
 
 struct ssa_info {
+   uint32_t val;
    union {
       Temp temp;
-      uint32_t val;
+      Instruction* instr;
    };
-   Instruction* instr;
    uint32_t uses;
    std::bitset<32> label;
 
@@ -248,6 +248,18 @@ struct ssa_info {
       return label.test(16);
    }
 
+   void set_base_offset(Temp base, uint32_t offset)
+   {
+      label.set(17,1);
+      temp = base;
+      val = offset;
+   }
+
+   bool is_base_offset()
+   {
+      return label.test(17);
+   }
+
 };
 
 struct opt_ctx {
@@ -416,6 +428,30 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             instr->getOperand(2) = Operand((uint32_t) 0);
             mubuf->offset += info.val;
             continue;
+         }
+      }
+
+      /* DS: combine additions */
+      else if (instr->format == Format::DS) {
+
+         DS_instruction *ds = static_cast<DS_instruction *>(instr.get());
+         if (i == 0 && info.is_base_offset() && info.temp.regClass() == instr->getOperand(i).regClass()) {
+            Temp base = info.temp;
+            uint32_t offset = info.val;
+            if (instr->opcode == aco_opcode::ds_write2_b32 || instr->opcode == aco_opcode::ds_read2_b32) {
+               if (offset % 4 == 0 &&
+                   ds->offset0 + (offset >> 2) <= 255 &&
+                   ds->offset1 + (offset >> 2) <= 255) {
+                  instr->getOperand(i).setTemp(base);
+                  ds->offset0 += offset >> 2;
+                  ds->offset1 += offset >> 2;
+               }
+            } else {
+               if (ds->offset0 + offset <= 65535) {
+                  instr->getOperand(i).setTemp(base);
+                  ds->offset0 += offset;
+               }
+            }
          }
       }
    }
@@ -616,6 +652,21 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       }
       break;
    }
+   case aco_opcode::v_add_u32:
+   case aco_opcode::v_add_co_u32:
+      for (unsigned i = 0; i < 2; i++) {
+         Operand base = instr->getOperand(i);
+         Operand offset_op = instr->getOperand(!i);
+         if (!base.isTemp() || (!offset_op.isConstant() && !offset_op.isTemp()))
+            continue;
+         if (offset_op.isTemp() && !ctx.info[offset_op.tempId()].is_constant() && !ctx.info[offset_op.tempId()].is_literal())
+            continue;
+
+         uint32_t offset = offset_op.isTemp() ? ctx.info[offset_op.tempId()].val : offset_op.constantValue();
+         ctx.info[instr->getDefinition(0).tempId()].set_base_offset(base.getTemp(), offset);
+         break;
+      }
+      break;
    default:
       break;
    }
