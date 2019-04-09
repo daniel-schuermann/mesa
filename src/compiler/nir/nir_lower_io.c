@@ -93,6 +93,31 @@ global_atomic_for_deref(nir_intrinsic_op deref_op)
    }
 }
 
+static nir_intrinsic_op
+shared_atomic_for_deref(nir_intrinsic_op deref_op)
+{
+   switch (deref_op) {
+#define OP(O) case nir_intrinsic_deref_##O: return nir_intrinsic_shared_##O;
+   OP(atomic_exchange)
+   OP(atomic_comp_swap)
+   OP(atomic_add)
+   OP(atomic_imin)
+   OP(atomic_umin)
+   OP(atomic_imax)
+   OP(atomic_umax)
+   OP(atomic_and)
+   OP(atomic_or)
+   OP(atomic_xor)
+   OP(atomic_fadd)
+   OP(atomic_fmin)
+   OP(atomic_fmax)
+   OP(atomic_fcomp_swap)
+#undef OP
+   default:
+      unreachable("Invalid shared atomic");
+   }
+}
+
 void
 nir_assign_var_locations(struct exec_list *var_list, unsigned *size,
                          int (*type_size)(const struct glsl_type *, bool))
@@ -326,27 +351,7 @@ lower_atomic(nir_intrinsic_instr *intrin, struct lower_io_state *state,
 {
    assert(var->data.mode == nir_var_mem_shared);
 
-   nir_intrinsic_op op;
-   switch (intrin->intrinsic) {
-#define OP(O) case nir_intrinsic_deref_##O: op = nir_intrinsic_shared_##O; break;
-   OP(atomic_exchange)
-   OP(atomic_comp_swap)
-   OP(atomic_add)
-   OP(atomic_imin)
-   OP(atomic_umin)
-   OP(atomic_imax)
-   OP(atomic_umax)
-   OP(atomic_and)
-   OP(atomic_or)
-   OP(atomic_xor)
-   OP(atomic_fadd)
-   OP(atomic_fmin)
-   OP(atomic_fmax)
-   OP(atomic_fcomp_swap)
-#undef OP
-   default:
-      unreachable("Invalid atomic");
-   }
+   nir_intrinsic_op op = shared_atomic_for_deref(intrin->intrinsic);
 
    nir_intrinsic_instr *atomic =
       nir_intrinsic_instr_create(state->builder.shader, op);
@@ -737,6 +742,10 @@ build_explicit_io_load(nir_builder *b, nir_intrinsic_instr *intrin,
       assert(addr_format_is_global(addr_format));
       op = nir_intrinsic_load_kernel_input;
       break;
+   case nir_var_mem_shared:
+      assert(addr_format == nir_address_format_32bit_global);
+      op = nir_intrinsic_load_shared;
+      break;
    default:
       unreachable("Unsupported explicit IO variable mode");
    }
@@ -750,7 +759,7 @@ build_explicit_io_load(nir_builder *b, nir_intrinsic_instr *intrin,
       load->src[1] = nir_src_for_ssa(addr_to_offset(b, addr, addr_format));
    }
 
-   if (mode != nir_var_mem_ubo && mode != nir_var_shader_in)
+   if (mode != nir_var_mem_ubo && mode != nir_var_shader_in && mode != nir_var_mem_shared)
       nir_intrinsic_set_access(load, nir_intrinsic_access(intrin));
 
    /* TODO: We should try and provide a better alignment.  For OpenCL, we need
@@ -807,6 +816,10 @@ build_explicit_io_store(nir_builder *b, nir_intrinsic_instr *intrin,
       assert(addr_format_is_global(addr_format));
       op = nir_intrinsic_store_global;
       break;
+   case nir_var_mem_shared:
+      assert(addr_format == nir_address_format_32bit_global);
+      op = nir_intrinsic_store_shared;
+      break;
    default:
       unreachable("Unsupported explicit IO variable mode");
    }
@@ -823,7 +836,8 @@ build_explicit_io_store(nir_builder *b, nir_intrinsic_instr *intrin,
 
    nir_intrinsic_set_write_mask(store, write_mask);
 
-   nir_intrinsic_set_access(store, nir_intrinsic_access(intrin));
+   if (mode != nir_var_mem_shared)
+      nir_intrinsic_set_access(store, nir_intrinsic_access(intrin));
 
    /* TODO: We should try and provide a better alignment.  For OpenCL, we need
     * to plumb the alignment through from SPIR-V when we have one.
@@ -867,6 +881,10 @@ build_explicit_io_atomic(nir_builder *b, nir_intrinsic_instr *intrin,
    case nir_var_mem_global:
       assert(addr_format_is_global(addr_format));
       op = global_atomic_for_deref(intrin->intrinsic);
+      break;
+   case nir_var_mem_shared:
+      assert(addr_format == nir_address_format_32bit_global);
+      op = shared_atomic_for_deref(intrin->intrinsic);
       break;
    default:
       unreachable("Unsupported explicit IO variable mode");
@@ -920,7 +938,7 @@ nir_explicit_io_address_from_deref(nir_builder *b, nir_deref_instr *deref,
    assert(deref->dest.is_ssa);
    switch (deref->deref_type) {
    case nir_deref_type_var:
-      assert(deref->mode == nir_var_shader_in);
+      assert(deref->mode & (nir_var_shader_in | nir_var_mem_shared));
       return nir_imm_intN_t(b, deref->var->data.driver_location,
                             deref->dest.ssa.bit_size);
 
