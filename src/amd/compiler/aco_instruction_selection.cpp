@@ -3815,6 +3815,13 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       bld.vopc(aco_opcode::v_cmp_lg_u32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), Operand(0u), get_ssa_temp(ctx, instr->src[0].ssa));
       break;
    }
+   case nir_intrinsic_shuffle: {
+      Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
+      Temp tid = get_ssa_temp(ctx, instr->src[1].ssa);
+      assert(src.regClass() == v1 && tid.regClass() == v1);
+      bld.ds(aco_opcode::ds_bpermute_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), tid, src);
+      break;
+   }
    case nir_intrinsic_load_sample_id: {
       bld.vop3(aco_opcode::v_bfe_u32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)),
                ctx->fs_inputs[ancillary], Operand(8u), Operand(4u));
