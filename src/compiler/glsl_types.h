@@ -63,6 +63,9 @@ const struct glsl_type *decode_type_from_blob(struct blob_reader *blob);
 }
 #endif
 
+typedef void (*glsl_type_size_align_func)(const struct glsl_type *type,
+                                          unsigned *size, unsigned *align);
+
 enum glsl_base_type {
    /* Note: GLSL_TYPE_UINT, GLSL_TYPE_INT, and GLSL_TYPE_FLOAT must be 0, 1,
     * and 2 so that they will fit in the 2 bits of glsl_type::sampled_type.
@@ -532,6 +535,26 @@ public:
     * Gets an explicitly laid out interface type.
     */
    const glsl_type *get_explicit_interface_type(bool supports_std430) const;
+
+   /** Returns an explicitly laid out type given a type and size/align func
+    *
+    * The size/align func is only called for scalar and vector types and the
+    * returned type is otherwise laid out in the natural way as follows:
+    *
+    *  - Arrays and matrices have a stride of ALIGN(elem_size, elem_align).
+    *
+    *  - Structure types have their elements in-order and as tightly packed as
+    *    possible following the alignment required by the size/align func.
+    *
+    *  - All composite types (structures, matrices, and arrays) have an
+    *    alignment equal to the highest alighment of any member of the composite.
+    *
+    * The types returned by this function are likely not suitable for most UBO
+    * or SSBO layout because they do not add the extra array and substructure
+    * alignment that is required by std140 and std430.
+    */
+   const glsl_type *get_explicit_type_for_size_align(glsl_type_size_align_func type_info,
+                                                     unsigned *size, unsigned *align) const;
 
    /**
     * Alignment in bytes of the start of this type in OpenCL memory.

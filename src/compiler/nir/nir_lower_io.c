@@ -762,7 +762,7 @@ build_explicit_io_load(nir_builder *b, nir_intrinsic_instr *intrin,
       op = nir_intrinsic_load_kernel_input;
       break;
    case nir_var_mem_shared:
-      assert(addr_format == nir_address_format_32bit_global);
+      assert(addr_format == nir_address_format_32bit_offset);
       op = nir_intrinsic_load_shared;
       break;
    default:
@@ -773,6 +773,9 @@ build_explicit_io_load(nir_builder *b, nir_intrinsic_instr *intrin,
 
    if (addr_format_is_global(addr_format)) {
       load->src[0] = nir_src_for_ssa(addr_to_global(b, addr, addr_format));
+   } else if (addr_format == nir_address_format_32bit_offset) {
+      assert(addr->num_components == 1);
+      load->src[0] = nir_src_for_ssa(addr);
    } else {
       load->src[0] = nir_src_for_ssa(addr_to_index(b, addr, addr_format));
       load->src[1] = nir_src_for_ssa(addr_to_offset(b, addr, addr_format));
@@ -836,7 +839,7 @@ build_explicit_io_store(nir_builder *b, nir_intrinsic_instr *intrin,
       op = nir_intrinsic_store_global;
       break;
    case nir_var_mem_shared:
-      assert(addr_format == nir_address_format_32bit_global);
+      assert(addr_format == nir_address_format_32bit_offset);
       op = nir_intrinsic_store_shared;
       break;
    default:
@@ -848,6 +851,9 @@ build_explicit_io_store(nir_builder *b, nir_intrinsic_instr *intrin,
    store->src[0] = nir_src_for_ssa(value);
    if (addr_format_is_global(addr_format)) {
       store->src[1] = nir_src_for_ssa(addr_to_global(b, addr, addr_format));
+   } else if (addr_format == nir_address_format_32bit_offset) {
+      assert(addr->num_components == 1);
+      store->src[1] = nir_src_for_ssa(addr);
    } else {
       store->src[1] = nir_src_for_ssa(addr_to_index(b, addr, addr_format));
       store->src[2] = nir_src_for_ssa(addr_to_offset(b, addr, addr_format));
@@ -902,7 +908,7 @@ build_explicit_io_atomic(nir_builder *b, nir_intrinsic_instr *intrin,
       op = global_atomic_for_deref(intrin->intrinsic);
       break;
    case nir_var_mem_shared:
-      assert(addr_format == nir_address_format_32bit_global);
+      assert(addr_format == nir_address_format_32bit_offset);
       op = shared_atomic_for_deref(intrin->intrinsic);
       break;
    default:
@@ -914,6 +920,9 @@ build_explicit_io_atomic(nir_builder *b, nir_intrinsic_instr *intrin,
    unsigned src = 0;
    if (addr_format_is_global(addr_format)) {
       atomic->src[src++] = nir_src_for_ssa(addr_to_global(b, addr, addr_format));
+   } else if (addr_format == nir_address_format_32bit_offset) {
+      assert(addr->num_components == 1);
+      atomic->src[src++] = nir_src_for_ssa(addr);
    } else {
       atomic->src[src++] = nir_src_for_ssa(addr_to_index(b, addr, addr_format));
       atomic->src[src++] = nir_src_for_ssa(addr_to_offset(b, addr, addr_format));
@@ -925,7 +934,7 @@ build_explicit_io_atomic(nir_builder *b, nir_intrinsic_instr *intrin,
    /* Global atomics don't have access flags because they assume that the
     * address may be non-uniform.
     */
-   if (!addr_format_is_global(addr_format))
+   if (!addr_format_is_global(addr_format) && mode != nir_var_mem_shared)
       nir_intrinsic_set_access(atomic, nir_intrinsic_access(intrin));
 
    assert(intrin->dest.ssa.num_components == 1);
@@ -1230,95 +1239,35 @@ nir_lower_explicit_io(nir_shader *shader, nir_variable_mode modes,
    return progress;
 }
 
-static const struct glsl_type *
-get_explicit_type(const struct glsl_type *type,
-                  void (*type_info)(const struct glsl_type *,
-                                    unsigned *size, unsigned *align),
-                  unsigned *size, unsigned *align)
-{
-   if (glsl_type_is_scalar(type)) {
-      type_info(type, size, align);
-      return type;
-   } else if (glsl_type_is_array(type)) {
-      const struct glsl_type *element = glsl_get_array_element(type);
-      unsigned elem_size, elem_align;
-      const struct glsl_type *explicit_element =
-         get_explicit_type(element, type_info, &elem_size, &elem_align);
-
-      unsigned stride = util_align_npot(elem_size, elem_align);
-
-      *size = stride * glsl_get_length(type);
-      *align = elem_align;
-      return glsl_array_type(explicit_element, glsl_get_length(type), stride);
-   } else if (glsl_type_is_struct(type)) {
-      unsigned num_fields = glsl_get_length(type);
-      struct glsl_struct_field *fields =
-         malloc(sizeof(struct glsl_struct_field) * num_fields);
-
-      unsigned offset = 0;
-      *size = 0;
-      *align = 0;
-      for (unsigned i = 0; i < num_fields; i++) {
-         fields[i] = *glsl_get_struct_field_data(type, i);
-
-         assert(fields[i].matrix_layout != GLSL_MATRIX_LAYOUT_ROW_MAJOR);
-         unsigned mem_size, mem_align;
-         fields[i].type =
-            get_explicit_type(fields[i].type, type_info, &mem_size, &mem_align);
-         if (fields[i].offset < 0)
-            fields[i].offset = util_align_npot(offset, mem_align);
-
-         offset = fields[i].offset + mem_size;
-
-         *size = MAX2(*size, offset);
-         *align = MAX2(*align, mem_align);
-      }
-
-      type = glsl_struct_type(fields, num_fields, glsl_get_type_name(type), false);
-      free(fields);
-      return type;
-   } else if (glsl_type_is_vector(type)) {
-      type_info(type, size, align);
-
-      const struct glsl_type *element_type = glsl_get_array_element(type);
-      unsigned elem_size, elem_align;
-      type_info(element_type, &elem_size, &elem_align);
-
-      assert(elem_size * glsl_get_length(type) <= *size);
-      return glsl_explicit_matrix_type(type, elem_size, false);
-   } else if (glsl_type_is_matrix(type)) {
-      const struct glsl_type *col_type =
-         glsl_vector_type(glsl_get_base_type(type), glsl_get_vector_elements(type));
-
-      unsigned col_size, col_align;
-      type_info(col_type, &col_size, &col_align);
-      unsigned stride = util_align_npot(col_size, col_align);
-
-      *size = glsl_get_matrix_columns(type) * stride;
-      *align = col_align;
-      return glsl_explicit_matrix_type(type, stride, false);
-   } else {
-      unreachable("Unhandled type.");
-   }
-}
-
 static bool
-nir_lower_to_explicit_impl(nir_function_impl *impl, nir_variable_mode modes,
-                           void (*type_info)(const struct glsl_type *,
-                                             unsigned *size, unsigned *align))
+nir_lower_vars_to_explicit_types_impl(nir_function_impl *impl,
+                                      nir_variable_mode modes,
+                                      glsl_type_size_align_func type_info)
 {
    bool progress = false;
 
    nir_foreach_block(block, impl) {
       nir_foreach_instr(instr, block) {
-         if (instr->type == nir_instr_type_deref) {
-            nir_deref_instr *deref = nir_instr_as_deref(instr);
-            if (deref->mode & modes) {
-               unsigned size, align;
-               const struct glsl_type *new_type =
-                  get_explicit_type(deref->type, type_info, &size, &align);
-               progress |= new_type != deref->type;
-               deref->type = new_type;
+         if (instr->type != nir_instr_type_deref)
+            continue;
+
+         nir_deref_instr *deref = nir_instr_as_deref(instr);
+         if (!(deref->mode & modes))
+            continue;
+
+         unsigned size, alignment;
+         const struct glsl_type *new_type =
+            glsl_get_explicit_type_for_size_align(deref->type, type_info, &size, &alignment);
+         if (new_type != deref->type) {
+            progress = true;
+            deref->type = new_type;
+         }
+         if (deref->deref_type == nir_deref_type_cast) {
+            /* See also glsl_type::get_explicit_type() */
+            unsigned new_stride = align(size, alignment);
+            if (new_stride != deref->cast.ptr_stride) {
+               deref->cast.ptr_stride = new_stride;
+               progress = true;
             }
          }
       }
@@ -1335,43 +1284,61 @@ nir_lower_to_explicit_impl(nir_function_impl *impl, nir_variable_mode modes,
 }
 
 static bool
-lower_vars_to_explicit(struct exec_list *vars,
-                       void (*type_info)(const struct glsl_type *,
-                                         unsigned *size, unsigned *align)) {
+lower_vars_to_explicit(nir_shader *shader,
+                       struct exec_list *vars, nir_variable_mode mode,
+                       glsl_type_size_align_func type_info)
+{
    bool progress = false;
+   unsigned offset = 0;
    nir_foreach_variable(var, vars) {
       unsigned size, align;
       const struct glsl_type *explicit_type =
-         get_explicit_type(var->type, type_info, &size, &align);
+         glsl_get_explicit_type_for_size_align(var->type, type_info, &size, &align);
+
       if (explicit_type != var->type) {
          progress = true;
          var->type = explicit_type;
       }
+
+      var->data.driver_location = ALIGN_POT(offset, align);
+      offset = var->data.driver_location + size;
    }
+
+   if (mode == nir_var_mem_shared) {
+      shader->info.cs.shared_size = offset;
+      shader->num_shared = offset;
+   }
+
    return progress;
 }
 
 bool
-nir_lower_to_explicit(nir_shader *shader,
-                      nir_variable_mode modes,
-                      void (*type_info)(const struct glsl_type *,
-                                        unsigned *size, unsigned *align))
+nir_lower_vars_to_explicit_types(nir_shader *shader,
+                                 nir_variable_mode modes,
+                                 glsl_type_size_align_func type_info)
 {
-   /* Situations which need to be handled to support more modes:
+   /* TODO: Situations which need to be handled to support more modes:
     * - row-major matrices
     * - compact shader inputs/outputs
     * - interface types
     */
-   assert(!(modes & ~nir_var_mem_shared) && "unsupported");
+   nir_variable_mode supported = nir_var_mem_shared | nir_var_shader_temp | nir_var_function_temp;
+   assert(!(modes & ~supported) && "unsupported");
 
    bool progress = false;
 
    if (modes & nir_var_mem_shared)
-      lower_vars_to_explicit(&shader->shared, type_info);
+      progress |= lower_vars_to_explicit(shader, &shader->shared, nir_var_mem_shared, type_info);
+   if (modes & nir_var_shader_temp)
+      progress |= lower_vars_to_explicit(shader, &shader->globals, nir_var_shader_temp, type_info);
 
    nir_foreach_function(function, shader) {
-      if (function->impl)
-         progress |= nir_lower_to_explicit_impl(function->impl, modes, type_info);
+      if (function->impl) {
+         if (modes & nir_var_function_temp)
+            progress |= lower_vars_to_explicit(shader, &function->impl->locals, nir_var_function_temp, type_info);
+
+         progress |= nir_lower_vars_to_explicit_types_impl(function->impl, modes, type_info);
+      }
    }
 
    return progress;

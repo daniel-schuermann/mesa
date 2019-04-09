@@ -3456,10 +3456,9 @@ bool nir_lower_io(nir_shader *shader,
 bool nir_io_add_const_offset_to_base(nir_shader *nir, nir_variable_mode mode);
 
 bool
-nir_lower_to_explicit(nir_shader *shader,
-                      nir_variable_mode modes,
-                      void (*type_info)(const struct glsl_type *,
-                                        unsigned *size, unsigned *align));
+nir_lower_vars_to_explicit_types(nir_shader *shader,
+                                 nir_variable_mode modes,
+                                 glsl_type_size_align_func type_info);
 
 typedef enum {
    /**

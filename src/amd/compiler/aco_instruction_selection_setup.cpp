@@ -1292,16 +1292,10 @@ setup_variables(isel_context *ctx, nir_shader *nir)
       break;
    }
    case MESA_SHADER_COMPUTE: {
-      unsigned lds_size_bytes = 0;
-      nir_foreach_variable(variable, &nir->shared)
-      {
-         variable->data.driver_location = lds_size_bytes;
-         lds_size_bytes += total_shared_var_size(variable->type);
-      }
       unsigned lds_allocation_size_unit = 4 * 64;
       if (ctx->program->chip_class >= GFX7)
          lds_allocation_size_unit = 4 * 128;
-      ctx->program->config->lds_size = (lds_size_bytes + lds_allocation_size_unit - 1) / lds_allocation_size_unit;
+      ctx->program->config->lds_size = (nir->info.cs.shared_size + lds_allocation_size_unit - 1) / lds_allocation_size_unit;
       ctx->program->info->cs.block_size[0] = nir->info.cs.local_size[0];
       ctx->program->info->cs.block_size[1] = nir->info.cs.local_size[1];
       ctx->program->info->cs.block_size[2] = nir->info.cs.local_size[2];
@@ -1356,10 +1350,10 @@ setup_isel_context(Program* program, nir_shader *nir,
    }
 
    /* the variable setup has to be done before lower_io / CSE */
+   nir_lower_vars_to_explicit_types(nir, nir_var_mem_shared, shared_var_info);
    setup_variables(&ctx, nir);
 
    /* optimize and lower memory operations */
-   nir_lower_to_explicit(nir, nir_var_mem_shared, shared_var_info);
    if (nir_opt_load_store_vectorize(nir,
                                     (nir_variable_mode)(nir_var_mem_ssbo | nir_var_mem_ubo |
                                                         nir_var_mem_push_const | nir_var_mem_shared),
@@ -1368,7 +1362,7 @@ setup_isel_context(Program* program, nir_shader *nir,
       nir_lower_pack(nir);
    }
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
-   nir_lower_explicit_io(nir, nir_var_mem_shared, nir_address_format_32bit_global);
+   nir_lower_explicit_io(nir, nir_var_mem_shared, nir_address_format_32bit_offset);
    nir_lower_explicit_io(nir, nir_var_mem_global, nir_address_format_64bit_global);
 
    /* lower ALU operations */

@@ -746,3 +746,11 @@ glsl_type_is_leaf(const struct glsl_type *type)
       return true;
    }
 }
+
+const struct glsl_type *
+glsl_get_explicit_type_for_size_align(const struct glsl_type *type,
+                                      glsl_type_size_align_func type_info,
+                                      unsigned *size, unsigned *align)
+{
+   return type->get_explicit_type_for_size_align(type_info, size, align);
+}

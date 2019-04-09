@@ -192,13 +192,14 @@ const struct glsl_type *glsl_transposed_type(const struct glsl_type *type);
 
 const struct glsl_type *glsl_channel_type(const struct glsl_type *type);
 
-typedef void (*glsl_type_size_align_func)(const struct glsl_type *type,
-                                          unsigned *size, unsigned *align);
-
 void glsl_get_natural_size_align_bytes(const struct glsl_type *type,
                                        unsigned *size, unsigned *align);
 
 const struct glsl_type *glsl_atomic_uint_type(void);
+
+const struct glsl_type *glsl_get_explicit_type_for_size_align(const struct glsl_type *type,
+                                                              glsl_type_size_align_func type_info,
+                                                              unsigned *size, unsigned *align);
 
 unsigned glsl_type_get_sampler_count(const struct glsl_type *type);
 unsigned glsl_type_get_image_count(const struct glsl_type *type);
