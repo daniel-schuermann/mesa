@@ -35,6 +35,8 @@
 #include "nir_builder.h"
 #include "nir_deref.h"
 
+#include "util/u_math.h"
+
 struct lower_io_state {
    void *dead_ctx;
    nir_builder builder;
@@ -1223,6 +1225,144 @@ nir_lower_explicit_io(nir_shader *shader, nir_variable_mode modes,
       if (function->impl &&
           nir_lower_explicit_io_impl(function->impl, modes, addr_format))
          progress = true;
+   }
+
+   return progress;
+}
+
+static const struct glsl_type *
+get_explicit_type(const struct glsl_type *type,
+                  void (*type_info)(const struct glsl_type *,
+                                    unsigned *size, unsigned *align),
+                  unsigned *size, unsigned *align)
+{
+   if (glsl_type_is_vector_or_scalar(type)) {
+      type_info(type, size, align);
+      return type;
+   } else if (glsl_type_is_array(type)) {
+      const struct glsl_type *element = glsl_get_array_element(type);
+      unsigned elem_size, elem_align;
+      const struct glsl_type *explicit_element =
+         get_explicit_type(element, type_info, &elem_size, &elem_align);
+
+      unsigned stride = util_align_npot(elem_size, elem_align);
+
+      *size = stride * glsl_get_length(type);
+      *align = elem_align;
+      return glsl_array_type(explicit_element, glsl_get_length(type), stride);
+   } else if (glsl_type_is_struct(type)) {
+      unsigned num_fields = glsl_get_length(type);
+      struct glsl_struct_field *fields =
+         malloc(sizeof(struct glsl_struct_field) * num_fields);
+
+      unsigned offset = 0;
+      *size = 0;
+      *align = 0;
+      for (unsigned i = 0; i < num_fields; i++) {
+         fields[i] = *glsl_get_struct_field_data(type, i);
+
+         assert(fields[i].matrix_layout != GLSL_MATRIX_LAYOUT_ROW_MAJOR);
+         unsigned mem_size, mem_align;
+         fields[i].type =
+            get_explicit_type(fields[i].type, type_info, &mem_size, &mem_align);
+         if (fields[i].offset < 0)
+            fields[i].offset = util_align_npot(offset, mem_align);
+
+         offset = fields[i].offset + mem_size;
+
+         *size = MAX2(*size, offset);
+         *align = MAX2(*align, mem_align);
+      }
+
+      type = glsl_struct_type(fields, num_fields, glsl_get_type_name(type), false);
+      free(fields);
+      return type;
+   } else if (glsl_type_is_matrix(type)) {
+      const struct glsl_type *col_type =
+         glsl_vector_type(glsl_get_base_type(type), glsl_get_vector_elements(type));
+
+      unsigned col_size, col_align;
+      type_info(col_type, &col_size, &col_align);
+      unsigned stride = util_align_npot(col_size, col_align);
+
+      *size = glsl_get_matrix_columns(type) * stride;
+      *align = col_align;
+      return glsl_explicit_matrix_type(type, stride, false);
+   } else {
+      unreachable("Unhandled type.");
+   }
+}
+
+static bool
+nir_lower_to_explicit_impl(nir_function_impl *impl, nir_variable_mode modes,
+                           void (*type_info)(const struct glsl_type *,
+                                             unsigned *size, unsigned *align))
+{
+   bool progress = false;
+
+   nir_foreach_block(block, impl) {
+      nir_foreach_instr(instr, block) {
+         if (instr->type == nir_instr_type_deref) {
+            nir_deref_instr *deref = nir_instr_as_deref(instr);
+            if (deref->mode & modes) {
+               unsigned size, align;
+               const struct glsl_type *new_type =
+                  get_explicit_type(deref->type, type_info, &size, &align);
+               progress |= new_type != deref->type;
+               deref->type = new_type;
+            }
+         }
+      }
+   }
+
+   if (progress) {
+      nir_metadata_preserve(impl, nir_metadata_block_index |
+                                  nir_metadata_dominance |
+                                  nir_metadata_live_ssa_defs |
+                                  nir_metadata_loop_analysis);
+   }
+
+   return progress;
+}
+
+static bool
+lower_vars_to_explicit(struct exec_list *vars,
+                       void (*type_info)(const struct glsl_type *,
+                                         unsigned *size, unsigned *align)) {
+   bool progress = false;
+   nir_foreach_variable(var, vars) {
+      unsigned size, align;
+      const struct glsl_type *explicit_type =
+         get_explicit_type(var->type, type_info, &size, &align);
+      if (explicit_type != var->type) {
+         progress = true;
+         var->type = explicit_type;
+      }
+   }
+   return progress;
+}
+
+bool
+nir_lower_to_explicit(nir_shader *shader,
+                      nir_variable_mode modes,
+                      void (*type_info)(const struct glsl_type *,
+                                        unsigned *size, unsigned *align))
+{
+   /* Situations which need to be handled to support more modes:
+    * - row-major matrices
+    * - compact shader inputs/outputs
+    * - interface types
+    */
+   assert(!(modes & ~nir_var_mem_shared) && "unsupported");
+
+   bool progress = false;
+
+   if (modes & nir_var_mem_shared)
+      lower_vars_to_explicit(&shader->shared, type_info);
+
+   nir_foreach_function(function, shader) {
+      if (function->impl)
+         progress |= nir_lower_to_explicit_impl(function->impl, modes, type_info);
    }
 
    return progress;
