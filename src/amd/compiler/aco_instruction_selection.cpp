@@ -3950,9 +3950,8 @@ void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
       *fmask_ptr = get_sampler_desc(ctx, texture_deref_instr, ACO_DESC_FMASK, instr, false, false);
 }
 
-void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is_array, bool is_lod)
+void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is_array)
 {
-
    Builder bld(ctx->program, ctx->block);
    Temp coord_args[4], ma, tc, sc, id;
    aco_ptr<Instruction> tmp;
@@ -3960,7 +3959,7 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
    for (unsigned i = 0; i < (is_array ? 4 : 3); i++)
       coord_args[i] = emit_extract_vector(ctx, *coords, i, v1);
 
-   if (is_array && !is_lod) {
+   if (is_array) {
       coord_args[3] = bld.vop1(aco_opcode::v_rndne_f32, bld.def(v1), coord_args[3]);
 
       // see comment in ac_prepare_cube_coords()
@@ -4093,15 +4092,29 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (has_offset && instr->op != nir_texop_txf) {
       aco_ptr<Instruction> tmp_instr;
       Temp acc, pack = Temp();
-      for (unsigned i = 0; i < offset.size(); i++) {
-         acc = emit_extract_vector(ctx, offset, i, s1);
-         acc = bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), acc, Operand(0x3Fu));
+      if (offset.type() == sgpr) {
+         for (unsigned i = 0; i < offset.size(); i++) {
+            acc = emit_extract_vector(ctx, offset, i, s1);
+            acc = bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), acc, Operand(0x3Fu));
 
-         if (i == 0) {
-            pack = acc;
-         } else {
-            acc = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), pack, Operand(8u * i));
-            pack = bld.sop2(aco_opcode::s_or_b32, bld.def(s1), bld.def(s1, scc), pack, acc);
+            if (i == 0) {
+               pack = acc;
+            } else {
+               acc = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), acc, Operand(8u * i));
+               pack = bld.sop2(aco_opcode::s_or_b32, bld.def(s1), bld.def(s1, scc), pack, acc);
+            }
+         }
+      } else {
+         for (unsigned i = 0; i < offset.size(); i++) {
+            acc = emit_extract_vector(ctx, offset, i, v1);
+            acc = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(0x3Fu), acc);
+
+            if (i == 0) {
+               pack = acc;
+            } else {
+               acc = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(8u * i), acc);
+               pack = bld.vop2(aco_opcode::v_or_b32, bld.def(v1), pack, acc);
+            }
          }
       }
       offset = pack;
@@ -4119,7 +4132,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    }
 
    if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && instr->coord_components)
-      prepare_cube_coords(ctx, &coords, instr->op == nir_texop_txd, instr->is_array, instr->op == nir_texop_lod);
+      prepare_cube_coords(ctx, &coords, instr->op == nir_texop_txd, instr->is_array && instr->op != nir_texop_lod);
 
    if (instr->coord_components > 1 &&
        instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
@@ -4199,23 +4212,54 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          dmask = 1;
       else
          dmask = 1 << instr->component;
+   } else if (instr->op == nir_texop_query_levels) {
+      dmask = 1 << 3;
    }
 
-
    aco_ptr<MIMG_instruction> tex;
-   if (instr->op == nir_texop_txs) {
+   if (instr->op == nir_texop_txs || instr->op == nir_texop_query_levels) {
       if (!has_lod)
          lod = bld.vop1(aco_opcode::v_mov_b32, bld.def(v1), Operand(0u));
+
+      bool div_by_6 = instr->op == nir_texop_txs &&
+                      instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE &&
+                      instr->is_array &&
+                      (dmask & (1 << 2));
+      if (tmp_dst.id() == dst.id() && div_by_6)
+         tmp_dst = {ctx->program->allocateId(), tmp_dst.regClass()};
+
       tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_get_resinfo, Format::MIMG, 2, 1));
       tex->getOperand(0) = Operand(as_vgpr(ctx,lod));
       tex->getOperand(1) = Operand(resource);
       tex->dmask = dmask;
+      tex->da = da;
       tex->getDefinition(0) = Definition(tmp_dst);
       ctx->block->instructions.emplace_back(std::move(tex));
-      if (dst.id() != tmp_dst.id()) {
+
+      if (div_by_6) {
+         /* divide 3rd value by 6 by multiplying with magic number */
+         emit_split_vector(ctx, tmp_dst, tmp_dst.size());
+         Temp c = {ctx->program->allocateId(), s1};
+         aco_ptr<Instruction> mov{create_s_mov(Definition(c), Operand((uint32_t) 0x2AAAAAAB))};
+         ctx->block->instructions.emplace_back(std::move(mov));
+         Temp by_6 = bld.vop3(aco_opcode::v_mul_hi_i32, bld.def(v1), emit_extract_vector(ctx, tmp_dst, 2, v1), c);
+         assert(instr->dest.ssa.num_components == 3);
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
+                    emit_extract_vector(ctx, tmp_dst, 0, v1),
+                    emit_extract_vector(ctx, tmp_dst, 1, v1),
+                    by_6);
+
+      } else if (dst.id() != tmp_dst.id()) {
          emit_split_vector(ctx, tmp_dst, tmp_dst.size());
          expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, dmask);
       }
+
+      if (ctx->options->chip_class >= GFX9 &&
+          instr->op == nir_texop_txs &&
+          instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
+          instr->is_array)
+         unreachable("Unimplemented tex instr type");
+
       return;
    }
 
@@ -4396,19 +4440,6 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
    emit_split_vector(ctx, tmp_dst, tmp_dst.size());
    expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, nir_ssa_def_components_read(&instr->dest.ssa));
-
-   if (instr->op == nir_texop_query_levels)
-      unreachable("Unimplemented tex instr type");
-   else if (instr->op == nir_texop_txs &&
-            instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE &&
-            instr->is_array)
-      unreachable("Unimplemented tex instr type");
-   else if (ctx->options->chip_class >= GFX9 &&
-            instr->op == nir_texop_txs &&
-            instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
-            instr->is_array)
-      unreachable("Unimplemented tex instr type");
-
 }
 
 
