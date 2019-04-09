@@ -2023,14 +2023,14 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    ctx->block->instructions.emplace_back(std::move(exp));
 }
 
-void emit_interp_instr(isel_context *ctx, unsigned idx, unsigned component, Temp src, Temp dst)
+void emit_interp_instr(isel_context *ctx, unsigned idx, unsigned component, Temp src, Temp dst, Temp prim_mask)
 {
    Temp coord1 = emit_extract_vector(ctx, src, 0, v1);
    Temp coord2 = emit_extract_vector(ctx, src, 1, v1);
 
    Builder bld(ctx->program, ctx->block);
-   Temp tmp = bld.vintrp(aco_opcode::v_interp_p1_f32, bld.def(v1), coord1, bld.m0(ctx->prim_mask), idx, component);
-   bld.vintrp(aco_opcode::v_interp_p2_f32, Definition(dst), coord2, bld.m0(ctx->prim_mask), tmp, idx, component);
+   Temp tmp = bld.vintrp(aco_opcode::v_interp_p1_f32, bld.def(v1), coord1, bld.m0(prim_mask), idx, component);
+   bld.vintrp(aco_opcode::v_interp_p2_f32, Definition(dst), coord2, bld.m0(prim_mask), tmp, idx, component);
 }
 
 void emit_load_frag_coord(isel_context *ctx, Temp dst, unsigned num_components)
@@ -2057,8 +2057,9 @@ void emit_load_frag_coord(isel_context *ctx, Temp dst, unsigned num_components)
 
 void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr)
 {
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+
    if (nir_intrinsic_base(instr) == VARYING_SLOT_POS) {
-      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
       emit_load_frag_coord(ctx, dst, instr->dest.ssa.num_components);
       return;
    }
@@ -2067,23 +2068,38 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
    uint64_t base = nir_intrinsic_base(instr) / 4;
 
    nir_const_value* offset = nir_src_as_const_value(instr->src[1]);
-   assert(offset); // TODO: handle when the offset is not a constant
-   base += offset->u32[0];
+   if (offset)
+      base += offset->u32[0];
 
+   Temp coords = get_ssa_temp(ctx, instr->src[0].ssa);
    unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
    unsigned component = nir_intrinsic_component(instr);
+   Temp prim_mask = ctx->prim_mask;
+
+   if (!offset) {
+      /* the lower 15bit of the prim_mask contain the offset into LDS
+       * while the upper bits contain the number of prims */
+      Temp offset_src = get_ssa_temp(ctx, instr->src[1].ssa);
+      assert(offset_src.regClass() == s1 && "TODO: divergent offsets...");
+      Builder bld(ctx->program, ctx->block);
+      Temp stride = bld.sop2(aco_opcode::s_lshr_b32, bld.def(s1), bld.def(s1, scc), prim_mask, Operand(16u));
+      stride = bld.sop1(aco_opcode::s_bcnt1_i32_b32, bld.def(s1), bld.def(s1, scc), stride);
+      stride = bld.sop2(aco_opcode::s_mul_i32, bld.def(s1), stride, Operand(48u));
+      offset_src = bld.sop2(aco_opcode::s_mul_i32, bld.def(s1), stride, offset_src);
+      prim_mask = bld.sop2(aco_opcode::s_add_i32, bld.def(s1, m0), bld.def(s1, scc), offset_src, prim_mask);
+   }
 
    if (instr->dest.ssa.num_components == 1) {
-      emit_interp_instr(ctx, idx, component, get_ssa_temp(ctx, instr->src[0].ssa), get_ssa_temp(ctx, &instr->dest.ssa));
+      emit_interp_instr(ctx, idx, component, coords, dst, prim_mask);
    } else {
       aco_ptr<Instruction> vec(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, instr->dest.ssa.num_components, 1));
       for (unsigned i = 0; i < instr->dest.ssa.num_components; i++)
       {
          Temp tmp = {ctx->program->allocateId(), v1};
-         emit_interp_instr(ctx, idx, component+i, get_ssa_temp(ctx, instr->src[0].ssa), tmp);
+         emit_interp_instr(ctx, idx, component+i, coords, tmp, prim_mask);
          vec->getOperand(i) = Operand(tmp);
       }
-      vec->getDefinition(0) = Definition(get_ssa_temp(ctx, &instr->dest.ssa));
+      vec->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(vec));
    }
 }
