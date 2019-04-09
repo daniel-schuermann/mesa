@@ -463,17 +463,16 @@ nir_lower_io_block(nir_block *block,
 
       nir_deref_instr *deref = nir_src_as_deref(intrin->src[0]);
 
+      if ((state->modes & deref->mode) == 0)
+         continue;
+
+      if (deref->mode != nir_var_shader_in &&
+          deref->mode != nir_var_shader_out &&
+          deref->mode != nir_var_mem_shared &&
+          deref->mode != nir_var_uniform)
+         continue;
+
       nir_variable *var = nir_deref_instr_get_variable(deref);
-      nir_variable_mode mode = var->data.mode;
-
-      if ((state->modes & mode) == 0)
-         continue;
-
-      if (mode != nir_var_shader_in &&
-          mode != nir_var_shader_out &&
-          mode != nir_var_mem_shared &&
-          mode != nir_var_uniform)
-         continue;
 
       b->cursor = nir_before_instr(instr);
 
