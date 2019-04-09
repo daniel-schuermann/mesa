@@ -280,6 +280,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_push_constant:
                   case nir_intrinsic_load_work_group_id:
                   case nir_intrinsic_load_num_work_groups:
+                  case nir_intrinsic_load_subgroup_id:
+                  case nir_intrinsic_load_num_subgroups:
                   case nir_intrinsic_get_buffer_size:
                   case nir_intrinsic_vote_all:
                   case nir_intrinsic_vote_any:
@@ -304,6 +306,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_view_index:
                   case nir_intrinsic_load_local_invocation_id:
                   case nir_intrinsic_load_local_invocation_index:
+                  case nir_intrinsic_load_subgroup_invocation:
                   case nir_intrinsic_ssbo_atomic_add:
                   case nir_intrinsic_ssbo_atomic_imin:
                   case nir_intrinsic_ssbo_atomic_umin:

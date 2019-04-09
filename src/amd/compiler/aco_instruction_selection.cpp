@@ -3790,6 +3790,31 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       bld.vop2(aco_opcode::v_or_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), tg_num, id);
       break;
    }
+   case nir_intrinsic_load_subgroup_id: {
+      if (ctx->stage == MESA_SHADER_COMPUTE) {
+         Temp tg_num = bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), Operand(0xfc0u), ctx->tg_size);
+         bld.sop2(aco_opcode::s_lshr_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), bld.def(s1, scc), tg_num, Operand(0x6u));
+      } else {
+         bld.sop1(aco_opcode::s_mov_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), Operand(0x0u));
+      }
+      break;
+   }
+   case nir_intrinsic_load_subgroup_invocation: {
+      bld.vop3(aco_opcode::v_mbcnt_hi_u32_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), Operand((uint32_t) -1),
+               bld.vop3(aco_opcode::v_mbcnt_lo_u32_b32, bld.def(v1), Operand((uint32_t) -1), Operand(0u)));
+      break;
+   }
+   case nir_intrinsic_load_num_subgroups: {
+      if (ctx->stage == MESA_SHADER_COMPUTE)
+         bld.sop2(aco_opcode::s_and_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), bld.def(s1, scc), Operand(0x3fu), ctx->tg_size);
+      else
+         bld.sop1(aco_opcode::s_mov_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), Operand(0x1u));
+      break;
+   }
+   case nir_intrinsic_ballot: {
+      bld.vopc(aco_opcode::v_cmp_lg_u32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), Operand(0u), get_ssa_temp(ctx, instr->src[0].ssa));
+      break;
+   }
    case nir_intrinsic_load_sample_id: {
       bld.vop3(aco_opcode::v_bfe_u32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)),
                ctx->fs_inputs[ancillary], Operand(8u), Operand(4u));
