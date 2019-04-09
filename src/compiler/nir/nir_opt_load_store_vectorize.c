@@ -218,14 +218,13 @@ type_scalar_size_bytes(const struct glsl_type *type)
 static int
 array_stride(struct vectorize_ctx *ctx, nir_variable_mode mode, const struct glsl_type *type)
 {
-   if (mode & (nir_var_mem_ubo | nir_var_mem_ssbo | nir_var_mem_global)) {
-      /* taken from nir_lower_explicit_io() */
-      unsigned stride = glsl_get_explicit_stride(type);
+   unsigned explicit_stride = glsl_get_explicit_stride(type);
+   if (explicit_stride || (mode & (nir_var_mem_ubo | nir_var_mem_ssbo | nir_var_mem_global))) {
       if ((glsl_type_is_matrix(type) &&
            glsl_matrix_type_is_row_major(type)) ||
-          (glsl_type_is_vector(type) && stride == 0))
-         stride = type_scalar_size_bytes(type);
-      return stride;
+          (glsl_type_is_vector(type) && explicit_stride == 0))
+         return type_scalar_size_bytes(type);
+      return explicit_stride;
    }
 
    return ctx->type_size(mode, glsl_get_array_element(type));
@@ -234,9 +233,10 @@ array_stride(struct vectorize_ctx *ctx, nir_variable_mode mode, const struct gls
 static int
 struct_field_offset(struct vectorize_ctx *ctx, nir_variable_mode mode, const struct glsl_type *type, unsigned field)
 {
-   if (mode & (nir_var_mem_ubo | nir_var_mem_ssbo | nir_var_mem_global)) {
+   int explicit_offset = glsl_get_struct_field_offset(type, field);
+   if (explicit_offset >= 0 || (mode & (nir_var_mem_ubo | nir_var_mem_ssbo | nir_var_mem_global))) {
       /* taken from nir_lower_explicit_io() */
-      return glsl_get_struct_field_offset(type, field);
+      return explicit_offset;
    }
 
    unsigned offset = 0;
