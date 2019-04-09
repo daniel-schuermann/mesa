@@ -1098,7 +1098,7 @@ setup_isel_context(Program* program, nir_shader *nir,
    /* lower ALU operations */
    nir_opt_idiv_const(nir, 32);
    nir_lower_idiv(nir, true);
-   nir_lower_int64(nir, (nir_lower_int64_options) (nir_lower_imul_high64 | nir_lower_divmod64));
+   nir_lower_int64(nir, (nir_lower_int64_options) (nir_lower_imul_high64 | nir_lower_divmod64 | nir_lower_logic64));
    nir_lower_int64(nir, (nir_lower_int64_options) (nir_lower_iabs64));
 
    /* optimize the lowered ALU operations */
