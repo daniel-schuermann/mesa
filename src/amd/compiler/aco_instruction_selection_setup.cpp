@@ -978,11 +978,11 @@ shared_var_size(const struct glsl_type *type)
    return type_size_scalar(type)*4;
 }
 
-int
-type_size_mode(nir_variable_mode mode, const struct glsl_type *type)
+void
+shared_var_info(const struct glsl_type *type, unsigned *size, unsigned *align)
 {
-   assert(mode == nir_var_mem_shared);
-   return shared_var_size(type);
+   *size = shared_var_size(type);
+   *align = 1;
 }
 
 int
@@ -1085,15 +1085,16 @@ setup_isel_context(Program* program, nir_shader *nir,
    setup_variables(&ctx, nir);
 
    /* optimize and lower memory operations */
+   nir_lower_to_explicit(nir, nir_var_mem_shared, shared_var_info);
    if (nir_opt_load_store_vectorize(nir,
                                     (nir_variable_mode)(nir_var_mem_ssbo | nir_var_mem_ubo |
                                                         nir_var_mem_push_const | nir_var_mem_shared),
-                                    type_size_mode, get_align)) {
+                                    NULL, get_align)) {
       nir_lower_alu_to_scalar(nir);
       nir_lower_pack(nir);
    }
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
-   nir_lower_io(nir, nir_var_mem_shared, shared_var_size, (nir_lower_io_options)0);
+   nir_lower_explicit_io(nir, nir_var_mem_shared, nir_address_format_32bit_global);
 
    /* lower ALU operations */
    nir_opt_idiv_const(nir, 32);
@@ -1103,6 +1104,7 @@ setup_isel_context(Program* program, nir_shader *nir,
 
    /* optimize the lowered ALU operations */
    nir_copy_prop(nir);
+   nir_opt_constant_folding(nir);
    nir_opt_algebraic(nir);
    nir_opt_algebraic_late(nir);
    nir_opt_constant_folding(nir);
