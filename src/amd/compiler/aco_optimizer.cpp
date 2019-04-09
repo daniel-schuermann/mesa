@@ -624,11 +624,11 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
 void check_instruction_uses(opt_ctx &ctx, aco_ptr<Instruction>& instr, std::set<Temp>& live_outs)
 {
-   if (instr->num_definitions && !instr->isVMEM()) {
+   if (instr->num_definitions && !instr->isVMEM() && instr->opcode != aco_opcode::p_discard_if) {
       bool is_used = false;
       for (unsigned i = 0; i < instr->num_definitions; i++)
       {
-         if (instr->getDefinition(i).isFixed() || ctx.info[instr->getDefinition(i).tempId()].uses ||
+         if (!instr->getDefinition(i).isTemp() || ctx.info[instr->getDefinition(i).tempId()].uses ||
              live_outs.find(instr->getDefinition(i).getTemp()) != live_outs.end()) {
             is_used = true;
             break;
