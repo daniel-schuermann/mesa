@@ -728,7 +728,8 @@ void check_instruction_uses(opt_ctx &ctx, aco_ptr<Instruction>& instr, std::set<
       bool is_used = false;
       for (unsigned i = 0; i < instr->num_definitions; i++)
       {
-         if (!instr->getDefinition(i).isTemp() || ctx.info[instr->getDefinition(i).tempId()].uses ||
+         if ((instr->getDefinition(i).isFixed() && instr->getDefinition(i).physReg() == exec) ||
+             ctx.info[instr->getDefinition(i).tempId()].uses ||
              live_outs.find(instr->getDefinition(i).getTemp()) != live_outs.end()) {
             is_used = true;
             break;
@@ -1022,7 +1023,7 @@ void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       bool is_used = false;
       for (unsigned i = 0; i < instr->num_definitions; i++)
       {
-         if ((instr->getDefinition(i).isFixed() && !instr->getDefinition(i).isTemp()) ||
+         if ((instr->getDefinition(i).isFixed() && instr->getDefinition(i).physReg() == exec) ||
              ctx.info[instr->getDefinition(i).tempId()].uses) {
             is_used = true;
             break;
