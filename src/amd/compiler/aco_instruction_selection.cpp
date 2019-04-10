@@ -3651,6 +3651,14 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Builder bld(ctx->program, ctx->block);
    switch(instr->intrinsic) {
+   case nir_intrinsic_load_barycentric_sample: {
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
+                 ctx->fs_inputs[fs_input::persp_sample_p1],
+                 ctx->fs_inputs[fs_input::persp_sample_p2]);
+      emit_split_vector(ctx, dst, 2);
+      break;
+   }
    case nir_intrinsic_load_barycentric_pixel: {
       Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
       bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
