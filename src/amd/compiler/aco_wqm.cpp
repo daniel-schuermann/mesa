@@ -355,13 +355,9 @@ void lower_wqm(Program *program, live& live_vars,
       wqm->getOperand(0) = Operand(exec, s2);
       wqm->getDefinition(0) = Definition(exec, s2);
       wqm->getDefinition(1) = Definition(scc, b);
-      if (block->instructions.size() && block->instructions[0]->opcode == aco_opcode::p_startpgm) {
-         block->instructions.emplace(std::next(block->instructions.begin()), std::move(wqm));
-         live_vars.register_demand[0].emplace(live_vars.register_demand[0].begin(), live_vars.register_demand[0][0]);
-      } else {
-         block->instructions.emplace(block->instructions.begin(), std::move(wqm));
-         live_vars.register_demand[0].emplace(live_vars.register_demand[0].begin(), std::pair<uint16_t, uint16_t>(0, 0));
-      }
+      assert(block->instructions.size() && block->instructions[0]->opcode == aco_opcode::p_startpgm);
+      block->instructions.emplace(std::next(block->instructions.begin()), std::move(wqm));
+      live_vars.register_demand[0].emplace(live_vars.register_demand[0].begin(), live_vars.register_demand[0][0]);
       return;
    } else if (!program->needs_wqm) {
       return;
