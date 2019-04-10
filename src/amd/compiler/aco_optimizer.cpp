@@ -468,6 +468,39 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             }
          }
       }
+
+      /* SMEM: propagate constants and combine additions */
+      else if (instr->format == Format::SMEM) {
+
+         SMEM_instruction *smem = static_cast<SMEM_instruction *>(instr.get());
+         if (i == 1 && info.is_constant_or_literal() && info.val <= 0xFFFFF) {
+            instr->getOperand(i) = Operand(info.val);
+            continue;
+         } else if (i == 1 && info.is_base_offset() && info.temp.regClass() == s1 && info.val <= 0xFFFFF && ctx.program->chip_class >= GFX9) {
+            bool soe = smem->num_operands >= (smem->num_definitions ? 3 : 4);
+            if (soe &&
+                (!ctx.info[smem->getOperand(smem->num_operands - 1).tempId()].is_constant_or_literal() ||
+                 ctx.info[smem->getOperand(smem->num_operands - 1).tempId()].val != 0)) {
+               continue;
+            }
+            if (soe) {
+               smem->getOperand(1) = Operand(info.val);
+               smem->getOperand(smem->num_operands - 1) = Operand(info.temp);
+            } else {
+               SMEM_instruction *new_instr = create_instruction<SMEM_instruction>(smem->opcode, Format::SMEM, smem->num_operands + 1, smem->num_definitions);
+               new_instr->getOperand(0) = smem->getOperand(0);
+               new_instr->getOperand(1) = Operand(info.val);
+               if (!smem->num_definitions)
+                  new_instr->getOperand(2) = smem->getOperand(2);
+               new_instr->getOperand(new_instr->num_operands - 1) = Operand(info.temp);
+               if (smem->num_definitions)
+                  new_instr->getDefinition(0) = smem->getDefinition(0);
+               instr.reset(new_instr);
+               smem = static_cast<SMEM_instruction *>(instr.get());
+            }
+            continue;
+         }
+      }
    }
 
    /* if this instruction doesn't define anything, return */

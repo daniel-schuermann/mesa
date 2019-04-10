@@ -633,8 +633,8 @@ struct SOP2_instruction : public Instruction {
  * For s_(buffer_)load_dword*:
  * Operand(0): SBASE - SGPR-pair which provides base address
  * Operand(1): Offset - immediate (un)signed offset or SGPR
- * Operand(2): SOffset - SGPR offset (Vega only)
- * Definition(0): SDATA - SGPR which accepts return data
+ * Operand(2) / Definition(0): SDATA - SGPR for read / write result
+ * Operand(n-1): SOffset - SGPR offset (Vega only)
  *
  */
 struct SMEM_instruction : public Instruction {
