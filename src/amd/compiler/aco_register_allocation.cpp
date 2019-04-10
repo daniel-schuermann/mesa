@@ -687,7 +687,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      vectors[instr->getOperand(i).tempId()] = instr.get();
                }
             }
-         } else {
+         } else if (!instr->getDefinition(0).isKill()) {
             /* collect information about affinity-related temporaries */
             std::vector<Temp> affinity_related;
             /* affinity_related[0] is the last seen affinity-related temp */
@@ -746,6 +746,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
             break;
          Definition& definition = phi->getDefinition(0);
+         if (definition.isKill())
+            continue;
          assert(!definition.isFixed());
          if (affinities.find(definition.tempId()) != affinities.end() &&
              ctx.assignments.find(affinities[definition.tempId()]) != ctx.assignments.end()) {
@@ -787,6 +789,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             break;
 
          Definition& definition = phi->getDefinition(0);
+         if (definition.isKill())
+            continue;
          assert(definition.isTemp());
          renames[block->index][definition.tempId()] = definition.getTemp();
 
