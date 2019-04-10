@@ -8,6 +8,7 @@
 namespace aco {
 
 struct asm_context {
+   enum chip_class chip_class;
    std::map<int, SOPP_instruction*> branches;
    std::vector<int> block_offset;
    // TODO: keep track of branch instructions referring blocks
@@ -70,11 +71,15 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       uint32_t encoding = (0b110000 << 26);
       encoding |= opcode_infos[(int)instr->opcode].opcode << 18;
       encoding |= instr->getOperand(1).isConstant() ? 1 << 17 : 0;
+      bool soe = instr->num_operands >= (instr->num_definitions ? 3 : 4);
+      assert(!soe || ctx.chip_class >= GFX9);
+      encoding |= soe ? 1 << 14 : 0;
       encoding |= smem->glc ? 1 << 16 : 0;
-      encoding |= instr->definitionCount() ? instr->getDefinition(0).physReg().reg << 6 : 0;
+      encoding |= (instr->num_definitions ? instr->getDefinition(0).physReg().reg : instr->getOperand(2).physReg().reg) << 6;
       encoding |= instr->getOperand(0).physReg().reg >> 1;
       out.push_back(encoding);
       encoding = instr->getOperand(1).isConstant() ? instr->getOperand(1).constantValue() : instr->getOperand(1).physReg().reg;
+      encoding |= soe ? instr->getOperand(instr->num_operands - 1).physReg().reg << 25 : 0;
       out.push_back(encoding);
       return;
    }
@@ -340,6 +345,7 @@ void fix_branches(asm_context& ctx, std::vector<uint32_t>& out)
 std::vector<uint32_t> emit_program(Program* program)
 {
    asm_context ctx;
+   ctx.chip_class = program->chip_class;
    ctx.block_offset.resize(program->blocks.size());
    std::vector<uint32_t> out;
    if (program->stage == MESA_SHADER_FRAGMENT)
