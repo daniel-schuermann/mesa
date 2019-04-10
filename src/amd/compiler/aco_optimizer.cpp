@@ -414,7 +414,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          }
       }
 
-      /* MUBUF: propagate constants */
+      /* MUBUF: propagate constants and combine additions */
       else if (instr->format == Format::MUBUF) {
 
          MUBUF_instruction *mubuf = static_cast<MUBUF_instruction *>(instr.get());
@@ -426,6 +426,15 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             continue;
          } else if (i == 2 && info.is_constant() && mubuf->offset + info.val < 4096) {
             instr->getOperand(2) = Operand((uint32_t) 0);
+            mubuf->offset += info.val;
+            continue;
+         } else if (mubuf->offen && i == 0 && info.is_base_offset() && info.temp.regClass() == v1 && mubuf->offset + info.val < 4096) {
+            assert(!mubuf->idxen);
+            instr->getOperand(i).setTemp(info.temp);
+            mubuf->offset += info.val;
+            continue;
+         } else if (i == 2 && info.is_base_offset() && info.temp.regClass() == s1 && mubuf->offset + info.val < 4096) {
+            instr->getOperand(i).setTemp(info.temp);
             mubuf->offset += info.val;
             continue;
          }
@@ -654,6 +663,8 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    }
    case aco_opcode::v_add_u32:
    case aco_opcode::v_add_co_u32:
+   case aco_opcode::s_add_i32:
+   case aco_opcode::s_add_u32:
       for (unsigned i = 0; i < 2; i++) {
          Operand base = instr->getOperand(i);
          Operand offset_op = instr->getOperand(!i);
