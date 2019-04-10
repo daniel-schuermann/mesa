@@ -92,6 +92,12 @@ bool get_reg_for_copies(ra_ctx& ctx,
       if (!res.second)
          return false;
 
+      /* free the variable's old area */
+      for (unsigned i = var.first.reg; i < var.first.reg + sizeOf(var.second); i++) {
+         if (reg_file[i] == id)
+            reg_file[i] = 0;
+      }
+
       /* mark the area as blocked */
       for (unsigned i = res.first.reg; i < res.first.reg + sizeOf(var.second); i++)
          reg_file[i] = 0xFFFF;
