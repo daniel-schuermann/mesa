@@ -4055,7 +4055,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    for (unsigned i = 0; i < instr->num_srcs; i++) {
       switch (instr->src[i].src_type) {
       case nir_tex_src_coord:
-         coords = get_ssa_temp(ctx, instr->src[i].src.ssa);
+         coords = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[i].src.ssa));
          break;
       case nir_tex_src_bias:
          if (instr->op == nir_texop_txb) {
@@ -4358,7 +4358,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          tmp_dst = {ctx->program->allocateId(), getRegClass(vgpr, last_bit)};
 
       aco_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 3, 1)};
-      mubuf->getOperand(0) = Operand(as_vgpr(ctx, coords));
+      mubuf->getOperand(0) = Operand(coords);
       mubuf->getOperand(1) = Operand(resource);
       mubuf->getOperand(2) = Operand((uint32_t) 0);
       mubuf->getDefinition(0) = Definition(tmp_dst);
