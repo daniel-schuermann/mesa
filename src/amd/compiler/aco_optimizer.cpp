@@ -248,6 +248,11 @@ struct ssa_info {
       return label.test(16);
    }
 
+   bool is_constant_or_literal()
+   {
+      return is_constant() || is_literal();
+   }
+
    void set_base_offset(Temp base, uint32_t offset)
    {
       label.set(17,1);
@@ -418,13 +423,13 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       else if (instr->format == Format::MUBUF) {
 
          MUBUF_instruction *mubuf = static_cast<MUBUF_instruction *>(instr.get());
-         if (mubuf->offen && i == 0 && info.is_constant() && mubuf->offset + info.val < 4096) {
+         if (mubuf->offen && i == 0 && info.is_constant_or_literal() && mubuf->offset + info.val < 4096) {
             assert(!mubuf->idxen);
             instr->getOperand(i) = Operand();
             mubuf->offset += info.val;
             mubuf->offen = false;
             continue;
-         } else if (i == 2 && info.is_constant() && mubuf->offset + info.val < 4096) {
+         } else if (i == 2 && info.is_constant_or_literal() && mubuf->offset + info.val < 4096) {
             instr->getOperand(2) = Operand((uint32_t) 0);
             mubuf->offset += info.val;
             continue;
@@ -670,7 +675,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          Operand offset_op = instr->getOperand(!i);
          if (!base.isTemp() || (!offset_op.isConstant() && !offset_op.isTemp()))
             continue;
-         if (offset_op.isTemp() && !ctx.info[offset_op.tempId()].is_constant() && !ctx.info[offset_op.tempId()].is_literal())
+         if (offset_op.isTemp() && !ctx.info[offset_op.tempId()].is_constant_or_literal())
             continue;
 
          uint32_t offset = offset_op.isTemp() ? ctx.info[offset_op.tempId()].val : offset_op.constantValue();
