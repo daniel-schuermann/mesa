@@ -43,6 +43,7 @@ namespace {
 struct ra_ctx {
    Program* program;
    std::unordered_map<unsigned, std::pair<PhysReg, RegClass>> assignments;
+   std::map<unsigned, Temp> orig_names;
    unsigned max_used_sgpr = 0;
    unsigned max_used_vgpr = 0;
 
@@ -64,6 +65,69 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
                                       uint32_t size, uint32_t stride,
                                       uint32_t num_moves,
                                       bool is_sgpr);
+
+/* helper function for debugging */
+#if 0
+void print_regs(ra_ctx& ctx, bool vgprs, std::array<uint32_t, 512>& reg_file)
+{
+   unsigned max = vgprs ? ctx.program->max_vgpr : ctx.program->max_sgpr;
+   unsigned lb = vgprs ? 256 : 0;
+   unsigned ub = lb + max;
+   char reg_char = vgprs ? 'v' : 's';
+
+   /* print markers */
+   printf("       ");
+   for (unsigned i = lb; i < ub; i += 3) {
+      printf("%.2u ", i - lb);
+   }
+   printf("\n");
+
+   /* print usage */
+   printf("%cgprs: ", reg_char);
+   unsigned free_regs = 0;
+   unsigned prev = 0;
+   bool char_select = false;
+   for (unsigned i = lb; i < ub; i++) {
+      if (reg_file[i] == 0xFFFF) {
+         printf("~");
+      } else if (reg_file[i]) {
+         printf(char_select ? "#" : "@");
+         if (reg_file[i] != prev) {
+            prev = reg_file[i];
+            char_select = !char_select;
+         }
+      } else {
+         free_regs++;
+         printf(".");
+      }
+   }
+   printf("\n");
+
+   printf("%u/%u used, %u/%u free\n", max - free_regs, max, free_regs, max);
+
+   /* print assignments */
+   prev = 0;
+   unsigned size = 0;
+   for (unsigned i = lb; i < ub; i++) {
+      if (reg_file[i] != prev) {
+         if (prev && size > 1)
+            printf("-%d]\n", i - 1 - lb);
+         else if (prev)
+            printf("]\n");
+         prev = reg_file[i];
+         if (prev && prev != 0xFFFF) {
+            if (ctx.orig_names.count(reg_file[i]))
+               printf("%%%u (was %%%d) = %c[%d", reg_file[i], ctx.orig_names[reg_file[i]].id(), reg_char, i - lb);
+            else
+               printf("%%%u = %c[%d", reg_file[i], reg_char, i - lb);
+         }
+         size = 1;
+      } else {
+         size++;
+      }
+   }
+}
+#endif
 
 bool get_reg_for_copies(ra_ctx& ctx,
                       std::array<uint32_t, 512>& reg_file,
@@ -513,7 +577,6 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
    ra_ctx ctx(program);
 
    std::vector<std::unordered_map<unsigned, Temp>> renames(program->blocks.size());
-   std::map<unsigned, Temp> orig_names;
 
    struct phi_info {
       Instruction* phi;
@@ -604,7 +667,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
       renames[block->index][val.id()] = new_val;
       renames[block->index][new_val.id()] = new_val;
-      orig_names[new_val.id()] = val;
+      ctx.orig_names[new_val.id()] = val;
       return new_val;
    };
 
@@ -645,8 +708,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          }
       }
 
-      auto it = orig_names.find(same.id());
-      unsigned orig_var = it != orig_names.end() ? it->second.id() : same.id();
+      auto it = ctx.orig_names.find(same.id());
+      unsigned orig_var = it != ctx.orig_names.end() ? it->second.id() : same.id();
       for (unsigned i = 0; i < program->blocks.size(); i++) {
          auto it = renames[i].find(orig_var);
          if (it != renames[i].end() && it->second == def.getTemp())
@@ -1093,11 +1156,11 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                pc->getDefinition(i) = parallelcopy[i].second;
 
                /* it might happen that the operand is already renamed. we have to restore the original name. */
-               std::map<unsigned, Temp>::iterator it = orig_names.find(pc->getOperand(i).tempId());
-               if (it != orig_names.end())
+               std::map<unsigned, Temp>::iterator it = ctx.orig_names.find(pc->getOperand(i).tempId());
+               if (it != ctx.orig_names.end())
                   pc->getOperand(i).setTemp(it->second);
                unsigned orig_id = pc->getOperand(i).tempId();
-               orig_names[pc->getDefinition(i).tempId()] = pc->getOperand(i).getTemp();
+               ctx.orig_names[pc->getDefinition(i).tempId()] = pc->getOperand(i).getTemp();
 
                pc->getOperand(i).setTemp(read_variable(pc->getOperand(i).getTemp(), block.get()));
                renames[block->index][orig_id] = pc->getDefinition(i).getTemp();
