@@ -10,7 +10,6 @@ namespace aco {
 struct asm_context {
    enum chip_class chip_class;
    std::map<int, SOPP_instruction*> branches;
-   std::vector<int> block_offset;
    // TODO: keep track of branch instructions referring blocks
    // and, when emitting the block, correct the offset in instr
 };
@@ -337,7 +336,7 @@ void fix_branches(asm_context& ctx, std::vector<uint32_t>& out)
 {
    for (std::pair<int, SOPP_instruction*> branch : ctx.branches)
    {
-      int offset = ctx.block_offset[branch.second->block->index] - branch.first - 1;
+      int offset = (int)branch.second->block->offset - branch.first - 1;
       out[branch.first] |= (uint16_t) offset;
    }
 }
@@ -346,13 +345,12 @@ std::vector<uint32_t> emit_program(Program* program)
 {
    asm_context ctx;
    ctx.chip_class = program->chip_class;
-   ctx.block_offset.resize(program->blocks.size());
    std::vector<uint32_t> out;
    if (program->stage == MESA_SHADER_FRAGMENT)
       fix_exports(ctx, out, program);
    for (auto const& block : program->blocks)
    {
-      ctx.block_offset[block->index] = out.size();
+      block->offset = out.size();
       emit_block(ctx, out, block.get());
    }
    fix_branches(ctx, out);
