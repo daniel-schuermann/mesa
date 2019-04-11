@@ -817,6 +817,7 @@ struct Block {
    uint16_t loop_nest_depth;
    int logical_idom = -1;
    int linear_idom = -1;
+   bool is_top_level = false;
 };
 
 

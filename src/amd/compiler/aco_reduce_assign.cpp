@@ -35,9 +35,7 @@ namespace aco {
 
 void setup_reduce_temp(Program* program)
 {
-   unsigned nesting_depth = 0;
    unsigned last_top_level_block_idx = 0;
-
    unsigned maxSize = 0;
 
    for (std::unique_ptr<Block>& block : program->blocks) {
@@ -57,11 +55,8 @@ void setup_reduce_temp(Program* program)
    int inserted_at = -1;
 
    for (std::unique_ptr<Block>& block : program->blocks) {
-      if (block->loop_nest_depth == 0 && block->linear_predecessors.size() == 2)
-         nesting_depth--;
-      if (block->loop_nest_depth == 0 && nesting_depth == 0) {
+      if (block->is_top_level)
          last_top_level_block_idx = block->index;
-      }
 
       std::vector<aco_ptr<Instruction>>::iterator it;
       for (it = block->instructions.begin(); it != block->instructions.end(); ++it) {
@@ -100,9 +95,6 @@ void setup_reduce_temp(Program* program)
 
          (*it)->getOperand(1) = Operand(val);
       }
-
-      if (block->loop_nest_depth == 0 && block->linear_successors.size() == 2)
-         nesting_depth++;
    }
 }
 
