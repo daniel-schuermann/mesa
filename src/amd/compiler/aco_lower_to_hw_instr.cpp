@@ -158,33 +158,30 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
       ++it;
    }
 
-   /* coalesce 32-bit sgpr copies to 64-bit copies */
-   it = copy_map.begin();
-   while (it != copy_map.end()) {
-      if (it->second.def.getTemp().type() != RegType::sgpr || !it->first.reg ||
-          it->second.uses || it->second.size != 1 || it->second.op.isConstant() ||
-          it->first.reg % 2 != 1 || it->second.op.physReg().reg % 2 != 1) {
-         ++it;
-         continue;
-      }
-
-      std::map<PhysReg, copy_operation>::iterator second = copy_map.find(PhysReg{it->first.reg - 1});
-      if (second == copy_map.end() || second->second.uses || second->second.size != 1 ||
-          second->second.op.physReg().reg + 1 != it->second.op.physReg().reg ||
-          second->second.op.isConstant()) {
-         ++it;
-         continue;
-      }
-
-      second->second.size = 2;
-      it = copy_map.erase(it);
-   }
-
    /* first, handle paths in the location transfer graph */
    it = copy_map.begin();
    while (it != copy_map.end()) {
+
+      /* the target reg is not used as operand for any other copy */
       if (it->second.uses == 0) {
-         /* the target reg is not used as operand for any other copy */
+
+         /* try to coalesce 32-bit sgpr copies to 64-bit copies */
+         if (it->second.def.getTemp().type() == RegType::sgpr && it->second.size == 1 &&
+             !it->second.op.isConstant() && it->first.reg % 2 == it->second.op.physReg().reg % 2) {
+
+            PhysReg other_def_reg = PhysReg{it->first.reg % 2 ? it->first.reg - 1 : it->first.reg + 1};
+            PhysReg other_op_reg = PhysReg{it->first.reg % 2 ? it->second.op.physReg().reg - 1 : it->second.op.physReg().reg + 1};
+            std::map<PhysReg, copy_operation>::iterator other = copy_map.find(other_def_reg);
+
+            if (other != copy_map.end() && !other->second.uses && other->second.size == 1 &&
+                other->second.op.physReg() == other_op_reg && !other->second.op.isConstant()) {
+               std::map<PhysReg, copy_operation>::iterator to_erase = it->first.reg % 2 ? it : other;
+               it = it->first.reg % 2 ? other : it;
+               copy_map.erase(to_erase);
+               it->second.size = 2;
+            }
+         }
+
          if (it->second.def.physReg().reg == scc.reg) {
             mov.reset(create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_i32, Format::SOPC, 2, 1));
             mov->getOperand(1) = Operand((uint32_t) 0);
@@ -206,10 +203,12 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
          }
 
          /* reduce the number of uses of the operand reg by one */
-         if (it->second.op.isFixed()) {
-            target = copy_map.find(it->second.op.physReg());
-            if (target != copy_map.end())
-               target->second.uses--;
+         if (!it->second.op.isConstant()) {
+            for (unsigned i = 0; i < it->second.size; i++) {
+               target = copy_map.find(PhysReg{it->second.op.physReg().reg + i});
+               if (target != copy_map.end())
+                  target->second.uses--;
+            }
          }
 
          copy_map.erase(it);
@@ -335,7 +334,7 @@ void lower_to_hw_instr(Program* program)
                   if (instr->getOperand(i).isConstant()) {
                      PhysReg reg = {instr->getDefinition(0).physReg().reg + reg_idx};
                      Definition def = Definition(reg, rc_def);
-                     copy_operations[reg] = {instr->getOperand(i), def, 0};
+                     copy_operations[reg] = {instr->getOperand(i), def, 0, 1};
                      reg_idx++;
                      continue;
                   }
@@ -376,7 +375,7 @@ void lower_to_hw_instr(Program* program)
                   Operand operand = instr->getOperand(i);
                   if (operand.isConstant() || operand.size() == 1) {
                      assert(instr->getDefinition(i).size() == 1);
-                     copy_operations[instr->getDefinition(i).physReg()] = {operand, instr->getDefinition(i), 0};
+                     copy_operations[instr->getDefinition(i).physReg()] = {operand, instr->getDefinition(i), 0, 1};
                   } else {
                      RegClass def_rc = getRegClass(typeOf(instr->getDefinition(i).regClass()), 1);
                      RegClass op_rc = getRegClass(operand.getTemp().type(), 1);
