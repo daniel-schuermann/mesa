@@ -4755,6 +4755,7 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    loop_entry->loop_nest_depth = ctx->cf_info.loop_nest_depth + 1;
    Block* loop_exit = new Block();
    loop_exit->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+   loop_exit->is_top_level = ctx->block->is_top_level;
    branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
    branch->targets[0] = loop_entry;
    ctx->block->instructions.emplace_back(std::move(branch));
@@ -4864,6 +4865,7 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       BB_else->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* BB_endif = new Block();
       BB_endif->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      BB_endif->is_top_level = BB_if->is_top_level;
       Block* parent_if_merge_block = ctx->cf_info.parent_if.merge_block;
       ctx->cf_info.parent_if.merge_block = BB_endif;
 
@@ -4983,12 +4985,14 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       BB_then_linear->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* BB_between = new Block();
       BB_between->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      BB_between->is_top_level = BB_if->is_top_level;
       Block* BB_else_logical = new Block();
       BB_else_logical->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* BB_else_linear = new Block();
       BB_else_linear->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* BB_endif = new Block();
       BB_endif->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      BB_endif->is_top_level = BB_if->is_top_level;
 
       append_logical_end(BB_if);
 
