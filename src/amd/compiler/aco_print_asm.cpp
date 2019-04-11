@@ -5,20 +5,45 @@
 #include "llvm-c/Disassembler.h"
 #include "common/ac_llvm_util.h"
 
+#include <llvm/ADT/StringRef.h>
+
 namespace aco {
 
-void print_asm(std::vector<uint32_t>& binary, enum radeon_family family, std::ostream& out)
+void print_asm(Program *program, std::vector<uint32_t>& binary, enum radeon_family family, std::ostream& out)
 {
+   std::vector<bool> referenced_blocks(program->blocks.size());
+   referenced_blocks[0] = true;
+   for (std::unique_ptr<Block>& block : program->blocks) {
+      for (Block *succ : block->linear_successors)
+         referenced_blocks[succ->index] = true;
+   }
+
+   std::vector<std::tuple<uint64_t, llvm::StringRef, uint8_t>> symbols;
+   std::vector<std::array<char,16>> block_names;
+   for (std::unique_ptr<Block>& block : program->blocks) {
+      std::array<char, 16> name;
+      sprintf(name.data(), "BB%u", block->index);
+      block_names.push_back(name);
+      symbols.emplace_back(block->offset * 4, llvm::StringRef(name.data()), 0);
+   }
+
    LLVMDisasmContextRef disasm = LLVMCreateDisasmCPU("amdgcn-mesa-mesa3d",
                                                      ac_get_llvm_processor_name(family),
-                                                     NULL, 0, NULL, NULL);
+                                                     &symbols, 0, NULL, NULL);
 
    char outline[1024];
    size_t pos = 0;
    bool invalid = false;
+   unsigned next_block = 0;
    while (pos < binary.size()) {
+      while (next_block < program->blocks.size() && pos == program->blocks[next_block]->offset) {
+         if (referenced_blocks[next_block])
+            out << "BB" << next_block << ":" << std::endl;
+         next_block++;
+      }
+
       size_t l = LLVMDisasmInstruction(disasm, (uint8_t *) &binary[pos],
-                                       (binary.size() - pos) * sizeof(uint32_t), 0,
+                                       (binary.size() - pos) * sizeof(uint32_t), pos * 4,
                                        outline, sizeof(outline));
 
       size_t new_pos;
@@ -38,6 +63,7 @@ void print_asm(std::vector<uint32_t>& binary, enum radeon_family family, std::os
          out << " " << std::setfill('0') << std::setw(8) << std::hex << binary[pos];
       out << std::endl;
    }
+   assert(next_block == program->blocks.size());
 
    LLVMDisasmDispose(disasm);
 
