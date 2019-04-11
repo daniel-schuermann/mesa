@@ -32,7 +32,6 @@
 #include "aco_builder.h"
 #include "aco_interface.h"
 #include "aco_instruction_selection_setup.cpp"
-#include "aco_builder.h"
 
 namespace aco {
 namespace {
