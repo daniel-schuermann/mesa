@@ -1326,12 +1326,10 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
    assert(vgpr_spill_temps.size() <= spills_to_vgpr);
 
    /* replace pseudo instructions with actual hardware instructions */
-   unsigned nesting_depth = 0;
    unsigned last_top_level_block_idx = 0;
    for (std::unique_ptr<Block>& block : ctx.program->blocks) {
-      if (block->loop_nest_depth == 0 && block->linear_predecessors.size() == 2)
-         nesting_depth--;
-      if (block->loop_nest_depth == 0 && nesting_depth == 0) {
+
+      if (block->is_top_level) {
          last_top_level_block_idx = block->index;
 
          /* check if any spilled variables use a created linear vgpr, otherwise destroy them */
@@ -1455,8 +1453,6 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
 
       }
       block->instructions = std::move(instructions);
-      if (block->loop_nest_depth == 0 && block->linear_successors.size() == 2)
-         nesting_depth++;
    }
 }
 
