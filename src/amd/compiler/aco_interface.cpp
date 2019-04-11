@@ -113,7 +113,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
       std::cerr << "After Assembly:\n";
       //std::cerr << "Num VGPRs: " << program->config->num_vgprs << "\n";
       //std::cerr << "Num SGPRs: " << program->config->num_sgprs << "\n";
-      aco::print_asm(code, options->family, std::cerr);
+      aco::print_asm(program.get(), code, options->family, std::cerr);
    }
    //std::cerr << binary->disasm_string;
    uint32_t* bin = (uint32_t*) malloc(code.size() * sizeof(uint32_t));
