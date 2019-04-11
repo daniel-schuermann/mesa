@@ -806,6 +806,7 @@ T* create_instruction(aco_opcode opcode, Format format, uint32_t num_operands, u
 /* CFG */
 struct Block {
    unsigned index;
+   unsigned offset;
    std::vector<aco_ptr<Instruction>> instructions;
    std::vector<Block*> logical_predecessors;
    std::vector<Block*> linear_predecessors;
@@ -891,7 +892,7 @@ void spill(Program* program, live& live_vars, const struct radv_nir_compiler_opt
 void insert_wait_states(Program* program);
 void insert_NOPs(Program* program);
 std::vector<uint32_t> emit_program(Program* program);
-void print_asm(std::vector<uint32_t>& binary, enum radeon_family family, std::ostream& out);
+void print_asm(Program *program, std::vector<uint32_t>& binary, enum radeon_family family, std::ostream& out);
 void validate(Program* program, FILE *output);
 bool validate_ra(Program* program, const struct radv_nir_compiler_options *options, FILE *output);
 
