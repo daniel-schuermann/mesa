@@ -36,7 +36,7 @@
 namespace aco {
 
 template<bool reg_demand_cond>
-void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>& worklist)
+void process_live_temps_per_block(Program *program, live& lives, Block* block, std::set<unsigned>& worklist)
 {
    std::vector<std::pair<uint16_t,uint16_t>>& register_demand = lives.register_demand[block->index];
    uint16_t vgpr_demand = 0;
@@ -172,7 +172,16 @@ void process_live_temps_per_block(live& lives, Block* block, std::set<unsigned>&
       }
    }
 
-   assert(block->index != 0 || (live_vgprs.empty() && live_sgprs.empty()));
+   if (!(block->index != 0 || (live_vgprs.empty() && live_sgprs.empty()))) {
+      aco_print_program(program, stderr);
+      fprintf(stderr, "These temporaries are never defined or are defined after use:\n");
+      for (Temp vgpr : live_vgprs)
+         fprintf(stderr, "%%%d\n", vgpr.id());
+      for (Temp sgpr : live_sgprs)
+         fprintf(stderr, "%%%d\n", sgpr.id());
+      abort();
+   }
+
    assert(!reg_demand_cond || block->index != 0 || (vgpr_demand == 0 && sgpr_demand == 0));
 }
 
@@ -219,7 +228,7 @@ live live_var_analysis(Program* program,
       std::set<unsigned>::reverse_iterator b_it = worklist.rbegin();
       unsigned block_idx = *b_it;
       worklist.erase(block_idx);
-      process_live_temps_per_block<register_demand>(result, program->blocks[block_idx].get(), worklist);
+      process_live_temps_per_block<register_demand>(program, result, program->blocks[block_idx].get(), worklist);
       vgpr_demand = std::max(vgpr_demand, program->blocks[block_idx]->vgpr_demand);
       sgpr_demand = std::max(sgpr_demand, program->blocks[block_idx]->sgpr_demand);
    }
