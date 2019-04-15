@@ -2245,10 +2245,9 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
       ctx->block->instructions.emplace_back(std::move(tmp));
    }
 
-   index = convert_pointer_to_64_bit(ctx, index);
-   ctx->allocated.insert({instr->dest.ssa.index, index.id()});
-
-
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+   Builder bld(ctx->program, ctx->block);
+   bld.sop1(aco_opcode::s_mov_b32, Definition(dst), index);
 }
 
 void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
@@ -2258,6 +2257,7 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
    nir_const_value* const_offset = nir_src_as_const_value(instr->src[1]);
 
    Builder bld(ctx->program, ctx->block);
+   rsrc = convert_pointer_to_64_bit(ctx, rsrc);
    rsrc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), rsrc, Operand(0u));
 
    if (dst.type() == sgpr) {
@@ -3039,7 +3039,8 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    unsigned num_bytes = num_components * instr->dest.ssa.bit_size / 8;
 
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-   Temp rsrc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), get_ssa_temp(ctx, instr->src[0].ssa), Operand(0u));
+   Temp rsrc = convert_pointer_to_64_bit(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
+   rsrc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), rsrc, Operand(0u));
 
    bool glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
    aco_opcode op;
@@ -3137,7 +3138,8 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    else
       offset = get_ssa_temp(ctx, instr->src[2].ssa);
 
-   Temp rsrc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), get_ssa_temp(ctx, instr->src[1].ssa), Operand(0u));
+   Temp rsrc = convert_pointer_to_64_bit(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
+   rsrc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), rsrc, Operand(0u));
 
    while (writemask) {
       int start, count;
@@ -3226,7 +3228,8 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    else
       offset = get_ssa_temp(ctx, instr->src[1].ssa);
 
-   Temp rsrc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), get_ssa_temp(ctx, instr->src[0].ssa), Operand(0u));
+   Temp rsrc = convert_pointer_to_64_bit(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
+   rsrc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), rsrc, Operand(0u));
 
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
 
@@ -3283,7 +3286,7 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
 
 void visit_get_buffer_size(isel_context *ctx, nir_intrinsic_instr *instr) {
 
-   Temp index = get_ssa_temp(ctx, instr->src[0].ssa);
+   Temp index = convert_pointer_to_64_bit(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
    Builder bld(ctx->program, ctx->block);
    Temp desc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), index, Operand(0u));
    get_buffer_size(ctx, desc, get_ssa_temp(ctx, &instr->dest.ssa), false);
