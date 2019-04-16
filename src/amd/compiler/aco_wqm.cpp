@@ -247,8 +247,8 @@ void get_block_needs(wqm_ctx &ctx, block_info *info, Block* block)
             continue;
          unsigned def = instr->getDefinition(j).tempId();
          ctx.defined_in[def] = block->index;
-         if (pred_by_exec && needs == Unspecified && ctx.needs_wqm[def]) {
-            needs = WQM;
+         if (needs == Unspecified && ctx.needs_wqm[def]) {
+            needs = pred_by_exec ? WQM : Unspecified;
             propagate_wqm = true;
          }
       }
