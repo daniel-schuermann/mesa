@@ -3727,14 +3727,18 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    }
    case nir_intrinsic_ballot: {
-      bld.vopc(aco_opcode::v_cmp_lg_u32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), Operand(0u), get_ssa_temp(ctx, instr->src[0].ssa));
+      Definition tmp = bld.def(s2);
+      bld.vopc(aco_opcode::v_cmp_lg_u32, tmp, Operand(0u), get_ssa_temp(ctx, instr->src[0].ssa));
+      emit_wqm(ctx, tmp.getTemp(), get_ssa_temp(ctx, &instr->dest.ssa));
       break;
    }
    case nir_intrinsic_shuffle: {
       Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
       Temp tid = get_ssa_temp(ctx, instr->src[1].ssa);
       assert(src.regClass() == v1 && tid.regClass() == v1);
-      bld.ds(aco_opcode::ds_bpermute_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), tid, src);
+      Definition tmp = bld.def(v1);
+      bld.ds(aco_opcode::ds_bpermute_b32, tmp, tid, src);
+      emit_wqm(ctx, tmp.getTemp(), get_ssa_temp(ctx, &instr->dest.ssa));
       break;
    }
    case nir_intrinsic_load_sample_id: {
@@ -3748,10 +3752,12 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    }
    case nir_intrinsic_read_first_invocation: {
       Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
+      Definition tmp = bld.def(s1);
       if (src.regClass() == v1)
-         bld.vop1(aco_opcode::v_readfirstlane_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), src);
+         bld.vop1(aco_opcode::v_readfirstlane_b32, tmp, src);
       else
-         bld.sop1(aco_opcode::s_mov_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), src);
+         bld.sop1(aco_opcode::s_mov_b32, tmp, src);
+      emit_wqm(ctx, tmp.getTemp(), get_ssa_temp(ctx, &instr->dest.ssa));
       break;
    }
    case nir_intrinsic_vote_all: {
@@ -3760,9 +3766,11 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       assert(src.regClass() == s2);
       assert(dst.regClass() == s1);
 
-      bld.sopc(aco_opcode::s_cmp_eq_u64, bld.scc(Definition(dst)),
+      Definition tmp = bld.def(s1);
+      bld.sopc(aco_opcode::s_cmp_eq_u64, bld.scc(tmp),
                bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2)),
                Operand(exec, s2));
+      emit_wqm(ctx, tmp.getTemp(), dst);
       break;
    }
    case nir_intrinsic_reduce:
