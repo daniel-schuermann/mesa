@@ -208,8 +208,7 @@ Temp emit_wqm(isel_context *ctx, Temp src, Temp dst=Temp(0, s1))
       return dst;
    }
 
-   bld.pseudo(aco_opcode::p_wqm, Definition(dst),
-              bld.pseudo(aco_opcode::p_parallelcopy, bld.def(src.regClass()), src));
+   bld.pseudo(aco_opcode::p_wqm, Definition(dst), src);
    ctx->program->needs_wqm = true;
    return dst;
 }
@@ -2752,8 +2751,6 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
 
    if (instr->intrinsic == nir_intrinsic_image_deref_atomic_comp_swap)
       data = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2), get_ssa_temp(ctx, instr->src[4].ssa), data);
-   else if (return_previous)
-      data = bld.pseudo(aco_opcode::p_parallelcopy, bld.def(vgpr, data.size()), data);
 
    aco_opcode buf_op, image_op;
    switch (instr->intrinsic) {
@@ -3111,12 +3108,8 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[2].ssa));
    assert(data.size() == 1 && "64bit ssbo atomics not yet implemented.");
 
-   if (instr->intrinsic == nir_intrinsic_ssbo_atomic_comp_swap) {
+   if (instr->intrinsic == nir_intrinsic_ssbo_atomic_comp_swap)
       data = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2), get_ssa_temp(ctx, instr->src[3].ssa), data);
-
-   } else if (return_previous) {
-      data = bld.pseudo(aco_opcode::p_parallelcopy, bld.def(vgpr, data.size()), data);
-   }
 
    Temp offset;
    if (ctx->options->chip_class < VI)
