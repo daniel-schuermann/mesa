@@ -543,9 +543,14 @@ void emit_bcsel(isel_context *ctx, nir_alu_instr *instr, Temp dst)
    then = as_divergent_bool(ctx, then, false);
    els = as_divergent_bool(ctx, els, false);
 
-   bld.sop2(aco_opcode::s_or_b64, Definition(dst), bld.def(s1, scc),
-            bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), cond, then),
-            bld.sop2(aco_opcode::s_andn2_b64, bld.def(s2), bld.def(s1, scc), els, cond));
+   if (cond.id() != then.id())
+      then = bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), cond, then);
+
+   if (cond.id() == els.id())
+      bld.sop1(aco_opcode::s_mov_b64, Definition(dst), then);
+   else
+      bld.sop2(aco_opcode::s_or_b64, Definition(dst), bld.def(s1, scc), then,
+               bld.sop2(aco_opcode::s_andn2_b64, bld.def(s2), bld.def(s1, scc), els, cond));
 }
 
 void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
