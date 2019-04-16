@@ -1906,8 +1906,6 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
             values[i] = Operand();
          }
       }
-      values[2] = Operand();
-      values[3] = Operand();
    }
 
    aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
@@ -1916,8 +1914,15 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    exp->compressed = (bool) compr_op;
    exp->dest = target;
    exp->enabled_mask = enabled_channels;
-   for (int i = 0; i < 4; i++)
-      exp->getOperand(i) = values[i];
+   if ((bool) compr_op) {
+      for (int i = 0; i < 2; i++)
+         exp->getOperand(i) = enabled_channels & (3 << (i * 2)) ? values[i] : Operand();
+      exp->getOperand(2) = Operand();
+      exp->getOperand(3) = Operand();
+   } else {
+      for (int i = 0; i < 4; i++)
+         exp->getOperand(i) = enabled_channels & (1 << i) ? values[i] : Operand();
+   }
 
    ctx->block->instructions.emplace_back(std::move(exp));
 }
