@@ -1,5 +1,7 @@
 #include "aco_ir.h"
 
+#include "common/sid.h"
+
 namespace aco {
 
 static const char *reduce_ops[] = {
@@ -226,6 +228,17 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
          fprintf(output, " done");
       if (exp->valid_mask)
          fprintf(output, " vm");
+
+      if (exp->dest <= V_008DFC_SQ_EXP_MRT + 7)
+         fprintf(output, " mrt%d", exp->dest - V_008DFC_SQ_EXP_MRT);
+      else if (exp->dest == V_008DFC_SQ_EXP_MRTZ)
+         fprintf(output, " mrtz");
+      else if (exp->dest == V_008DFC_SQ_EXP_NULL)
+         fprintf(output, " null");
+      else if (exp->dest >= V_008DFC_SQ_EXP_POS && exp->dest <= V_008DFC_SQ_EXP_POS + 3)
+         fprintf(output, " pos%d", exp->dest - V_008DFC_SQ_EXP_POS);
+      else if (exp->dest >= V_008DFC_SQ_EXP_PARAM && exp->dest <= V_008DFC_SQ_EXP_PARAM + 31)
+         fprintf(output, " param%d", exp->dest - V_008DFC_SQ_EXP_PARAM);
       break;
    }
    case Format::PSEUDO_BRANCH: {
