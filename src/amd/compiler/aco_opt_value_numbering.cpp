@@ -231,6 +231,13 @@ void process_block(std::unique_ptr<Block>& block,
          continue;
       }
 
+      /* simple copy-propagation through renaming */
+      if ((instr->opcode == aco_opcode::s_mov_b32 || instr->opcode == aco_opcode::s_mov_b64 || instr->opcode == aco_opcode::v_mov_b32) &&
+          !instr->getDefinition(0).isFixed() && instr->getOperand(0).isTemp() && instr->getOperand(0).regClass() == instr->getDefinition(0).regClass() &&
+          !instr->isDPP() && !((int)instr->format & (int)Format::SDWA)) {
+         renames[instr->getDefinition(0).tempId()] = instr->getOperand(0).getTemp();
+      }
+
       std::pair<expr_set::iterator, bool> res = expr_values.emplace(instr.get());
 
       /* if there was already an expression with the same value number */
