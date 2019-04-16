@@ -2689,7 +2689,7 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    const enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
    Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[3].ssa));
 
-   bool glc = ctx->options->chip_class == SI || var->data.image.access & (ACCESS_VOLATILE | ACCESS_COHERENT) ? 1 : 0;
+   bool glc = ctx->options->chip_class == SI || var->data.image.access & (ACCESS_VOLATILE | ACCESS_COHERENT | ACCESS_NON_READABLE) ? 1 : 0;
 
    if (dim == GLSL_SAMPLER_DIM_BUF) {
       Temp rsrc = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_BUFFER, nullptr, true, true);
@@ -3084,7 +3084,7 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       store->getOperand(3) = Operand(write_data);
       store->offset = start * elem_size_bytes;
       store->offen = (offset.type() == vgpr);
-      store->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
+      store->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT | ACCESS_NON_READABLE);
       store->disable_wqm = true;
       ctx->program->needs_exact = true;
       ctx->block->instructions.emplace_back(std::move(store));
