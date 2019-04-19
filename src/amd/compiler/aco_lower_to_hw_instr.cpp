@@ -26,102 +26,194 @@
  */
 
 #include <map>
+#include <math.h>
 
 #include "aco_ir.h"
 #include "aco_builder.h"
+#include "util/u_math.h"
 
 
 namespace aco {
 
 struct lower_context {
+   Program *program;
    std::vector<aco_ptr<Instruction>> instructions;
 };
 
-void emit_dpp_op(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1,
-                 aco_opcode op, unsigned dpp_ctrl, unsigned row_mask, unsigned bank_mask,
-                 bool bound_ctrl_zero)
+void emit_dpp_op(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1, PhysReg vtmp, PhysReg wrtmp,
+                 aco_opcode op, Format format, bool clobber_vcc, unsigned dpp_ctrl,
+                 unsigned row_mask, unsigned bank_mask, bool bound_ctrl_zero)
 {
-   Format format = (Format) ((uint32_t) Format::VOP2 | (uint32_t) Format::DPP);
-   aco_ptr<DPP_instruction> dpp{create_instruction<DPP_instruction>(op, format, 3, 1)};
-   dpp->getOperand(0) = Operand(src0, v1);
-   dpp->getOperand(1) = Operand(src1, v1);
-   dpp->getDefinition(0) = Definition(dst, v1);
-   dpp->dpp_ctrl = dpp_ctrl;
-   dpp->row_mask = row_mask;
-   dpp->bank_mask = bank_mask;
-   dpp->bound_ctrl = bound_ctrl_zero;
-   ctx->instructions.emplace_back(std::move(dpp));
+   if (format == Format::VOP3) {
+      Builder bld(ctx->program, &ctx->instructions);
+      bld.vop1_dpp(aco_opcode::v_mov_b32, Definition(vtmp, v1), Operand(src0, v1),
+                   dpp_ctrl, row_mask, bank_mask, bound_ctrl_zero);
+
+      if (clobber_vcc)
+         bld.vop3(op, Definition(dst, v1), Definition(vcc, s2), Operand(vtmp, v1), Operand(src1, v1));
+      else
+         bld.vop3(op, Definition(dst, v1), Operand(vtmp, v1), Operand(src1, v1));
+   } else {
+      assert(format == Format::VOP2 || format == Format::VOP1);
+      aco_ptr<DPP_instruction> dpp{create_instruction<DPP_instruction>(
+         op, (Format) ((uint32_t) format | (uint32_t) Format::DPP),
+         format == Format::VOP2 ? 2 : 1, clobber_vcc ? 2 : 1)};
+      dpp->getOperand(0) = Operand(src0, v1);
+      if (format == Format::VOP2)
+         dpp->getOperand(1) = Operand(src1, v1);
+      dpp->getDefinition(0) = Definition(dst, v1);
+      if (clobber_vcc)
+         dpp->getDefinition(1) = Definition(vcc, s2);
+      dpp->dpp_ctrl = dpp_ctrl;
+      dpp->row_mask = row_mask;
+      dpp->bank_mask = bank_mask;
+      dpp->bound_ctrl = bound_ctrl_zero;
+      ctx->instructions.emplace_back(std::move(dpp));
+   }
 }
 
-void invert_exec(lower_context *ctx)
+uint32_t get_reduction_identity(ReduceOp op)
 {
-   aco_ptr<Instruction> inv{create_instruction<SOP2_instruction>(aco_opcode::s_xor_b64, Format::SOP2, 2, 1)};
-
-   inv->getOperand(0) = Operand(exec, s2);
-   inv->getOperand(1) = Operand((uint64_t)-1);
-   inv->getDefinition(0) = Definition(exec, s2);
-   ctx->instructions.emplace_back(std::move(inv));
+   switch (op) {
+   case iadd32:
+   case iadd64:
+   case fadd32:
+   case fadd64:
+   case ior32:
+   case ior64:
+   case ixor32:
+   case ixor64:
+   case umax32:
+   case umax64:
+      return 0;
+   case imul32:
+   case imul64:
+      return 1;
+   case fmul32:
+   case fmul64:
+      return 0x3f800000u; /* 1.0 */
+   case imin32:
+   case imin64:
+      return INT32_MAX;
+   case imax32:
+   case imax64:
+      return INT32_MIN;
+   case umin32:
+   case umin64:
+   case iand32:
+   case iand64:
+      return UINT32_MAX;
+   case fmin32:
+   case fmin64:
+      return 0x7f800000u; /* infinity */
+   case fmax32:
+   case fmax64:
+      return 0xff800000u; /* negative infinity */
+   }
+   unreachable("Invalid reduction operation");
 }
 
-void emit_reduce(lower_context *ctx, aco_opcode op, ReduceOp reduce_op, unsigned cluster_size, PhysReg tmp,
-                 PhysReg stmp, Operand src, Definition dst)
+aco_opcode get_reduction_opcode(lower_context *ctx, ReduceOp op, bool *clobber_vcc, Format *format)
 {
-   assert(reduce_op == ReduceOp::umin32);
+   *clobber_vcc = false;
+   *format = Format::VOP2;
+   switch (op) {
+   case iadd32:
+      *clobber_vcc = ctx->program->chip_class < GFX9;
+      return ctx->program->chip_class < GFX9 ? aco_opcode::v_add_co_u32 : aco_opcode::v_add_u32;
+   case imul32:
+      *format = Format::VOP3;
+      return aco_opcode::v_mul_lo_u32;
+   case fadd32:
+      return aco_opcode::v_add_f32;
+   case fmul32:
+      return aco_opcode::v_mul_f32;
+   case imax32:
+      return aco_opcode::v_max_i32;
+   case imin32:
+      return aco_opcode::v_min_i32;
+   case umin32:
+      return aco_opcode::v_min_u32;
+   case umax32:
+      return aco_opcode::v_max_u32;
+   case fmin32:
+      return aco_opcode::v_min_f32;
+   case fmax32:
+      return aco_opcode::v_max_f32;
+   case iand32:
+      return aco_opcode::v_and_b32;
+   case ixor32:
+      return aco_opcode::v_xor_b32;
+   case ior32:
+      return aco_opcode::v_or_b32;
+   case iadd64:
+   case imul64:
+   case fadd64:
+   case fmul64:
+   case imin64:
+   case imax64:
+   case umin64:
+   case umax64:
+   case fmin64:
+   case fmax64:
+   case iand64:
+   case ior64:
+   case ixor64:
+      assert(false);
+      break;
+   }
+   unreachable("Invalid reduction operation");
+   return aco_opcode::v_min_u32;
+}
+
+void emit_reduction(lower_context *ctx, aco_opcode op, ReduceOp reduce_op, unsigned cluster_size, PhysReg tmp,
+                    PhysReg stmp, PhysReg vtmp, Operand src, Definition dst)
+{
    assert(op == aco_opcode::p_reduce);
-   assert(cluster_size == 0);
+   assert(cluster_size == 64);
+
+   Builder bld(ctx->program, &ctx->instructions);
+
+   PhysReg wrtmp{0}; /* should never be needed */
+
+   Format format;
+   bool should_clobber_vcc;
+   aco_opcode reduce_opcode = get_reduction_opcode(ctx, reduce_op, &should_clobber_vcc, &format);
+   Operand identity = Operand(get_reduction_identity(reduce_op));
 
    /* First, copy the source to tmp and set inactive lanes to the identity */
-   for (unsigned k = 0; k < src.size(); k++) {
-      aco_ptr<Instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
-      mov->getOperand(0) = Operand(PhysReg{src.physReg().reg + k}, v1);
-      mov->getDefinition(0) = Definition(PhysReg{tmp.reg + k}, v1);
-      ctx->instructions.emplace_back(std::move(mov));
-   }
-
-   invert_exec(ctx);
-
-   for (unsigned k = 0; k < src.size(); k++) {
-      aco_ptr<Instruction> mov{create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1)};
-      mov->getOperand(0) = Operand((uint32_t) -1); // TODO get identity for op!
-      mov->getDefinition(0) = Definition(PhysReg{tmp.reg + k}, v1);
-      ctx->instructions.emplace_back(std::move(mov));
-   }
-
-   invert_exec(ctx);
-
    // note: this clobbers SCC!
-   aco_ptr<SOP1_instruction> set_exec{create_instruction<SOP1_instruction>(aco_opcode::s_or_saveexec_b64, Format::SOP1, 1, 3)};
-   set_exec->getOperand(0) = Operand((uint64_t) -1);
-   set_exec->getDefinition(0) = Definition(stmp, s2);
-   set_exec->getDefinition(1) = Definition(scc, b);
-   set_exec->getDefinition(2) = Definition(exec, s2);
-   ctx->instructions.emplace_back(std::move(set_exec));
+   bld.sop1(aco_opcode::s_or_saveexec_b64, Definition(stmp, s2), Definition(scc, s1), Definition(exec, s2), Operand(UINT64_MAX));
 
-   // TODO: generalize this!
-   emit_dpp_op(ctx, tmp, tmp, tmp, aco_opcode::v_min_u32,
-               dpp_quad_perm(1, 0, 3, 2), 0xf, 0xf, false);
-   emit_dpp_op(ctx, tmp, tmp, tmp, aco_opcode::v_min_u32,
-               dpp_quad_perm(2, 3, 0, 1), 0xf, 0xf, false);
-   emit_dpp_op(ctx, tmp, tmp, tmp, aco_opcode::v_min_u32,
-               dpp_row_half_mirror, 0xf, 0xf, false);
-   emit_dpp_op(ctx, tmp, tmp, tmp, aco_opcode::v_min_u32,
-               dpp_row_mirror, 0xf, 0xf, false);
-   emit_dpp_op(ctx, tmp, tmp, tmp, aco_opcode::v_min_u32,
-               dpp_row_bcast15, 0xf, 0xf, false);
-   emit_dpp_op(ctx, tmp, tmp, tmp, aco_opcode::v_min_u32,
-               dpp_row_bcast31, 0xf, 0xf, false);
-
-   aco_ptr<Instruction> restore{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
-   restore->getOperand(0) = Operand(stmp, s2);
-   restore->getDefinition(0) = Definition(exec, s2);
-   ctx->instructions.emplace_back(std::move(restore));
+   if (identity.isLiteral()) {
+      bld.vop1(aco_opcode::v_mov_b32, Definition(PhysReg{tmp.reg + src.size() - 1}, v1), identity);
+      identity = Operand(PhysReg{tmp.reg + src.size() - 1}, v1);
+   }
 
    for (unsigned k = 0; k < src.size(); k++) {
-      aco_ptr<VOP3A_instruction> readlane{create_instruction<VOP3A_instruction>(aco_opcode::v_readlane_b32, Format::VOP3A, 2, 1)};
-      readlane->getOperand(0) = Operand(PhysReg{tmp.reg + k}, v1);
-      readlane->getOperand(1) = Operand((uint32_t)63);
-      readlane->getDefinition(0) = Definition(PhysReg{dst.physReg().reg + k}, s1);
-      ctx->instructions.emplace_back(std::move(readlane));
+      bld.vop2_e64(aco_opcode::v_cndmask_b32, Definition(PhysReg{tmp.reg + k}, v1),
+                   identity, Operand(PhysReg{src.physReg().reg + k}, v1),
+                   Operand(stmp, s2));
+   }
+
+   emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+               dpp_quad_perm(1, 0, 3, 2), 0xf, 0xf, false);
+   emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+               dpp_quad_perm(2, 3, 0, 1), 0xf, 0xf, false);
+   emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+               dpp_row_half_mirror, 0xf, 0xf, false);
+   emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+               dpp_row_mirror, 0xf, 0xf, false);
+   emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+               dpp_row_bcast15, 0xa, 0xf, false);
+   emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+               dpp_row_bcast31, 0xc, 0xf, false);
+
+   bld.sop1(aco_opcode::s_mov_b64, Definition(exec, s2), Operand(stmp, s2));
+
+   for (unsigned k = 0; k < src.size(); k++) {
+      bld.vop3(aco_opcode::v_readlane_b32, Definition(PhysReg{dst.physReg().reg + k}, s1),
+               Operand(PhysReg{tmp.reg + k}, v1), Operand(63u));
    }
 }
 
@@ -302,6 +394,7 @@ void lower_to_hw_instr(Program* program)
    {
       Block* block = it->get();
       lower_context ctx;
+      ctx.program = program;
       for (auto&& instr : block->instructions)
       {
          aco_ptr<Instruction> mov;
@@ -521,10 +614,11 @@ void lower_to_hw_instr(Program* program)
 
          } else if (instr->format == Format::PSEUDO_REDUCTION) {
             Pseudo_reduction_instruction* reduce = static_cast<Pseudo_reduction_instruction*>(instr.get());
-            emit_reduce(&ctx, reduce->opcode, reduce->reduce_op, reduce->cluster_size,
-                        reduce->getOperand(1).physReg(), // tmp
-                        reduce->getDefinition(1).physReg(), // stmp
-                        reduce->getOperand(0), reduce->getDefinition(0));
+            emit_reduction(&ctx, reduce->opcode, reduce->reduce_op, reduce->cluster_size,
+                           reduce->getOperand(1).physReg(), // tmp
+                           reduce->getDefinition(1).physReg(), // stmp
+                           reduce->getOperand(2).physReg(), // vtmp
+                           reduce->getOperand(0), reduce->getDefinition(0));
          } else {
             ctx.instructions.emplace_back(std::move(instr));
          }
