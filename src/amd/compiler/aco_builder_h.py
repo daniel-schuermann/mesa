@@ -215,7 +215,7 @@ formats = [("pseudo", [Format.PSEUDO], 'Instruction', itertools.product(range(5)
            ("vop1", [Format.VOP1], 'VOP1_instruction', [(1, 1)]),
            ("vop2", [Format.VOP2], 'VOP2_instruction', itertools.product([1, 2], [2, 3])),
            ("vopc", [Format.VOPC], 'VOPC_instruction', itertools.product([1, 2], [2])),
-           ("vop3", [Format.VOP3A], 'VOP3A_instruction', [(1, 3), (1, 2), (2, 2)]),
+           ("vop3", [Format.VOP3A], 'VOP3A_instruction', [(1, 3), (1, 2), (1, 1), (2, 2)]),
            ("vintrp", [Format.VINTRP], 'Interp_instruction', [(1, 2), (1, 3)]),
            ("vop1_dpp", [Format.VOP1, Format.DPP], 'DPP_instruction', [(1, 1)]),
            ("vop2_dpp", [Format.VOP2, Format.DPP], 'DPP_instruction', itertools.product([1, 2], [2, 3])),
