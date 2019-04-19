@@ -780,8 +780,9 @@ enum ReduceOp {
  * Operand(2): vector temporary
  * Definition(0): result
  * Definition(1): scalar temporary
- * Definition(2): scc clobber
- * Definition(3): vcc clobber
+ * Definition(2): scalar identity temporary
+ * Definition(3): scc clobber
+ * Definition(4): vcc clobber
  *
  */
 struct Pseudo_reduction_instruction : public Instruction {
