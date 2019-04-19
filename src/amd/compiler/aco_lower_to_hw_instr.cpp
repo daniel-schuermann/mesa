@@ -42,10 +42,15 @@ struct lower_context {
 
 void emit_dpp_op(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1, PhysReg vtmp, PhysReg wrtmp,
                  aco_opcode op, Format format, bool clobber_vcc, unsigned dpp_ctrl,
-                 unsigned row_mask, unsigned bank_mask, bool bound_ctrl_zero)
+                 unsigned row_mask, unsigned bank_mask, bool bound_ctrl_zero,
+                 Operand identity=Operand()) /* for VOP3 with sparse writes */
 {
    if (format == Format::VOP3) {
       Builder bld(ctx->program, &ctx->instructions);
+
+      if (!identity.isUndefined())
+         bld.vop1(aco_opcode::v_mov_b32, Definition(vtmp, v1), identity);
+
       bld.vop1_dpp(aco_opcode::v_mov_b32, Definition(vtmp, v1), Operand(src0, v1),
                    dpp_ctrl, row_mask, bank_mask, bound_ctrl_zero);
 
@@ -167,9 +172,8 @@ aco_opcode get_reduction_opcode(lower_context *ctx, ReduceOp op, bool *clobber_v
 }
 
 void emit_reduction(lower_context *ctx, aco_opcode op, ReduceOp reduce_op, unsigned cluster_size, PhysReg tmp,
-                    PhysReg stmp, PhysReg vtmp, Operand src, Definition dst)
+                    PhysReg stmp, PhysReg vtmp, PhysReg sitmp, Operand src, Definition dst)
 {
-   assert(op == aco_opcode::p_reduce);
    assert(cluster_size == 64);
 
    Builder bld(ctx->program, &ctx->instructions);
@@ -180,40 +184,85 @@ void emit_reduction(lower_context *ctx, aco_opcode op, ReduceOp reduce_op, unsig
    bool should_clobber_vcc;
    aco_opcode reduce_opcode = get_reduction_opcode(ctx, reduce_op, &should_clobber_vcc, &format);
    Operand identity = Operand(get_reduction_identity(reduce_op));
+   Operand vcndmask_identity = identity;
 
    /* First, copy the source to tmp and set inactive lanes to the identity */
    // note: this clobbers SCC!
    bld.sop1(aco_opcode::s_or_saveexec_b64, Definition(stmp, s2), Definition(scc, s1), Definition(exec, s2), Operand(UINT64_MAX));
 
-   if (identity.isLiteral()) {
+   /* p_exclusive_scan needs it to be a sgpr or inline constant for the v_writelane_b32 */
+   if (identity.isLiteral() && op == aco_opcode::p_exclusive_scan) {
+      bld.sop1(aco_opcode::s_mov_b32, Definition(sitmp, s1), identity);
+      identity = Operand(sitmp, s1);
+
       bld.vop1(aco_opcode::v_mov_b32, Definition(PhysReg{tmp.reg + src.size() - 1}, v1), identity);
-      identity = Operand(PhysReg{tmp.reg + src.size() - 1}, v1);
+      vcndmask_identity = Operand(PhysReg{tmp.reg + src.size() - 1}, v1);
+   } else if (identity.isLiteral()) {
+      bld.vop1(aco_opcode::v_mov_b32, Definition(PhysReg{tmp.reg + src.size() - 1}, v1), identity);
+      vcndmask_identity = Operand(PhysReg{tmp.reg + src.size() - 1}, v1);
    }
 
    for (unsigned k = 0; k < src.size(); k++) {
       bld.vop2_e64(aco_opcode::v_cndmask_b32, Definition(PhysReg{tmp.reg + k}, v1),
-                   identity, Operand(PhysReg{src.physReg().reg + k}, v1),
+                   vcndmask_identity, Operand(PhysReg{src.physReg().reg + k}, v1),
                    Operand(stmp, s2));
    }
 
-   emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
-               dpp_quad_perm(1, 0, 3, 2), 0xf, 0xf, false);
-   emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
-               dpp_quad_perm(2, 3, 0, 1), 0xf, 0xf, false);
-   emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
-               dpp_row_half_mirror, 0xf, 0xf, false);
-   emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
-               dpp_row_mirror, 0xf, 0xf, false);
-   emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
-               dpp_row_bcast15, 0xa, 0xf, false);
-   emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
-               dpp_row_bcast31, 0xc, 0xf, false);
+   switch (op) {
+   case aco_opcode::p_reduce:
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                  dpp_quad_perm(1, 0, 3, 2), 0xf, 0xf, false);
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                  dpp_quad_perm(2, 3, 0, 1), 0xf, 0xf, false);
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                  dpp_row_half_mirror, 0xf, 0xf, false);
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                  dpp_row_mirror, 0xf, 0xf, false);
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                  dpp_row_bcast15, 0xa, 0xf, false);
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                  dpp_row_bcast31, 0xc, 0xf, false);
+      break;
+   case aco_opcode::p_exclusive_scan:
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, aco_opcode::v_mov_b32, Format::VOP1, false,
+                  dpp_wf_sr1, 0xf, 0xf, true);
+      if (!identity.isConstant() || identity.constantValue()) { /* bound_ctrl should take case of this overwise */
+         assert((identity.isConstant() && !identity.isLiteral()) || identity.physReg() == sitmp);
+         bld.vop3(aco_opcode::v_writelane_b32, Definition(tmp, v1),
+                  identity, Operand(0u));
+      }
+      /* fall through */
+   case aco_opcode::p_inclusive_scan:
+      assert(cluster_size == 64);
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                  dpp_row_sr(1), 0xf, 0xf, false, identity);
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                  dpp_row_sr(2), 0xf, 0xf, false, identity);
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                  dpp_row_sr(4), 0xf, 0xf, false, identity);
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                  dpp_row_sr(8), 0xf, 0xf, false, identity);
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                  dpp_row_bcast15, 0xa, 0xf, false, identity);
+      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                  dpp_row_bcast31, 0xc, 0xf, false, identity);
+      break;
+   default:
+      unreachable("Invalid reduction mode");
+   }
 
    bld.sop1(aco_opcode::s_mov_b64, Definition(exec, s2), Operand(stmp, s2));
 
-   for (unsigned k = 0; k < src.size(); k++) {
-      bld.vop3(aco_opcode::v_readlane_b32, Definition(PhysReg{dst.physReg().reg + k}, s1),
-               Operand(PhysReg{tmp.reg + k}, v1), Operand(63u));
+   if (op == aco_opcode::p_reduce) {
+      for (unsigned k = 0; k < src.size(); k++) {
+         bld.vop3(aco_opcode::v_readlane_b32, Definition(PhysReg{dst.physReg().reg + k}, s1),
+                  Operand(PhysReg{tmp.reg + k}, v1), Operand(63u));
+      }
+   } else if (!(dst.physReg() == tmp)) {
+      for (unsigned k = 0; k < src.size(); k++) {
+         bld.vop1(aco_opcode::v_mov_b32, Definition(PhysReg{dst.physReg().reg + k}, s1),
+                  Operand(PhysReg{tmp.reg + k}, v1));
+      }
    }
 }
 
@@ -618,6 +667,7 @@ void lower_to_hw_instr(Program* program)
                            reduce->getOperand(1).physReg(), // tmp
                            reduce->getDefinition(1).physReg(), // stmp
                            reduce->getOperand(2).physReg(), // vtmp
+                           reduce->getDefinition(2).physReg(), // sitmp
                            reduce->getOperand(0), reduce->getDefinition(0));
          } else {
             ctx.instructions.emplace_back(std::move(instr));
