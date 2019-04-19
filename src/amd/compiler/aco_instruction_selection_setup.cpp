@@ -339,19 +339,30 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_shared_atomic_xor:
                   case nir_intrinsic_shared_atomic_exchange:
                   case nir_intrinsic_shared_atomic_comp_swap:
+                     type = vgpr;
+                     break;
                   case nir_intrinsic_inclusive_scan:
                   case nir_intrinsic_exclusive_scan:
-                     type = vgpr;
+                     if (intrinsic->src[0].ssa->bit_size == 1) {
+                        type = sgpr;
+                        size = 2;
+                     } else {
+                        type = vgpr;
+                     }
                      break;
                   case nir_intrinsic_load_front_face:
                      type = sgpr;
                      size = 2;
                      break;
                   case nir_intrinsic_reduce:
-                     if (nir_intrinsic_cluster_size(intrinsic) == 0)
+                     if (nir_intrinsic_cluster_size(intrinsic) == 0) {
                         type = sgpr;
-                     else
+                     } else if (intrinsic->src[0].ssa->bit_size == 1) {
+                        type = sgpr;
+                        size = 2;
+                     } else {
                         type = vgpr;
+                     }
                      break;
                   case nir_intrinsic_load_ubo:
                   case nir_intrinsic_load_ssbo:
