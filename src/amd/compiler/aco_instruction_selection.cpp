@@ -3595,25 +3595,72 @@ void visit_load_sample_mask_in(isel_context *ctx, nir_intrinsic_instr *instr) {
    bld.vop2(aco_opcode::v_and_b32, Definition(dst), mask, ctx->fs_inputs[fs_input::sample_coverage]);
 }
 
-Temp emit_boolean_reduce(isel_context *ctx, nir_op op, Temp src)
+Temp emit_boolean_reduce(isel_context *ctx, nir_op op, unsigned cluster_size, Temp src)
 {
    Builder bld(ctx->program, ctx->block);
 
-   if (op == nir_op_iand) {
+   if (cluster_size == 1) {
+      return src;
+   } if (op == nir_op_iand && cluster_size == 4) {
+      //subgroupClusteredAnd(val, 4) -> ~wqm(exec & ~val)
+      Temp tmp = bld.sop2(aco_opcode::s_andn2_b64, bld.def(s2), bld.def(s1, scc), Operand(exec, s2), src);
+      return bld.sop1(aco_opcode::s_not_b64, bld.def(s2), bld.def(s1, scc),
+                      bld.sop1(aco_opcode::s_wqm_b64, bld.def(s2), bld.def(s1, scc), tmp));
+   } else if (op == nir_op_ior && cluster_size == 4) {
+      //subgroupClusteredOr(val, 4) -> wqm(val & exec)
+      return bld.sop1(aco_opcode::s_wqm_b64, bld.def(s2), bld.def(s1, scc),
+                      bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2)));
+   } else if (op == nir_op_iand && cluster_size == 64) {
       //subgroupAnd(val) -> (exec & ~val) == 0
       Temp tmp = bld.sop2(aco_opcode::s_andn2_b64, bld.def(s2), bld.def(s1, scc), Operand(exec, s2), src).def(1).getTemp();
       return bld.sopc(aco_opcode::s_cmp_eq_u32, bld.def(s1, scc), tmp, Operand(0u));
-   } else if (op == nir_op_ior) {
+   } else if (op == nir_op_ior && cluster_size == 64) {
       //subgroupOr(val) -> (val & exec) != 0
       return bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2)).def(1).getTemp();
-   } else if (op == nir_op_ixor) {
+   } else if (op == nir_op_ixor && cluster_size == 64) {
       //subgroupXor(val) -> s_bcnt1_i32_b64(val & exec) & 1
       Temp tmp = bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2));
       tmp = bld.sop1(aco_opcode::s_bcnt1_i32_b64, bld.def(s2), bld.def(s1, scc), tmp);
       return bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), tmp, Operand(1u)).def(1).getTemp();
    } else {
-      assert(false);
-      return Temp(0, s1);
+      //subgroupClustered{And,Or,Xor}(val, n) ->
+      //lane_id = v_mbcnt_hi_u32_b32(-1, v_mbcnt_lo_u32_b32(-1, 0))
+      //cluster_offset = ~(n - 1) & lane_id
+      //cluster_mask = ((1 << n) - 1)
+      //subgroupClusteredAnd():
+      //   return ((val | ~exec) >> cluster_offset) & cluster_mask == cluster_mask
+      //subgroupClusteredOr():
+      //   return ((val & exec) >> cluster_offset) & cluster_mask != 0
+      //subgroupClusteredXor():
+      //   return v_bnt_u32_b32(((val & exec) >> cluster_offset) & cluster_mask) & 1 != 0
+      Temp lane_id = bld.vop3(aco_opcode::v_mbcnt_hi_u32_b32, bld.def(v1), Operand((uint32_t) -1),
+                              bld.vop3(aco_opcode::v_mbcnt_lo_u32_b32, bld.def(v1), Operand((uint32_t) -1), Operand(0u)));
+      Temp cluster_offset = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(~uint32_t(cluster_size - 1)), lane_id);
+
+      Temp tmp;
+      if (op == nir_op_iand)
+         tmp = bld.sop2(aco_opcode::s_orn2_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2));
+      else
+         tmp = bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2));
+
+      uint32_t cluster_mask = cluster_size == 32 ? -1 : (1u << cluster_size) - 1u;
+      tmp = bld.vop3(aco_opcode::v_lshrrev_b64, bld.def(v2), cluster_offset, tmp);
+      tmp = emit_extract_vector(ctx, tmp, 0, v1);
+      if (cluster_mask != 0xffffffff)
+         tmp = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(cluster_mask), tmp);
+
+      Definition cmp_def;
+      if (op == nir_op_iand) {
+         cmp_def = bld.vopc(aco_opcode::v_cmp_eq_u32, bld.def(s2), Operand(cluster_mask), tmp).def(0);
+      } else if (op == nir_op_ior) {
+         cmp_def = bld.vopc(aco_opcode::v_cmp_lg_u32, bld.def(s2), Operand(0u), tmp).def(0);
+      } else if (op == nir_op_ixor) {
+         tmp = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(1u),
+                        bld.vop3(aco_opcode::v_bcnt_u32_b32, bld.def(v1), tmp));
+         cmp_def = bld.vopc(aco_opcode::v_cmp_lg_u32, bld.def(s2), Operand(0u), tmp).def(0);
+      }
+      cmp_def.setHint(vcc);
+      return cmp_def.getTemp();
    }
 }
 
@@ -3923,8 +3970,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 
          switch (instr->intrinsic) {
          case nir_intrinsic_reduce:
-            assert(cluster_size == 64);
-            emit_wqm(ctx, emit_boolean_reduce(ctx, op, src), dst);
+            emit_wqm(ctx, emit_boolean_reduce(ctx, op, cluster_size, src), dst);
             break;
          case nir_intrinsic_exclusive_scan:
             emit_wqm(ctx, emit_boolean_exclusive_scan(ctx, op, src), dst);
@@ -3935,6 +3981,8 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
          default:
             assert(false);
          }
+      } else if (cluster_size == 1) {
+         emit_v_mov(ctx, src, dst);
       } else {
          src = as_vgpr(ctx, src);
 
