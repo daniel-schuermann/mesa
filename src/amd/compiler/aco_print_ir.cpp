@@ -133,10 +133,13 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
          break;
       }
       default: {
-         fprintf(output, " imm:%u", imm);
+         if (imm)
+            fprintf(output, " imm:%u", imm);
          break;
       }
       }
+      if (sopp->block)
+         fprintf(output, " block:BB%d", sopp->block->index);
       break;
    }
    case Format::SMEM: {
