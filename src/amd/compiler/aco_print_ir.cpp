@@ -250,9 +250,9 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
    }
    case Format::PSEUDO_REDUCTION: {
       Pseudo_reduction_instruction* reduce = static_cast<Pseudo_reduction_instruction*>(instr);
-      fprintf(output, " op:%s\n", reduce_ops[reduce->reduce_op]);
+      fprintf(output, " op:%s", reduce_ops[reduce->reduce_op]);
       if (reduce->cluster_size)
-         fprintf(output, " cluster_size:%u\n", reduce->cluster_size);
+         fprintf(output, " cluster_size:%u", reduce->cluster_size);
       break;
    }
    case Format::MTBUF:
