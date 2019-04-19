@@ -355,7 +355,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      size = 2;
                      break;
                   case nir_intrinsic_reduce:
-                     if (nir_intrinsic_cluster_size(intrinsic) == 0) {
+                     if (nir_intrinsic_cluster_size(intrinsic) == 0 || nir_intrinsic_cluster_size(intrinsic) == 64) {
                         type = sgpr;
                      } else if (intrinsic->src[0].ssa->bit_size == 1) {
                         type = sgpr;

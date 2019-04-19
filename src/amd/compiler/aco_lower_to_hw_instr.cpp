@@ -171,10 +171,39 @@ aco_opcode get_reduction_opcode(lower_context *ctx, ReduceOp op, bool *clobber_v
    return aco_opcode::v_min_u32;
 }
 
+static inline unsigned
+ds_pattern_bitmode(unsigned and_mask, unsigned or_mask, unsigned xor_mask)
+{
+	assert(and_mask < 32 && or_mask < 32 && xor_mask < 32);
+	return and_mask | (or_mask << 5) | (xor_mask << 10);
+}
+
+void emit_vopn(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1,
+               aco_opcode op, Format format, bool clobber_vcc)
+{
+   aco_ptr<Instruction> instr;
+   switch (format) {
+   case Format::VOP2:
+      instr.reset(create_instruction<VOP2_instruction>(op, format, 2, clobber_vcc ? 2 : 1));
+      break;
+   case Format::VOP3:
+      instr.reset(create_instruction<VOP3A_instruction>(op, format, 2, clobber_vcc ? 2 : 1));
+      break;
+   default:
+      assert(false);
+   }
+   instr->getOperand(0) = Operand(src0, v1);
+   instr->getOperand(1) = Operand(src1, v1);
+   instr->getDefinition(0) = Definition(dst, v1);
+   if (clobber_vcc)
+      instr->getDefinition(1) = Definition(vcc, s2);
+   ctx->instructions.emplace_back(std::move(instr));
+}
+
 void emit_reduction(lower_context *ctx, aco_opcode op, ReduceOp reduce_op, unsigned cluster_size, PhysReg tmp,
                     PhysReg stmp, PhysReg vtmp, PhysReg sitmp, Operand src, Definition dst)
 {
-   assert(cluster_size == 64);
+   assert(cluster_size == 64 || op == aco_opcode::p_reduce);
 
    Builder bld(ctx->program, &ctx->instructions);
 
@@ -208,20 +237,36 @@ void emit_reduction(lower_context *ctx, aco_opcode op, ReduceOp reduce_op, unsig
                    Operand(stmp, s2));
    }
 
+   bool exec_restored = false;
+   bool dst_written = false;
    switch (op) {
    case aco_opcode::p_reduce:
+      if (cluster_size == 1) break;
       emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
                   dpp_quad_perm(1, 0, 3, 2), 0xf, 0xf, false);
+      if (cluster_size == 2) break;
       emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
                   dpp_quad_perm(2, 3, 0, 1), 0xf, 0xf, false);
+      if (cluster_size == 4) break;
       emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
                   dpp_row_half_mirror, 0xf, 0xf, false);
+      if (cluster_size == 8) break;
       emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
                   dpp_row_mirror, 0xf, 0xf, false);
-      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
-                  dpp_row_bcast15, 0xa, 0xf, false);
-      emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
-                  dpp_row_bcast31, 0xc, 0xf, false);
+      if (cluster_size == 16) break;
+      if (cluster_size == 32) {
+         bld.ds(aco_opcode::ds_swizzle_b32, Definition(vtmp, v1), Operand(tmp, s1), ds_pattern_bitmode(0x1f, 0, 0x10));
+         bld.sop1(aco_opcode::s_mov_b64, Definition(exec, s2), Operand(stmp, s2));
+         exec_restored = true;
+         emit_vopn(ctx, dst.physReg(), vtmp, tmp, reduce_opcode, format, should_clobber_vcc);
+         dst_written = true;
+      } else {
+         assert(cluster_size == 64);
+         emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                     dpp_row_bcast15, 0xa, 0xf, false);
+         emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, reduce_opcode, format, should_clobber_vcc,
+                     dpp_row_bcast31, 0xc, 0xf, false);
+      }
       break;
    case aco_opcode::p_exclusive_scan:
       emit_dpp_op(ctx, tmp, tmp, tmp, vtmp, wrtmp, aco_opcode::v_mov_b32, Format::VOP1, false,
@@ -251,14 +296,15 @@ void emit_reduction(lower_context *ctx, aco_opcode op, ReduceOp reduce_op, unsig
       unreachable("Invalid reduction mode");
    }
 
-   bld.sop1(aco_opcode::s_mov_b64, Definition(exec, s2), Operand(stmp, s2));
+   if (!exec_restored)
+      bld.sop1(aco_opcode::s_mov_b64, Definition(exec, s2), Operand(stmp, s2));
 
-   if (op == aco_opcode::p_reduce) {
+   if (op == aco_opcode::p_reduce && cluster_size == 64) {
       for (unsigned k = 0; k < src.size(); k++) {
          bld.vop3(aco_opcode::v_readlane_b32, Definition(PhysReg{dst.physReg().reg + k}, s1),
                   Operand(PhysReg{tmp.reg + k}, v1), Operand(63u));
       }
-   } else if (!(dst.physReg() == tmp)) {
+   } else if (!(dst.physReg() == tmp) && !dst_written) {
       for (unsigned k = 0; k < src.size(); k++) {
          bld.vop1(aco_opcode::v_mov_b32, Definition(PhysReg{dst.physReg().reg + k}, s1),
                   Operand(PhysReg{tmp.reg + k}, v1));

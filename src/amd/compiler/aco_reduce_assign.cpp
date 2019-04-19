@@ -95,6 +95,7 @@ void setup_reduce_temp(Program* program)
 
          /* same as before, except for the vector temporary instead of the reduce temporary */
          bool need_vtmp = op == imul32;
+         need_vtmp |= static_cast<Pseudo_reduction_instruction *>(instr)->cluster_size == 32;
          if (need_vtmp && (int)last_top_level_block_idx != vtmp_inserted_at) {
             vtmp = {program->allocateId(), vtmp.regClass()};
             aco_ptr<Instruction> create{create_instruction<Instruction>(aco_opcode::p_start_linear_vgpr, Format::PSEUDO, 0, 1)};
