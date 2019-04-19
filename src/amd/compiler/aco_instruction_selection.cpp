@@ -3838,10 +3838,13 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       nir_op op = (nir_op) nir_intrinsic_reduction_op(instr);
       unsigned cluster_size = instr->intrinsic == nir_intrinsic_reduce ?
          nir_intrinsic_cluster_size(instr) : 0;
+      cluster_size = util_next_power_of_two(MIN2(cluster_size ? cluster_size : 64, 64));
+
+      src = as_vgpr(ctx, src);
 
       ReduceOp reduce_op;
       switch (op) {
-#define CASE(name) case nir_op_##name: reduce_op = (src.regClass() == v1) ? name##32 : name##64; break;
+      #define CASE(name) case nir_op_##name: reduce_op = (src.regClass() == v1) ? name##32 : name##64; break;
          CASE(iadd)
          CASE(imul)
          CASE(fadd)
@@ -3857,6 +3860,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
          CASE(ixor)
          default:
             unreachable("unknown reduction op");
+      #undef CASE
       }
 
       aco_opcode aco_op;
@@ -3868,17 +3872,18 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
             unreachable("unknown reduce intrinsic");
       }
 
-      Temp stmp{ctx->program->allocateId(), s2};
-      aco_ptr<Pseudo_reduction_instruction> reduce{create_instruction<Pseudo_reduction_instruction>(aco_op, Format::PSEUDO_REDUCTION, 2, 3)};
+      aco_ptr<Pseudo_reduction_instruction> reduce{create_instruction<Pseudo_reduction_instruction>(aco_op, Format::PSEUDO_REDUCTION, 3, 4)};
       reduce->getOperand(0) = Operand(src);
       // filled in by aco_reduce_assign.cpp, used internally as part of the
       // reduce sequence
       reduce->getOperand(1) = Operand();
+      reduce->getOperand(2) = Operand();
 
-      Temp tmp_dst{ctx->program->allocateId(), dst.regClass()};
+      Temp tmp_dst = bld.tmp(dst.regClass());
       reduce->getDefinition(0) = Definition(tmp_dst);
-      reduce->getDefinition(1) = Definition(stmp);
-      reduce->getDefinition(2) = Definition(scc, b); // clobbers scc
+      reduce->getDefinition(1) = bld.def(s2); // used internally
+      reduce->getDefinition(2) = Definition(scc, s1);
+      reduce->getDefinition(3) = Definition();
       reduce->reduce_op = reduce_op;
       reduce->cluster_size = cluster_size;
       ctx->block->instructions.emplace_back(std::move(reduce));
