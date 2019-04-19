@@ -124,9 +124,22 @@ void setup_reduce_temp(Program* program)
          if (need_vtmp)
             instr->getOperand(2) = Operand(vtmp);
 
+         /* scalar temporary */
+         Builder bld(program);
+         instr->getDefinition(1) = bld.def(s2);
+
+         /* scalar identity temporary */
+         if (instr->opcode == aco_opcode::p_exclusive_scan &&
+             (op == imin32 || op == imin64 ||
+              op == imax32 || op == imax64 ||
+              op == fmin32 || op == fmin64 ||
+              op == fmax32 || op == fmax64)) {
+            instr->getDefinition(2) = bld.def(s1);
+         }
+
          /* vcc clobber */
          if (op == iadd32 && program->chip_class < GFX9)
-            instr->getDefinition(3) = Definition(vcc, s2);
+            instr->getDefinition(4) = Definition(vcc, s2);
       }
    }
 }
