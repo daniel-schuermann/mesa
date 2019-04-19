@@ -3595,6 +3595,78 @@ void visit_load_sample_mask_in(isel_context *ctx, nir_intrinsic_instr *instr) {
    bld.vop2(aco_opcode::v_and_b32, Definition(dst), mask, ctx->fs_inputs[fs_input::sample_coverage]);
 }
 
+Temp emit_boolean_reduce(isel_context *ctx, nir_op op, Temp src)
+{
+   Builder bld(ctx->program, ctx->block);
+
+   if (op == nir_op_iand) {
+      //subgroupAnd(val) -> (exec & ~val) == 0
+      Temp tmp = bld.sop2(aco_opcode::s_andn2_b64, bld.def(s2), bld.def(s1, scc), Operand(exec, s2), src).def(1).getTemp();
+      return bld.sopc(aco_opcode::s_cmp_eq_u32, bld.def(s1, scc), tmp, Operand(0u));
+   } else if (op == nir_op_ior) {
+      //subgroupOr(val) -> (val & exec) != 0
+      return bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2)).def(1).getTemp();
+   } else if (op == nir_op_ixor) {
+      //subgroupXor(val) -> s_bcnt1_i32_b64(val & exec) & 1
+      Temp tmp = bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2));
+      tmp = bld.sop1(aco_opcode::s_bcnt1_i32_b64, bld.def(s2), bld.def(s1, scc), tmp);
+      return bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), tmp, Operand(1u)).def(1).getTemp();
+   } else {
+      assert(false);
+      return Temp(0, s1);
+   }
+}
+
+Temp emit_boolean_exclusive_scan(isel_context *ctx, nir_op op, Temp src)
+{
+   Builder bld(ctx->program, ctx->block);
+
+   //subgroupExclusiveAnd(val) -> mbcnt(exec & ~val) == 0
+   //subgroupExclusiveOr(val) -> mbcnt(val & exec) != 0
+   //subgroupExclusiveXor(val) -> mbcnt(val & exec) & 1 != 0
+   Temp tmp;
+   if (op == nir_op_iand)
+      tmp = bld.sop2(aco_opcode::s_andn2_b64, bld.def(s2), bld.def(s1, scc), Operand(exec, s2), src);
+   else
+      tmp = bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2));
+
+   Builder::Result lohi = bld.pseudo(aco_opcode::p_split_vector, bld.def(s1), bld.def(s1), tmp);
+   Temp lo = lohi.def(0).getTemp();
+   Temp hi = lohi.def(1).getTemp();
+   Temp mbcnt = bld.vop3(aco_opcode::v_mbcnt_hi_u32_b32, bld.def(v1), hi,
+                         bld.vop3(aco_opcode::v_mbcnt_lo_u32_b32, bld.def(v1), lo, Operand(0u)));
+
+   Definition cmp_def;
+   if (op == nir_op_iand)
+      cmp_def = bld.vopc(aco_opcode::v_cmp_eq_u32, bld.def(s2), Operand(0u), mbcnt).def(0);
+   else if (op == nir_op_ior)
+      cmp_def = bld.vopc(aco_opcode::v_cmp_lg_u32, bld.def(s2), Operand(0u), mbcnt).def(0);
+   else if (op == nir_op_ixor)
+      cmp_def = bld.vopc(aco_opcode::v_cmp_lg_u32, bld.def(s2), Operand(0u),
+                         bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(1u), mbcnt)).def(0);
+   cmp_def.setHint(vcc);
+   return cmp_def.getTemp();
+}
+
+Temp emit_boolean_inclusive_scan(isel_context *ctx, nir_op op, Temp src)
+{
+   Builder bld(ctx->program, ctx->block);
+
+   //subgroupInclusiveAnd(val) -> subgroupExclusiveAnd(val) && val
+   //subgroupInclusiveOr(val) -> subgroupExclusiveOr(val) || val
+   //subgroupInclusiveXor(val) -> subgroupExclusiveXor(val) ^^ val
+   Temp tmp = emit_boolean_exclusive_scan(ctx, op, src);
+   if (op == nir_op_iand)
+      return bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), tmp, src);
+   else if (op == nir_op_ior)
+      return bld.sop2(aco_opcode::s_or_b64, bld.def(s2), bld.def(s1, scc), tmp, src);
+   else if (op == nir_op_ixor)
+      return bld.sop2(aco_opcode::s_xor_b64, bld.def(s2), bld.def(s1, scc), tmp, src);
+
+   assert(false);
+   return Temp();
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Builder bld(ctx->program, ctx->block);
@@ -3840,55 +3912,81 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
          nir_intrinsic_cluster_size(instr) : 0;
       cluster_size = util_next_power_of_two(MIN2(cluster_size ? cluster_size : 64, 64));
 
-      src = as_vgpr(ctx, src);
+      if (instr->dest.ssa.bit_size == 1) {
+         if (op == nir_op_imul || op == nir_op_umin || op == nir_op_imin)
+            op = nir_op_iand;
+         else if (op == nir_op_iadd)
+            op = nir_op_ixor;
+         else if (op == nir_op_umax || op == nir_op_imax)
+            op = nir_op_ior;
+         assert(op == nir_op_iand || op == nir_op_ior || op == nir_op_ixor);
 
-      ReduceOp reduce_op;
-      switch (op) {
-      #define CASE(name) case nir_op_##name: reduce_op = (src.regClass() == v1) ? name##32 : name##64; break;
-         CASE(iadd)
-         CASE(imul)
-         CASE(fadd)
-         CASE(fmul)
-         CASE(imin)
-         CASE(umin)
-         CASE(fmin)
-         CASE(imax)
-         CASE(umax)
-         CASE(fmax)
-         CASE(iand)
-         CASE(ior)
-         CASE(ixor)
+         switch (instr->intrinsic) {
+         case nir_intrinsic_reduce:
+            assert(cluster_size == 64);
+            emit_wqm(ctx, emit_boolean_reduce(ctx, op, src), dst);
+            break;
+         case nir_intrinsic_exclusive_scan:
+            emit_wqm(ctx, emit_boolean_exclusive_scan(ctx, op, src), dst);
+            break;
+         case nir_intrinsic_inclusive_scan:
+            emit_wqm(ctx, emit_boolean_inclusive_scan(ctx, op, src), dst);
+            break;
          default:
-            unreachable("unknown reduction op");
-      #undef CASE
+            assert(false);
+         }
+      } else {
+         src = as_vgpr(ctx, src);
+
+         ReduceOp reduce_op;
+         switch (op) {
+         #define CASE(name) case nir_op_##name: reduce_op = (src.regClass() == v1) ? name##32 : name##64; break;
+            CASE(iadd)
+            CASE(imul)
+            CASE(fadd)
+            CASE(fmul)
+            CASE(imin)
+            CASE(umin)
+            CASE(fmin)
+            CASE(imax)
+            CASE(umax)
+            CASE(fmax)
+            CASE(iand)
+            CASE(ior)
+            CASE(ixor)
+            default:
+               unreachable("unknown reduction op");
+         #undef CASE
+         }
+
+         aco_opcode aco_op;
+         switch (instr->intrinsic) {
+            case nir_intrinsic_reduce: aco_op = aco_opcode::p_reduce; break;
+            case nir_intrinsic_inclusive_scan: aco_op = aco_opcode::p_inclusive_scan; break;
+            case nir_intrinsic_exclusive_scan: aco_op = aco_opcode::p_exclusive_scan; break;
+            default:
+               unreachable("unknown reduce intrinsic");
+         }
+
+         aco_ptr<Pseudo_reduction_instruction> reduce{create_instruction<Pseudo_reduction_instruction>(aco_op, Format::PSEUDO_REDUCTION, 3, 5)};
+         reduce->getOperand(0) = Operand(src);
+         // filled in by aco_reduce_assign.cpp, used internally as part of the
+         // reduce sequence
+         reduce->getOperand(1) = Operand();
+         reduce->getOperand(2) = Operand();
+
+         Temp tmp_dst = bld.tmp(dst.regClass());
+         reduce->getDefinition(0) = Definition(tmp_dst);
+         reduce->getDefinition(1) = bld.def(s2); // used internally
+         reduce->getDefinition(2) = Definition();
+         reduce->getDefinition(3) = Definition(scc, s1);
+         reduce->getDefinition(4) = Definition();
+         reduce->reduce_op = reduce_op;
+         reduce->cluster_size = cluster_size;
+         ctx->block->instructions.emplace_back(std::move(reduce));
+
+         emit_wqm(ctx, tmp_dst, dst);
       }
-
-      aco_opcode aco_op;
-      switch (instr->intrinsic) {
-         case nir_intrinsic_reduce: aco_op = aco_opcode::p_reduce; break;
-         case nir_intrinsic_inclusive_scan: aco_op = aco_opcode::p_inclusive_scan; break;
-         case nir_intrinsic_exclusive_scan: aco_op = aco_opcode::p_exclusive_scan; break;
-         default:
-            unreachable("unknown reduce intrinsic");
-      }
-
-      aco_ptr<Pseudo_reduction_instruction> reduce{create_instruction<Pseudo_reduction_instruction>(aco_op, Format::PSEUDO_REDUCTION, 3, 5)};
-      reduce->getOperand(0) = Operand(src);
-      // filled in by aco_reduce_assign.cpp, used internally as part of the
-      // reduce sequence
-      reduce->getOperand(1) = Operand();
-      reduce->getOperand(2) = Operand();
-
-      Temp tmp_dst = bld.tmp(dst.regClass());
-      reduce->getDefinition(0) = Definition(tmp_dst);
-      reduce->getDefinition(1) = bld.def(s2); // used internally
-      reduce->getDefinition(2) = Definition();
-      reduce->getDefinition(3) = Definition(scc, s1);
-      reduce->getDefinition(4) = Definition();
-      reduce->reduce_op = reduce_op;
-      reduce->cluster_size = cluster_size;
-      ctx->block->instructions.emplace_back(std::move(reduce));
-      emit_wqm(ctx, tmp_dst, dst);
       break;
    }
    default:
