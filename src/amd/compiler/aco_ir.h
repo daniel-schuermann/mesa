@@ -772,6 +772,18 @@ enum ReduceOp {
    ixor32, ixor64,
 };
 
+/**
+ * Subgroup Reduction Instructions, everything except for the data to be
+ * reduced and the result as inserted by setup_reduce_temp().
+ * Operand(0): data to be reduced
+ * Operand(1): reduce temporary
+ * Operand(2): vector temporary
+ * Definition(0): result
+ * Definition(1): scalar temporary
+ * Definition(2): scc clobber
+ * Definition(3): vcc clobber
+ *
+ */
 struct Pseudo_reduction_instruction : public Instruction {
    ReduceOp reduce_op;
    unsigned cluster_size; // must be 0 for scans

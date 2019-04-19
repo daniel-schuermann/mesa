@@ -199,13 +199,13 @@ public:
 <%
 import itertools
 formats = [("pseudo", [Format.PSEUDO], 'Instruction', itertools.product(range(5), range(5))),
-           ("sop1", [Format.SOP1], 'SOP1_instruction', itertools.product([1, 2], [1])),
+           ("sop1", [Format.SOP1], 'SOP1_instruction', itertools.product([1, 2, 3], [1])),
            ("sop2", [Format.SOP2], 'SOP2_instruction', itertools.product([1, 2], [2, 3])),
            ("sopk", [Format.SOPK], 'SOPK_instruction', itertools.product([0, 1, 2], [0, 1])),
            ("sopp", [Format.SOPP], 'SOPP_instruction', [(0, 0)]),
            ("sopc", [Format.SOPC], 'SOPC_instruction', [(1, 2)]),
            ("smem", [Format.SMEM], 'SMEM_instruction', [(0, 4), (0, 3), (1, 3), (1, 2)]),
-           ("ds", [Format.DS], 'DS_instruction', [(1, 2), (0, 3), (0, 4)]),
+           ("ds", [Format.DS], 'DS_instruction', [(1, 1), (1, 2), (0, 3), (0, 4)]),
            ("mubuf", [Format.MUBUF], 'MUBUF_instruction', [(0, 4), (1, 3)]),
            ("mimg", [Format.MIMG], 'MIMG_instruction', [(0, 4), (1, 3), (0, 3), (1, 2)]), #TODO(pendingchaos): less shapes?
            ("exp", [Format.EXP], 'Export_instruction', [(0, 4)]),
@@ -215,7 +215,7 @@ formats = [("pseudo", [Format.PSEUDO], 'Instruction', itertools.product(range(5)
            ("vop1", [Format.VOP1], 'VOP1_instruction', [(1, 1)]),
            ("vop2", [Format.VOP2], 'VOP2_instruction', itertools.product([1, 2], [2, 3])),
            ("vopc", [Format.VOPC], 'VOPC_instruction', itertools.product([1, 2], [2])),
-           ("vop3", [Format.VOP3A], 'VOP3A_instruction', [(1, 3), (1, 2)]),
+           ("vop3", [Format.VOP3A], 'VOP3A_instruction', [(1, 3), (1, 2), (2, 2)]),
            ("vintrp", [Format.VINTRP], 'Interp_instruction', [(1, 2), (1, 3)]),
            ("vop1_dpp", [Format.VOP1, Format.DPP], 'DPP_instruction', [(1, 1)]),
            ("vop2_dpp", [Format.VOP2, Format.DPP], 'DPP_instruction', itertools.product([1, 2], [2, 3])),
