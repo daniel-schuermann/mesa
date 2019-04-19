@@ -349,14 +349,14 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          instr->getOperand(i) = Operand();
       /* propagate reg->reg of same type */
       if (info.is_temp() && info.temp.regClass() == instr->getOperand(i).getTemp().regClass()) {
-         instr->getOperand(i) = Operand(ctx.info[instr->getOperand(i).tempId()].temp);
+         instr->getOperand(i).setTemp(ctx.info[instr->getOperand(i).tempId()].temp);
          info = ctx.info[info.temp.id()];
       }
 
       /* SALU / PSEUDO: propagate inline constants */
       if (instr->isSALU() || instr->format == Format::PSEUDO) {
          if (info.is_temp() && info.temp.type() == sgpr) {
-            instr->getOperand(i) = Operand(info.temp);
+            instr->getOperand(i).setTemp(info.temp);
             info = ctx.info[info.temp.id()];
          } else if (info.is_temp() && info.temp.type() == vgpr) {
             /* propagate vgpr if it can take it */
@@ -389,7 +389,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       else if (instr->isVALU()) {
 
          if (info.is_temp() && info.temp.type() == vgpr) {
-            instr->getOperand(i) = Operand(info.temp);
+            instr->getOperand(i).setTemp(info.temp);
             info = ctx.info[info.temp.id()];
          }
          if (info.is_abs() && can_use_VOP3(instr) && opcode_infos[(int)instr->opcode].can_use_input_modifiers) {
