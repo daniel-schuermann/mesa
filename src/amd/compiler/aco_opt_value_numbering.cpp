@@ -147,6 +147,11 @@ struct InstrPred {
                 aDPP->neg[1] == bDPP->neg[1];
       }
       switch (a->format) {
+         case Format::VOPC: {
+            /* Since the results depend on the exec mask, these shouldn't
+             * be value numbered (this is especially useful for subgroupBallot()). */
+            return false;
+         }
          case Format::SOPK: {
             SOPK_instruction* aK = static_cast<SOPK_instruction*>(a);
             SOPK_instruction* bK = static_cast<SOPK_instruction*>(b);
