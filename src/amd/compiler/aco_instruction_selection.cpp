@@ -2520,7 +2520,7 @@ static int image_type_to_components_count(enum glsl_sampler_dim dim, bool array)
  * The sample index should be adjusted as follows:
  *   sample_index = (fmask >> (sample_index * 4)) & 0xF;
  */
-static Temp adjust_sample_index_using_fmask(isel_context *ctx, bool da, Temp coords, Temp sample_index, Temp fmask_desc_ptr)
+static Temp adjust_sample_index_using_fmask(isel_context *ctx, bool da, Temp coords, Operand sample_index, Temp fmask_desc_ptr)
 {
    Builder bld(ctx->program, ctx->block);
    Temp fmask = bld.tmp(v1);
@@ -2535,15 +2535,23 @@ static Temp adjust_sample_index_using_fmask(isel_context *ctx, bool da, Temp coo
    load->da = da;
    ctx->block->instructions.emplace_back(std::move(load));
 
-   Temp sample_index4;
-   if (sample_index.regClass() == s1) {
+   Operand sample_index4;
+   if (sample_index.isConstant() && sample_index.constantValue() < 16) {
+      sample_index4 = Operand(sample_index.constantValue() << 2);
+   } else if (sample_index.regClass() == s1) {
       sample_index4 = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), sample_index, Operand(2u));
    } else {
       assert(sample_index.regClass() == v1);
       sample_index4 = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(2u), sample_index);
    }
 
-   Temp final_sample = bld.vop3(aco_opcode::v_bfe_u32, bld.def(v1), fmask, sample_index4, Operand(4u));
+   Temp final_sample;
+   if (sample_index4.isConstant() && sample_index4.constantValue() == 0)
+      final_sample = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(15u), fmask);
+   else if (sample_index4.isConstant() && sample_index4.constantValue() == 28)
+      final_sample = bld.vop2(aco_opcode::v_lshrrev_b32, bld.def(v1), Operand(28u), fmask);
+   else
+      final_sample = bld.vop3(aco_opcode::v_bfe_u32, bld.def(v1), fmask, sample_index4, Operand(4u));
 
    /* Don't rewrite the sample index if WORD1.DATA_FORMAT of the FMASK
     * resource descriptor is 0 (invalid),
@@ -2552,13 +2560,10 @@ static Temp adjust_sample_index_using_fmask(isel_context *ctx, bool da, Temp coo
    bld.vopc_e64(aco_opcode::v_cmp_lg_u32, Definition(compare),
                 Operand(0u), emit_extract_vector(ctx, fmask_desc_ptr, 1, s1)).def(0).setHint(vcc);
 
-   Temp sample_index_v = bld.tmp(v1);
-   emit_v_mov(ctx, sample_index, sample_index_v);
+   Temp sample_index_v = bld.vop1(aco_opcode::v_mov_b32, bld.def(v1), sample_index);
 
    /* Replace the MSAA sample index. */
-   sample_index = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), sample_index_v, final_sample, compare);
-
-   return sample_index;
+   return bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), sample_index_v, final_sample, compare);
 }
 
 static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr, const struct glsl_type *type)
@@ -2575,7 +2580,12 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
    std::vector<Operand> coords(count);
 
    if (is_ms) {
-      Temp sample_index = emit_extract_vector(ctx, get_ssa_temp(ctx, instr->src[2].ssa), 0, v1);
+      Operand sample_index;
+      nir_const_value *sample_cv = nir_src_as_const_value(instr->src[2]);
+      if (sample_cv)
+         sample_index = Operand(sample_cv->u32[0]);
+      else
+         sample_index = Operand(emit_extract_vector(ctx, get_ssa_temp(ctx, instr->src[2].ssa), 0, v1));
 
       if (instr->intrinsic == nir_intrinsic_image_deref_load) {
          aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, is_array ? 3 : 2, 1)};
@@ -2587,10 +2597,10 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
 
          Temp fmask_desc_ptr = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_FMASK, nullptr, false, false);
          count--;
-         sample_index = adjust_sample_index_using_fmask(ctx, is_array, fmask_load_address, sample_index, fmask_desc_ptr);
+         sample_index = Operand(adjust_sample_index_using_fmask(ctx, is_array, fmask_load_address, sample_index, fmask_desc_ptr));
       }
       count--;
-      coords[count] = Operand(sample_index);
+      coords[count] = sample_index;
    }
 
    if (count == 1 && !gfx9_1d)
@@ -3959,6 +3969,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
         has_offset = false, has_ddx = false, has_ddy = false, has_derivs = false, has_sample_index = false;
    Temp resource, sampler, fmask_ptr, bias, coords, compare, sample_index,
         lod = Temp(), offset = Temp(), ddx = Temp(), ddy = Temp(), derivs = Temp();
+   nir_const_value *sample_index_cv = NULL;
    tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
 
    for (unsigned i = 0; i < instr->num_srcs; i++) {
@@ -4004,6 +4015,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          break;
       case nir_tex_src_ms_index:
          sample_index = get_ssa_temp(ctx, instr->src[i].src.ssa);
+         sample_index_cv = nir_src_as_const_value(instr->src[i].src);
          has_sample_index = true;
          break;
       case nir_tex_src_texture_offset:
@@ -4113,7 +4125,10 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
              instr->sampler_dim == GLSL_SAMPLER_DIM_SUBPASS_MS) &&
             instr->op != nir_texop_txs) {
       assert(has_sample_index);
-      sample_index = adjust_sample_index_using_fmask(ctx, da, coords, sample_index, fmask_ptr);
+      Operand op(sample_index);
+      if (sample_index_cv)
+         op = Operand(sample_index_cv->u32[0]);
+      sample_index = adjust_sample_index_using_fmask(ctx, da, coords, op, fmask_ptr);
    }
 
    if (has_offset && instr->op == nir_texop_txf) {
