@@ -183,6 +183,8 @@ struct InstrPred {
                    aDS->offset1 == bDS->offset1 &&
                    aDS->gds == bDS->gds;
          }
+         case Format::PSEUDO_REDUCTION:
+            return false;
          /* we want to optimize these in NIR and don't hassle with load-store dependencies */
          case Format::MUBUF:
             return false;
