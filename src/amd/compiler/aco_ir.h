@@ -737,6 +737,7 @@ struct MIMG_instruction : public Instruction {
    };
    bool d16; /* Convert 32-bit data to 16-bit data */
    bool disable_wqm; /* Require an exec mask without helper invocations */
+   bool can_value_number; /* Whether value numbering can optimize this */
 };
 
 struct Export_instruction : public Instruction {
