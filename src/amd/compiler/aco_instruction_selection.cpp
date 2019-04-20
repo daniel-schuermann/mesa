@@ -2533,6 +2533,7 @@ static Temp adjust_sample_index_using_fmask(isel_context *ctx, bool da, Temp coo
    load->dmask = 0x1;
    load->unrm = true;
    load->da = da;
+   load->can_value_number = true; /* fmask images shouldn't be modified */
    ctx->block->instructions.emplace_back(std::move(load));
 
    Operand sample_index4;

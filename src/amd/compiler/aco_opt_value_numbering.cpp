@@ -180,8 +180,23 @@ struct InstrPred {
          }
          /* we want to optimize these in NIR and don't hassle with load-store dependencies */
          case Format::MUBUF:
-         case Format::MIMG:
             return false;
+         case Format::MIMG: {
+            MIMG_instruction* aM = static_cast<MIMG_instruction*>(a);
+            MIMG_instruction* bM = static_cast<MIMG_instruction*>(b);
+            return aM->can_value_number && bM->can_value_number &&
+                   aM->dmask == bM->dmask &&
+                   aM->unrm == bM->unrm &&
+                   aM->glc == bM->glc &&
+                   aM->slc == bM->slc &&
+                   aM->tfe == bM->tfe &&
+                   aM->da == bM->da &&
+                   aM->lwe == bM->lwe &&
+                   aM->r128 == bM->r128 &&
+                   aM->a16 == bM->a16 &&
+                   aM->d16 == bM->d16 &&
+                   aM->disable_wqm == bM->disable_wqm;
+         }
          default:
             return true;
       }
