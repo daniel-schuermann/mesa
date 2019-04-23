@@ -67,18 +67,15 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    aco::validate(program.get(), stderr);
 
    aco::setup_reduce_temp(program.get());
+   aco::insert_exec_mask(program.get());
    aco::validate(program.get(), stderr);
 
    aco::live live_vars = aco::live_var_analysis<true>(program.get(), options);
+   aco::spill(program.get(), live_vars, options);
 
    //std::cerr << "Before Schedule:\n";
    //aco_print_program(program.get(), stderr);
    aco::schedule_program(program.get(), live_vars);
-
-   if (program->stage == MESA_SHADER_FRAGMENT)
-      aco::lower_wqm(program.get(), live_vars, options);
-
-   aco::spill(program.get(), live_vars, options);
 
    /* Register Allocation */
    aco::register_allocation(program.get(), live_vars.live_out);
