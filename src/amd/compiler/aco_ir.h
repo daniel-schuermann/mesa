@@ -266,10 +266,12 @@ public:
    explicit Operand(Temp r) noexcept
    {
       data_.temp = r;
-      if (r.id())
+      if (r.id()) {
          control_[0] = 1; /* isTemp */
-      else
+      } else {
          control_[4] = 1; /* undef */
+         setFixed(PhysReg{128});
+      }
    };
    explicit Operand(uint32_t v) noexcept
    {
