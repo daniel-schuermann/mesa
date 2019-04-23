@@ -4018,6 +4018,17 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       emit_wqm(ctx, tmp.getTemp(), dst);
       break;
    }
+   case nir_intrinsic_vote_any: {
+      Temp src = as_divergent_bool(ctx, get_ssa_temp(ctx, instr->src[0].ssa), false);
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      assert(src.regClass() == s2);
+      assert(dst.regClass() == s1);
+
+      Definition tmp = bld.def(s1);
+      bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.scc(tmp), src, Operand(exec, s2));
+      emit_wqm(ctx, tmp.getTemp(), dst);
+      break;
+   }
    case nir_intrinsic_reduce:
    case nir_intrinsic_inclusive_scan:
    case nir_intrinsic_exclusive_scan: {
