@@ -172,6 +172,7 @@ visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_load_invocation_id:
    case nir_intrinsic_load_local_invocation_index:
    case nir_intrinsic_load_subgroup_invocation:
+   case nir_intrinsic_load_helper_invocation:
    case nir_intrinsic_ssbo_atomic_add:
    case nir_intrinsic_ssbo_atomic_imin:
    case nir_intrinsic_ssbo_atomic_umin:
