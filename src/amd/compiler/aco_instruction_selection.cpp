@@ -38,8 +38,6 @@ namespace {
 
 class loop_info_RAII {
    isel_context* ctx;
-   Temp orig_old;
-   Temp active_old;
    Block* entry_old;
    Block* exit_old;
    bool divergent_cont_old;
@@ -47,8 +45,8 @@ class loop_info_RAII {
    bool divergent_if_old;
 
 public:
-   loop_info_RAII(isel_context* ctx, Block* loop_entry, Block* loop_exit, Temp orig_exec, Temp active_mask)
-      : ctx(ctx), orig_old(ctx->cf_info.parent_loop.orig_exec), active_old(ctx->cf_info.parent_loop.active_mask),
+   loop_info_RAII(isel_context* ctx, Block* loop_entry, Block* loop_exit)
+      : ctx(ctx),
         entry_old(ctx->cf_info.parent_loop.entry), exit_old(ctx->cf_info.parent_loop.exit),
         divergent_cont_old(ctx->cf_info.parent_loop.has_divergent_continue),
         divergent_break_old(ctx->cf_info.parent_loop.has_divergent_break),
@@ -56,8 +54,6 @@ public:
    {
       ctx->cf_info.parent_loop.entry = loop_entry;
       ctx->cf_info.parent_loop.exit = loop_exit;
-      ctx->cf_info.parent_loop.orig_exec = orig_exec;
-      ctx->cf_info.parent_loop.active_mask = active_mask;
       ctx->cf_info.parent_loop.has_divergent_continue = false;
       ctx->cf_info.parent_loop.has_divergent_break = false;
       ctx->cf_info.parent_if.is_divergent = false;
@@ -68,8 +64,6 @@ public:
    {
       ctx->cf_info.parent_loop.entry = entry_old;
       ctx->cf_info.parent_loop.exit = exit_old;
-      ctx->cf_info.parent_loop.orig_exec = orig_old;
-      ctx->cf_info.parent_loop.active_mask = active_old;
       ctx->cf_info.parent_loop.has_divergent_continue = divergent_cont_old;
       ctx->cf_info.parent_loop.has_divergent_break = divergent_break_old;
       ctx->cf_info.parent_if.is_divergent = divergent_if_old;
@@ -2355,6 +2349,7 @@ void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
    discard->getDefinition(0) = Definition{ctx->program->allocateId(), b};
    discard->getDefinition(0).setFixed(scc);
    ctx->block->instructions.emplace_back(std::move(discard));
+   ctx->block->kind |= block_kind_uses_discard;
    return;
 }
 
@@ -4876,120 +4871,43 @@ static void append_logical_end(Block *b)
 
 void visit_jump(isel_context *ctx, nir_jump_instr *instr)
 {
-   Block *logical_target, *linear_target;
-   aco_ptr<Instruction> aco_instr;
-   aco_ptr<Pseudo_branch_instruction> branch;
-
+   Builder bld(ctx->program, ctx->block);
+   Block *logical_target;
    append_logical_end(ctx->block);
+
    switch (instr->type) {
-   case nir_jump_break: {
+   case nir_jump_break:
       logical_target = ctx->cf_info.parent_loop.exit;
       add_logical_edge(ctx->block, logical_target);
-      ctx->cf_info.has_break = true;
       ctx->block->kind |= block_kind_break;
 
-      if (ctx->cf_info.parent_if.is_divergent) {
-         linear_target = ctx->cf_info.parent_if.merge_block;
-         ctx->cf_info.parent_loop.has_divergent_break = true;
-
-         Block* break_block = ctx->program->createAndInsertBlock();
-         break_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
-
-         /* remove current exec mask from active */
-         aco_instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2));
-         aco_instr->getOperand(0) = Operand(ctx->cf_info.parent_loop.active_mask);
-         aco_instr->getOperand(1) = Operand(exec, s2);
-         ctx->cf_info.parent_loop.active_mask = {ctx->program->allocateId(), s2};
-         aco_instr->getDefinition(0) = Definition(ctx->cf_info.parent_loop.active_mask);
-         Temp branch_cond{ctx->program->allocateId(), b};
-         aco_instr->getDefinition(1) = Definition(branch_cond);
-         aco_instr->getDefinition(1).setFixed(scc);
-         ctx->block->instructions.emplace_back(std::move(aco_instr));
-
-         /* set exec zero */
-         aco_ptr<Instruction> restore_exec;
-         restore_exec.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
-         restore_exec->getOperand(0) = Operand((uint32_t) 0);
-         restore_exec->getDefinition(0) = Definition(exec, s2);
-         ctx->block->instructions.emplace_back(std::move(restore_exec));
-
-         /* exit loop if needed */
-         branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z, Format::PSEUDO_BRANCH, 1, 0));
-         branch->getOperand(0) = Operand(branch_cond);
-         branch->getOperand(0).setFixed(scc);
-         branch->targets[0] = ctx->cf_info.parent_loop.exit;
-         branch->targets[1] = break_block;
-         ctx->block->instructions.emplace_back(std::move(branch));
-         add_linear_edge(ctx->block, ctx->cf_info.parent_loop.exit);
-         add_linear_edge(ctx->block, break_block);
-
-         ctx->block = break_block;
-
-      } else if (ctx->cf_info.parent_loop.has_divergent_continue) {
-         Block* break_block = ctx->program->createAndInsertBlock();
-         break_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
-
-         /* there might be still active lanes due to previous continue */
-         aco_instr.reset(create_instruction<SOP1_instruction>(aco_opcode::s_andn2_saveexec_b64, Format::SOP1, 2, 3));
-         aco_instr->getOperand(0) = Operand(ctx->cf_info.parent_loop.active_mask);
-         aco_instr->getOperand(1) = Operand(exec, s2);
-         Temp temp = {ctx->program->allocateId(), s2};
-         aco_instr->getDefinition(0) = Definition(temp);
-         Temp branch_cond{ctx->program->allocateId(), b};
-         aco_instr->getDefinition(1) = Definition(branch_cond);
-         aco_instr->getDefinition(1).setFixed(scc);
-         aco_instr->getDefinition(2) = Definition(exec, s2);
-         ctx->block->instructions.emplace_back(std::move(aco_instr));
-
-         /* branch to loop entry if still lanes are active */
-         branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0));
-         branch->getOperand(0) = Operand(branch_cond);
-         branch->getOperand(0).setFixed(scc);
-         branch->targets[0] = ctx->cf_info.parent_loop.entry;
-         branch->targets[1] = break_block;
-         ctx->block->instructions.emplace_back(std::move(branch));
-         add_linear_edge(ctx->block, ctx->cf_info.parent_loop.entry);
-         add_linear_edge(ctx->block, break_block);
-
-         ctx->block = break_block;
-
-         /* branch out of the loop */
-         linear_target = ctx->cf_info.parent_loop.exit;
-      } else {
+      if (!ctx->cf_info.parent_if.is_divergent &&
+          !ctx->cf_info.parent_loop.has_divergent_continue) {
          /* uniform break - directly jump out of the loop */
-         linear_target = ctx->cf_info.parent_loop.exit;
+         ctx->block->kind |= block_kind_uniform;
+         ctx->cf_info.has_break = true;
+         bld.branch(aco_opcode::p_branch, logical_target);
+         add_linear_edge(ctx->block, logical_target);
+         return;
       }
-
       break;
-   }
    case nir_jump_continue:
       logical_target = ctx->cf_info.parent_loop.entry;
       add_logical_edge(ctx->block, logical_target);
-      ctx->cf_info.has_continue = true;
       ctx->block->kind |= block_kind_continue;
 
       if (ctx->cf_info.parent_if.is_divergent) {
-         linear_target = ctx->cf_info.parent_if.merge_block;
          /* for potential uniform breaks after this continue,
             we must ensure that they are handled correctly */
          ctx->cf_info.parent_loop.has_divergent_continue = true;
 
-         /* set exec zero */
-         aco_instr.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
-         aco_instr->getOperand(0) = Operand((uint32_t) 0);
-         aco_instr->getDefinition(0) = Definition(exec, s2);
-         ctx->block->instructions.emplace_back(std::move(aco_instr));
       } else {
-         /* uniform continue - directly jump to the loop entry block */
-         linear_target = logical_target;
-
-         if (ctx->cf_info.parent_loop.has_divergent_break) {
-            /* restore exec with all continues */
-            aco_instr.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
-            aco_instr->getOperand(0) = Operand(ctx->cf_info.parent_loop.active_mask);
-            aco_instr->getDefinition(0) = Definition(exec, s2);
-            ctx->block->instructions.emplace_back(std::move(aco_instr));
-         }
+         /* uniform continue - directly jump to the loop header */
+         ctx->block->kind |= block_kind_uniform;
+         ctx->cf_info.has_continue = true;
+         bld.branch(aco_opcode::p_branch, logical_target);
+         add_linear_edge(ctx->block, logical_target);
+         return;
       }
       break;
    default:
@@ -4999,12 +4917,23 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
       abort();
    }
 
-   /* branch to linear target */
-   branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
-   branch->targets[0] = linear_target;
-   ctx->block->instructions.emplace_back(std::move(branch));
+   /* remove critical edges from linear CFG */
+   Block* break_block = ctx->program->createAndInsertBlock();
+   break_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+   break_block->kind |= block_kind_uniform;
+   add_linear_edge(ctx->block, break_block);
+   Block* continue_block = ctx->program->createAndInsertBlock();
+   continue_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+   add_linear_edge(ctx->block, continue_block);
+   bld.branch(aco_opcode::p_branch, break_block, continue_block);
 
-   add_linear_edge(ctx->block, linear_target);
+   bld.reset(break_block);
+   add_linear_edge(break_block, logical_target);
+   bld.branch(aco_opcode::p_branch, logical_target);
+
+   append_logical_start(continue_block);
+   ctx->block = continue_block;
+   return;
 }
 
 void visit_block(isel_context *ctx, nir_block *block)
@@ -5047,16 +4976,8 @@ void visit_block(isel_context *ctx, nir_block *block)
 
 static void visit_loop(isel_context *ctx, nir_loop *loop)
 {
-   aco_ptr<Pseudo_branch_instruction> branch;
    append_logical_end(ctx->block);
    ctx->block->kind |= block_kind_loop_preheader | block_kind_uniform;
-   /* save original exec */
-   aco_ptr<Instruction> save_exec;
-   save_exec.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
-   save_exec->getOperand(0) = Operand{exec, s2};
-   Temp orig_exec = {ctx->program->allocateId(), s2};
-   save_exec->getDefinition(0) = Definition(orig_exec);
-   ctx->block->instructions.emplace_back(std::move(save_exec));
 
    Block* loop_entry = ctx->program->createAndInsertBlock();
    loop_entry->loop_nest_depth = ctx->cf_info.loop_nest_depth + 1;
@@ -5064,68 +4985,36 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    Block* loop_exit = new Block();
    loop_exit->loop_nest_depth = ctx->cf_info.loop_nest_depth;
    loop_exit->kind |= (block_kind_loop_exit | (ctx->block->kind & block_kind_top_level));
-   branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
-   branch->targets[0] = loop_entry;
-   ctx->block->instructions.emplace_back(std::move(branch));
+
+   Builder bld(ctx->program, ctx->block);
+   bld.branch(aco_opcode::p_branch, loop_entry);
    add_edge(ctx->block, loop_entry);
    ctx->block = loop_entry;
 
-   /* save current exec as active mask */
-   save_exec.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
-   save_exec->getOperand(0) = Operand{exec, s2};
-   Temp active_mask = {ctx->program->allocateId(), s2};
-   save_exec->getDefinition(0) = Definition(active_mask);
-   ctx->block->instructions.emplace_back(std::move(save_exec));
-
    /* emit loop body */
-   loop_info_RAII loop_raii(ctx, loop_entry, loop_exit, orig_exec, active_mask);
+   loop_info_RAII loop_raii(ctx, loop_entry, loop_exit);
    append_logical_start(ctx->block);
    visit_cf_list(ctx, &loop->body);
-
-   aco_ptr<Instruction> restore;
 
    if (ctx->cf_info.has_break) {
       ctx->cf_info.has_break = false;
    } else {
       append_logical_end(ctx->block);
+      add_edge(ctx->block, loop_entry);
       ctx->block->kind |= (block_kind_continue | block_kind_uniform);
-      if (ctx->cf_info.parent_loop.has_divergent_continue) {
-         /* restore all 'continue' lanes */
-         restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 2));
-         restore->getOperand(0) = Operand{exec, s2};
-         if (ctx->cf_info.parent_loop.has_divergent_break)
-            restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.active_mask);
-         else
-            restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.orig_exec);
-         restore->getDefinition(0) = Definition{exec, s2};
-         restore->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
-         ctx->block->instructions.emplace_back(std::move(restore));
-      }
-
-      add_logical_edge(ctx->block, loop_entry);
-
-      branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
-      branch->targets[0] = loop_entry;
-      ctx->block->instructions.emplace_back(std::move(branch));
-      add_linear_edge(ctx->block, loop_entry);
+      bld.reset(ctx->block);
+      bld.branch(aco_opcode::p_branch, loop_entry);
    }
 
+   // TODO: if the loop has not a single exit, we must add one °°
    /* emit loop successor block */
    loop_exit->index = ctx->program->blocks.size();
    ctx->block = loop_exit;
    ctx->program->blocks.emplace_back(loop_exit);
-   /* restore original exec */
-   if (ctx->cf_info.parent_loop.has_divergent_break || ctx->cf_info.parent_loop.has_divergent_continue) {
-      restore.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 2));
-      restore->getOperand(0) = Operand{exec, s2};
-      restore->getOperand(1) = Operand(ctx->cf_info.parent_loop.orig_exec);
-      restore->getDefinition(0) = Definition{exec, s2};
-      restore->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
-      ctx->block->instructions.emplace_back(std::move(restore));
-   }
-
    append_logical_start(ctx->block);
 
+   #if 0
+   // TODO: check if it is beneficial to not branch on continues
    /* trim linear phis in loop header */
    for (auto&& instr : loop_entry->instructions) {
       if (instr->opcode == aco_opcode::p_linear_phi) {
@@ -5143,11 +5032,13 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
          break;
       }
    }
+   #endif
 }
 
 static void visit_if(isel_context *ctx, nir_if *if_stmt)
 {
    Temp cond = get_ssa_temp(ctx, if_stmt->condition.ssa);
+   Builder bld(ctx->program, ctx->block);
    aco_ptr<Pseudo_branch_instruction> branch;
 
    if (!ctx->divergent_vals[if_stmt->condition.ssa->index]) { /* uniform condition */
@@ -5196,14 +5087,13 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       add_edge(BB_if, BB_then);
       add_edge(BB_if, BB_else);
 
-      /* remember active lanes mask just in case */
-      Temp active_mask_if = ctx->cf_info.parent_loop.active_mask;
-
       /** emit then block */
       append_logical_start(BB_then);
       ctx->block = BB_then;
       visit_cf_list(ctx, &if_stmt->then_list);
       BB_then = ctx->block;
+      bool then_break = ctx->cf_info.has_break;
+      bool then_continue =  ctx->cf_info.has_continue;
 
       if (!ctx->cf_info.has_break && !ctx->cf_info.has_continue) {
          append_logical_end(BB_then);
@@ -5214,8 +5104,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          add_edge(BB_then, BB_endif);
          BB_then->kind |= block_kind_uniform;
       }
-      Temp active_mask_then = ctx->cf_info.parent_loop.active_mask;
-      bool break_then = active_mask_then.id() != active_mask_if.id();
 
       ctx->cf_info.has_break = false;
       ctx->cf_info.has_continue = false;
@@ -5228,8 +5116,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       visit_cf_list(ctx, &if_stmt->else_list);
       BB_else = ctx->block;
 
-      ctx->cf_info.parent_loop.active_mask = active_mask_if;
-
       if (!ctx->cf_info.has_break && !ctx->cf_info.has_continue) {
          append_logical_end(BB_else);
          /* branch from then block to endif block */
@@ -5239,29 +5125,18 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          add_edge(BB_else, BB_endif);
          BB_else->kind |= block_kind_uniform;
       }
-      Temp active_mask_else = ctx->cf_info.parent_loop.active_mask;
-      bool break_else = active_mask_else.id() != active_mask_if.id();
 
-      ctx->cf_info.has_break = false;
-      ctx->cf_info.has_continue = false;
+      ctx->cf_info.has_break &= then_break;
+      ctx->cf_info.has_continue &= then_continue;
 
       /** emit endif merge block */
-      BB_endif->index = ctx->program->blocks.size();
-      ctx->program->blocks.emplace_back(BB_endif);
+      if (!ctx->cf_info.has_break && !ctx->cf_info.has_continue) {
+         BB_endif->index = ctx->program->blocks.size();
+         ctx->program->blocks.emplace_back(BB_endif);
 
-      /* emit linear phi for active mask */
-      if (break_then || break_else) {
-
-         aco_ptr<Instruction> phi{create_instruction<Instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, 2, 1)};
-         phi->getOperand(0) = Operand(break_then ? active_mask_then : active_mask_if);
-         phi->getOperand(1) = Operand(break_else ? active_mask_else : active_mask_if);
-         Temp active_mask = {ctx->program->allocateId(), s2};
-         phi->getDefinition(0) = Definition(active_mask);
-         BB_endif->instructions.emplace_back(std::move(phi));
-         ctx->cf_info.parent_loop.active_mask = active_mask;
+         append_logical_start(BB_endif);
+         ctx->block = BB_endif;
       }
-      append_logical_start(BB_endif);
-      ctx->block = BB_endif;
       ctx->cf_info.parent_if.merge_block = parent_if_merge_block;
 
    } else { /* non-uniform condition */
@@ -5311,30 +5186,10 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
 
       append_logical_end(BB_if);
 
-      /* create the exec mask for then branch */
-      aco_ptr<SOP1_instruction> set_exec{create_instruction<SOP1_instruction>(aco_opcode::s_and_saveexec_b64, Format::SOP1, 1, 3)};
-      set_exec->getOperand(0) = Operand(cond);
-      Temp orig_exec = {ctx->program->allocateId(), s2};
-      set_exec->getDefinition(0) = Definition(orig_exec);
-      set_exec->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
-      Temp branch_cond{ctx->program->allocateId(), s2};
-      set_exec->getDefinition(2) = Definition(branch_cond);
-      set_exec->getDefinition(2).setFixed(exec);
-      BB_if->instructions.push_back(std::move(set_exec));
-
-      /* create the exec mask for else branch */
-      aco_ptr<SOP2_instruction> nand{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2)};
-      nand->getOperand(0) = Operand(orig_exec);
-      nand->getOperand(1) = Operand(cond);
-      Temp else_mask = {ctx->program->allocateId(), s2};
-      nand->getDefinition(0) = Definition(else_mask);
-      nand->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
-      BB_if->instructions.push_back(std::move(nand));
-
       /* branch to linear then block */
+      assert(cond.regClass() == s2);
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z, Format::PSEUDO_BRANCH, 1, 0));
-      branch->getOperand(0) = Operand(branch_cond);
-      branch->getOperand(0).setFixed(exec);
+      branch->getOperand(0) = Operand(cond);
       branch->targets[0] = BB_then_linear;
       branch->targets[1] = BB_then_logical;
       BB_if->instructions.push_back(std::move(branch));
@@ -5351,19 +5206,15 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       append_logical_start(BB_then_logical);
       visit_cf_list(ctx, &if_stmt->then_list);
       BB_then_logical = ctx->block;
+      append_logical_end(BB_then_logical);
 
-      Temp active_mask_new = ctx->cf_info.parent_loop.active_mask;
-
-      if (!ctx->cf_info.has_break && !ctx->cf_info.has_continue) {
-         append_logical_end(BB_then_logical);
-         /* branch from logical then block to between block */
-         branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
-         branch->targets[0] = BB_between;
-         BB_then_logical->instructions.emplace_back(std::move(branch));
-         add_linear_edge(BB_then_logical, BB_between);
-         add_logical_edge(BB_then_logical, BB_endif);
-         BB_then_logical->kind |= block_kind_uniform;
-      }
+      /* branch from logical then block to between block */
+      branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
+      branch->targets[0] = BB_between;
+      BB_then_logical->instructions.emplace_back(std::move(branch));
+      add_linear_edge(BB_then_logical, BB_between);
+      add_logical_edge(BB_then_logical, BB_endif);
+      BB_then_logical->kind |= block_kind_uniform;
 
       /** emit linear then block */
       BB_then_linear->index = ctx->program->blocks.size();
@@ -5375,41 +5226,21 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       BB_then_linear->instructions.emplace_back(std::move(branch));
       add_linear_edge(BB_then_linear, BB_between);
 
-
       /** emit in-between merge block */
       BB_between->index = ctx->program->blocks.size();
       ctx->program->blocks.emplace_back(BB_between);
 
-      if (active_mask.id() != active_mask_new.id()) {
-         /* emit linear phi for active mask */
-         aco_ptr<Instruction> phi;
-         phi.reset(create_instruction<Instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, 2, 1));
-         phi->getOperand(0) = Operand(active_mask_new);
-         phi->getOperand(1) = Operand(active_mask);
-         ctx->cf_info.parent_loop.active_mask = {ctx->program->allocateId(), s2};
-         phi->getDefinition(0) = Definition(ctx->cf_info.parent_loop.active_mask);
-         BB_between->instructions.push_back(std::move(phi));
-      }
       ctx->cf_info.has_break = false;
       ctx->cf_info.has_continue = false;
 
-      /* invert exec mask */
-      aco_ptr<Instruction> mov;
-      mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
-      mov->getOperand(0) = Operand(exec, s2);
-      Temp then_mask = {ctx->program->allocateId(), s2};
-      mov->getDefinition(0) = Definition(then_mask);
-      BB_between->instructions.push_back(std::move(mov));
-
       /* branch to linear else block (skip else) */
-      branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z, Format::PSEUDO_BRANCH, 1, 0));
-      branch->getOperand(0) = Operand(else_mask);
-      branch->getOperand(0).setFixed(exec);
+      branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0));
+      branch->getOperand(0) = Operand(cond);
       branch->targets[0] = BB_else_linear;
       branch->targets[1] = BB_else_logical;
       BB_between->instructions.push_back(std::move(branch));
-      add_linear_edge(BB_between, BB_else_linear);
       add_linear_edge(BB_between, BB_else_logical);
+      add_linear_edge(BB_between, BB_else_linear);
 
       active_mask = ctx->cf_info.parent_loop.active_mask;
 
@@ -5421,18 +5252,14 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       append_logical_start(BB_else_logical);
       visit_cf_list(ctx, &if_stmt->else_list);
       BB_else_logical = ctx->block;
+      append_logical_end(BB_else_logical);
 
-      active_mask_new = ctx->cf_info.parent_loop.active_mask;
-
-      if (!ctx->cf_info.has_break && !ctx->cf_info.has_continue) {
-         append_logical_end(BB_else_logical);
-         /* branch from logical else block to endif block */
-         branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
-         branch->targets[0] = BB_endif;
-         BB_else_logical->instructions.emplace_back(std::move(branch));
-         add_edge(BB_else_logical, BB_endif);
-         BB_else_logical->kind |= block_kind_uniform;
-      }
+      /* branch from logical else block to endif block */
+      branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
+      branch->targets[0] = BB_endif;
+      BB_else_logical->instructions.emplace_back(std::move(branch));
+      add_edge(BB_else_logical, BB_endif);
+      BB_else_logical->kind |= block_kind_uniform;
 
       /** emit linear else block */
       BB_else_linear->index = ctx->program->blocks.size();
@@ -5448,26 +5275,8 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       BB_endif->index = ctx->program->blocks.size();
       ctx->program->blocks.emplace_back(BB_endif);
 
-      if (active_mask.id() != active_mask_new.id()) {
-         /* emit linear phi for active mask */
-         aco_ptr<Instruction> phi;
-         phi.reset(create_instruction<Instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, 2, 1));
-         phi->getOperand(0) = Operand(active_mask_new);
-         phi->getOperand(1) = Operand(active_mask);
-         ctx->cf_info.parent_loop.active_mask = {ctx->program->allocateId(), s2};
-         phi->getDefinition(0) = Definition(ctx->cf_info.parent_loop.active_mask);
-         BB_endif->instructions.push_back(std::move(phi));
-      }
       ctx->cf_info.has_break = false;
       ctx->cf_info.has_continue = false;
-
-      /* restore original exec mask */
-      aco_ptr<SOP2_instruction> restore{create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 2)};
-      restore->getOperand(0) = Operand(exec, s2);
-      restore->getOperand(1) = Operand(then_mask);
-      restore->getDefinition(0) = Definition(exec, s2);
-      restore->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
-      BB_endif->instructions.emplace_back(std::move(restore));
 
       append_logical_start(BB_endif);
       ctx->block = BB_endif;
@@ -5571,6 +5380,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    visit_cf_list(&ctx, &func->impl->body);
 
    append_logical_end(ctx.block);
+   ctx.block->kind |= block_kind_uniform;
    ctx.block->instructions.push_back(aco_ptr<SOPP_instruction>(create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)));
 
    return program;
