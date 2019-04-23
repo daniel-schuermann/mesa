@@ -357,6 +357,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      }
                      break;
                   case nir_intrinsic_load_front_face:
+                  case nir_intrinsic_load_helper_invocation:
                      type = sgpr;
                      size = 2;
                      break;
