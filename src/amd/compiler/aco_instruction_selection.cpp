@@ -1683,6 +1683,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_ine: {
       if (dst.regClass() == s2 && instr->src[0].src.ssa->bit_size == 32) {
          emit_comparison(ctx, instr, aco_opcode::v_cmp_lg_i32, dst);
+      } else if (dst.regClass() == s2 && instr->src[0].src.ssa->bit_size == 64) {
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_lg_i64, dst);
       } else if (dst.regClass() == s1 && instr->src[0].src.ssa->bit_size == 32) {
          emit_comparison(ctx, instr, aco_opcode::s_cmp_lg_i32, dst);
       } else if (dst.regClass() == s1 && instr->src[0].src.ssa->bit_size == 64) {
