@@ -219,6 +219,11 @@ public:
       return id() == other.id();
    }
 
+   bool operator !=(Temp other) const noexcept
+   {
+      return id() != other.id();
+   }
+
 private:
    uint32_t id_;
    RegClass reg_class;
@@ -914,6 +919,7 @@ template<bool condition>
 live live_var_analysis(Program* program,
                        const struct radv_nir_compiler_options *options);
 void dominator_tree(Program* program);
+void insert_exec_mask(Program *program);
 void value_numbering(Program* program);
 void optimize(Program* program);
 void setup_reduce_temp(Program* program);
