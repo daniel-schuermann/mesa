@@ -767,7 +767,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      vectors[instr->getOperand(i).tempId()] = instr.get();
                }
             }
-         } else if (!instr->getDefinition(0).isKill()) {
+         } else if (!instr->getDefinition(0).isKill() && !instr->getDefinition(0).isFixed()) {
             /* collect information about affinity-related temporaries */
             std::vector<Temp> affinity_related;
             /* affinity_related[0] is the last seen affinity-related temp */
@@ -828,31 +828,36 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          Definition& definition = phi->getDefinition(0);
          if (definition.isKill())
             continue;
-         assert(!definition.isFixed());
-         if (affinities.find(definition.tempId()) != affinities.end() &&
+
+         if (definition.isFixed()) {
+            assert(definition.physReg() == exec);
+            for (unsigned i = 0; i < definition.size(); i++) {
+               assert(register_file[definition.physReg().reg + i] == 0);
+               register_file[definition.physReg().reg + i] = definition.tempId();
+            }
+
+         } else if (affinities.find(definition.tempId()) != affinities.end() &&
              ctx.assignments.find(affinities[definition.tempId()]) != ctx.assignments.end()) {
-            assert(ctx.assignments[affinities[definition.tempId()]].second == phi->getDefinition(0).regClass());
+            assert(ctx.assignments[affinities[definition.tempId()]].second == definition.regClass());
             PhysReg reg = ctx.assignments[affinities[definition.tempId()]].first;
-            if (reg == scc) {
-               bool can_use_scc = true;
-               for (unsigned i = 0; i < phi->num_operands; i++) {
+            bool try_use_special_reg = reg == scc || reg == exec;
+            if (try_use_special_reg) {
+               for (unsigned i = 0; try_use_special_reg && i < phi->num_operands; i++) {
                   if (!phi->getOperand(i).isTemp() ||
                       ctx.assignments.find(phi->getOperand(i).tempId()) == ctx.assignments.end() ||
-                      !(ctx.assignments[phi->getOperand(i).tempId()].first == scc)) {
-                     can_use_scc = false;
-                     break;
+                      !(ctx.assignments[phi->getOperand(i).tempId()].first == reg)) {
+                     try_use_special_reg = false;
                   }
                }
-               if (!can_use_scc)
+               if (!try_use_special_reg)
                   continue;
             }
             bool reg_free = true;
-            for (unsigned i = reg.reg; i < reg.reg + definition.size(); i++) {
-               if (register_file[i] != 0) {
+            for (unsigned i = reg.reg; reg_free && i < reg.reg + definition.size(); i++) {
+               if (register_file[i] != 0)
                   reg_free = false;
-                  break;
-               }
             }
+            assert(reg_free || !try_use_special_reg);
             if (reg_free) {
                definition.setFixed(reg);
                for (unsigned i = 0; i < definition.size(); i++)
