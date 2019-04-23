@@ -3923,7 +3923,18 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    }
    case nir_intrinsic_ballot: {
       Definition tmp = bld.def(s2);
-      bld.vopc(aco_opcode::v_cmp_lg_u32, tmp, Operand(0u), get_ssa_temp(ctx, instr->src[0].ssa));
+      Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
+      if (instr->src[0].ssa->bit_size == 1 && src.regClass() == s2) {
+         bld.sop2(aco_opcode::s_and_b64, tmp, Operand(exec, s2), src);
+      } else if (instr->src[0].ssa->bit_size == 1 && src.regClass() == s1) {
+         bld.sop2(aco_opcode::s_cselect_b64, tmp, Operand(exec, s2), Operand(0u), bld.scc(src));
+      } else if (instr->src[0].ssa->bit_size == 32 && src.regClass() == v1) {
+         bld.vopc(aco_opcode::v_cmp_lg_u32, tmp, Operand(0u), src);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
       emit_wqm(ctx, tmp.getTemp(), get_ssa_temp(ctx, &instr->dest.ssa));
       break;
    }
