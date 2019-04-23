@@ -127,6 +127,7 @@ visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_load_num_work_groups:
    case nir_intrinsic_load_subgroup_id:
    case nir_intrinsic_load_num_subgroups:
+   case nir_intrinsic_first_invocation:
    case nir_intrinsic_get_buffer_size:
       is_divergent = false;
       break;
