@@ -819,6 +819,22 @@ T* create_instruction(aco_opcode opcode, Format format, uint32_t num_operands, u
    return inst;
 }
 
+enum block_kind {
+   /* uniform indicates that leaving this block,
+    * all actives lanes stay active */
+   block_kind_uniform = 1 << 0,
+   block_kind_top_level = 1 << 1,
+   block_kind_loop_preheader = 1 << 2,
+   block_kind_loop_header = 1 << 3,
+   block_kind_loop_exit = 1 << 4,
+   block_kind_continue = 1 << 5,
+   block_kind_break = 1 << 6,
+   block_kind_branch = 1 << 7,
+   block_kind_merge = 1 << 8,
+   block_kind_invert = 1 << 9,
+   block_kind_uses_discard = 1 << 10,
+};
+
 /* CFG */
 struct Block {
    unsigned index;
@@ -831,9 +847,9 @@ struct Block {
    uint16_t vgpr_demand;
    uint16_t sgpr_demand;
    uint16_t loop_nest_depth;
+   uint16_t kind = 0;
    int logical_idom = -1;
    int linear_idom = -1;
-   bool is_top_level = false;
 };
 
 
