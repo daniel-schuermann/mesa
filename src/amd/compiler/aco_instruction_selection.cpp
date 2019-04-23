@@ -1412,8 +1412,9 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_i2b1: {
       Temp src = get_alu_src(ctx, instr->src[0]);
       if (dst.regClass() == s2) {
-         assert(src.regClass() == v1);
-         bld.vopc(aco_opcode::v_cmp_lg_u32, Definition(dst), Operand(0u), src).def(0).setHint(vcc);
+         assert(src.regClass() == v1 || src.regClass() == v2);
+         bld.vopc(src.size() == 2 ? aco_opcode::v_cmp_lg_u64 : aco_opcode::v_cmp_lg_u32,
+                  Definition(dst), Operand(0u), src).def(0).setHint(vcc);
       } else {
          assert(src.regClass() == s1 && dst.regClass() == s1);
          bld.sopc(aco_opcode::s_cmp_lg_u32, bld.scc(Definition(dst)), Operand(0u), src);
