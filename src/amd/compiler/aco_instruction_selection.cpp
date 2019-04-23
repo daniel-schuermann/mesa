@@ -1607,10 +1607,18 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_bit_count: {
-      if (dst.regClass() == s1) {
-         bld.sop1(aco_opcode::s_bcnt1_i32_b32, Definition(dst), bld.def(s1, scc), get_alu_src(ctx, instr->src[0]));
-      } else if (dst.regClass() == v1) {
-         bld.vop3(aco_opcode::v_bcnt_u32_b32, Definition(dst), get_alu_src(ctx, instr->src[0]), Operand(0u));
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      if (src.regClass() == s1) {
+         bld.sop1(aco_opcode::s_bcnt1_i32_b32, Definition(dst), bld.def(s1, scc), src);
+      } else if (src.regClass() == v1) {
+         bld.vop3(aco_opcode::v_bcnt_u32_b32, Definition(dst), src, Operand(0u));
+      } else if (src.regClass() == v2) {
+         bld.vop3(aco_opcode::v_bcnt_u32_b32, Definition(dst),
+                  emit_extract_vector(ctx, src, 1, v1),
+                  bld.vop3(aco_opcode::v_bcnt_u32_b32, bld.def(v1),
+                           emit_extract_vector(ctx, src, 0, v1), Operand(0u)));
+      } else if (src.regClass() == s2) {
+         bld.sop1(aco_opcode::s_bcnt1_i32_b64, Definition(dst), bld.def(s1, scc), src);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
