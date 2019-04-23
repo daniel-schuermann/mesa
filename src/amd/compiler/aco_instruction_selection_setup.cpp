@@ -1188,7 +1188,6 @@ setup_isel_context(Program* program, nir_shader *nir,
    ctx.block = ctx.program->blocks.back().get();
    ctx.block->index = 0;
    ctx.block->loop_nest_depth = 0;
-   ctx.block->is_top_level = true;
 
    add_startpgm(&ctx);
 
