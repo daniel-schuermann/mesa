@@ -335,6 +335,9 @@ void process_block(wqm_ctx &ctx, block_info *info, Block *block)
          assert(needs == Unspecified || needs == WQM);
          needs = WQM;
       }
+ 
+      if (instr->opcode == aco_opcode::p_is_helper)
+         instr->getOperand(0) = Operand(ctx.exact_mask);
 
       state = transition_state(ctx, block->instructions, state, needs);
 
@@ -349,7 +352,7 @@ void process_block(wqm_ctx &ctx, block_info *info, Block *block)
 void lower_wqm(Program *program, live& live_vars,
                const struct radv_nir_compiler_options *options)
 {
-   if (program->needs_wqm && !program->needs_exact) {
+   if (program->needs_wqm && !program->needs_exact && !program->has_is_helper) {
       Block *block = program->blocks[0].get();
       aco_ptr<Instruction> wqm{create_instruction<SOP1_instruction>(aco_opcode::s_wqm_b64, Format::SOP1, 1, 2)};
       wqm->getOperand(0) = Operand(exec, s2);

@@ -221,6 +221,8 @@ opcode("p_start_linear_vgpr")
 opcode("p_end_linear_vgpr")
 
 opcode("p_wqm")
+opcode("p_is_helper")
+
 opcode("p_as_uniform")
 
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)

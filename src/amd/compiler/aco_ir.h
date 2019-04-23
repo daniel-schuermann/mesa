@@ -847,6 +847,7 @@ public:
    gl_shader_stage stage;
    bool needs_exact = false; /* there exists an instruction with disable_wqm = true */
    bool needs_wqm = false; /* there exists a p_wqm instruction */
+   bool has_is_helper = false; /* there exists a p_is_helper instruction */
 
    uint32_t allocateId()
    {
