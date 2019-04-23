@@ -1329,7 +1329,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
    unsigned last_top_level_block_idx = 0;
    for (std::unique_ptr<Block>& block : ctx.program->blocks) {
 
-      if (block->is_top_level) {
+      if (block->kind & block_kind_top_level) {
          last_top_level_block_idx = block->index;
 
          /* check if any spilled variables use a created linear vgpr, otherwise destroy them */
