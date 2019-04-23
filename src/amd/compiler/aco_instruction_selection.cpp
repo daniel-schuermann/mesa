@@ -3941,11 +3941,22 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_shuffle: {
       Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
       Temp tid = get_ssa_temp(ctx, instr->src[1].ssa);
-      assert(src.regClass() == v1 && tid.regClass() == v1);
-      Definition tmp = bld.def(v1);
-      tid = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(2u), tid);
-      bld.ds(aco_opcode::ds_bpermute_b32, tmp, tid, src);
-      emit_wqm(ctx, tmp.getTemp(), get_ssa_temp(ctx, &instr->dest.ssa));
+      assert(tid.regClass() == v1);
+      Definition dst = bld.def(src.regClass());
+      if (src.regClass() == v1) {
+         tid = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(2u), tid);
+         bld.ds(aco_opcode::ds_bpermute_b32, dst, tid, src);
+      } else if (instr->dest.ssa.bit_size == 1 && src.regClass() == s2) {
+         Temp tmp = bld.vop3(aco_opcode::v_lshrrev_b64, bld.def(v2), tid, src);
+         tmp = emit_extract_vector(ctx, tmp, 0, v1);
+         tmp = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(1u), tmp);
+         bld.vopc(aco_opcode::v_cmp_lg_u32, dst, Operand(0u), tmp);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      emit_wqm(ctx, dst.getTemp(), get_ssa_temp(ctx, &instr->dest.ssa));
       break;
    }
    case nir_intrinsic_load_sample_id: {
