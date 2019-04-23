@@ -4173,6 +4173,12 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       emit_wqm(ctx, tmp.getTemp(), dst);
       break;
    }
+   case nir_intrinsic_load_helper_invocation: {
+      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+      bld.pseudo(aco_opcode::p_is_helper, Definition(dst), Operand(exec, s2), Operand(exec, s2));
+      ctx->program->has_is_helper = true;
+      break;
+   }
    case nir_intrinsic_first_invocation: {
       emit_wqm(ctx, bld.sop1(aco_opcode::s_ff1_i32_b64, bld.def(s1), Operand(exec, s2)),
                get_ssa_temp(ctx, &instr->dest.ssa));
