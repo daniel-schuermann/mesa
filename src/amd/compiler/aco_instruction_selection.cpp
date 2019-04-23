@@ -3971,10 +3971,18 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_read_first_invocation: {
       Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
       Definition tmp = bld.def(s1);
-      if (src.regClass() == v1)
+      if (src.regClass() == v1) {
          bld.vop1(aco_opcode::v_readfirstlane_b32, tmp, src);
-      else
+      } else if (src.regClass() == s1) {
          bld.sop1(aco_opcode::s_mov_b32, tmp, src);
+      } else if (instr->dest.ssa.bit_size == 1 && src.regClass() == s2) {
+         bld.sopc(aco_opcode::s_bitcmp1_b64, bld.scc(tmp), src,
+                  bld.sop1(aco_opcode::s_ff1_i32_b64, bld.def(s1), Operand(exec, s2)));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
       emit_wqm(ctx, tmp.getTemp(), get_ssa_temp(ctx, &instr->dest.ssa));
       break;
    }
