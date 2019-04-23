@@ -123,6 +123,12 @@ public:
       instructions = NULL;
    }
 
+   void reset(Block *block) {
+      use_iterator = false;
+      start = false;
+      instructions = &block->instructions;
+   }
+
    Result insert(aco_ptr<Instruction> instr) {
       Instruction *instr_ptr = instr.get();
       if (instructions) {
@@ -199,7 +205,7 @@ public:
 <%
 import itertools
 formats = [("pseudo", [Format.PSEUDO], 'Instruction', itertools.product(range(5), range(5))),
-           ("sop1", [Format.SOP1], 'SOP1_instruction', itertools.product([1, 2, 3], [1])),
+           ("sop1", [Format.SOP1], 'SOP1_instruction', [(1, 1), (2, 1), (3, 2)]),
            ("sop2", [Format.SOP2], 'SOP2_instruction', itertools.product([1, 2], [2, 3])),
            ("sopk", [Format.SOPK], 'SOPK_instruction', itertools.product([0, 1, 2], [0, 1])),
            ("sopp", [Format.SOPP], 'SOPP_instruction', [(0, 0)]),
