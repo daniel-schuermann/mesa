@@ -343,6 +343,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      break;
                   case nir_intrinsic_inclusive_scan:
                   case nir_intrinsic_exclusive_scan:
+                  case nir_intrinsic_shuffle:
                      if (intrinsic->src[0].ssa->bit_size == 1) {
                         type = sgpr;
                         size = 2;
