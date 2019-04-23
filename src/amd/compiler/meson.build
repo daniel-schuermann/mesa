@@ -78,7 +78,6 @@ libaco_files = files(
   'aco_ssa_elimination.cpp',
   'aco_spill.cpp',
   'aco_validate.cpp',
-  'aco_wqm.cpp',
 )
 
 libaco = static_library(
