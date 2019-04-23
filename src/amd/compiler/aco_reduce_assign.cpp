@@ -60,7 +60,7 @@ void setup_reduce_temp(Program* program)
    int vtmp_inserted_at = -1;
 
    for (std::unique_ptr<Block>& block : program->blocks) {
-      if (block->is_top_level)
+      if (block->kind & block_kind_top_level)
          last_top_level_block_idx = block->index;
       if (!hasReductions[block->index])
          continue;
