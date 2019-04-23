@@ -342,14 +342,16 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_shared_atomic_comp_swap:
                      type = vgpr;
                      break;
-                  case nir_intrinsic_inclusive_scan:
-                  case nir_intrinsic_exclusive_scan:
                   case nir_intrinsic_shuffle:
                   case nir_intrinsic_quad_broadcast:
                   case nir_intrinsic_quad_swap_horizontal:
                   case nir_intrinsic_quad_swap_vertical:
                   case nir_intrinsic_quad_swap_diagonal:
-                     if (intrinsic->src[0].ssa->bit_size == 1) {
+                  case nir_intrinsic_inclusive_scan:
+                  case nir_intrinsic_exclusive_scan:
+                     if (!ctx->divergent_vals[intrinsic->dest.ssa.index]) {
+                        type = sgpr;
+                     } else if (intrinsic->src[0].ssa->bit_size == 1) {
                         type = sgpr;
                         size = 2;
                      } else {
@@ -362,7 +364,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      size = 2;
                      break;
                   case nir_intrinsic_reduce:
-                     if (nir_intrinsic_cluster_size(intrinsic) == 0 || nir_intrinsic_cluster_size(intrinsic) == 64) {
+                     if (nir_intrinsic_cluster_size(intrinsic) == 0 ||
+                         !ctx->divergent_vals[intrinsic->dest.ssa.index]) {
                         type = sgpr;
                      } else if (intrinsic->src[0].ssa->bit_size == 1) {
                         type = sgpr;
