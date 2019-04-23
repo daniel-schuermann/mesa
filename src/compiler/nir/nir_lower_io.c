@@ -1236,7 +1236,7 @@ get_explicit_type(const struct glsl_type *type,
                                     unsigned *size, unsigned *align),
                   unsigned *size, unsigned *align)
 {
-   if (glsl_type_is_vector_or_scalar(type)) {
+   if (glsl_type_is_scalar(type)) {
       type_info(type, size, align);
       return type;
    } else if (glsl_type_is_array(type)) {
@@ -1277,6 +1277,15 @@ get_explicit_type(const struct glsl_type *type,
       type = glsl_struct_type(fields, num_fields, glsl_get_type_name(type), false);
       free(fields);
       return type;
+   } else if (glsl_type_is_vector(type)) {
+      type_info(type, size, align);
+
+      const struct glsl_type *element_type = glsl_get_array_element(type);
+      unsigned elem_size, elem_align;
+      type_info(element_type, &elem_size, &elem_align);
+
+      assert(elem_size * glsl_get_length(type) <= size);
+      return glsl_explicit_matrix_type(type, elem_size, false);
    } else if (glsl_type_is_matrix(type)) {
       const struct glsl_type *col_type =
          glsl_vector_type(glsl_get_base_type(type), glsl_get_vector_elements(type));
