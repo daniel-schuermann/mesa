@@ -605,6 +605,10 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          assert(instr->getOperand(0).isFixed());
       }
       break;
+   case aco_opcode::p_is_helper:
+      if (!ctx.program->needs_wqm)
+         ctx.info[instr->getDefinition(0).tempId()].set_constant(0u);
+      break;
    case aco_opcode::s_movk_i32: {
       uint32_t v = static_cast<SOPK_instruction*>(instr.get())->imm;
       v = v & 0x8000 ? (v | 0xffff0000) : v;
