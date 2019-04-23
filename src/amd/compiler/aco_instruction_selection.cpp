@@ -3733,6 +3733,25 @@ Temp emit_boolean_inclusive_scan(isel_context *ctx, nir_op op, Temp src)
    return Temp();
 }
 
+void emit_uniform_subgroup(isel_context *ctx, nir_intrinsic_instr *instr, Temp src)
+{
+   Builder bld(ctx->program, ctx->block);
+   Definition dst(get_ssa_temp(ctx, &instr->dest.ssa));
+   if (typeOf(src.regClass()) == vgpr) {
+      bld.pseudo(aco_opcode::p_as_uniform, dst, src);
+   } else if (instr->dest.ssa.bit_size == 1 && src.regClass() == s2) {
+      bld.sopc(aco_opcode::s_cmp_lg_u64, bld.scc(dst), Operand(0u), Operand(src));
+   } else if (src.regClass() == s1) {
+      bld.sop1(aco_opcode::s_mov_b32, dst, src);
+   } else if (src.regClass() == s2) {
+      bld.sop1(aco_opcode::s_mov_b64, dst, src);
+   } else {
+      fprintf(stderr, "Unimplemented NIR instr bit size: ");
+      nir_print_instr(&instr->instr, stderr);
+      fprintf(stderr, "\n");
+   }
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Builder bld(ctx->program, ctx->block);
@@ -3940,23 +3959,27 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    }
    case nir_intrinsic_shuffle: {
       Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
-      Temp tid = get_ssa_temp(ctx, instr->src[1].ssa);
-      assert(tid.regClass() == v1);
-      Definition dst = bld.def(src.regClass());
-      if (src.regClass() == v1) {
-         tid = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(2u), tid);
-         bld.ds(aco_opcode::ds_bpermute_b32, dst, tid, src);
-      } else if (instr->dest.ssa.bit_size == 1 && src.regClass() == s2) {
-         Temp tmp = bld.vop3(aco_opcode::v_lshrrev_b64, bld.def(v2), tid, src);
-         tmp = emit_extract_vector(ctx, tmp, 0, v1);
-         tmp = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(1u), tmp);
-         bld.vopc(aco_opcode::v_cmp_lg_u32, dst, Operand(0u), tmp);
+      if (!ctx->divergent_vals[instr->dest.ssa.index]) {
+         emit_uniform_subgroup(ctx, instr, src);
       } else {
-         fprintf(stderr, "Unimplemented NIR instr bit size: ");
-         nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
+         Temp tid = get_ssa_temp(ctx, instr->src[1].ssa);
+         assert(tid.regClass() == v1);
+         Definition dst = bld.def(src.regClass());
+         if (src.regClass() == v1) {
+            tid = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(2u), tid);
+            bld.ds(aco_opcode::ds_bpermute_b32, dst, tid, src);
+         } else if (instr->dest.ssa.bit_size == 1 && src.regClass() == s2) {
+            Temp tmp = bld.vop3(aco_opcode::v_lshrrev_b64, bld.def(v2), tid, src);
+            tmp = emit_extract_vector(ctx, tmp, 0, v1);
+            tmp = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(1u), tmp);
+            bld.vopc(aco_opcode::v_cmp_lg_u32, dst, Operand(0u), tmp);
+         } else {
+            fprintf(stderr, "Unimplemented NIR instr bit size: ");
+            nir_print_instr(&instr->instr, stderr);
+            fprintf(stderr, "\n");
+         }
+         emit_wqm(ctx, dst.getTemp(), get_ssa_temp(ctx, &instr->dest.ssa));
       }
-      emit_wqm(ctx, dst.getTemp(), get_ssa_temp(ctx, &instr->dest.ssa));
       break;
    }
    case nir_intrinsic_load_sample_id: {
@@ -4039,7 +4062,9 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
          nir_intrinsic_cluster_size(instr) : 0;
       cluster_size = util_next_power_of_two(MIN2(cluster_size ? cluster_size : 64, 64));
 
-      if (instr->dest.ssa.bit_size == 1) {
+      if (!ctx->divergent_vals[instr->src[0].ssa->index] && (op == nir_op_ior || op == nir_op_iand)) {
+         emit_uniform_subgroup(ctx, instr, src);
+      } else if (instr->dest.ssa.bit_size == 1) {
          if (op == nir_op_imul || op == nir_op_umin || op == nir_op_imin)
             op = nir_op_iand;
          else if (op == nir_op_iadd)
@@ -4119,58 +4144,66 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    }
    case nir_intrinsic_quad_broadcast: {
       Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
-      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      Definition tmp = bld.def(dst.regClass());
-      unsigned lane = nir_src_as_const_value(instr->src[1])->u32[0];
-      if (instr->dest.ssa.bit_size == 1 && src.regClass() == s2) {
-         uint32_t half_mask = 0x11111111u << lane;
-         Temp mask_tmp = bld.pseudo(aco_opcode::p_create_vector, bld.def(s2), Operand(half_mask), Operand(half_mask));
-         bld.sop1(aco_opcode::s_wqm_b64, tmp,
-                  bld.sop2(aco_opcode::s_and_b64, bld.def(s2), mask_tmp,
-                           bld.sop2(aco_opcode::s_and_b64, bld.def(s2), src, Operand(exec, s2))));
-      } else if (instr->dest.ssa.bit_size == 32) {
-         bld.vop1_dpp(aco_opcode::v_mov_b32, tmp, src,
-                      dpp_quad_perm(lane, lane, lane, lane));
+      if (!ctx->divergent_vals[instr->dest.ssa.index]) {
+         emit_uniform_subgroup(ctx, instr, src);
       } else {
-         fprintf(stderr, "Unimplemented NIR instr bit size: ");
-         nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
+         Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+         Definition tmp = bld.def(dst.regClass());
+         unsigned lane = nir_src_as_const_value(instr->src[1])->u32[0];
+         if (instr->dest.ssa.bit_size == 1 && src.regClass() == s2) {
+            uint32_t half_mask = 0x11111111u << lane;
+            Temp mask_tmp = bld.pseudo(aco_opcode::p_create_vector, bld.def(s2), Operand(half_mask), Operand(half_mask));
+            bld.sop1(aco_opcode::s_wqm_b64, tmp,
+                     bld.sop2(aco_opcode::s_and_b64, bld.def(s2), mask_tmp,
+                              bld.sop2(aco_opcode::s_and_b64, bld.def(s2), src, Operand(exec, s2))));
+         } else if (instr->dest.ssa.bit_size == 32) {
+            bld.vop1_dpp(aco_opcode::v_mov_b32, tmp, src,
+                         dpp_quad_perm(lane, lane, lane, lane));
+         } else {
+            fprintf(stderr, "Unimplemented NIR instr bit size: ");
+            nir_print_instr(&instr->instr, stderr);
+            fprintf(stderr, "\n");
+         }
+         emit_wqm(ctx, tmp.getTemp(), dst);
       }
-      emit_wqm(ctx, tmp.getTemp(), dst);
       break;
    }
    case nir_intrinsic_quad_swap_horizontal:
    case nir_intrinsic_quad_swap_vertical:
    case nir_intrinsic_quad_swap_diagonal: {
-      uint16_t dpp_ctrl = 0;
-      switch (instr->intrinsic) {
-      case nir_intrinsic_quad_swap_horizontal:
-         dpp_ctrl = dpp_quad_perm(1, 0, 3, 2);
-         break;
-      case nir_intrinsic_quad_swap_vertical:
-         dpp_ctrl = dpp_quad_perm(2, 3, 0, 1);
-         break;
-      case nir_intrinsic_quad_swap_diagonal:
-         dpp_ctrl = dpp_quad_perm(3, 2, 1, 0);
-         break;
-      default:
-         break;
-      }
-
       Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
-      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      Definition tmp = bld.def(dst.regClass());
-      if (instr->dest.ssa.bit_size == 1 && src.regClass() == s2) {
-         src = bld.vop2_e64(aco_opcode::v_cndmask_b32, bld.def(v1), Operand(0u), Operand((uint32_t)-1), src);
-         bld.vopc_dpp(aco_opcode::v_cmp_lg_u32, tmp, Operand(0u), src, dpp_ctrl);
-      } else if (instr->dest.ssa.bit_size == 32) {
-         bld.vop1_dpp(aco_opcode::v_mov_b32, tmp, src, dpp_ctrl);
+      if (!ctx->divergent_vals[instr->dest.ssa.index]) {
+         emit_uniform_subgroup(ctx, instr, src);
       } else {
-         fprintf(stderr, "Unimplemented NIR instr bit size: ");
-         nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
+         uint16_t dpp_ctrl = 0;
+         switch (instr->intrinsic) {
+         case nir_intrinsic_quad_swap_horizontal:
+            dpp_ctrl = dpp_quad_perm(1, 0, 3, 2);
+            break;
+         case nir_intrinsic_quad_swap_vertical:
+            dpp_ctrl = dpp_quad_perm(2, 3, 0, 1);
+            break;
+         case nir_intrinsic_quad_swap_diagonal:
+            dpp_ctrl = dpp_quad_perm(3, 2, 1, 0);
+            break;
+         default:
+            break;
+         }
+
+         Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+         Definition tmp = bld.def(dst.regClass());
+         if (instr->dest.ssa.bit_size == 1 && src.regClass() == s2) {
+            src = bld.vop2_e64(aco_opcode::v_cndmask_b32, bld.def(v1), Operand(0u), Operand((uint32_t)-1), src);
+            bld.vopc_dpp(aco_opcode::v_cmp_lg_u32, tmp, Operand(0u), src, dpp_ctrl);
+         } else if (instr->dest.ssa.bit_size == 32) {
+            bld.vop1_dpp(aco_opcode::v_mov_b32, tmp, src, dpp_ctrl);
+         } else {
+            fprintf(stderr, "Unimplemented NIR instr bit size: ");
+            nir_print_instr(&instr->instr, stderr);
+            fprintf(stderr, "\n");
+         }
+         emit_wqm(ctx, tmp.getTemp(), dst);
       }
-      emit_wqm(ctx, tmp.getTemp(), dst);
       break;
    }
    case nir_intrinsic_load_helper_invocation: {
