@@ -3943,6 +3943,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       Temp tid = get_ssa_temp(ctx, instr->src[1].ssa);
       assert(src.regClass() == v1 && tid.regClass() == v1);
       Definition tmp = bld.def(v1);
+      tid = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(2u), tid);
       bld.ds(aco_opcode::ds_bpermute_b32, tmp, tid, src);
       emit_wqm(ctx, tmp.getTemp(), get_ssa_temp(ctx, &instr->dest.ssa));
       break;
