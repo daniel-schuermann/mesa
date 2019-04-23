@@ -344,6 +344,10 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_inclusive_scan:
                   case nir_intrinsic_exclusive_scan:
                   case nir_intrinsic_shuffle:
+                  case nir_intrinsic_quad_broadcast:
+                  case nir_intrinsic_quad_swap_horizontal:
+                  case nir_intrinsic_quad_swap_vertical:
+                  case nir_intrinsic_quad_swap_diagonal:
                      if (intrinsic->src[0].ssa->bit_size == 1) {
                         type = sgpr;
                         size = 2;
