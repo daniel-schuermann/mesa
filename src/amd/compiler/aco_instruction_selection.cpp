@@ -4152,6 +4152,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       coords = {ctx->program->allocateId(), coords.regClass()};
       vec->getDefinition(0) = Definition(coords);
       ctx->block->instructions.emplace_back(std::move(vec));
+
+      has_offset = false;
    }
 
    /* Build tex instruction */
