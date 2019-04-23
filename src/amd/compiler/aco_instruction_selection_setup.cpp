@@ -287,6 +287,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_vote_any:
                   case nir_intrinsic_read_first_invocation:
                   case nir_intrinsic_read_invocation:
+                  case nir_intrinsic_first_invocation:
                   case nir_intrinsic_vulkan_resource_index:
                      type = sgpr;
                      break;
