@@ -114,19 +114,20 @@ void find_empty_blocks(ssa_elimination_ctx& ctx)
          continue;
       std::unique_ptr<Block>& block = ctx.program->blocks[i];
 
-      /* linear helper blocks without to be inserted parallelcopies are considered empty */
-      if (block->logical_idom == -1)
-         continue;
-
-      /* check if there are other instructions between logical_start and logical_end */
       std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
-      while ((*it)->opcode != aco_opcode::p_logical_start) {
-         ++it;
-         assert(it != block->instructions.end());
+      for (; it != block->instructions.end(); ++it) {
+         aco_opcode op = (*it)->opcode;
+         if (op != aco_opcode::p_logical_start &&
+             op != aco_opcode::p_logical_end &&
+             op != aco_opcode::p_wqm &&
+             op != aco_opcode::p_phi &&
+             op != aco_opcode::p_linear_phi &&
+             op != aco_opcode::p_startpgm &&
+             (*it)->format != Format::PSEUDO_BRANCH) {
+            ctx.empty_blocks[i] = false;
+            break;
+         }
       }
-      ++it;
-      if ((*it)->opcode != aco_opcode::p_logical_end)
-         ctx.empty_blocks[i] = false;
    }
 }
 
