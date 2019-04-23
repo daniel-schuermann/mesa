@@ -3986,6 +3986,25 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       emit_wqm(ctx, tmp.getTemp(), get_ssa_temp(ctx, &instr->dest.ssa));
       break;
    }
+   case nir_intrinsic_read_invocation: {
+      Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
+      Temp lane = get_ssa_temp(ctx, instr->src[1].ssa);
+      assert(lane.regClass() == s1);
+      Definition tmp = bld.def(s1);
+      if (src.regClass() == v1) {
+         bld.vop3(aco_opcode::v_readlane_b32, tmp, src, lane);
+      } else if (instr->dest.ssa.bit_size == 1 && src.regClass() == s2) {
+         bld.sopc(aco_opcode::s_bitcmp1_b64, bld.scc(tmp), src, lane);
+      } else if (src.regClass() == s1) {
+         bld.sop1(aco_opcode::s_mov_b32, tmp, src);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      emit_wqm(ctx, tmp.getTemp(), get_ssa_temp(ctx, &instr->dest.ssa));
+      break;
+   }
    case nir_intrinsic_vote_all: {
       Temp src = as_divergent_bool(ctx, get_ssa_temp(ctx, instr->src[0].ssa), false);
       Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
