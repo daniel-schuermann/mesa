@@ -22,7 +22,6 @@
  *
  */
 
-#include <stack>
 #include <vector>
 
 #include "aco_ir.h"
@@ -32,6 +31,33 @@ namespace aco {
 
 namespace {
 
+enum WQMState : uint8_t {
+   Unspecified = 0,
+   Exact = 1 << 0,
+   WQM = 1 << 1 /* with control flow applied */
+};
+
+enum mask_type : uint8_t {
+   mask_type_global = 1 << 0,
+   mask_type_wqm = 1 << 1, /* 0 indicates exact */
+   mask_type_loop = 1 << 2,
+};
+
+struct wqm_ctx {
+   /* state for WQM propagation */
+   std::set<unsigned> worklist;
+   std::vector<uint16_t> defined_in;
+   std::vector<bool> needs_wqm;
+   std::vector<bool> branch_wqm; /* true if the branch condition in this block should be in wqm */
+   wqm_ctx(Program* program) : defined_in(program->peekAllocationId(), 0xFFFF),
+                               needs_wqm(program->peekAllocationId()),
+                               branch_wqm(program->blocks.size())
+   {
+      for (unsigned i = 0; i < program->blocks.size(); i++)
+         worklist.insert(i);
+   }
+};
+
 struct loop_info {
    Block* loop_header;
    size_t num_exec_masks;
@@ -40,14 +66,9 @@ struct loop_info {
    loop_info(Block* block, unsigned num) : loop_header(block), num_exec_masks(num) {}
 };
 
-enum mask_type {
-   mask_type_global = 1 << 0,
-   mask_type_wqm = 1 << 1, /* 0 indicates exact */
-   mask_type_loop = 1 << 2,
-};
-
 struct block_info {
    std::vector<std::pair<Temp, uint8_t>> exec;
+   std::vector<WQMState> instr_needs;
    /* more... */
 };
 
@@ -58,6 +79,130 @@ struct exec_ctx {
    exec_ctx(Program *program) : program(program), info(program->blocks.size()) {}
 };
 
+bool pred_by_exec_mask(aco_ptr<Instruction>& instr) {
+   if (instr->format == Format::SMEM || instr->isSALU())
+      return false;
+   if (instr->format == Format::PSEUDO_BARRIER)
+      return false;
+
+   if (instr->format == Format::PSEUDO) {
+      switch (instr->opcode) {
+      case aco_opcode::p_create_vector:
+         return instr->getDefinition(0).getTemp().type() == RegType::vgpr;
+      case aco_opcode::p_extract_vector:
+      case aco_opcode::p_split_vector:
+         return instr->getOperand(0).getTemp().type() == RegType::vgpr;
+      case aco_opcode::p_spill:
+      case aco_opcode::p_reload:
+         return false;
+      default:
+         break;
+      }
+   }
+
+   if (instr->opcode == aco_opcode::v_readlane_b32 ||
+       instr->opcode == aco_opcode::v_writelane_b32)
+      return false;
+
+   return true;
+}
+
+bool needs_exact(aco_ptr<Instruction>& instr) {
+   if (instr->format == Format::MUBUF) {
+      MUBUF_instruction *mubuf = static_cast<MUBUF_instruction *>(instr.get());
+      return mubuf->disable_wqm;
+   } else if (instr->format == Format::MIMG) {
+      MIMG_instruction *mimg = static_cast<MIMG_instruction *>(instr.get());
+      return mimg->disable_wqm;
+   } else {
+      return false;
+   }
+}
+
+void set_needs_wqm(wqm_ctx &ctx, Block *block, Temp tmp)
+{
+   if (!ctx.needs_wqm[tmp.id()]) {
+      ctx.needs_wqm[tmp.id()] = true;
+      if (ctx.defined_in[tmp.id()] != 0xFFFF)
+         ctx.worklist.insert(ctx.defined_in[tmp.id()]);
+   }
+}
+
+void mark_block_wqm(wqm_ctx &ctx, Block *block)
+{
+   if (ctx.branch_wqm[block->index])
+      return;
+   ctx.branch_wqm[block->index] = true;
+
+   aco_ptr<Instruction>& branch = *block->instructions.rbegin();
+   if (branch->opcode != aco_opcode::p_branch) {
+      assert(branch->operandCount() && branch->getOperand(0).isTemp());
+      set_needs_wqm(ctx, block, branch->getOperand(0).getTemp());
+   }
+
+   for (Block *pred : block->logical_predecessors)
+      mark_block_wqm(ctx, pred);
+}
+
+/* ensure the condition controlling the control flow for this phi is in WQM */
+void mark_phi_wqm(wqm_ctx &ctx, Block *block)
+{
+   /* TODO: this sets more branch conditions to WQM than it needs to */
+   for (Block *pred : block->logical_predecessors)
+      mark_block_wqm(ctx, pred);
+}
+
+std::vector<WQMState> get_block_needs(wqm_ctx &ctx, Block* block)
+{
+   std::vector<WQMState> instr_needs(block->instructions.size());
+
+   for (int i = block->instructions.size() - 1; i >= 0; --i)
+   {
+      aco_ptr<Instruction>& instr = block->instructions[i];
+
+      WQMState needs = needs_exact(instr) ? Exact : Unspecified;
+      bool propagate_wqm = instr->opcode == aco_opcode::p_wqm;
+
+      bool pred_by_exec = pred_by_exec_mask(instr);
+      for (unsigned j = 0; j < instr->definitionCount(); j++) {
+         if (!instr->getDefinition(j).isTemp())
+            continue;
+         unsigned def = instr->getDefinition(j).tempId();
+         ctx.defined_in[def] = block->index;
+         if (needs == Unspecified && ctx.needs_wqm[def]) {
+            needs = pred_by_exec ? WQM : Unspecified;
+            propagate_wqm = true;
+         }
+      }
+
+      if (propagate_wqm) {
+         for (unsigned j = 0; j < instr->operandCount(); j++) {
+            if (!instr->getOperand(j).isTemp())
+               continue;
+            set_needs_wqm(ctx, block, instr->getOperand(j).getTemp());
+         }
+      }
+
+      if (needs == WQM && instr->opcode == aco_opcode::p_phi)
+         mark_phi_wqm(ctx, block);
+
+      instr_needs[i] = needs;
+   }
+   return instr_needs;
+}
+
+void calculate_wqm_needs(exec_ctx& exec_ctx)
+{
+   wqm_ctx ctx(exec_ctx.program);
+
+   while (!ctx.worklist.empty()) {
+      unsigned block_index = *std::prev(ctx.worklist.end());
+      ctx.worklist.erase(std::prev(ctx.worklist.end()));
+
+      Block *block = exec_ctx.program->blocks[block_index].get();
+      exec_ctx.info[block->index].instr_needs = get_block_needs(ctx, block);
+   }
+}
 
 void add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
 {
@@ -373,10 +518,10 @@ void process_block(exec_ctx& ctx, std::unique_ptr<Block>& block)
 
 void insert_exec_mask(Program *program)
 {
-   if (program->blocks.size() == 1)
-      return;
-
    exec_ctx ctx(program);
+
+   if (program->needs_wqm && program->needs_exact)
+      calculate_wqm_needs(ctx);
 
    for (std::unique_ptr<Block>& block : program->blocks)
       process_block(ctx, block);
