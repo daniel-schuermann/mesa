@@ -40,9 +40,12 @@ enum fs_input {
    persp_centroid_p1,
    persp_centroid_p2,
    persp_pull_model,
-   linear_sample,
-   linear_center,
-   linear_centroid,
+   linear_sample_p1,
+   linear_sample_p2,
+   linear_center_p1,
+   linear_center_p2,
+   linear_centroid_p1,
+   linear_centroid_p2,
    line_stipple,
    frag_pos_0,
    frag_pos_1,
@@ -114,6 +117,32 @@ struct isel_context {
 
    uint64_t input_mask;
 };
+
+fs_input get_interp_input(nir_intrinsic_op intrin, enum glsl_interp_mode interp)
+{
+   switch (interp) {
+   case INTERP_MODE_SMOOTH:
+   case INTERP_MODE_NONE:
+      if (intrin == nir_intrinsic_load_barycentric_pixel)
+         return fs_input::persp_center_p1;
+      else if (intrin == nir_intrinsic_load_barycentric_centroid)
+         return fs_input::persp_centroid_p1;
+      else if (intrin == nir_intrinsic_load_barycentric_sample)
+         return fs_input::persp_sample_p1;
+      break;
+   case INTERP_MODE_NOPERSPECTIVE:
+      if (intrin == nir_intrinsic_load_barycentric_pixel)
+         return fs_input::linear_center_p1;
+      else if (intrin == nir_intrinsic_load_barycentric_centroid)
+         return fs_input::linear_centroid_p1;
+      else if (intrin == nir_intrinsic_load_barycentric_sample)
+         return fs_input::linear_sample_p1;
+      break;
+   default:
+      break;
+   }
+   return fs_input::max_inputs;
+}
 
 void init_context(isel_context *ctx, nir_function_impl *impl)
 {
@@ -396,14 +425,12 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
 
                switch(intrinsic->intrinsic) {
                   case nir_intrinsic_load_barycentric_sample:
-                     ctx->fs_vgpr_args[fs_input::persp_sample_p1] = true;
-                     break;
                   case nir_intrinsic_load_barycentric_pixel:
-                     ctx->fs_vgpr_args[fs_input::persp_center_p1] = true;
+                  case nir_intrinsic_load_barycentric_centroid: {
+                     glsl_interp_mode mode = (glsl_interp_mode)nir_intrinsic_interp_mode(intrinsic);
+                     ctx->fs_vgpr_args[get_interp_input(intrinsic->intrinsic, mode)] = true;
                      break;
-                  case nir_intrinsic_load_barycentric_centroid:
-                     ctx->fs_vgpr_args[fs_input::persp_centroid_p1] = true;
-                     break;
+                  }
                   case nir_intrinsic_load_front_face:
                      ctx->fs_vgpr_args[fs_input::front_face] = true;
                      break;
@@ -815,23 +842,23 @@ void add_startpgm(struct isel_context *ctx)
          ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_PULL_MODEL_ENA(1);
          vgpr_idx += 3;
       }
-      if (ctx->fs_vgpr_args[fs_input::linear_sample]) {
-         add_arg(&args, v2, &ctx->fs_inputs[fs_input::linear_sample], vgpr_idx);
+      if (ctx->fs_vgpr_args[fs_input::linear_sample_p1]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::linear_sample_p1], vgpr_idx++);
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::linear_sample_p2], vgpr_idx++);
          ctx->program->config->spi_ps_input_addr |= S_0286CC_LINEAR_SAMPLE_ENA(1);
          ctx->program->config->spi_ps_input_ena |= S_0286CC_LINEAR_SAMPLE_ENA(1);
-         vgpr_idx += 2;
       }
-      if (ctx->fs_vgpr_args[fs_input::linear_center]) {
-         add_arg(&args, v2, &ctx->fs_inputs[fs_input::linear_center], vgpr_idx);
+      if (ctx->fs_vgpr_args[fs_input::linear_center_p1]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::linear_center_p1], vgpr_idx++);
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::linear_center_p2], vgpr_idx++);
          ctx->program->config->spi_ps_input_addr |= S_0286CC_LINEAR_CENTER_ENA(1);
          ctx->program->config->spi_ps_input_ena |= S_0286CC_LINEAR_CENTER_ENA(1);
-         vgpr_idx += 2;
       }
-      if (ctx->fs_vgpr_args[fs_input::linear_centroid]) {
-         add_arg(&args, v2, &ctx->fs_inputs[fs_input::linear_centroid], vgpr_idx);
+      if (ctx->fs_vgpr_args[fs_input::linear_centroid_p1]) {
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::linear_centroid_p1], vgpr_idx++);
+         add_arg(&args, v1, &ctx->fs_inputs[fs_input::linear_centroid_p2], vgpr_idx++);
          ctx->program->config->spi_ps_input_addr |= S_0286CC_LINEAR_CENTROID_ENA(1);
          ctx->program->config->spi_ps_input_ena |= S_0286CC_LINEAR_CENTROID_ENA(1);
-         vgpr_idx += 2;
       }
       if (ctx->fs_vgpr_args[fs_input::line_stipple]) {
          add_arg(&args, v1, &ctx->fs_inputs[fs_input::line_stipple], vgpr_idx++);
