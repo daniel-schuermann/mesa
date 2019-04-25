@@ -3756,27 +3756,21 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Builder bld(ctx->program, ctx->block);
    switch(instr->intrinsic) {
-   case nir_intrinsic_load_barycentric_sample: {
-      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
-                 ctx->fs_inputs[fs_input::persp_sample_p1],
-                 ctx->fs_inputs[fs_input::persp_sample_p2]);
-      emit_split_vector(ctx, dst, 2);
-      break;
-   }
-   case nir_intrinsic_load_barycentric_pixel: {
-      Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
-                 ctx->fs_inputs[fs_input::persp_center_p1],
-                 ctx->fs_inputs[fs_input::persp_center_p2]);
-      emit_split_vector(ctx, dst, 2);
-      break;
-   }
+   case nir_intrinsic_load_barycentric_sample:
+   case nir_intrinsic_load_barycentric_pixel:
    case nir_intrinsic_load_barycentric_centroid: {
+      glsl_interp_mode mode = (glsl_interp_mode)nir_intrinsic_interp_mode(instr);
+      fs_input input = get_interp_input(instr->intrinsic, mode);
+
       Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
-                 ctx->fs_inputs[fs_input::persp_centroid_p1],
-                 ctx->fs_inputs[fs_input::persp_centroid_p2]);
+      if (input == fs_input::max_inputs) {
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
+                    Operand(0u), Operand(0u));
+      } else {
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
+                    ctx->fs_inputs[input],
+                    ctx->fs_inputs[input + 1]);
+      }
       emit_split_vector(ctx, dst, 2);
       break;
    }
@@ -5518,8 +5512,16 @@ void handle_bc_optimize(isel_context *ctx)
       }
 
       if (G_0286CC_LINEAR_CENTROID_ENA(spi_ps_input_ena)) {
-         /* TODO: implement when linear interpolation is implemented */
-         unreachable("Unimplemented\n");
+         for (unsigned i = 0; i < 2; i++) {
+            Temp new_coord{ctx->program->allocateId(), v1};
+            instr.reset(create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
+            instr->getOperand(0) = Operand(ctx->fs_inputs[fs_input::linear_centroid_p1 + i]);
+            instr->getOperand(1) = Operand(ctx->fs_inputs[fs_input::linear_center_p1 + i]);
+            instr->getOperand(2) = Operand(sel);
+            instr->getDefinition(0) = Definition(new_coord);
+            ctx->block->instructions.emplace_back(std::move(instr));
+            ctx->fs_inputs[fs_input::linear_centroid_p1 + i] = new_coord;
+         }
       }
    }
 }
