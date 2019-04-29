@@ -1079,8 +1079,13 @@ setup_variables(isel_context *ctx, nir_shader *nir)
          variable->data.driver_location = idx * 4;
          unsigned attrib_count = glsl_count_attribute_slots(variable->type, false);
          if (idx >= VARYING_SLOT_VAR0 || idx == VARYING_SLOT_PNTC ||
-             idx == VARYING_SLOT_PRIMITIVE_ID || idx == VARYING_SLOT_LAYER)
+             idx == VARYING_SLOT_PRIMITIVE_ID || idx == VARYING_SLOT_LAYER) {
             ctx->input_mask |= ((1ull << attrib_count) - 1ull) << idx;
+         } else if (idx == VARYING_SLOT_CLIP_DIST0 || idx == VARYING_SLOT_CLIP_DIST1) {
+            assert(variable->data.compact);
+            unsigned length = DIV_ROUND_UP(glsl_get_length(variable->type), 4);
+            ctx->input_mask |= ((1ull << length) - 1ull) << idx;
+         }
       }
       if (ctx->program->info->info.needs_multiview_view_index)
          ctx->input_mask |= 1 << VARYING_SLOT_LAYER;
