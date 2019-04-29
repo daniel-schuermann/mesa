@@ -34,7 +34,8 @@ namespace {
 enum WQMState : uint8_t {
    Unspecified = 0,
    Exact = 1 << 0,
-   WQM = 1 << 1 /* with control flow applied */
+   WQM = 1 << 1, /* with control flow applied */
+   Preserve_WQM = 1 << 2,
 };
 
 enum mask_type : uint8_t {
@@ -213,9 +214,19 @@ void calculate_wqm_needs(exec_ctx& exec_ctx)
    }
 
    uint8_t ever_again_needs = 0;
+   bool preserve_wqm = false;
    for (int i = exec_ctx.program->blocks.size() - 1; i >= 0; i--) {
       exec_ctx.info[i].ever_again_needs = ever_again_needs;
       ever_again_needs |= exec_ctx.info[i].block_needs;
+
+      /* if discard is used somewhere in nested CF, we need to preserve the WQM mask */
+      if (preserve_wqm && ever_again_needs & WQM &&
+          exec_ctx.program->blocks[i]->kind & block_kind_top_level) {
+         exec_ctx.info[i].ever_again_needs |= Preserve_WQM;
+         preserve_wqm = false;
+      }
+      if (exec_ctx.program->blocks[i]->kind & block_kind_uses_discard)
+         preserve_wqm = true;
    }
    exec_ctx.handle_wqm = true;
 }
@@ -478,8 +489,10 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
                           unsigned idx)
 {
    /* if the block doesn't need both, WQM and Exact, we can skip processing the instructions */
-   bool short_cut = !ctx.handle_wqm || ctx.info[block->index].block_needs != (WQM | Exact);
-   if (short_cut) {
+   bool process = ctx.handle_wqm ||
+                  ctx.info[block->index].block_needs == (WQM | Exact) ||
+                  block->kind & block_kind_uses_discard;
+   if (!process) {
       std::vector<aco_ptr<Instruction>>::iterator it = std::next(block->instructions.begin(), idx);
       instructions.insert(instructions.end(),
                           std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(it),
@@ -492,16 +505,31 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
    if (ctx.info[block->index].exec.back().second & mask_type_wqm)
       state = WQM;
    else {
-      assert(ctx.info[block->index].exec.back().second & mask_type_exact);
+      assert(!ctx.handle_wqm || ctx.info[block->index].exec.back().second & mask_type_exact);
       state = Exact;
    }
 
    for (; idx < block->instructions.size(); idx++) {
       aco_ptr<Instruction> instr = std::move(block->instructions[idx]);
 
-      WQMState needs = ctx.info[block->index].instr_needs[idx];
+      WQMState needs = ctx.handle_wqm ? ctx.info[block->index].instr_needs[idx] : Unspecified;
 
-      if (needs == WQM && state != WQM) {
+      if (instr->opcode == aco_opcode::p_discard_if) {
+         unsigned num = ctx.info[block->index].exec.size();
+         assert(num);
+         Operand cond = instr->getOperand(0);
+         instr.reset(create_instruction<Instruction>(aco_opcode::p_discard_if, Format::PSEUDO, num + 1, num + 1));
+         for (unsigned i = 0; i < num; i++) {
+            instr->getOperand(i) = Operand(ctx.info[block->index].exec[i].first);
+            Temp new_mask = bld.tmp(s2);
+            instr->getDefinition(i) = Definition(new_mask);
+            ctx.info[block->index].exec[i].first = new_mask;
+         }
+         instr->getDefinition(num - 1).setFixed(exec);
+         instr->getOperand(num) = cond;
+         instr->getDefinition(num) = bld.def(s1, scc);
+
+      } else if (needs == WQM && state != WQM) {
          transition_to_WQM(ctx, bld, block->index);
          state = WQM;
       } else if (needs == Exact && state != Exact) {
@@ -542,6 +570,22 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
          transition_to_Exact(ctx, bld, idx);
          bld.insert(std::move(branch));
          ctx.handle_wqm = false;
+
+      } else if (ctx.info[idx].ever_again_needs & Preserve_WQM) {
+         /* transition to WQM and remove global flag */
+         aco_ptr<Instruction> branch = std::move(block->instructions.back());
+         block->instructions.pop_back();
+         transition_to_WQM(ctx, bld, idx);
+         assert(ctx.info[idx].exec.size() == 2);
+         ctx.info[idx].exec.back().second &= ~mask_type_global;
+         bld.insert(std::move(branch));
+
+         if (!(ctx.info[idx].ever_again_needs & Exact)) {
+            /* if we don't ever again need Exact, remove it and disable wqm handling */
+            ctx.info[idx].exec[0] = ctx.info[idx].exec[1];
+            ctx.info[idx].exec.pop_back();
+            ctx.handle_wqm = false;
+         }
       }
    }
 
