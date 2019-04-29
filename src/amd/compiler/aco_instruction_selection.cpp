@@ -2334,21 +2334,10 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
 
 void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
 {
-   /**
-    * (vgpr discard_if)
-    * s_andn2_b64 exec, exec, vcc
-    * s_cbranch_execnz Label
-    * exp null off, off, off, off done vm
-    * s_endpgm
-    * Label
-    */
-   aco_ptr<Instruction> discard{create_instruction<Instruction>(aco_opcode::p_discard_if, Format::PSEUDO, 1, 1)};
-   discard->getOperand(0) = Operand(get_ssa_temp(ctx, instr->src[0].ssa));
-   if (discard->getOperand(0).regClass() == b)
-      discard->getOperand(0).setFixed(scc);
-   discard->getDefinition(0) = Definition{ctx->program->allocateId(), b};
-   discard->getDefinition(0).setFixed(scc);
-   ctx->block->instructions.emplace_back(std::move(discard));
+   Builder bld(ctx->program, ctx->block);
+   Temp src = as_divergent_bool(ctx, get_ssa_temp(ctx, instr->src[0].ssa), false);
+   src = bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2));
+   bld.pseudo(aco_opcode::p_discard_if, src);
    ctx->block->kind |= block_kind_uses_discard;
    return;
 }
