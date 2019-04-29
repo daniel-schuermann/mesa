@@ -1357,13 +1357,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       Temp src = get_alu_src(ctx, instr->src[0]);
       if (dst.regClass() == s1) {
          aco_ptr<Instruction> sop2;
-         if (src.regClass() == s1) {
-            bld.sop2(aco_opcode::s_mul_i32, Definition(dst), Operand(0x3f800000u), src);
-         } else {
-            assert(src.regClass() == s2);
-            src = emit_extract_vector(ctx, src, 0, s1);
-            bld.sop2(aco_opcode::s_or_b32, Definition(dst), bld.def(s1, scc), Operand(0x3f800000u), src);
-         }
+         src = as_uniform_bool(ctx, src);
+         bld.sop2(aco_opcode::s_mul_i32, Definition(dst), Operand(0x3f800000u), src);
       } else if (dst.regClass() == v1) {
          bld.vop2_e64(aco_opcode::v_cndmask_b32, Definition(dst), Operand(0u), Operand(0x3f800000u),
                       as_divergent_bool(ctx, src, true));
