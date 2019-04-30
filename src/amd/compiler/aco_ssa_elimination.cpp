@@ -107,83 +107,72 @@ void insert_parallelcopies(ssa_elimination_ctx& ctx)
    }
 }
 
-void find_empty_blocks(ssa_elimination_ctx& ctx)
-{
-   for (unsigned i = 0; i < ctx.program->blocks.size(); i++) {
-      if (!ctx.empty_blocks[i])
-         continue;
-      std::unique_ptr<Block>& block = ctx.program->blocks[i];
 
-      std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
-      for (; it != block->instructions.end(); ++it) {
-         aco_opcode op = (*it)->opcode;
-         if (op != aco_opcode::p_logical_start &&
-             op != aco_opcode::p_logical_end &&
-             op != aco_opcode::p_wqm &&
-             op != aco_opcode::p_phi &&
-             op != aco_opcode::p_linear_phi &&
-             op != aco_opcode::p_startpgm &&
-             (*it)->format != Format::PSEUDO_BRANCH) {
-            ctx.empty_blocks[i] = false;
-            break;
-         }
+void try_remove_merge_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
+{
+   /* check if the successor is another merge block which restores exec */
+   // TODO: divergent loops also restore exec
+   if (block->linear_successors.size() != 1 ||
+       !(block->linear_successors[0]->kind & block_kind_merge))
+      return;
+
+   /* check if this block is empty and the exec mask is not needed */
+   for (aco_ptr<Instruction>& instr : block->instructions) {
+      if (instr->opcode == aco_opcode::p_parallelcopy) {
+         if (instr->getDefinition(0).physReg() == exec)
+            continue;
+         else
+            return;
       }
+
+      if (instr->opcode != aco_opcode::p_linear_phi &&
+          instr->opcode != aco_opcode::p_phi &&
+          instr->opcode != aco_opcode::p_logical_start &&
+          instr->opcode != aco_opcode::p_logical_end &&
+          instr->opcode != aco_opcode::p_branch)
+         return;
    }
+
+   /* keep the branch instruction and remove the rest */
+   aco_ptr<Instruction> branch = std::move(block->instructions.back());
+   block->instructions.clear();
+   block->instructions.emplace_back(std::move(branch));
 }
 
-void try_shrink_branch_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
+void try_remove_invert_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
 {
+   assert(block->linear_successors.size() == 2);
+   if (block->linear_successors[0] != block->linear_successors[1])
+      return;
+
+   /* check if we can remove this block */
    for (aco_ptr<Instruction>& instr : block->instructions) {
-
-      /* TODO: shrink other pattern */
-      if (!(instr->opcode == aco_opcode::p_linear_phi ||
-            instr->opcode == aco_opcode::s_mov_b64 ||
-            instr->opcode == aco_opcode::p_parallelcopy))
+      if (instr->opcode != aco_opcode::p_linear_phi &&
+          instr->opcode != aco_opcode::p_phi &&
+          instr->opcode != aco_opcode::s_andn2_b64 &&
+          instr->opcode != aco_opcode::p_branch)
          return;
-
-      /* find the parallelcopy instruction which moves the else-mask to exec */
-      if (instr->opcode != aco_opcode::p_parallelcopy)
-         continue;
-
-      if (!(instr->getDefinition(0).physReg() == exec))
-         return;
-
-      for (aco_ptr<Instruction>& restore : block->linear_successors[0]->instructions) {
-         if (restore->opcode == aco_opcode::p_phi || restore->opcode == aco_opcode::p_linear_phi)
-            continue;
-
-         if (restore->opcode != aco_opcode::s_or_b64)
-            return;
-
-         restore->getOperand(1) = instr->getOperand(0);
-
-         assert(block->linear_predecessors[0]->linear_successors.size() == 1 &&
-                block->linear_predecessors[1]->linear_successors.size() == 1);
-         block->linear_predecessors[0]->linear_successors[0] = block->linear_successors[0];
-         block->linear_predecessors[1]->linear_successors[0] = block->linear_successors[0];
-         block->linear_successors[0]->linear_predecessors[0] = block->linear_predecessors[0];
-         block->linear_successors[0]->linear_predecessors[1] = block->linear_predecessors[1];
-
-         for (unsigned i = 0; i < 2; i++) {
-            Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(block->linear_predecessors[0]->instructions.back().get());
-            assert(branch->opcode == aco_opcode::p_branch);
-            branch->targets[i] = block->linear_successors[0];
-         }
-         block->instructions.clear();
-         block->linear_predecessors.clear();
-         block->linear_successors.clear();
-         return;
-      }
    }
+
+   Block* succ = block->linear_successors[0];
+   assert(block->linear_predecessors.size() == 2);
+   block->linear_predecessors[0]->linear_successors[0] = succ;
+   block->linear_predecessors[1]->linear_successors[0] = succ;
+   succ->linear_predecessors[0] = block->linear_predecessors[0];
+   succ->linear_predecessors[1] = block->linear_predecessors[1];
+
+   block->instructions.clear();
+   block->linear_predecessors.clear();
+   block->linear_successors.clear();
 }
 
 void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
 {
    for (aco_ptr<Instruction>& instr : block->instructions) {
-      if (instr->format != Format::PSEUDO &&
-          instr->format != Format::PSEUDO_BRANCH) {
+      if (instr->opcode != aco_opcode::p_logical_start &&
+          instr->opcode != aco_opcode::p_logical_end &&
+          instr->opcode != aco_opcode::p_branch)
          return;
-      }
    }
 
    Block* pred = block->linear_predecessors[0];
@@ -244,17 +233,22 @@ void jump_threading(ssa_elimination_ctx& ctx)
    for (int i = ctx.program->blocks.size() - 1; i >= 0; i--) {
       std::unique_ptr<Block>& block = ctx.program->blocks[i];
 
-      if (block->linear_successors.size() == 2 &&
-          block->linear_successors[0] == block->linear_successors[1]) {
-         try_shrink_branch_block(ctx, block);
-         continue;
-      }
-
       if (!ctx.empty_blocks[i])
          continue;
 
-      // TODO: we should also try to remove blocks with multiple pre- and successors
-      if (block->linear_predecessors.size() == 1 && block->linear_successors.size() == 1)
+      if (block->kind & block_kind_invert) {
+         try_remove_invert_block(ctx, block);
+         continue;
+      }
+
+      if (block->linear_successors.size() > 1)
+         continue;
+
+      if (block->kind & block_kind_merge ||
+          block->kind & block_kind_loop_exit)
+         try_remove_merge_block(ctx, block);
+
+      if (block->linear_predecessors.size() == 1)
          try_remove_simple_block(ctx, block);
    }
 }
@@ -270,7 +264,6 @@ void ssa_elimination(Program* program)
    collect_phi_info(ctx);
 
    /* eliminate empty blocks */
-   find_empty_blocks(ctx);
    jump_threading(ctx);
 
    /* insert parallelcopies from SSA elimination */
