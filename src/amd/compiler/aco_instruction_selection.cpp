@@ -4281,8 +4281,9 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    }
    case nir_intrinsic_load_helper_invocation: {
       Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-      bld.pseudo(aco_opcode::p_is_helper, Definition(dst), Operand(exec, s2), Operand(exec, s2));
-      ctx->program->has_is_helper = true;
+      bld.pseudo(aco_opcode::p_is_helper, Definition(dst));
+      ctx->block->kind |= block_kind_uses_load_helper;
+      ctx->program->needs_exact = true;
       break;
    }
    case nir_intrinsic_first_invocation: {

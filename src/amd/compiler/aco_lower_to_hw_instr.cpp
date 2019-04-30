@@ -644,23 +644,6 @@ void lower_to_hw_instr(Program* program)
                assert(instr->getOperand(0).physReg() == instr->getDefinition(0).physReg());
                break;
             }
-            case aco_opcode::p_is_helper:
-            {
-               assert(instr->getOperand(1).physReg() == exec);
-               if (instr->getOperand(0).physReg() == exec) {
-                  aco_ptr<SOP1_instruction> mov{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
-                  mov->getOperand(0) = Operand(0u);
-                  mov->getDefinition(0) = instr->getDefinition(0);
-                  ctx.instructions.emplace_back(std::move(mov));
-               } else {
-                  aco_ptr<SOP2_instruction> andn2{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 1, 1)};
-                  andn2->getOperand(0) = Operand(exec, s2);
-                  andn2->getOperand(1) = instr->getOperand(0);
-                  andn2->getDefinition(0) = instr->getDefinition(0);
-                  ctx.instructions.emplace_back(std::move(andn2));
-               }
-               break;
-            }
             case aco_opcode::p_as_uniform:
             {
                assert(typeOf(instr->getOperand(0).regClass()) == RegType::vgpr);
