@@ -839,6 +839,7 @@ enum block_kind {
    block_kind_merge = 1 << 9,
    block_kind_invert = 1 << 10,
    block_kind_uses_discard_if = 1 << 11,
+   block_kind_uses_load_helper = 1 << 12,
 };
 
 /* CFG */
@@ -871,7 +872,6 @@ public:
    gl_shader_stage stage;
    bool needs_exact = false; /* there exists an instruction with disable_wqm = true */
    bool needs_wqm = false; /* there exists a p_wqm instruction */
-   bool has_is_helper = false; /* there exists a p_is_helper instruction */
 
    uint32_t allocateId()
    {
