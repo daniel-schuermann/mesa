@@ -834,10 +834,11 @@ enum block_kind {
    block_kind_loop_exit = 1 << 4,
    block_kind_continue = 1 << 5,
    block_kind_break = 1 << 6,
-   block_kind_branch = 1 << 7,
-   block_kind_merge = 1 << 8,
-   block_kind_invert = 1 << 9,
-   block_kind_uses_discard = 1 << 10,
+   block_kind_discard = 1 << 7,
+   block_kind_branch = 1 << 8,
+   block_kind_merge = 1 << 9,
+   block_kind_invert = 1 << 10,
+   block_kind_uses_discard_if = 1 << 11,
 };
 
 /* CFG */

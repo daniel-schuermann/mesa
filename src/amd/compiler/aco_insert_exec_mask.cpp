@@ -225,7 +225,7 @@ void calculate_wqm_needs(exec_ctx& exec_ctx)
          exec_ctx.info[i].ever_again_needs |= Preserve_WQM;
          preserve_wqm = false;
       }
-      if (exec_ctx.program->blocks[i]->kind & block_kind_uses_discard)
+      if (exec_ctx.program->blocks[i]->kind & block_kind_uses_discard_if)
          preserve_wqm = true;
    }
    exec_ctx.handle_wqm = true;
@@ -491,7 +491,7 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
    /* if the block doesn't need both, WQM and Exact, we can skip processing the instructions */
    bool process = ctx.handle_wqm ||
                   ctx.info[block->index].block_needs == (WQM | Exact) ||
-                  block->kind & block_kind_uses_discard;
+                  block->kind & block_kind_uses_discard_if;
    if (!process) {
       std::vector<aco_ptr<Instruction>>::iterator it = std::next(block->instructions.begin(), idx);
       instructions.insert(instructions.end(),
@@ -552,7 +552,8 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
    }
 
    /* try to disable wqm handling */
-   if (ctx.handle_wqm && ctx.info[idx].exec.back().second & mask_type_global) {
+   if (ctx.handle_wqm && block->kind & block_kind_top_level &&
+       ctx.info[idx].exec.back().second & mask_type_global) {
       assert(ctx.info[idx].exec.size() <= 2);
 
       if (ctx.info[idx].ever_again_needs == 0) {
@@ -601,7 +602,8 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
          Block* loop_block = ctx.program->blocks[i].get();
          needs |= ctx.info[i].block_needs;
 
-         if (loop_block->kind & block_kind_uses_discard)
+         if (loop_block->kind & block_kind_uses_discard_if ||
+             loop_block->kind & block_kind_discard)
             has_discard = true;
          if (loop_block->loop_nest_depth != loop_nest_depth)
             continue;
@@ -636,10 +638,44 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
                             has_discard);
    }
 
-   if (block->kind & block_kind_top_level && !(ctx.info[idx].exec.back().second & mask_type_wqm)) {
-      /* if any non top level block ever needs WQM, the dominating top level block should already end in WQM */
-      for (unsigned i = idx + 1; !(ctx.program->blocks[i]->kind & block_kind_top_level); i++)
-         assert(!(ctx.info[i].block_needs & WQM));
+   if (block->kind & block_kind_discard) {
+      /* create a discard_if() instruction with the exec mask as condition */
+      unsigned num = 0;
+      if (ctx.loop.size()) {
+         /* if we're in a loop, only discard from the outer exec masks */
+         num = ctx.loop.back().num_exec_masks;
+      } else {
+         num = ctx.info[idx].exec.size() - 1;
+      }
+
+      Temp cond = ctx.info[idx].exec.back().first;
+      aco_ptr<Instruction> discard{create_instruction<Instruction>(aco_opcode::p_discard_if, Format::PSEUDO, num + 1, num + 1)};
+      for (unsigned i = 0; i < num; i++) {
+         discard->getOperand(i) = Operand(ctx.info[block->index].exec[i].first);
+         Temp new_mask = bld.tmp(s2);
+         discard->getDefinition(i) = Definition(new_mask);
+         ctx.info[block->index].exec[i].first = new_mask;
+      }
+      discard->getDefinition(num - 1).setFixed(exec);
+      discard->getOperand(num) = bld.exec(cond);
+      discard->getDefinition(num) = bld.def(s1, scc);
+
+      assert(block->instructions.back()->format == Format::PSEUDO_BRANCH);
+      aco_ptr<Instruction> branch = std::move(block->instructions.back());
+      block->instructions.pop_back();
+      bld.insert(std::move(discard));
+
+      if (!ctx.loop.size()) {
+         /* check if the successor is the merge block, otherwise set exec to 0 */
+         // TODO: this could be done better by directly branching to the merge block
+         Block* succ = block->linear_successors[0];
+         if (!(succ->kind & block_kind_invert || succ->kind & block_kind_merge)) {
+            ctx.info[idx].exec.back().first = bld.sop1(aco_opcode::s_mov_b64, bld.def(s2, exec), Operand(0u));
+         }
+      }
+
+      bld.insert(std::move(branch));
+      /* no return here as it can be followed by a divergent break */
    }
 
    if (block->kind & block_kind_uniform)
