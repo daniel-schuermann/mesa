@@ -402,6 +402,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      break;
                   case nir_intrinsic_load_ubo:
                   case nir_intrinsic_load_ssbo:
+                  case nir_intrinsic_load_global:
                      type = ctx->divergent_vals[intrinsic->dest.ssa.index] ? vgpr : sgpr;
                      break;
                   /* due to copy propagation, the swizzled imov is removed if num dest components == 1 */
@@ -1147,6 +1148,7 @@ setup_isel_context(Program* program, nir_shader *nir,
    }
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
    nir_lower_explicit_io(nir, nir_var_mem_shared, nir_address_format_32bit_global);
+   nir_lower_explicit_io(nir, nir_var_mem_global, nir_address_format_64bit_global);
 
    /* lower ALU operations */
    nir_opt_idiv_const(nir, 32);
