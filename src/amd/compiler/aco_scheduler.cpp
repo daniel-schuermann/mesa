@@ -164,10 +164,16 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
       /* if current depends on candidate, add additional dependencies and continue */
       bool can_move_down = true;
+      bool writes_exec = false;
       for (unsigned i = 0; i < candidate->num_definitions; i++) {
          if (candidate->getDefinition(i).isTemp() && ctx.depends_on[candidate->getDefinition(i).tempId()])
             can_move_down = false;
+         if (candidate->getDefinition(i).isFixed() && candidate->getDefinition(i).physReg() == exec)
+            writes_exec = true;
       }
+      if (writes_exec)
+         break;
+
       if (moving_ds && candidate->format == Format::DS)
          can_move_down = false;
       moving_ds = moving_ds || candidate->format == Format::DS;
@@ -252,6 +258,14 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       if (candidate->opcode == aco_opcode::p_logical_end)
          break;
       if (handle_barrier(candidate, moving_ds))
+         break;
+
+      bool writes_exec = false;
+      for (unsigned i = 0; i < candidate->num_definitions; i++) {
+         if (candidate->getDefinition(i).isFixed() && candidate->getDefinition(i).physReg() == exec)
+            writes_exec = true;
+      }
+      if (writes_exec)
          break;
 
       /* check if candidate depends on current */
@@ -396,10 +410,16 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
       /* if current depends on candidate, add additional dependencies and continue */
       bool can_move_down = true;
+      bool writes_exec = false;
       for (unsigned i = 0; i < candidate->num_definitions; i++) {
          if (candidate->getDefinition(i).isTemp() && ctx.depends_on[candidate->getDefinition(i).tempId()])
             can_move_down = false;
+         if (candidate->getDefinition(i).isFixed() && candidate->getDefinition(i).physReg() == exec)
+            writes_exec = true;
       }
+      if (writes_exec)
+         break;
+
       if (moving_ds && candidate->format == Format::DS)
          can_move_down = false;
       moving_ds = moving_ds || candidate->format == Format::DS;
@@ -482,6 +502,14 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       if (candidate->opcode == aco_opcode::p_logical_end)
          break;
       if (handle_barrier(candidate, moving_ds))
+         break;
+
+      bool writes_exec = false;
+      for (unsigned i = 0; i < candidate->num_definitions; i++) {
+         if (candidate->getDefinition(i).isFixed() && candidate->getDefinition(i).physReg() == exec)
+            writes_exec = true;
+      }
+      if (writes_exec)
          break;
 
       /* check if candidate depends on current */
