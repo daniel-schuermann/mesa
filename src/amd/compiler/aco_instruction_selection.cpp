@@ -95,6 +95,38 @@ public:
 static void visit_cf_list(struct isel_context *ctx,
                           struct exec_list *list);
 
+static void add_logical_edge(Block *pred, Block *succ)
+{
+   pred->logical_successors.push_back(succ);
+   succ->logical_predecessors.push_back(pred);
+}
+
+static void add_linear_edge(Block *pred, Block *succ)
+{
+   pred->linear_successors.push_back(succ);
+   succ->linear_predecessors.push_back(pred);
+}
+
+static void add_edge(Block *pred, Block *succ)
+{
+   add_logical_edge(pred, succ);
+   add_linear_edge(pred, succ);
+}
+
+static void append_logical_start(Block *b)
+{
+   b->instructions.push_back(
+      aco_ptr<Instruction>(create_instruction<Instruction>(aco_opcode::p_logical_start,
+                                                                   Format::PSEUDO, 0, 0)));
+}
+
+static void append_logical_end(Block *b)
+{
+   b->instructions.push_back(
+      aco_ptr<Instruction>(create_instruction<Instruction>(aco_opcode::p_logical_end,
+                                                                   Format::PSEUDO, 0, 0)));
+}
+
 Temp get_ssa_temp(struct isel_context *ctx, nir_ssa_def *def)
 {
    RegClass rc = ctx->reg_class[def->index];
@@ -2338,10 +2370,79 @@ void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp src = as_divergent_bool(ctx, get_ssa_temp(ctx, instr->src[0].ssa), false);
    src = bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2));
    bld.pseudo(aco_opcode::p_discard_if, src);
-   ctx->block->kind |= block_kind_uses_discard;
+   ctx->block->kind |= block_kind_uses_discard_if;
    return;
 }
 
+void visit_discard(isel_context* ctx, nir_intrinsic_instr *instr)
+{
+   Builder bld(ctx->program, ctx->block);
+
+   /* it can currently happen that NIR doesn't remove the unreachable code */
+   if (!nir_instr_is_last(&instr->instr)) {
+      bld.pseudo(aco_opcode::p_discard_if, Operand(exec, s2));
+      ctx->block->kind |= block_kind_uses_discard_if;
+      return;
+   }
+
+   /* we handle discards the same way as jump instructions */
+   append_logical_end(ctx->block);
+
+   if (ctx->block->loop_nest_depth) {
+      /* in loops, discard behaves like break */
+      Block *linear_target = ctx->cf_info.parent_loop.exit;
+      ctx->block->kind |= block_kind_discard;
+
+      if (!ctx->cf_info.parent_if.is_divergent &&
+          !ctx->cf_info.parent_loop.has_divergent_continue) {
+         /* uniform discard - loop ends here */
+         ctx->block->kind |= block_kind_uniform;
+         ctx->cf_info.has_branch = true;
+         bld.branch(aco_opcode::p_branch, linear_target);
+         add_linear_edge(ctx->block, linear_target);
+         return;
+      }
+
+      /* we add a break right behind the discard() instructions */
+      ctx->block->kind |= block_kind_break;
+
+      /* remove critical edges from linear CFG */
+      Block* break_block = ctx->program->createAndInsertBlock();
+      break_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      break_block->kind |= block_kind_uniform;
+      add_linear_edge(ctx->block, break_block);
+      Block* continue_block = ctx->program->createAndInsertBlock();
+      continue_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      add_linear_edge(ctx->block, continue_block);
+      bld.branch(aco_opcode::p_branch, break_block, continue_block);
+
+      bld.reset(break_block);
+      add_linear_edge(break_block, linear_target);
+      bld.branch(aco_opcode::p_branch, linear_target);
+
+      append_logical_start(continue_block);
+      ctx->block = continue_block;
+
+   } else {
+      /* not inside loop */
+
+      if (!ctx->cf_info.parent_if.is_divergent) {
+         /* program just ends here */
+         ctx->block->kind |= block_kind_uniform;
+         ctx->cf_info.has_branch = true; /* not really, but doesn't need one */
+         bld.exp(aco_opcode::exp, Operand(), Operand(), Operand(), Operand(),
+                 0 /* enabled mask */, 9 /* dest */,
+                 false /* compressed */, true/* done */, true /* valid mask */);
+         bld.sopp(aco_opcode::s_endpgm);
+
+      } else {
+         ctx->block->kind |= block_kind_discard;
+         /* branch and linear edge is added by visit_if() */
+
+      }
+   }
+
+}
 
 enum aco_descriptor_type {
    ACO_DESC_IMAGE,
@@ -3790,10 +3891,9 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_vulkan_resource_index:
       visit_load_resource(ctx, instr);
       break;
-   case nir_intrinsic_discard: {
-      bld.sop1(aco_opcode::s_mov_b64, Definition(exec, s2), Operand(0u));
+   case nir_intrinsic_discard:
+      visit_discard(ctx, instr);
       break;
-   }
    case nir_intrinsic_discard_if:
       visit_discard_if(ctx, instr);
       break;
@@ -4826,38 +4926,6 @@ void visit_undef(isel_context *ctx, nir_ssa_undef_instr *instr)
    ctx->block->instructions.emplace_back(std::move(undef));
 }
 
-static void add_logical_edge(Block *pred, Block *succ)
-{
-   pred->logical_successors.push_back(succ);
-   succ->logical_predecessors.push_back(pred);
-}
-
-static void add_linear_edge(Block *pred, Block *succ)
-{
-   pred->linear_successors.push_back(succ);
-   succ->linear_predecessors.push_back(pred);
-}
-
-static void add_edge(Block *pred, Block *succ)
-{
-   add_logical_edge(pred, succ);
-   add_linear_edge(pred, succ);
-}
-
-static void append_logical_start(Block *b)
-{
-   b->instructions.push_back(
-      aco_ptr<Instruction>(create_instruction<Instruction>(aco_opcode::p_logical_start,
-                                                                   Format::PSEUDO, 0, 0)));
-}
-
-static void append_logical_end(Block *b)
-{
-   b->instructions.push_back(
-      aco_ptr<Instruction>(create_instruction<Instruction>(aco_opcode::p_logical_end,
-                                                                   Format::PSEUDO, 0, 0)));
-}
-
 void visit_jump(isel_context *ctx, nir_jump_instr *instr)
 {
    Builder bld(ctx->program, ctx->block);
@@ -4874,7 +4942,7 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
           !ctx->cf_info.parent_loop.has_divergent_continue) {
          /* uniform break - directly jump out of the loop */
          ctx->block->kind |= block_kind_uniform;
-         ctx->cf_info.has_break = true;
+         ctx->cf_info.has_branch = true;
          bld.branch(aco_opcode::p_branch, logical_target);
          add_linear_edge(ctx->block, logical_target);
          return;
@@ -4893,7 +4961,7 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
       } else {
          /* uniform continue - directly jump to the loop header */
          ctx->block->kind |= block_kind_uniform;
-         ctx->cf_info.has_continue = true;
+         ctx->cf_info.has_branch = true;
          bld.branch(aco_opcode::p_branch, logical_target);
          add_linear_edge(ctx->block, logical_target);
          return;
@@ -4985,15 +5053,15 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    append_logical_start(ctx->block);
    visit_cf_list(ctx, &loop->body);
 
-   if (ctx->cf_info.has_break) {
-      ctx->cf_info.has_break = false;
-   } else {
+   if (!ctx->cf_info.has_branch) {
       append_logical_end(ctx->block);
       add_edge(ctx->block, loop_entry);
       ctx->block->kind |= (block_kind_continue | block_kind_uniform);
       bld.reset(ctx->block);
       bld.branch(aco_opcode::p_branch, loop_entry);
    }
+
+   ctx->cf_info.has_branch = false;
 
    // TODO: if the loop has not a single exit, we must add one °°
    /* emit loop successor block */
@@ -5081,10 +5149,9 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       ctx->block = BB_then;
       visit_cf_list(ctx, &if_stmt->then_list);
       BB_then = ctx->block;
-      bool then_break = ctx->cf_info.has_break;
-      bool then_continue =  ctx->cf_info.has_continue;
+      bool then_branch = ctx->cf_info.has_branch;
 
-      if (!ctx->cf_info.has_break && !ctx->cf_info.has_continue) {
+      if (!ctx->cf_info.has_branch) {
          append_logical_end(BB_then);
          /* branch from then block to endif block */
          branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
@@ -5094,8 +5161,7 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          BB_then->kind |= block_kind_uniform;
       }
 
-      ctx->cf_info.has_break = false;
-      ctx->cf_info.has_continue = false;
+      ctx->cf_info.has_branch = false;
 
       /** emit else block */
       BB_else->index = ctx->program->blocks.size();
@@ -5105,7 +5171,7 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       visit_cf_list(ctx, &if_stmt->else_list);
       BB_else = ctx->block;
 
-      if (!ctx->cf_info.has_break && !ctx->cf_info.has_continue) {
+      if (!ctx->cf_info.has_branch) {
          append_logical_end(BB_else);
          /* branch from then block to endif block */
          branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
@@ -5115,16 +5181,17 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          BB_else->kind |= block_kind_uniform;
       }
 
-      ctx->cf_info.has_break &= then_break;
-      ctx->cf_info.has_continue &= then_continue;
+      ctx->cf_info.has_branch &= then_branch;
 
       /** emit endif merge block */
-      if (!ctx->cf_info.has_break && !ctx->cf_info.has_continue) {
+      if (!ctx->cf_info.has_branch) {
          BB_endif->index = ctx->program->blocks.size();
          ctx->program->blocks.emplace_back(BB_endif);
 
          append_logical_start(BB_endif);
          ctx->block = BB_endif;
+      } else {
+         delete BB_endif;
       }
       ctx->cf_info.parent_if.merge_block = parent_if_merge_block;
 
@@ -5187,9 +5254,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       add_logical_edge(BB_if, BB_else_logical);
       if_info_RAII if_raii(ctx, BB_between);
 
-      /* remember active lanes mask just in case */
-      Temp active_mask = ctx->cf_info.parent_loop.active_mask;
-
       /** emit logical then block */
       ctx->block = BB_then_logical;
       append_logical_start(BB_then_logical);
@@ -5219,8 +5283,7 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       BB_between->index = ctx->program->blocks.size();
       ctx->program->blocks.emplace_back(BB_between);
 
-      ctx->cf_info.has_break = false;
-      ctx->cf_info.has_continue = false;
+      assert(!ctx->cf_info.has_branch);
 
       /* branch to linear else block (skip else) */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0));
@@ -5230,8 +5293,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       BB_between->instructions.push_back(std::move(branch));
       add_linear_edge(BB_between, BB_else_logical);
       add_linear_edge(BB_between, BB_else_linear);
-
-      active_mask = ctx->cf_info.parent_loop.active_mask;
 
       /** emit logical else block */
       BB_else_logical->index = ctx->program->blocks.size();
@@ -5264,8 +5325,7 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       BB_endif->index = ctx->program->blocks.size();
       ctx->program->blocks.emplace_back(BB_endif);
 
-      ctx->cf_info.has_break = false;
-      ctx->cf_info.has_continue = false;
+      assert(!ctx->cf_info.has_branch);
 
       append_logical_start(BB_endif);
       ctx->block = BB_endif;
