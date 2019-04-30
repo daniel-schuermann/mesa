@@ -1203,9 +1203,8 @@ void optimize(Program* program)
 {
    opt_ctx ctx;
    ctx.program = program;
-   ssa_info info[program->peekAllocationId()];
-   memset(&info, 0, sizeof(ssa_info) * program->peekAllocationId());
-   ctx.info = info;
+   std::vector<ssa_info> info(program->peekAllocationId());
+   ctx.info = info.data();
 
    /* 1. Bottom-Up DAG pass (forward) to label all ssa-defs */
    for (auto&& block : program->blocks) {
