@@ -2283,6 +2283,7 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       else
          load->getOperand(1) = Operand(get_ssa_temp(ctx, instr->src[1].ssa));
       load->getDefinition(0) = Definition(dst);
+      load->can_reorder = true;
 
       if (dst.size() == 3) {
       /* trim vector */
@@ -2680,7 +2681,7 @@ static Temp adjust_sample_index_using_fmask(isel_context *ctx, bool da, Temp coo
    load->dmask = 0x1;
    load->unrm = true;
    load->da = da;
-   load->can_value_number = true; /* fmask images shouldn't be modified */
+   load->can_reorder = true; /* fmask images shouldn't be modified */
    ctx->block->instructions.emplace_back(std::move(load));
 
    Operand sample_index4;
@@ -3349,6 +3350,142 @@ void visit_get_buffer_size(isel_context *ctx, nir_intrinsic_instr *instr) {
    get_buffer_size(ctx, desc, get_ssa_temp(ctx, &instr->dest.ssa), false);
 }
 
+void visit_load_global(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   Builder bld(ctx->program, ctx->block);
+   unsigned num_components = instr->num_components;
+   unsigned num_bytes = num_components * instr->dest.ssa.bit_size / 8;
+
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+   Temp addr = get_ssa_temp(ctx, instr->src[0].ssa);
+
+   bool glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT);
+   aco_opcode op;
+   if (dst.type() == vgpr || (glc && ctx->options->chip_class < VI)) {
+      bool global = ctx->options->chip_class >= GFX9;
+      aco_opcode op;
+      switch (num_bytes) {
+      case 4:
+         op = global ? aco_opcode::global_load_dword : aco_opcode::flat_load_dword;
+         break;
+      case 8:
+         op = global ? aco_opcode::global_load_dwordx2 : aco_opcode::flat_load_dwordx2;
+         break;
+      case 12:
+         op = global ? aco_opcode::global_load_dwordx3 : aco_opcode::flat_load_dwordx3;
+         break;
+      case 16:
+         op = global ? aco_opcode::global_load_dwordx4 : aco_opcode::flat_load_dwordx4;
+         break;
+      default:
+         unreachable("load_global not implemented for this size.");
+      }
+      aco_ptr<FLAT_instruction> flat{create_instruction<FLAT_instruction>(op, global ? Format::GLOBAL : Format::FLAT, 2, 1)};
+      flat->getOperand(0) = Operand(addr);
+      flat->getOperand(1) = Operand();
+      flat->glc = glc;
+
+      if (dst.type() == sgpr) {
+         Temp vec = bld.tmp(vgpr, dst.size());
+         flat->getDefinition(0) = Definition(vec);
+         ctx->block->instructions.emplace_back(std::move(flat));
+         bld.pseudo(aco_opcode::p_as_uniform, Definition(dst), vec);
+      } else {
+         flat->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(flat));
+      }
+      emit_split_vector(ctx, dst, num_components);
+   } else {
+      switch (num_bytes) {
+         case 4:
+            op = aco_opcode::s_load_dword;
+            break;
+         case 8:
+            op = aco_opcode::s_load_dwordx2;
+            break;
+         case 12:
+         case 16:
+            op = aco_opcode::s_load_dwordx4;
+            break;
+         default:
+            unreachable("load_global not implemented for this size.");
+      }
+      aco_ptr<SMEM_instruction> load{create_instruction<SMEM_instruction>(op, Format::SMEM, 2, 1)};
+      load->getOperand(0) = Operand(addr);
+      load->getOperand(1) = Operand(0u);
+      load->getDefinition(0) = Definition(dst);
+      load->glc = glc;
+      assert(ctx->options->chip_class >= VI || !glc);
+
+      if (dst.size() == 3) {
+         /* trim vector */
+         Temp vec = {ctx->program->allocateId(), s4};
+         load->getDefinition(0) = Definition(vec);
+         ctx->block->instructions.emplace_back(std::move(load));
+         emit_split_vector(ctx, vec, 4);
+
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
+                    emit_extract_vector(ctx, vec, 0, s1),
+                    emit_extract_vector(ctx, vec, 1, s1),
+                    emit_extract_vector(ctx, vec, 2, s1));
+      } else {
+         ctx->block->instructions.emplace_back(std::move(load));
+      }
+   }
+}
+
+void visit_store_global(isel_context *ctx, nir_intrinsic_instr *instr)
+{
+   unsigned elem_size_bytes = instr->src[0].ssa->bit_size / 8;
+
+   Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
+   Temp addr = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
+
+   unsigned writemask = nir_intrinsic_write_mask(instr);
+   while (writemask) {
+      int start, count;
+      u_bit_scan_consecutive_range(&writemask, &start, &count);
+      unsigned num_bytes = count * elem_size_bytes;
+
+      Temp write_data = data;
+      if (count != instr->num_components) {
+         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, count, 1)};
+         for (int i = 0; i < count; i++)
+            vec->getOperand(i) = Operand(emit_extract_vector(ctx, data, start + i, v1));
+         write_data = {ctx->program->allocateId(), getRegClass(vgpr, count)};
+         vec->getDefinition(0) = Definition(write_data);
+         ctx->block->instructions.emplace_back(std::move(vec));
+      }
+
+      bool glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT | ACCESS_NON_READABLE);
+      bool global = ctx->options->chip_class >= GFX9;
+      aco_opcode op;
+      switch (num_bytes) {
+      case 4:
+         op = global ? aco_opcode::global_store_dword : aco_opcode::flat_store_dword;
+         break;
+      case 8:
+         op = global ? aco_opcode::global_store_dwordx2 : aco_opcode::flat_store_dwordx2;
+         break;
+      case 12:
+         op = global ? aco_opcode::global_store_dwordx3 : aco_opcode::flat_store_dwordx3;
+         break;
+      case 16:
+         op = global ? aco_opcode::global_store_dwordx4 : aco_opcode::flat_store_dwordx4;
+         break;
+      default:
+         unreachable("store_global not implemented for this size.");
+      }
+      aco_ptr<FLAT_instruction> flat{create_instruction<FLAT_instruction>(op, global ? Format::GLOBAL : Format::FLAT, 3, 0)};
+      flat->getOperand(0) = Operand(addr);
+      flat->getOperand(1) = Operand();
+      flat->getOperand(2) = Operand(data);
+      flat->glc = glc;
+      flat->offset = start * elem_size_bytes;
+      ctx->block->instructions.emplace_back(std::move(flat));
+   }
+}
+
 void emit_memory_barrier(isel_context *ctx, nir_intrinsic_instr *instr) {
    Builder bld(ctx->program, ctx->block);
    switch(instr->intrinsic) {
@@ -3951,6 +4088,12 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    case nir_intrinsic_store_ssbo:
       visit_store_ssbo(ctx, instr);
+      break;
+   case nir_intrinsic_load_global:
+      visit_load_global(ctx, instr);
+      break;
+   case nir_intrinsic_store_global:
+      visit_store_global(ctx, instr);
       break;
    case nir_intrinsic_ssbo_atomic_add:
    case nir_intrinsic_ssbo_atomic_imin:
