@@ -199,6 +199,27 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
    return copy;
 }
 
+void lower_linear_bool_phi(Program *program, Block *block, aco_ptr<Instruction>& phi)
+{
+   for (unsigned i = 0; i < phi->operandCount(); i++) {
+      if (!phi->getOperand(i).isTemp())
+         continue;
+
+      Temp phi_src = phi->getOperand(i).getTemp();
+      if (phi_src.regClass() == s2) {
+         aco_ptr<Instruction> cmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_u64, Format::SOPC, 2, 1)};
+         cmp->getOperand(0) = Operand(0u);
+         cmp->getOperand(1) = Operand(phi_src);
+         phi_src = {program->allocateId(), s1};
+         cmp->getDefinition(0) = Definition(phi_src);
+         cmp->getDefinition(0).setFixed(scc);
+         insert_before_logical_end(block->linear_predecessors[i], std::move(cmp));
+
+         phi->getOperand(i).setTemp(phi_src);
+      }
+   }
+}
+
 void lower_bool_phis(Program* program)
 {
    for (std::vector<std::unique_ptr<Block>>::iterator it = program->blocks.begin(); it != program->blocks.end(); ++it)
@@ -216,6 +237,10 @@ void lower_bool_phis(Program* program)
             break;
          if (phi->opcode == aco_opcode::p_phi && phi->getDefinition(0).regClass() == s2) {
             non_phi.emplace_back(std::move(lower_divergent_bool_phi(program, block, phi)));
+         } else if (phi->opcode == aco_opcode::p_linear_phi && phi->getDefinition(0).regClass() == s1) {
+            /* if it's a valid non-boolean phi, this should be a no-op */
+            lower_linear_bool_phi(program, block, phi);
+            block->instructions.emplace_back(std::move(phi));
          } else {
             block->instructions.emplace_back(std::move(phi));
          }
