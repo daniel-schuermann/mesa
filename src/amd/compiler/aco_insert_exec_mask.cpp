@@ -217,7 +217,6 @@ void calculate_wqm_needs(exec_ctx& exec_ctx)
    bool preserve_wqm = false;
    for (int i = exec_ctx.program->blocks.size() - 1; i >= 0; i--) {
       exec_ctx.info[i].ever_again_needs = ever_again_needs;
-      ever_again_needs |= exec_ctx.info[i].block_needs;
 
       /* if discard is used somewhere in nested CF, we need to preserve the WQM mask */
       if (preserve_wqm && ever_again_needs & WQM &&
@@ -225,8 +224,13 @@ void calculate_wqm_needs(exec_ctx& exec_ctx)
          exec_ctx.info[i].ever_again_needs |= Preserve_WQM;
          preserve_wqm = false;
       }
-      if (exec_ctx.program->blocks[i]->kind & block_kind_uses_discard_if)
+      if (exec_ctx.program->blocks[i]->kind & block_kind_uses_discard_if ||
+          exec_ctx.program->blocks[i]->kind & block_kind_discard)
          preserve_wqm = true;
+      if (exec_ctx.program->blocks[i]->kind & block_kind_uses_load_helper)
+         exec_ctx.info[i].block_needs |= Exact;
+
+      ever_again_needs |= exec_ctx.info[i].block_needs;
    }
    exec_ctx.handle_wqm = true;
 }
@@ -491,7 +495,8 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
    /* if the block doesn't need both, WQM and Exact, we can skip processing the instructions */
    bool process = ctx.handle_wqm ||
                   ctx.info[block->index].block_needs == (WQM | Exact) ||
-                  block->kind & block_kind_uses_discard_if;
+                  block->kind & block_kind_uses_discard_if ||
+                  block->kind & block_kind_uses_load_helper;
    if (!process) {
       std::vector<aco_ptr<Instruction>>::iterator it = std::next(block->instructions.begin(), idx);
       instructions.insert(instructions.end(),
@@ -528,6 +533,21 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
          instr->getDefinition(num - 1).setFixed(exec);
          instr->getOperand(num) = cond;
          instr->getDefinition(num) = bld.def(s1, scc);
+
+      } else if (instr->opcode == aco_opcode::p_is_helper) {
+         Definition dst = instr->getDefinition(0);
+         if (state == Exact) {
+            instr.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
+            instr->getOperand(0) = Operand(0u);
+            instr->getDefinition(0) = dst;
+         } else {
+            instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2));
+            instr->getOperand(0) = Operand(ctx.info[block->index].exec.back().first); /* current exec */
+            assert(ctx.info[block->index].exec[0].second & mask_type_exact);
+            instr->getOperand(1) = Operand(ctx.info[block->index].exec[0].first);
+            instr->getDefinition(0) = dst;
+            instr->getDefinition(1) = bld.def(s1, scc);
+         }
 
       } else if (needs == WQM && state != WQM) {
          transition_to_WQM(ctx, bld, block->index);
