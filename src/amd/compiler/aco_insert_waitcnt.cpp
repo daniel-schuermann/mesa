@@ -653,11 +653,12 @@ void insert_wait_states(Program* program)
    for (unsigned i = 0; i < program->blocks.size(); i++)
    {
       Block* current = program->blocks[i].get();
-      if (current->instructions.empty())
-         continue;
       wait_ctx& in = out_ctx[current->index];
       for (Block* b : current->linear_predecessors)
          in.join(&out_ctx[b->index]);
+
+      if (current->instructions.empty())
+         continue;
 
       handle_block(current, in);
    }
