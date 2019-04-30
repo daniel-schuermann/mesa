@@ -217,7 +217,7 @@ void emit_reduction(lower_context *ctx, aco_opcode op, ReduceOp reduce_op, unsig
 
    /* First, copy the source to tmp and set inactive lanes to the identity */
    // note: this clobbers SCC!
-   bld.sop1(aco_opcode::s_or_saveexec_b64, Definition(stmp, s2), Definition(scc, s1), Definition(exec, s2), Operand(UINT64_MAX));
+   bld.sop1(aco_opcode::s_or_saveexec_b64, Definition(stmp, s2), Definition(scc, s1), Definition(exec, s2), Operand(UINT64_MAX), Operand(exec, s2));
 
    /* p_exclusive_scan needs it to be a sgpr or inline constant for the v_writelane_b32 */
    if (identity.isLiteral() && op == aco_opcode::p_exclusive_scan) {
