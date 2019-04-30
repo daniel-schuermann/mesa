@@ -258,10 +258,23 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
          fprintf(output, " cluster_size:%u", reduce->cluster_size);
       break;
    }
-   case Format::MTBUF:
    case Format::FLAT:
    case Format::GLOBAL:
    case Format::SCRATCH: {
+      FLAT_instruction* flat = static_cast<FLAT_instruction*>(instr);
+      if (flat->offset)
+         fprintf(output, " offset:%u", flat->offset);
+      if (flat->glc)
+         fprintf(output, " glc");
+      if (flat->slc)
+         fprintf(output, " slc");
+      if (flat->lds)
+         fprintf(output, " lds");
+      if (flat->nv)
+         fprintf(output, " nv");
+      break;
+   }
+   case Format::MTBUF: {
       fprintf(output, " (printing unimplemented)");
       break;
    }
