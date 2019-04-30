@@ -70,14 +70,11 @@ struct isel_context {
    std::unordered_map<unsigned, std::array<Temp,4>> allocated_vec;
    gl_shader_stage stage;
    struct {
-      bool has_continue;
-      bool has_break;
+      bool has_branch;
       uint16_t loop_nest_depth = 0;
       struct {
          Block* entry;
          Block* exit;
-         Temp active_mask;
-         Temp orig_exec;
          bool has_divergent_continue;
          bool has_divergent_break;
       } parent_loop;
