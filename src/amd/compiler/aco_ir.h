@@ -615,6 +615,11 @@ struct Instruction {
              ((uint16_t) format & (uint16_t) Format::VOP3B) ||
              format == Format::VOP3P;
    }
+
+   bool isFlatOrGlobal()
+   {
+      return format == Format::FLAT || format == Format::GLOBAL;
+   }
 };
 
 struct SOPK_instruction : public Instruction {
@@ -745,6 +750,21 @@ struct MIMG_instruction : public Instruction {
    bool d16; /* Convert 32-bit data to 16-bit data */
    bool disable_wqm; /* Require an exec mask without helper invocations */
    bool can_value_number; /* Whether value numbering can optimize this */
+};
+
+/**
+ * Flat/Scratch/Global Instructions
+ * Operand(0): ADDR
+ * Operand(1): SADDR
+ * Operand(2) / Definition(0): DATA/VDST
+ *
+ */
+struct FLAT_instruction : public Instruction {
+   uint16_t offset;
+   bool slc;
+   bool glc;
+   bool lds;
+   bool nv;
 };
 
 struct Export_instruction : public Instruction {
