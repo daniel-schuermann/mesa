@@ -184,6 +184,37 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       out.push_back(encoding);
       break;
    }
+   case Format::FLAT:
+   case Format::SCRATCH:
+   case Format::GLOBAL: {
+      FLAT_instruction *flat = static_cast<FLAT_instruction*>(instr);
+      uint32_t encoding = (0b110111 << 26);
+      encoding |= opcode_infos[(int)instr->opcode].opcode << 18;
+      encoding |= flat->offset & 0x1fff;
+      if (instr->format == Format::SCRATCH)
+         encoding |= 1 << 14;
+      else if (instr->format == Format::GLOBAL)
+         encoding |= 2 << 14;
+      encoding |= flat->lds ? 1 << 13 : 0;
+      encoding |= flat->glc ? 1 << 13 : 0;
+      encoding |= flat->slc ? 1 << 13 : 0;
+      out.push_back(encoding);
+      encoding = (0xFF & instr->getOperand(0).physReg().reg);
+      if (instr->num_definitions)
+         encoding |= (0xFF & instr->getDefinition(0).physReg().reg) << 24;
+      else
+         encoding |= (0xFF & instr->getOperand(2).physReg().reg) << 8;
+      if (!instr->getOperand(1).isUndefined()) {
+         assert(instr->getOperand(1).physReg().reg != 0x7f);
+         assert(instr->format != Format::FLAT);
+         encoding |= instr->getOperand(1).physReg().reg << 16;
+      } else if (instr->format != Format::FLAT) {
+         encoding |= 0x7F << 16;
+      }
+      encoding |= flat->nv ? 1 << 23 : 0;
+      out.push_back(encoding);
+      break;
+   }
    case Format::EXP: {
       Export_instruction* exp = static_cast<Export_instruction*>(instr);
       uint32_t encoding = (0b110001 << 26);

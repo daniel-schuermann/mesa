@@ -185,6 +185,20 @@ void validate(Program* program, FILE * output)
                      "Only VGPRs are valid Export arguments", instr.get());
             break;
          }
+         case Format::FLAT:
+            check(instr->getOperand(1).isUndefined(), "Flat instructions don't support SADDR", instr.get());
+            /* fallthrough */
+         case Format::GLOBAL:
+         case Format::SCRATCH: {
+            check(instr->getOperand(0).isTemp() && instr->getOperand(0).getTemp().type() == vgpr, "FLAT/GLOBAL/SCRATCH address must be vgpr", instr.get());
+            check(instr->getOperand(1).isUndefined() || (instr->getOperand(1).isTemp() && instr->getOperand(1).getTemp().type() == sgpr),
+                  "FLAT/GLOBAL/SCRATCH sgpr address must be undefined or sgpr", instr.get());
+            if (instr->num_definitions)
+               check(instr->getDefinition(0).getTemp().type() == vgpr, "FLAT/GLOBAL/SCRATCH result must be vgpr", instr.get());
+            else
+               check(instr->getOperand(2).getTemp().type() == vgpr, "FLAT/GLOBAL/SCRATCH data must be vgpr", instr.get());
+            break;
+         }
          default:
             break;
          }
