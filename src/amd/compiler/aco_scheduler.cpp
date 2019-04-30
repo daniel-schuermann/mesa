@@ -31,6 +31,8 @@
 namespace aco {
 
 struct sched_ctx {
+   std::vector<bool> depends_on;
+   std::vector<bool> RAR_dependencies;
    int16_t num_waves;
    int16_t max_vgpr;
    int16_t max_sgpr;
@@ -126,10 +128,10 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
    int16_t k = 0;
 
    /* create the initial set of values which current depends on */
-   std::set<Temp> depends_on;
+   std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
    for (unsigned i = 0; i < current->num_operands; i++) {
       if (current->getOperand(i).isTemp())
-         depends_on.insert(current->getOperand(i).getTemp());
+         ctx.depends_on[current->getOperand(i).tempId()] = true;
    }
 
    /* maintain how many registers remain free when moving instructions */
@@ -163,7 +165,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       /* if current depends on candidate, add additional dependencies and continue */
       bool can_move_down = true;
       for (unsigned i = 0; i < candidate->num_definitions; i++) {
-         if (candidate->getDefinition(i).isTemp() && depends_on.find(candidate->getDefinition(i).getTemp()) != depends_on.end())
+         if (candidate->getDefinition(i).isTemp() && ctx.depends_on[candidate->getDefinition(i).tempId()])
             can_move_down = false;
       }
       if (moving_ds && candidate->format == Format::DS)
@@ -172,7 +174,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       if (!can_move_down) {
          for (unsigned i = 0; i < candidate->num_operands; i++) {
             if (candidate->getOperand(i).isTemp())
-               depends_on.insert(candidate->getOperand(i).getTemp());
+               ctx.depends_on[candidate->getOperand(i).tempId()] = true;
          }
          continue;
       }
@@ -180,7 +182,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       bool register_pressure_unknown = false;
       /* check if one of candidate's operands is killed by depending instruction */
       for (unsigned i = 0; i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && depends_on.find(candidate->getOperand(i).getTemp()) != depends_on.end()) {
+         if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()]) {
             // FIXME: account for difference in register pressure
             register_pressure_unknown = true;
          }
@@ -188,7 +190,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       if (register_pressure_unknown) {
          for (unsigned i = 0; i < candidate->num_operands; i++) {
             if (candidate->getOperand(i).isTemp())
-               depends_on.insert(candidate->getOperand(i).getTemp());
+               ctx.depends_on[candidate->getOperand(i).tempId()] = true;
          }
          continue;
       }
@@ -230,12 +232,12 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
    }
 
    /* create the initial set of values which depend on current */
-   depends_on.clear();
+   std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
+   std::fill(ctx.RAR_dependencies.begin(), ctx.RAR_dependencies.end(), false);
    for (unsigned i = 0; i < current->num_definitions; i++) {
       if (current->getDefinition(i).isTemp())
-         depends_on.insert(current->getDefinition(i).getTemp());
+         ctx.depends_on[current->getDefinition(i).tempId()] = true;
    }
-   std::set<Temp> RAR_dependencies;
 
    /* find the first instruction depending on current or find another MEM */
    insert_idx = idx + 1;
@@ -255,7 +257,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       /* check if candidate depends on current */
       bool is_dependency = false;
       for (unsigned i = 0; !is_dependency && i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && depends_on.find(candidate->getOperand(i).getTemp()) != depends_on.end())
+         if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()])
             is_dependency = true;
       }
       if (moving_ds && candidate->format == Format::DS)
@@ -264,11 +266,11 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       if (is_dependency) {
          for (unsigned j = 0; j < candidate->num_definitions; j++) {
             if (candidate->getDefinition(j).isTemp())
-               depends_on.insert(candidate->getDefinition(j).getTemp());
+               ctx.depends_on[candidate->getDefinition(j).tempId()] = true;
          }
          for (unsigned i = 0; i < candidate->num_operands; i++) {
             if (candidate->getOperand(i).isTemp())
-               RAR_dependencies.insert(candidate->getOperand(i).getTemp());
+               ctx.RAR_dependencies[candidate->getOperand(i).tempId()] = true;
          }
          if (!found_dependency) {
             insert_idx = candidate_idx;
@@ -299,17 +301,17 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       bool register_pressure_unknown = false;
       /* check if candidate uses/kills an operand which is used by a dependency */
       for (unsigned i = 0; i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && RAR_dependencies.find(candidate->getOperand(i).getTemp()) != RAR_dependencies.end())
+         if (candidate->getOperand(i).isTemp() && ctx.RAR_dependencies[candidate->getOperand(i).tempId()])
             register_pressure_unknown = true;
       }
       if (register_pressure_unknown) {
          for (unsigned i = 0; i < candidate->num_definitions; i++) {
             if (candidate->getDefinition(i).isTemp())
-               RAR_dependencies.insert(candidate->getDefinition(i).getTemp());
+               ctx.RAR_dependencies[candidate->getDefinition(i).tempId()] = true;
          }
          for (unsigned i = 0; i < candidate->num_operands; i++) {
             if (candidate->getOperand(i).isTemp())
-               RAR_dependencies.insert(candidate->getOperand(i).getTemp());
+               ctx.RAR_dependencies[candidate->getOperand(i).tempId()] = true;
          }
          continue;
       }
@@ -358,10 +360,10 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
    int window_size = 25 - ctx.num_waves;
 
    /* create the initial set of values which current depends on */
-   std::set<Temp> depends_on;
+   std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
    for (unsigned i = 0; i < current->num_operands; i++) {
       if (current->getOperand(i).isTemp())
-         depends_on.insert(current->getOperand(i).getTemp());
+         ctx.depends_on[current->getOperand(i).tempId()] = true;
    }
 
    /* maintain how many registers remain free when moving instructions */
@@ -395,7 +397,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       /* if current depends on candidate, add additional dependencies and continue */
       bool can_move_down = true;
       for (unsigned i = 0; i < candidate->num_definitions; i++) {
-         if (candidate->getDefinition(i).isTemp() && depends_on.find(candidate->getDefinition(i).getTemp()) != depends_on.end())
+         if (candidate->getDefinition(i).isTemp() && ctx.depends_on[candidate->getDefinition(i).tempId()])
             can_move_down = false;
       }
       if (moving_ds && candidate->format == Format::DS)
@@ -404,7 +406,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       if (!can_move_down) {
          for (unsigned i = 0; i < candidate->num_operands; i++) {
             if (candidate->getOperand(i).isTemp())
-               depends_on.insert(candidate->getOperand(i).getTemp());
+               ctx.depends_on[candidate->getOperand(i).tempId()] = true;
          }
          continue;
       }
@@ -412,7 +414,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       bool register_pressure_unknown = false;
       /* check if one of candidate's operands is killed by depending instruction */
       for (unsigned i = 0; i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && depends_on.find(candidate->getOperand(i).getTemp()) != depends_on.end()) {
+         if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()]) {
             // FIXME: account for difference in register pressure
             register_pressure_unknown = true;
          }
@@ -420,7 +422,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       if (register_pressure_unknown) {
          for (unsigned i = 0; i < candidate->num_operands; i++) {
             if (candidate->getOperand(i).isTemp())
-               depends_on.insert(candidate->getOperand(i).getTemp());
+               ctx.depends_on[candidate->getOperand(i).tempId()] = true;
          }
          continue;
       }
@@ -460,12 +462,12 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
    }
 
    /* create the initial set of values which depend on current */
-   depends_on.clear();
+   std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
+   std::fill(ctx.RAR_dependencies.begin(), ctx.RAR_dependencies.end(), false);
    for (unsigned i = 0; i < current->num_definitions; i++) {
       if (current->getDefinition(i).isTemp())
-         depends_on.insert(current->getDefinition(i).getTemp());
+         ctx.depends_on[current->getDefinition(i).tempId()] = true;
    }
-   std::set<Temp> RAR_dependencies;
 
    /* find the first instruction depending on current or find another VMEM */
    insert_idx = idx;
@@ -485,7 +487,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       /* check if candidate depends on current */
       bool is_dependency = candidate->isVMEM();
       for (unsigned i = 0; !is_dependency && i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && depends_on.find(candidate->getOperand(i).getTemp()) != depends_on.end())
+         if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()])
             is_dependency = true;
       }
       if (moving_ds && candidate->format == Format::DS)
@@ -494,11 +496,11 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       if (is_dependency) {
          for (unsigned j = 0; j < candidate->num_definitions; j++) {
             if (candidate->getDefinition(j).isTemp())
-               depends_on.insert(candidate->getDefinition(j).getTemp());
+               ctx.depends_on[candidate->getDefinition(j).tempId()] = true;
          }
          for (unsigned i = 0; i < candidate->num_operands; i++) {
             if (candidate->getOperand(i).isTemp())
-               RAR_dependencies.insert(candidate->getOperand(i).getTemp());
+               ctx.RAR_dependencies[candidate->getOperand(i).tempId()] = true;
          }
          if (!found_dependency) {
             insert_idx = candidate_idx;
@@ -521,17 +523,17 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       bool register_pressure_unknown = false;
       /* check if candidate uses/kills an operand which is used by a dependency */
       for (unsigned i = 0; i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && RAR_dependencies.find(candidate->getOperand(i).getTemp()) != RAR_dependencies.end())
+         if (candidate->getOperand(i).isTemp() && ctx.RAR_dependencies[candidate->getOperand(i).tempId()])
             register_pressure_unknown = true;
       }
       if (register_pressure_unknown) {
          for (unsigned i = 0; i < candidate->num_definitions; i++) {
             if (candidate->getDefinition(i).isTemp())
-               RAR_dependencies.insert(candidate->getDefinition(i).getTemp());
+               ctx.RAR_dependencies[candidate->getDefinition(i).tempId()] = true;
          }
          for (unsigned i = 0; i < candidate->num_operands; i++) {
             if (candidate->getOperand(i).isTemp())
-               RAR_dependencies.insert(candidate->getOperand(i).getTemp());
+               ctx.RAR_dependencies[candidate->getOperand(i).tempId()] = true;
          }
          continue;
       }
@@ -599,6 +601,8 @@ void schedule_block(sched_ctx& ctx, Program *program, std::unique_ptr<Block>& bl
 void schedule_program(Program *program, live& live_vars)
 {
    sched_ctx ctx;
+   ctx.depends_on.resize(program->peekAllocationId());
+   ctx.RAR_dependencies.resize(program->peekAllocationId());
    ctx.num_waves = program->num_waves;
    ctx.max_vgpr = program->max_vgpr;
    ctx.max_sgpr = program->max_sgpr;
