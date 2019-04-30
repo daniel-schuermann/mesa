@@ -152,7 +152,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          break;
 
       /* break when encountering another MEM instruction, logical_start or barriers */
-      if (candidate->isVMEM() || candidate->format == Format::SMEM)
+      if (candidate->isVMEM() || candidate->format == Format::SMEM || candidate->isFlatOrGlobal())
          break;
       if (candidate->opcode == aco_opcode::p_logical_start)
          break;
@@ -295,7 +295,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          }
       }
 
-      if (candidate->isVMEM() || candidate->format == Format::SMEM)
+      if (candidate->isVMEM() || candidate->format == Format::SMEM || candidate->isFlatOrGlobal())
          break;
 
       if (!found_dependency) {
@@ -393,7 +393,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
 
       /* break when encountering another VMEM instruction, logical_start or barriers */
-      if (candidate->isVMEM())
+      if (candidate->isVMEM() || candidate->isFlatOrGlobal())
          break;
       if (candidate->opcode == aco_opcode::p_logical_start)
          break;
@@ -513,7 +513,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          break;
 
       /* check if candidate depends on current */
-      bool is_dependency = candidate->isVMEM();
+      bool is_dependency = candidate->isVMEM() || candidate->isFlatOrGlobal();
       for (unsigned i = 0; !is_dependency && i < candidate->num_operands; i++) {
          if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()])
             is_dependency = true;

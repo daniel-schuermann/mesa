@@ -69,8 +69,9 @@ struct wait_entry {
    uint16_t vm_cnt;
    uint16_t exp_cnt;
    uint16_t lgkm_cnt;
-   wait_entry(wait_type t, uint8_t vm, uint8_t exp, uint8_t lgkm)
-           : type(t), vm_cnt(vm), exp_cnt(exp), lgkm_cnt(lgkm) {}
+   bool flat;
+   wait_entry(wait_type t, uint8_t vm, uint8_t exp, uint8_t lgkm, bool is_flat=false)
+           : type(t), vm_cnt(vm), exp_cnt(exp), lgkm_cnt(lgkm), flat(is_flat) {}
 
    bool operator==(const wait_entry& rhs) const
    {
@@ -85,6 +86,7 @@ struct wait_ctx {
    uint16_t vm_cnt = 0;
    uint16_t exp_cnt = 0;
    uint16_t lgkm_cnt = 0;
+   unsigned pending_flat = 0;
 
    std::unordered_map<uint8_t,wait_entry> vgpr_map;
    std::unordered_map<uint8_t,wait_entry> sgpr_map;
@@ -105,8 +107,14 @@ struct wait_ctx {
             it->second.exp_cnt = std::min(it->second.exp_cnt, entry.second.exp_cnt);
             it->second.vm_cnt = std::min(it->second.vm_cnt, entry.second.vm_cnt);
             it->second.lgkm_cnt = std::min(it->second.lgkm_cnt, entry.second.vm_cnt);
+            if (entry.second.flat && !it->second.flat) {
+               it->second.flat = true;
+               pending_flat++;
+            }
          } else {
             vgpr_map.insert(entry);
+            if (entry.second.flat)
+               pending_flat++;
          }
       }
       for (std::pair<uint8_t,wait_entry> entry : other->sgpr_map)
@@ -255,7 +263,7 @@ uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
             continue;
 
          /* Vector Memory reads and writes return in the order they were issued */
-         if (instr->isVMEM() && it->second.type == vm_type) {
+         if (instr->isVMEM() && (it->second.type & vm_type) && !it->second.flat) {
             it->second.vm_cnt = max_vm_cnt;
             it->second.type = it->second.type &= ~vm_type;
             if (it->second.type == done)
@@ -285,10 +293,12 @@ uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
                   it->second.lgkm_cnt = max_lgkm_cnt;
                   it->second.type = it->second.type &= ~lgkm_type;
                }
-               if (it->second.type == done)
+               if (it->second.type == done) {
+                  ctx.pending_flat -= it->second.flat;
                   it = ctx.vgpr_map.erase(it);
-               else
+               } else {
                   it++;
+               }
             } else {
                it++;
             }
@@ -435,10 +445,12 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
                      it->second.lgkm_cnt = max_lgkm_cnt;
                      it->second.type = it->second.type &= ~lgkm_type;
                   }
-                  if (it->second.type == done)
+                  if (it->second.type == done) {
+                     ctx.pending_flat -= it->second.flat;
                      it = ctx.vgpr_map.erase(it);
-                  else
+                  } else {
                      it++;
+                  }
                } else {
                   it++;
                }
@@ -539,7 +551,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
       /* increase counter for all entries of same wait_type */
       for (auto& e : ctx.vgpr_map)
       {
-         if ((e.second.type & t) == t)
+         if ((e.second.type & exp_type) == t)
             e.second.exp_cnt++;
       }
 
@@ -558,13 +570,33 @@ bool gen(Instruction* instr, wait_ctx& ctx)
       ctx.exp_cnt++;
       return true;
    }
+   case Format::FLAT: {
+      // TODO: the situation is better on GFX10 (according to LLVM's SIInsertWaitcnts)
+      ctx.lgkm_cnt++;
+      ctx.vm_cnt++;
+      for (auto& e : ctx.vgpr_map)
+      {
+         if ((e.second.type & (vm_type | lgkm_type)))
+            e.second.lgkm_cnt = e.second.vm_cnt = 0;
+      }
+      if (instr->num_definitions) {
+         for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
+         {
+            ctx.pending_flat++;
+            ctx.vgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
+            wait_entry((wait_type)((int)lgkm_type | (int)vm_type), 0, max_exp_cnt, 0, true));
+         }
+         return true;
+      }
+      break;
+   }
    case Format::SMEM: {
       ctx.lgkm_cnt++;
       if (instr->num_definitions) {
          for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
          {
             ctx.sgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
-            wait_entry(lgkm_type, max_vm_cnt, max_exp_cnt, 0));
+            wait_entry(lgkm_type, max_vm_cnt, max_exp_cnt, 0, false));
          }
          return true;
       }
@@ -585,11 +617,12 @@ bool gen(Instruction* instr, wait_ctx& ctx)
       break;
    }
    case Format::MUBUF:
-   case Format::MIMG: {
+   case Format::MIMG:
+   case Format::GLOBAL: {
       /* increase counter for all entries of same wait_type */
       for (auto& e : ctx.vgpr_map)
       {
-         if (e.second.type == vm_type)
+         if ((e.second.type & vm_type) && !ctx.pending_flat)
             e.second.vm_cnt++;
       }
       ctx.vm_cnt++;
