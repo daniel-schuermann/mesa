@@ -160,12 +160,8 @@ struct InstrPred {
          case Format::SMEM: {
             SMEM_instruction* aS = static_cast<SMEM_instruction*>(a);
             SMEM_instruction* bS = static_cast<SMEM_instruction*>(b);
-            if (a->opcode != aco_opcode::s_load_dword &&
-                a->opcode != aco_opcode::s_load_dwordx2 &&
-                a->opcode != aco_opcode::s_load_dwordx4 &&
-                a->opcode != aco_opcode::s_load_dwordx8)
-               return false;
-            return aS->glc == bS->glc && aS->nv == bS->nv;
+            return aS->can_reorder && bS->can_reorder &&
+                   aS->glc == bS->glc && aS->nv == bS->nv;
          }
          case Format::VINTRP: {
             Interp_instruction* aI = static_cast<Interp_instruction*>(a);
@@ -187,11 +183,14 @@ struct InstrPred {
             return false;
          /* we want to optimize these in NIR and don't hassle with load-store dependencies */
          case Format::MUBUF:
+         case Format::FLAT:
+         case Format::GLOBAL:
+         case Format::SCRATCH:
             return false;
          case Format::MIMG: {
             MIMG_instruction* aM = static_cast<MIMG_instruction*>(a);
             MIMG_instruction* bM = static_cast<MIMG_instruction*>(b);
-            return aM->can_value_number && bM->can_value_number &&
+            return aM->can_reorder && bM->can_reorder &&
                    aM->dmask == bM->dmask &&
                    aM->unrm == bM->unrm &&
                    aM->glc == bM->glc &&

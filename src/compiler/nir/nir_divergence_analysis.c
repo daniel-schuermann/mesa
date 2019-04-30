@@ -157,6 +157,7 @@ visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_image_deref_load:
    case nir_intrinsic_load_ssbo:
    case nir_intrinsic_load_shared:
+   case nir_intrinsic_load_global:
       for (unsigned i = 0; i < nir_intrinsic_infos[instr->intrinsic].num_srcs; i++) {
          if (divergent[instr->src[i].ssa->index]) {
             is_divergent = true;
