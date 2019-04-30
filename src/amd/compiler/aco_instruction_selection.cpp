@@ -933,6 +933,18 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_add_i32, dst, true);
          break;
+      } else if (dst.regClass() == s2) {
+         Temp src0 = get_alu_src(ctx, instr->src[0]);
+         Temp src1 = get_alu_src(ctx, instr->src[1]);
+         Temp src00 = emit_extract_vector(ctx, src0, 0, s1);
+         Temp src10 = emit_extract_vector(ctx, src1, 0, s1);
+         Temp src01 = emit_extract_vector(ctx, src0, 1, s1);
+         Temp src11 = emit_extract_vector(ctx, src1, 1, s1);
+         Temp carry = bld.tmp(s1);
+         Temp dst0 = bld.sop2(aco_opcode::s_add_u32, bld.def(s1), bld.scc(Definition(carry)), src00, src10);
+         Temp dst1 = bld.sop2(aco_opcode::s_addc_u32, bld.def(s1), bld.def(s1, scc), src01, src11, bld.scc(carry));
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), dst0, dst1);
+         break;
       }
       Temp src0 = get_alu_src(ctx, instr->src[0]);
       Temp src1 = get_alu_src(ctx, instr->src[1]);
