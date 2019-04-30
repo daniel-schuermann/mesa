@@ -80,7 +80,8 @@ class Format(Enum):
          return [('Block *', 'block', 'NULL'),
                  ('uint32_t', 'imm', '0')]
       elif self == Format.SMEM:
-         return [('bool', 'glc', 'false'),
+         return [('bool', 'can_reorder', 'true'),
+                 ('bool', 'glc', 'false'),
                  ('bool', 'nv', 'false')]
       elif self == Format.DS:
          return [('int16_t', 'offset0', '0'),
