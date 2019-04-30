@@ -91,11 +91,11 @@ void print_regs(ra_ctx& ctx, bool vgprs, std::array<uint32_t, 512>& reg_file)
       if (reg_file[i] == 0xFFFF) {
          printf("~");
       } else if (reg_file[i]) {
-         printf(char_select ? "#" : "@");
          if (reg_file[i] != prev) {
             prev = reg_file[i];
             char_select = !char_select;
          }
+         printf(char_select ? "#" : "@");
       } else {
          free_regs++;
          printf(".");
@@ -116,7 +116,7 @@ void print_regs(ra_ctx& ctx, bool vgprs, std::array<uint32_t, 512>& reg_file)
             printf("]\n");
          prev = reg_file[i];
          if (prev && prev != 0xFFFF) {
-            if (ctx.orig_names.count(reg_file[i]))
+            if (ctx.orig_names.count(reg_file[i]) && ctx.orig_names[reg_file[i]].id() != reg_file[i])
                printf("%%%u (was %%%d) = %c[%d", reg_file[i], ctx.orig_names[reg_file[i]].id(), reg_char, i - lb);
             else
                printf("%%%u = %c[%d", reg_file[i], reg_char, i - lb);
