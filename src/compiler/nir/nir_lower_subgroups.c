@@ -480,7 +480,8 @@ lower_subgroups_instr(nir_builder *b, nir_instr *instr, void *_options)
       break;
 
    case nir_intrinsic_reduce:
-      if (nir_intrinsic_cluster_size(intrin) == options->subgroup_size)
+      /* A cluster size greater than the subgroup size is implemention defined */
+      if (nir_intrinsic_cluster_size(intrin) >= options->subgroup_size)
          nir_intrinsic_set_cluster_size(intrin, 0);
    case nir_intrinsic_inclusive_scan:
    case nir_intrinsic_exclusive_scan:
