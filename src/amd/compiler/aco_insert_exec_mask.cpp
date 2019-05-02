@@ -821,6 +821,8 @@ void process_block(exec_ctx& ctx, std::unique_ptr<Block>& block)
    block->instructions = std::move(instructions);
 
    add_branch_code(ctx, block);
+
+   block->live_out_exec = ctx.info[block->index].exec.back().first;
 }
 
 } /* end namespace */
