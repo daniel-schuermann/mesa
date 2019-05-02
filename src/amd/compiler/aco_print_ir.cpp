@@ -390,6 +390,37 @@ void aco_print_instr(struct Instruction *instr, FILE *output)
    aco_print_instr_format_specific(instr, output);
 }
 
+static void
+aco_print_block_kind(uint16_t kind, FILE *output)
+{
+   if (kind & block_kind_uniform)
+      fprintf(output, "uniform, ");
+   if (kind & block_kind_top_level)
+      fprintf(output, "top-level, ");
+   if (kind & block_kind_loop_preheader)
+      fprintf(output, "loop-preheader, ");
+   if (kind & block_kind_loop_header)
+      fprintf(output, "loop-header, ");
+   if (kind & block_kind_loop_exit)
+      fprintf(output, "loop-exit, ");
+   if (kind & block_kind_continue)
+      fprintf(output, "continue, ");
+   if (kind & block_kind_break)
+      fprintf(output, "break, ");
+   if (kind & block_kind_discard)
+      fprintf(output, "discard, ");
+   if (kind & block_kind_branch)
+      fprintf(output, "branch, ");
+   if (kind & block_kind_merge)
+      fprintf(output, "merge, ");
+   if (kind & block_kind_invert)
+      fprintf(output, "invert, ");
+   if (kind & block_kind_uses_discard_if)
+      fprintf(output, "discard_if, ");
+   if (kind & block_kind_uses_load_helper)
+      fprintf(output, "load_helper, ");
+}
+
 void aco_print_block(const struct Block* block, FILE *output)
 {
    fprintf(output, "BB%d\n", block->index);
@@ -399,7 +430,9 @@ void aco_print_block(const struct Block* block, FILE *output)
    fprintf(output, "/ linear preds: ");
    for (auto const& pred : block->linear_predecessors)
       fprintf(output, "BB%d, ", pred->index);
-   fprintf(output, " */\n");
+   fprintf(output, "/ kind: ");
+   aco_print_block_kind(block->kind, output);
+   fprintf(output, "*/\n");
    for (auto const& instr : block->instructions) {
       fprintf(output, "\t");
       aco_print_instr(instr.get(), output);
