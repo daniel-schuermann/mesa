@@ -2150,6 +2150,7 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
       mubuf->getOperand(2) = Operand((uint32_t) 0); /* soffset */
       mubuf->getDefinition(0) = Definition(dst);
       mubuf->idxen = true;
+      mubuf->can_reorder = true;
       ctx->block->instructions.emplace_back(std::move(mubuf));
 
       unsigned alpha_adjust = (ctx->options->key.vs.alpha_adjust >> (offset * 2)) & 3;
@@ -2331,6 +2332,7 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       mubuf->getOperand(2) = Operand((uint32_t) 0);
       mubuf->getDefinition(0) = Definition(dst);
       mubuf->offen = true;
+      mubuf->can_reorder = true;
       ctx->block->instructions.emplace_back(std::move(mubuf));
    }
 
@@ -2821,6 +2823,7 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
          tmp = {ctx->program->allocateId(), getRegClass(RegType::vgpr, num_channels)};
       load->getDefinition(0) = Definition(tmp);
       load->idxen = true;
+      load->barrier = barrier_image;
       ctx->block->instructions.emplace_back(std::move(load));
 
       emit_split_vector(ctx, tmp, num_channels);
@@ -2848,6 +2851,7 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
    load->dmask = dmask;
    load->unrm = true;
    load->da = should_declare_array(ctx, dim, glsl_sampler_type_is_array(type));
+   load->barrier = barrier_image;
    ctx->block->instructions.emplace_back(std::move(load));
 
    emit_split_vector(ctx, tmp, num_components);
@@ -2876,6 +2880,7 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
       store->idxen = true;
       store->glc = glc;
       store->disable_wqm = true;
+      store->barrier = barrier_image;
       ctx->program->needs_exact = true;
       ctx->block->instructions.emplace_back(std::move(store));
       return;
@@ -2895,6 +2900,7 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    store->unrm = true;
    store->da = should_declare_array(ctx, dim, glsl_sampler_type_is_array(type));
    store->disable_wqm = true;
+   store->barrier = barrier_image;
    ctx->program->needs_exact = true;
    ctx->block->instructions.emplace_back(std::move(store));
    return;
@@ -2980,6 +2986,7 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
       mubuf->idxen = true;
       mubuf->glc = return_previous;
       mubuf->disable_wqm = true;
+      mubuf->barrier = barrier_image;
       ctx->program->needs_exact = true;
       ctx->block->instructions.emplace_back(std::move(mubuf));
       return;
@@ -2999,6 +3006,7 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
    mimg->unrm = true;
    mimg->da = should_declare_array(ctx, dim, glsl_sampler_type_is_array(type));
    mimg->disable_wqm = true;
+   mimg->barrier = barrier_image;
    ctx->program->needs_exact = true;
    ctx->block->instructions.emplace_back(std::move(mimg));
    return;
@@ -3062,6 +3070,7 @@ void visit_image_size(isel_context *ctx, nir_intrinsic_instr *instr)
    unsigned& dmask = mimg->dmask;
    mimg->dmask = (1 << instr->dest.ssa.num_components) - 1;
    mimg->da = glsl_sampler_type_is_array(type);
+   mimg->can_reorder = true;
    Definition& def = mimg->getDefinition(0);
    ctx->block->instructions.emplace_back(std::move(mimg));
 
@@ -3139,6 +3148,7 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       mubuf->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand((uint32_t) 0);
       mubuf->offen = (offset.type() == vgpr);
       mubuf->glc = glc;
+      mubuf->barrier = barrier_buffer;
 
       if (dst.type() == sgpr) {
          Temp vec = bld.tmp(vgpr, dst.size());
@@ -3170,6 +3180,7 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       assert(load->getOperand(1).getTemp().type() == sgpr);
       load->getDefinition(0) = Definition(dst);
       load->glc = glc;
+      load->barrier = barrier_buffer;
       assert(ctx->options->chip_class >= VI || !glc);
 
       if (dst.size() == 3) {
@@ -3259,6 +3270,7 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       store->offen = (offset.type() == vgpr);
       store->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT | ACCESS_NON_READABLE);
       store->disable_wqm = true;
+      store->barrier = barrier_buffer;
       ctx->program->needs_exact = true;
       ctx->block->instructions.emplace_back(std::move(store));
    }
@@ -3342,6 +3354,7 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    mubuf->offen = (offset.type() == vgpr);
    mubuf->glc = return_previous;
    mubuf->disable_wqm = true;
+   mubuf->barrier = barrier_buffer;
    ctx->program->needs_exact = true;
    ctx->block->instructions.emplace_back(std::move(mubuf));
 }
@@ -3419,6 +3432,7 @@ void visit_load_global(isel_context *ctx, nir_intrinsic_instr *instr)
       load->getOperand(1) = Operand(0u);
       load->getDefinition(0) = Definition(dst);
       load->glc = glc;
+      load->barrier = barrier_buffer;
       assert(ctx->options->chip_class >= VI || !glc);
 
       if (dst.size() == 3) {
@@ -4793,6 +4807,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tex->dmask = dmask;
       tex->da = da;
       tex->getDefinition(0) = Definition(tmp_dst);
+      tex->can_reorder = true;
       ctx->block->instructions.emplace_back(std::move(tex));
 
       if (div_by_6) {
@@ -4891,6 +4906,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       mubuf->getOperand(2) = Operand((uint32_t) 0);
       mubuf->getDefinition(0) = Definition(tmp_dst);
       mubuf->idxen = true;
+      mubuf->can_reorder = true;
       ctx->block->instructions.emplace_back(std::move(mubuf));
       emit_split_vector(ctx, tmp_dst, last_bit);
 
@@ -4911,6 +4927,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tex->unrm = true;
       tex->da = da;
       tex->getDefinition(0) = Definition(tmp_dst);
+      tex->can_reorder = true;
       ctx->block->instructions.emplace_back(std::move(tex));
 
       if (instr->op == nir_texop_samples_identical) {
@@ -4995,6 +5012,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    tex->dmask = dmask;
    tex->da = da;
    tex->getDefinition(0) = Definition(tmp_dst);
+   tex->can_reorder = true;
    ctx->block->instructions.emplace_back(std::move(tex));
 
    emit_split_vector(ctx, tmp_dst, tmp_dst.size());
