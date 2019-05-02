@@ -1825,8 +1825,13 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
    } else {
       assert(dst.size() != 1);
       aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size(), 1)};
-      for (unsigned i = 0; i < dst.size(); i++)
-         vec->getOperand(i) = Operand{instr->value[i].u32};
+      if (instr->def.bit_size == 64)
+         for (unsigned i = 0; i < dst.size(); i++)
+            vec->getOperand(i) = Operand{(uint32_t)(instr->value[0].u64 >> i * 32)};
+      else {
+         for (unsigned i = 0; i < dst.size(); i++)
+            vec->getOperand(i) = Operand{instr->value[i].u32};
+      }
       vec->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(vec));
    }
