@@ -112,29 +112,37 @@ void next_uses_per_block(spill_ctx& ctx, unsigned block_idx, std::set<uint32_t>&
    std::map<Temp, std::pair<uint32_t, uint32_t>> next_uses = ctx.next_use_distances_end[block_idx];
 
    /* to compute the next use distance at the beginning of the block, we have to add the block's size */
-   for (std::map<Temp, std::pair<uint32_t, uint32_t>>::iterator it = next_uses.begin(); it != next_uses.end(); ++it)
+   for (std::map<Temp, std::pair<uint32_t, uint32_t>>::iterator it = next_uses.begin(); it != next_uses.end(); ++it) {
       it->second.second = it->second.second + block->instructions.size();
+
+      /* remove the live out exec mask as we really don't want to spill it */
+      if (it->first == block->live_out_exec)
+         it = next_uses.erase(it)--;
+   }
 
    int idx = block->instructions.size() - 1;
    while (idx >= 0) {
       aco_ptr<Instruction>& instr = block->instructions[idx];
+
+      if (instr->opcode == aco_opcode::p_linear_phi ||
+          instr->opcode == aco_opcode::p_phi)
+         break;
 
       for (unsigned i = 0; i < instr->num_definitions; i++) {
          if (instr->getDefinition(i).isTemp())
             next_uses.erase(instr->getDefinition(i).getTemp());
       }
 
-      if (instr->opcode == aco_opcode::p_linear_phi ||
-          instr->opcode == aco_opcode::p_phi) {
-         break;
-      } else {
-         for (unsigned i = 0; i < instr->num_operands; i++) {
-            if (instr->getOperand(i).isTemp())
-               next_uses[instr->getOperand(i).getTemp()] = {block_idx, idx};
-         }
+      for (unsigned i = 0; i < instr->num_operands; i++) {
+         /* omit exec mask */
+         if (instr->getOperand(i).isFixed() && instr->getOperand(i).physReg() == exec)
+            continue;
+         if (instr->getOperand(i).isTemp())
+            next_uses[instr->getOperand(i).getTemp()] = {block_idx, idx};
       }
       idx--;
    }
+
    assert(block_idx != 0 || next_uses.empty());
    ctx.next_use_distances_start[block_idx] = next_uses;
    while (idx >= 0) {
@@ -271,8 +279,13 @@ std::vector<std::map<Temp, uint32_t>> local_next_uses(spill_ctx& ctx, std::uniqu
    std::vector<std::map<Temp, uint32_t>> local_next_uses(block->instructions.size());
 
    std::map<Temp, uint32_t> next_uses;
-   for (std::pair<Temp, std::pair<uint32_t, uint32_t>> pair : ctx.next_use_distances_end[block->index])
+   for (std::pair<Temp, std::pair<uint32_t, uint32_t>> pair : ctx.next_use_distances_end[block->index]) {
+      /* omit live out exec mask */
+      if (pair.first == block->live_out_exec)
+         continue;
+
       next_uses[pair.first] = pair.second.second + block->instructions.size();
+   }
 
    for (int idx = block->instructions.size() - 1; idx >= 0; idx--) {
       aco_ptr<Instruction>& instr = block->instructions[idx];
@@ -282,6 +295,8 @@ std::vector<std::map<Temp, uint32_t>> local_next_uses(spill_ctx& ctx, std::uniqu
          break;
 
       for (unsigned i = 0; i < instr->num_operands; i++) {
+         if (instr->getOperand(i).isFixed() && instr->getOperand(i).physReg() == exec)
+            continue;
          if (instr->getOperand(i).isTemp())
             next_uses[instr->getOperand(i).getTemp()] = idx;
       }
