@@ -104,6 +104,29 @@ void aco_print_definition(const Definition *definition, FILE *output)
 }
 
 static
+void aco_print_barrier_reorder(bool can_reorder, barrier_interaction barrier, FILE *output)
+{
+   if (can_reorder)
+      fprintf(output, " reorder");
+   switch (barrier) {
+   case barrier_buffer:
+      fprintf(output, " buffer");
+      break;
+   case barrier_image:
+      fprintf(output, " image");
+      break;
+   case barrier_atomic:
+      fprintf(output, " atomic");
+      break;
+   case barrier_shared:
+      fprintf(output, " shared");
+      break;
+   case barrier_none:
+      break;
+   }
+}
+
+static
 void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
 {
    switch (instr->format) {
@@ -148,6 +171,7 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
          fprintf(output, " glc");
       if (smem->nv)
          fprintf(output, " nv");
+      aco_print_barrier_reorder(smem->can_reorder, smem->barrier, output);
       break;
    }
    case Format::VINTRP: {
@@ -183,6 +207,7 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
          fprintf(output, " lds");
       if (mubuf->disable_wqm)
          fprintf(output, " disable_wqm");
+      aco_print_barrier_reorder(mubuf->can_reorder, mubuf->barrier, output);
       break;
    }
    case Format::MIMG: {
@@ -214,6 +239,7 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
          fprintf(output, " d16");
       if (mimg->disable_wqm)
          fprintf(output, " disable_wqm");
+      aco_print_barrier_reorder(mimg->can_reorder, mimg->barrier, output);
       break;
    }
    case Format::EXP: {
