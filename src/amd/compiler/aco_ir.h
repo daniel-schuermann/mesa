@@ -142,6 +142,14 @@ enum class Format : std::uint16_t {
    SDWA = 1 << 15,
 };
 
+enum barrier_interaction {
+   barrier_none = 0,
+   barrier_buffer,
+   barrier_image,
+   barrier_atomic,
+   barrier_shared
+};
+
 static inline Format asVOP3(Format format) {
    return (Format) ((uint32_t) Format::VOP3 | (uint32_t) format);
 };
@@ -653,6 +661,7 @@ struct SMEM_instruction : public Instruction {
    bool glc; /* VI+: globally coherent */
    bool nv; /* VEGA only: Non-volatile */
    bool can_reorder;
+   barrier_interaction barrier;
 };
 
 struct VOP1_instruction : public Instruction {
@@ -726,6 +735,8 @@ struct MUBUF_instruction : public Instruction {
    bool tfe; /* texture fail enable */
    bool lds; /* Return read-data to LDS instead of VGPRs */
    bool disable_wqm; /* Require an exec mask without helper invocations */
+   bool can_reorder;
+   barrier_interaction barrier;
 };
 
 /**
@@ -751,6 +762,7 @@ struct MIMG_instruction : public Instruction {
    bool d16; /* Convert 32-bit data to 16-bit data */
    bool disable_wqm; /* Require an exec mask without helper invocations */
    bool can_reorder;
+   barrier_interaction barrier;
 };
 
 /**
