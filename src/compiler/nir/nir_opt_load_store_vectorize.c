@@ -160,14 +160,14 @@ static bool
 parse_alu(nir_ssa_def **def, nir_op op, uint32_t *c)
 {
    nir_src src = nir_src_for_ssa(*def);
-   nir_alu_instr *alu = nir_src_as_alu_instr(&src);
+   nir_alu_instr *alu = nir_src_as_alu_instr(src);
    if (!alu || alu->op != op)
       return false;
 
    for (unsigned i = op == nir_op_ishl ? 1 : 0; i < 2; i++) {
       nir_const_value *cv = nir_src_as_const_value(alu->src[i].src);
       if (cv) {
-         *c = cv->u32[0];
+         *c = cv->u32;
          *def = alu->src[!i].src.ssa;
          return true;
       }
@@ -182,7 +182,7 @@ parse_offset(nir_ssa_def **base, uint32_t *base_mul, uint32_t *offset)
    nir_const_value *const_offset = nir_src_as_const_value(nir_src_for_ssa(*base));
    if (const_offset) {
       *base = NULL;
-      *offset += const_offset->u32[0];
+      *offset += const_offset->u32;
       return;
    }
 
@@ -874,7 +874,7 @@ resources_different(nir_ssa_def *a, nir_ssa_def *b)
    nir_const_value *acv = nir_src_as_const_value(nir_src_for_ssa(a));
    nir_const_value *bcv = nir_src_as_const_value(nir_src_for_ssa(b));
    if (acv && bcv)
-      return acv->u32[0] != bcv->u32[0];
+      return acv->u32 != bcv->u32;
    else if (acv || bcv)
       return false;
 
