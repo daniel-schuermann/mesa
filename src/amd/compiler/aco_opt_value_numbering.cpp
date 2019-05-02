@@ -172,13 +172,6 @@ struct InstrPred {
                return false;
             return true;
          }
-         case Format::DS: {
-            DS_instruction* aDS = static_cast<DS_instruction*>(a);
-            DS_instruction* bDS = static_cast<DS_instruction*>(b);
-            return aDS->offset0 == bDS->offset0 &&
-                   aDS->offset1 == bDS->offset1 &&
-                   aDS->gds == bDS->gds;
-         }
          case Format::PSEUDO_REDUCTION:
             return false;
          /* we want to optimize these in NIR and don't hassle with load-store dependencies */
@@ -186,6 +179,7 @@ struct InstrPred {
          case Format::FLAT:
          case Format::GLOBAL:
          case Format::SCRATCH:
+         case Format::DS:
             return false;
          case Format::MIMG: {
             MIMG_instruction* aM = static_cast<MIMG_instruction*>(a);
