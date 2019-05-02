@@ -4771,10 +4771,30 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
          opcode = aco_opcode::p_linear_phi; /* just a linear phi will do and will avoid expensive lowering */
    }
 
-   phi.reset(create_instruction<Instruction>(opcode, Format::PSEUDO, num_src, 1));
    std::map<unsigned, nir_ssa_def*> phi_src;
-   nir_foreach_phi_src(src, instr)
+   bool all_undef = true;
+   nir_foreach_phi_src(src, instr) {
       phi_src[src->pred->index] = src->src.ssa;
+      if (src->src.ssa->parent_instr->type != nir_instr_type_ssa_undef)
+         all_undef = false;
+   }
+   if (all_undef) {
+      Builder bld(ctx->program, ctx->block);
+      if (dst.regClass() == s1) {
+         bld.sop1(aco_opcode::s_mov_b32, Definition(dst), Operand());
+      } else if (dst.regClass() == v1) {
+         bld.vop1(aco_opcode::v_mov_b32, Definition(dst), Operand());
+      } else {
+         phi.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size(), 1));
+         for (unsigned i = 0; i < dst.size(); i++)
+            phi->getOperand(i) = Operand();
+         phi->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(phi));
+      }
+      return;
+   }
+
+   phi.reset(create_instruction<Instruction>(opcode, Format::PSEUDO, num_src, 1));
 
    /* if we have a linear phi on a divergent if, we know that one src is undef */
    if (num_src == 2 && opcode == aco_opcode::p_linear_phi && ctx->block->logical_predecessors[0] != ctx->block->linear_predecessors[0]) {
