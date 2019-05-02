@@ -2745,7 +2745,6 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
          ctx->block->instructions.emplace_back(std::move(vec));
 
          Temp fmask_desc_ptr = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_FMASK, nullptr, false, false);
-         count--;
          sample_index = Operand(adjust_sample_index_using_fmask(ctx, is_array, fmask_load_address, sample_index, fmask_desc_ptr));
       }
       count--;
