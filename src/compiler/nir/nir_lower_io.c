@@ -516,8 +516,8 @@ nir_lower_io_block(nir_block *block,
       nir_ssa_def *offset;
       nir_ssa_def *vertex_index = NULL;
       unsigned component_offset = var->data.location_frac;
-      bool bindless_type_size = mode == nir_var_shader_in ||
-                                mode == nir_var_shader_out ||
+      bool bindless_type_size = var->data.mode == nir_var_shader_in ||
+                                var->data.mode == nir_var_shader_out ||
                                 var->data.bindless;
 
       offset = get_io_offset(b, deref, per_vertex ? &vertex_index : NULL,
@@ -1284,7 +1284,7 @@ get_explicit_type(const struct glsl_type *type,
       unsigned elem_size, elem_align;
       type_info(element_type, &elem_size, &elem_align);
 
-      assert(elem_size * glsl_get_length(type) <= size);
+      assert(elem_size * glsl_get_length(type) <= *size);
       return glsl_explicit_matrix_type(type, elem_size, false);
    } else if (glsl_type_is_matrix(type)) {
       const struct glsl_type *col_type =
