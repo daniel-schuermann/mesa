@@ -1543,7 +1543,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          nir_const_value* const_insert = nir_src_as_const_value(instr->src[1].src);
          Operand lhs;
          if (const_insert && const_bitmask) {
-            lhs = Operand(const_insert->u32[0] & const_bitmask->u32[0]);
+            lhs = Operand(const_insert->u32 & const_bitmask->u32);
          } else {
             insert = bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), insert, bitmask);
             lhs = Operand(insert);
@@ -1552,7 +1552,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          Operand rhs;
          nir_const_value* const_base = nir_src_as_const_value(instr->src[2].src);
          if (const_base && const_bitmask) {
-            rhs = Operand(const_base->u32[0] & ~const_bitmask->u32[0]);
+            rhs = Operand(const_base->u32 & ~const_bitmask->u32);
          } else {
             base = bld.sop2(aco_opcode::s_andn2_b32, bld.def(s1), bld.def(s1, scc), base, bitmask);
             rhs = Operand(base);
@@ -1586,12 +1586,12 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          nir_const_value* const_offset = nir_src_as_const_value(instr->src[1].src);
          nir_const_value* const_bits = nir_src_as_const_value(instr->src[2].src);
          if (const_offset && const_bits) {
-            uint32_t const_extract = (const_bits->u32[0] << 16) | const_offset->u32[0];
+            uint32_t const_extract = (const_bits->u32 << 16) | const_offset->u32;
             extract = Operand(const_extract);
          } else {
             Operand width;
             if (const_bits) {
-               width = Operand(const_bits->u32[0] << 16);
+               width = Operand(const_bits->u32 << 16);
             } else {
                width = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), bits, Operand(16u));
             }
@@ -1820,13 +1820,13 @@ void visit_load_const(isel_context *ctx, nir_load_const_instr *instr)
 
    if (dst.size() == 1)
    {
-      aco_ptr<Instruction> mov = create_s_mov(Definition(dst), Operand(instr->value.u32[0]));
+      aco_ptr<Instruction> mov = create_s_mov(Definition(dst), Operand(instr->value[0].u32));
       ctx->block->instructions.emplace_back(std::move(mov));
    } else {
       assert(dst.size() != 1);
       aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size(), 1)};
       for (unsigned i = 0; i < dst.size(); i++)
-         vec->getOperand(i) = Operand{instr->value.u32[i]};
+         vec->getOperand(i) = Operand{instr->value[i].u32};
       vec->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(vec));
    }
@@ -1915,7 +1915,7 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
       index = index - FRAG_RESULT_DATA0;
       nir_const_value* offset = nir_src_as_const_value(instr->src[1]);
       assert(offset && "Non-const offsets on exports not yet supported");
-      index += offset->u32[0];
+      index += offset->u32;
       target = V_008DFC_SQ_EXP_MRT + index;
       col_format = (ctx->options->key.fs.col_format >> (4 * index)) & 0xf;
    }
@@ -2061,7 +2061,7 @@ void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr
 
    nir_const_value* offset = nir_src_as_const_value(instr->src[1]);
    if (offset)
-      base += offset->u32[0];
+      base += offset->u32;
 
    Temp coords = get_ssa_temp(ctx, instr->src[0].ssa);
    unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
@@ -2196,7 +2196,7 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
       stride = layout->binding[binding].size;
 
    nir_const_value* nir_const_index = nir_src_as_const_value(instr->src[0]);
-   unsigned const_index = nir_const_index ? nir_const_index->u32[0] : 0;
+   unsigned const_index = nir_const_index ? nir_const_index->u32 : 0;
    if (stride != 1) {
       if (nir_const_index) {
          const_index = const_index * stride;
@@ -2278,8 +2278,8 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       aco_ptr<SMEM_instruction> load{create_instruction<SMEM_instruction>(op, Format::SMEM, 2, 1)};
       load->getOperand(0) = Operand(rsrc);
 
-      if (const_offset && const_offset->u32[0] < 0xFFFFF)
-         load->getOperand(1) = Operand(const_offset->u32[0]);
+      if (const_offset && const_offset->u32 < 0xFFFFF)
+         load->getOperand(1) = Operand(const_offset->u32);
       else
          load->getOperand(1) = Operand(get_ssa_temp(ctx, instr->src[1].ssa));
       load->getDefinition(0) = Definition(dst);
@@ -2542,7 +2542,7 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
          assert(deref_instr->deref_type == nir_deref_type_array);
          nir_const_value *const_value = nir_src_as_const_value(deref_instr->arr.index);
          if (const_value) {
-            constant_index += array_size * const_value->u32[0];
+            constant_index += array_size * const_value->u32;
          } else {
             Temp indirect = bld.as_uniform(get_ssa_temp(ctx, deref_instr->arr.index.ssa));
 
@@ -2732,7 +2732,7 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
       Operand sample_index;
       nir_const_value *sample_cv = nir_src_as_const_value(instr->src[2]);
       if (sample_cv)
-         sample_index = Operand(sample_cv->u32[0]);
+         sample_index = Operand(sample_cv->u32);
       else
          sample_index = Operand(emit_extract_vector(ctx, get_ssa_temp(ctx, instr->src[2].ssa), 0, v1));
 
@@ -4377,7 +4377,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       } else {
          Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
          Definition tmp = bld.def(dst.regClass());
-         unsigned lane = nir_src_as_const_value(instr->src[1])->u32[0];
+         unsigned lane = nir_src_as_const_value(instr->src[1])->u32;
          if (instr->dest.ssa.bit_size == 1 && src.regClass() == s2) {
             uint32_t half_mask = 0x11111111u << lane;
             Temp mask_tmp = bld.pseudo(aco_opcode::p_create_vector, bld.def(s2), Operand(half_mask), Operand(half_mask));
@@ -4584,7 +4584,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       case nir_tex_src_lod: {
          nir_const_value *val = nir_src_as_const_value(instr->src[i].src);
 
-         if (val && val->i32[0] == 0) {
+         if (val && val->i32 == 0) {
             level_zero = true;
          } else {
             lod = get_ssa_temp(ctx, instr->src[i].src.ssa);
@@ -4725,7 +4725,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       assert(has_sample_index);
       Operand op(sample_index);
       if (sample_index_cv)
-         op = Operand(sample_index_cv->u32[0]);
+         op = Operand(sample_index_cv->u32);
       sample_index = adjust_sample_index_using_fmask(ctx, da, coords, op, fmask_ptr);
    }
 

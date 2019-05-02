@@ -962,7 +962,7 @@ void add_startpgm(struct isel_context *ctx)
 }
 
 int
-type_size(const struct glsl_type *type)
+type_size(const struct glsl_type *type, bool bindless)
 {
    // TODO: don't we need type->std430_base_alignment() here?
    return glsl_count_attribute_slots(type, false);
