@@ -534,7 +534,15 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
          instr->getOperand(num) = cond;
          instr->getDefinition(num) = bld.def(s1, scc);
 
-      } else if (instr->opcode == aco_opcode::p_is_helper) {
+      } else if (needs == WQM && state != WQM) {
+         transition_to_WQM(ctx, bld, block->index);
+         state = WQM;
+      } else if (needs == Exact && state != Exact) {
+         transition_to_Exact(ctx, bld, block->index);
+         state = Exact;
+      }
+
+      if (instr->opcode == aco_opcode::p_is_helper) {
          Definition dst = instr->getDefinition(0);
          if (state == Exact) {
             instr.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
@@ -548,13 +556,6 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
             instr->getDefinition(0) = dst;
             instr->getDefinition(1) = bld.def(s1, scc);
          }
-
-      } else if (needs == WQM && state != WQM) {
-         transition_to_WQM(ctx, bld, block->index);
-         state = WQM;
-      } else if (needs == Exact && state != Exact) {
-         transition_to_Exact(ctx, bld, block->index);
-         state = Exact;
       }
 
       bld.insert(std::move(instr));
