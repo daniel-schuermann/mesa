@@ -198,6 +198,13 @@ void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
       instr_needs[i] = needs;
       info.block_needs |= needs;
    }
+   /* for "if (<cond>) <wqm code>" or "while (<cond>) <wqm code>",
+    * <cond> should be computed in WQM */
+   if (info.block_needs & WQM && !(block->kind & block_kind_top_level)) {
+      for (Block* pred : block->logical_predecessors)
+         mark_block_wqm(ctx, pred);
+   }
+
    info.instr_needs = instr_needs;
 }
 
