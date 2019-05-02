@@ -49,15 +49,20 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
    std::set<Temp> live_sgprs;
    std::set<Temp> live_vgprs;
 
-   /* first, insert the live-outs from this block into our temporary sets */
+   /* add the live_out_exec to live, so that it doesn't add to the register demand */
+   if (block->live_out_exec != Temp())
+      live_sgprs.insert(block->live_out_exec);
+
+   /* insert the live-outs from this block into our temporary sets */
    std::vector<std::set<Temp>>& live_temps = lives.live_out;
    for (std::set<Temp>::iterator it = live_temps[block->index].begin(); it != live_temps[block->index].end(); ++it)
    {
+      bool inserted = false;
       if ((*it).is_linear())
-         live_sgprs.insert(*it);
+         inserted = live_sgprs.insert(*it).second;
       else
-         live_vgprs.insert(*it);
-      if (reg_demand_cond) {
+         inserted = live_vgprs.insert(*it).second;
+      if (reg_demand_cond && inserted) {
          if (it->type() == vgpr)
             vgpr_demand += it->size();
          else
@@ -182,7 +187,7 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
       abort();
    }
 
-   assert(!reg_demand_cond || block->index != 0 || (vgpr_demand == 0 && sgpr_demand == 0));
+   assert(!reg_demand_cond || block->index != 0 || (vgpr_demand == 0 && (sgpr_demand == 0 || sgpr_demand == (uint16_t) -2)));
 }
 
 void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr)
