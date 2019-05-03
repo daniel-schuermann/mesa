@@ -197,6 +197,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_fddy_coarse:
                   case nir_op_fquantize2f16:
                   case nir_op_ldexp:
+                  case nir_op_frexp_sig:
+                  case nir_op_frexp_exp:
                   case nir_op_cube_face_index:
                   case nir_op_cube_face_coord:
                      type = vgpr;
