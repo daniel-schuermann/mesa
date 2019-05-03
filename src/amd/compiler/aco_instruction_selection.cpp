@@ -1771,7 +1771,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             unreachable("Unsupported BFE bit size");
          }
 
-         bld.sop2(opcode, Definition(dst), base, extract);
+         bld.sop2(opcode, Definition(dst), bld.def(s1, scc), base, extract);
 
       } else {
          aco_opcode opcode;
@@ -3167,7 +3167,7 @@ void get_buffer_size(isel_context *ctx, Temp desc, Temp dst, bool in_elements)
       Builder bld(ctx->program, ctx->block);
 
       Temp stride = emit_extract_vector(ctx, desc, 1, s1);
-      stride = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), stride, Operand((5u << 16) | 16u));
+      stride = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), bld.def(s1, scc), stride, Operand((5u << 16) | 16u));
       stride = bld.vop1(aco_opcode::v_cvt_f32_ubyte0, bld.def(v1), stride);
       stride = bld.vop1(aco_opcode::v_rcp_iflag_f32, bld.def(v1), stride);
 
@@ -4852,9 +4852,9 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (instr->op == nir_texop_texture_samples) {
       Temp dword3 = emit_extract_vector(ctx, resource, 3, s1);
 
-      Temp samples_log2 = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), dword3, Operand(16u | 4u<<16));
+      Temp samples_log2 = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), bld.def(s1, scc), dword3, Operand(16u | 4u<<16));
       Temp samples = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), Operand(1u), samples_log2);
-      Temp type = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), dword3, Operand(28u | 4u<<16 /* offset=28, width=4 */));
+      Temp type = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), bld.def(s1, scc), dword3, Operand(28u | 4u<<16 /* offset=28, width=4 */));
       Temp is_msaa = bld.sopc(aco_opcode::s_cmp_ge_u32, bld.def(s1, scc), type, Operand(14u));
 
       bld.sop2(aco_opcode::s_cselect_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)),
