@@ -76,7 +76,7 @@ struct isel_context {
          Block* entry;
          Block* exit;
          bool has_divergent_continue;
-         bool has_divergent_break;
+         bool has_divergent_branch;
       } parent_loop;
       struct {
          Block* merge_block;
