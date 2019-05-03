@@ -822,7 +822,7 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
          Instruction* omod_instr = ctx.info[instr->getOperand(1).tempId()].instr;
          /* check if we have an additional clamp modifier */
-         if (ctx.info[instr->getDefinition(0).tempId()].is_clamp()) {
+         if (ctx.info[instr->getDefinition(0).tempId()].is_clamp() && ctx.info[instr->getDefinition(0).tempId()].uses == 1) {
             static_cast<VOP3A_instruction*>(omod_instr)->clamp = true;
             ctx.info[instr->getDefinition(0).tempId()].set_clamp_success(omod_instr);
          }
