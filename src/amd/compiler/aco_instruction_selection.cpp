@@ -41,7 +41,7 @@ class loop_info_RAII {
    Block* entry_old;
    Block* exit_old;
    bool divergent_cont_old;
-   bool divergent_break_old;
+   bool divergent_branch_old;
    bool divergent_if_old;
 
 public:
@@ -49,13 +49,13 @@ public:
       : ctx(ctx),
         entry_old(ctx->cf_info.parent_loop.entry), exit_old(ctx->cf_info.parent_loop.exit),
         divergent_cont_old(ctx->cf_info.parent_loop.has_divergent_continue),
-        divergent_break_old(ctx->cf_info.parent_loop.has_divergent_break),
+        divergent_branch_old(ctx->cf_info.parent_loop.has_divergent_branch),
         divergent_if_old(ctx->cf_info.parent_if.is_divergent)
    {
       ctx->cf_info.parent_loop.entry = loop_entry;
       ctx->cf_info.parent_loop.exit = loop_exit;
       ctx->cf_info.parent_loop.has_divergent_continue = false;
-      ctx->cf_info.parent_loop.has_divergent_break = false;
+      ctx->cf_info.parent_loop.has_divergent_branch = false;
       ctx->cf_info.parent_if.is_divergent = false;
       ctx->cf_info.loop_nest_depth = ctx->cf_info.loop_nest_depth + 1;
    }
@@ -65,7 +65,7 @@ public:
       ctx->cf_info.parent_loop.entry = entry_old;
       ctx->cf_info.parent_loop.exit = exit_old;
       ctx->cf_info.parent_loop.has_divergent_continue = divergent_cont_old;
-      ctx->cf_info.parent_loop.has_divergent_break = divergent_break_old;
+      ctx->cf_info.parent_loop.has_divergent_branch = divergent_branch_old;
       ctx->cf_info.parent_if.is_divergent = divergent_if_old;
       ctx->cf_info.loop_nest_depth = ctx->cf_info.loop_nest_depth - 1;
    }
@@ -5305,6 +5305,7 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
          add_linear_edge(ctx->block, logical_target);
          return;
       }
+      ctx->cf_info.parent_loop.has_divergent_branch = true;
       break;
    case nir_jump_continue:
       logical_target = ctx->cf_info.parent_loop.entry;
@@ -5315,7 +5316,7 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
          /* for potential uniform breaks after this continue,
             we must ensure that they are handled correctly */
          ctx->cf_info.parent_loop.has_divergent_continue = true;
-
+         ctx->cf_info.parent_loop.has_divergent_branch = true;
       } else {
          /* uniform continue - directly jump to the loop header */
          ctx->block->kind |= block_kind_uniform;
@@ -5508,18 +5509,22 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       visit_cf_list(ctx, &if_stmt->then_list);
       BB_then = ctx->block;
       bool then_branch = ctx->cf_info.has_branch;
+      bool then_branch_divergent = ctx->cf_info.parent_loop.has_divergent_branch;
 
-      if (!ctx->cf_info.has_branch) {
+      if (!then_branch) {
          append_logical_end(BB_then);
          /* branch from then block to endif block */
          branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
          branch->targets[0] = BB_endif;
          BB_then->instructions.emplace_back(std::move(branch));
-         add_edge(BB_then, BB_endif);
+         add_linear_edge(BB_then, BB_endif);
+         if (!then_branch_divergent)
+            add_logical_edge(BB_then, BB_endif);
          BB_then->kind |= block_kind_uniform;
       }
 
       ctx->cf_info.has_branch = false;
+      ctx->cf_info.parent_loop.has_divergent_branch = false;
 
       /** emit else block */
       BB_else->index = ctx->program->blocks.size();
@@ -5535,11 +5540,14 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
          branch->targets[0] = BB_endif;
          BB_else->instructions.emplace_back(std::move(branch));
-         add_edge(BB_else, BB_endif);
+         add_linear_edge(BB_else, BB_endif);
+         if (!ctx->cf_info.parent_loop.has_divergent_branch)
+            add_logical_edge(BB_else, BB_endif);
          BB_else->kind |= block_kind_uniform;
       }
 
       ctx->cf_info.has_branch &= then_branch;
+      ctx->cf_info.parent_loop.has_divergent_branch &= then_branch_divergent;
 
       /** emit endif merge block */
       if (!ctx->cf_info.has_branch) {
@@ -5624,8 +5632,13 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       branch->targets[0] = BB_between;
       BB_then_logical->instructions.emplace_back(std::move(branch));
       add_linear_edge(BB_then_logical, BB_between);
-      add_logical_edge(BB_then_logical, BB_endif);
+      if (!ctx->cf_info.parent_loop.has_divergent_branch)
+         add_logical_edge(BB_then_logical, BB_endif);
       BB_then_logical->kind |= block_kind_uniform;
+
+      assert(!ctx->cf_info.has_branch);
+      bool then_branch_divergent = ctx->cf_info.parent_loop.has_divergent_branch;
+      ctx->cf_info.parent_loop.has_divergent_branch = false;
 
       /** emit linear then block */
       BB_then_linear->index = ctx->program->blocks.size();
@@ -5640,8 +5653,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       /** emit in-between merge block */
       BB_between->index = ctx->program->blocks.size();
       ctx->program->blocks.emplace_back(BB_between);
-
-      assert(!ctx->cf_info.has_branch);
 
       /* branch to linear else block (skip else) */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0));
@@ -5666,8 +5677,13 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
       branch->targets[0] = BB_endif;
       BB_else_logical->instructions.emplace_back(std::move(branch));
-      add_edge(BB_else_logical, BB_endif);
+      add_linear_edge(BB_else_logical, BB_endif);
+      if (!ctx->cf_info.parent_loop.has_divergent_branch)
+         add_logical_edge(BB_else_logical, BB_endif);
       BB_else_logical->kind |= block_kind_uniform;
+
+      assert(!ctx->cf_info.has_branch);
+      ctx->cf_info.parent_loop.has_divergent_branch &= then_branch_divergent;
 
       /** emit linear else block */
       BB_else_linear->index = ctx->program->blocks.size();
@@ -5682,8 +5698,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       /** emit endif merge block */
       BB_endif->index = ctx->program->blocks.size();
       ctx->program->blocks.emplace_back(BB_endif);
-
-      assert(!ctx->cf_info.has_branch);
 
       append_logical_start(BB_endif);
       ctx->block = BB_endif;
