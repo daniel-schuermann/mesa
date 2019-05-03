@@ -67,6 +67,13 @@ dpp_row_sr(unsigned amount)
     return (dpp_ctrl)(((unsigned) _dpp_row_sr) | amount);
 }
 
+inline unsigned
+ds_pattern_bitmode(unsigned and_mask, unsigned or_mask, unsigned xor_mask)
+{
+    assert(and_mask < 32 && or_mask < 32 && xor_mask < 32);
+    return and_mask | (or_mask << 5) | (xor_mask << 10);
+}
+
 aco_ptr<Instruction> create_s_mov(Definition dst, Operand src);
 
 class Builder {

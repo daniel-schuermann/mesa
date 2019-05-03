@@ -995,7 +995,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
          /* handle definitions which must have the same register as an operand */
          if (instr->opcode == aco_opcode::v_interp_p2_f32 ||
-             instr->opcode == aco_opcode::v_mac_f32)
+             instr->opcode == aco_opcode::v_mac_f32 ||
+             instr->opcode == aco_opcode::v_writelane_b32)
             instr->getDefinition(0).setFixed(instr->getOperand(2).physReg());
          else if (instr->opcode == aco_opcode::s_addk_i32 ||
                   instr->opcode == aco_opcode::s_mulk_i32)
