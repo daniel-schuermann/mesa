@@ -1080,6 +1080,7 @@ setup_variables(isel_context *ctx, nir_shader *nir)
          int idx = variable->data.location + variable->data.index;
          variable->data.driver_location = idx * 4;
       }
+      uint64_t flat_mask = 0;
       nir_foreach_variable(variable, &nir->inputs)
       {
          int idx = variable->data.location;
@@ -1088,11 +1089,20 @@ setup_variables(isel_context *ctx, nir_shader *nir)
          if (idx >= VARYING_SLOT_VAR0 || idx == VARYING_SLOT_PNTC ||
              idx == VARYING_SLOT_PRIMITIVE_ID || idx == VARYING_SLOT_LAYER) {
             ctx->input_mask |= ((1ull << attrib_count) - 1ull) << idx;
+            if (variable->data.interpolation == INTERP_MODE_FLAT)
+               flat_mask |= ((1ull << attrib_count) - 1ull) << idx;
          } else if (idx == VARYING_SLOT_CLIP_DIST0 || idx == VARYING_SLOT_CLIP_DIST1) {
             assert(variable->data.compact);
             unsigned length = DIV_ROUND_UP(glsl_get_length(variable->type), 4);
             ctx->input_mask |= ((1ull << length) - 1ull) << idx;
          }
+      }
+      uint64_t mask = ctx->input_mask;
+      while (mask) {
+         unsigned loc = u_bit_scan64(&mask);
+         unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << loc) - 1ull));
+         if (flat_mask & (1ull << loc))
+            ctx->program->info->fs.flat_shaded_mask |= 1ull << idx;
       }
       if (ctx->program->info->info.needs_multiview_view_index)
          ctx->input_mask |= 1 << VARYING_SLOT_LAYER;
