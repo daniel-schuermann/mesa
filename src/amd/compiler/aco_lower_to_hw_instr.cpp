@@ -171,13 +171,6 @@ aco_opcode get_reduction_opcode(lower_context *ctx, ReduceOp op, bool *clobber_v
    return aco_opcode::v_min_u32;
 }
 
-static inline unsigned
-ds_pattern_bitmode(unsigned and_mask, unsigned or_mask, unsigned xor_mask)
-{
-	assert(and_mask < 32 && or_mask < 32 && xor_mask < 32);
-	return and_mask | (or_mask << 5) | (xor_mask << 10);
-}
-
 void emit_vopn(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1,
                aco_opcode op, Format format, bool clobber_vcc)
 {

@@ -341,6 +341,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_local_invocation_id:
                   case nir_intrinsic_load_local_invocation_index:
                   case nir_intrinsic_load_subgroup_invocation:
+                  case nir_intrinsic_write_invocation_amd:
+                  case nir_intrinsic_mbcnt_amd:
                   case nir_intrinsic_ssbo_atomic_add:
                   case nir_intrinsic_ssbo_atomic_imin:
                   case nir_intrinsic_ssbo_atomic_umin:
@@ -378,6 +380,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_quad_swap_horizontal:
                   case nir_intrinsic_quad_swap_vertical:
                   case nir_intrinsic_quad_swap_diagonal:
+                  case nir_intrinsic_quad_swizzle_amd:
+                  case nir_intrinsic_masked_swizzle_amd:
                   case nir_intrinsic_inclusive_scan:
                   case nir_intrinsic_exclusive_scan:
                      if (!ctx->divergent_vals[intrinsic->dest.ssa.index]) {
