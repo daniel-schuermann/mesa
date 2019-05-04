@@ -993,6 +993,22 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                   register_file[instr->getOperand(i).physReg().reg + j] = 0;
 
+         /* try to optimize v_mad_f32 -> v_mac_f32 */
+         if (instr->opcode == aco_opcode::v_mad_f32 &&
+             instr->getOperand(2).isTemp() &&
+             instr->getOperand(2).isKill() &&
+             instr->getOperand(2).getTemp().type() == vgpr) {
+            VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr.get());
+            bool can_use_mac = !(vop3->abs[0] || vop3->abs[1] || vop3->abs[2] ||
+                                 vop3->opsel[0] || vop3->opsel[1] || vop3->opsel[2] ||
+                                 vop3->neg[0] || vop3->neg[1] || vop3->neg[2] ||
+                                 vop3->clamp || vop3->omod);
+            if (can_use_mac) {
+               instr->format = Format::VOP2;
+               instr->opcode = aco_opcode::v_mac_f32;
+            }
+         }
+
          /* handle definitions which must have the same register as an operand */
          if (instr->opcode == aco_opcode::v_interp_p2_f32 ||
              instr->opcode == aco_opcode::v_mac_f32 ||
