@@ -1182,16 +1182,6 @@ void apply_literals(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          new_mad->getOperand(2) = Operand(ctx.info[instr->getOperand(info->literal_idx).tempId()].val);
          new_mad->getDefinition(0) = instr->getDefinition(0);
          instr.swap(new_mad);
-      /* convert to MAC if possible */
-      } else if (!info->needs_vop3 &&
-                 instr->getOperand(2).isTemp() &&
-                 instr->getOperand(2).getTemp().type() == vgpr &&
-                 instr->getOperand(2).isKill()) {
-         new_mad.reset(create_instruction<VOP2_instruction>(aco_opcode::v_mac_f32, Format::VOP2, 3, 1));
-         for (unsigned i = 0; i < 3; i++)
-            new_mad->getOperand(i) = instr->getOperand(i);
-         new_mad->getDefinition(0) = instr->getDefinition(0);
-         instr.swap(new_mad);
       }
    }
 
