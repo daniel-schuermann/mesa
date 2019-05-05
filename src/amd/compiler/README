@@ -21,3 +21,18 @@ not `5`.
 
 Both the Vega and GCN3 ISA references write that these instructions don't write
 SCC. They do.
+
+## v_bcnt_u32_b32
+
+The Vega ISA reference writes it's behaviour as:
+```
+D.u = 0;
+for i in 0 ... 31 do
+D.u += (S0.u[i] == 1 ? 1 : 0);
+endfor.
+```
+This is incorrect. The actual behaviour (and number of operands) is what
+is written in the GCN3 reference guide:
+```
+D.u = CountOneBits(S0.u) + S1.u.
+```
