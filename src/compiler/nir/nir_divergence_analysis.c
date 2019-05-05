@@ -356,7 +356,6 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
       /* check if any loop exit condition is divergent */
       nir_foreach_phi_src(src, instr) {
          nir_cf_node *current = src->pred->cf_node.parent;
-         assert(current->type == nir_cf_node_if);
 
          /* check recursively the conditions if any is divergent */
          while (current->type != nir_cf_node_loop) {
