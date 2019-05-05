@@ -953,6 +953,7 @@ void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr);
 template<bool condition>
 live live_var_analysis(Program* program,
                        const struct radv_nir_compiler_options *options);
+std::vector<uint16_t> dead_code_analysis(Program *program);
 void dominator_tree(Program* program);
 void insert_exec_mask(Program *program);
 void value_numbering(Program* program);
