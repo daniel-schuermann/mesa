@@ -819,24 +819,34 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       std::vector<aco_ptr<Instruction>>::iterator it;
 
       /* this is a slight adjustment from the paper as we already have phi nodes:
-       * We consider them incomplete phis and only handle the definition.
-       * First, we look up the affinities.  */
+       * We consider them incomplete phis and only handle the definition. */
+
+      /* handle fixed phi definitions */
       for (it = block->instructions.begin(); it != block->instructions.end(); ++it) {
          aco_ptr<Instruction>& phi = *it;
          if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
             break;
          Definition& definition = phi->getDefinition(0);
-         if (definition.isKill())
+         if (definition.isKill() || !definition.isFixed())
             continue;
 
-         if (definition.isFixed()) {
-            assert(definition.physReg() == exec);
-            for (unsigned i = 0; i < definition.size(); i++) {
-               assert(register_file[definition.physReg().reg + i] == 0);
-               register_file[definition.physReg().reg + i] = definition.tempId();
-            }
+         assert(definition.physReg() == exec);
+         for (unsigned i = 0; i < definition.size(); i++) {
+            assert(register_file[definition.physReg().reg + i] == 0);
+            register_file[definition.physReg().reg + i] = definition.tempId();
+         }
+      }
 
-         } else if (affinities.find(definition.tempId()) != affinities.end() &&
+      /* look up the affinities */
+      for (it = block->instructions.begin(); it != block->instructions.end(); ++it) {
+         aco_ptr<Instruction>& phi = *it;
+         if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
+            break;
+         Definition& definition = phi->getDefinition(0);
+         if (definition.isKill() || definition.isFixed())
+             continue;
+
+         if (affinities.find(definition.tempId()) != affinities.end() &&
              ctx.assignments.find(affinities[definition.tempId()]) != ctx.assignments.end()) {
             assert(ctx.assignments[affinities[definition.tempId()]].second == definition.regClass());
             PhysReg reg = ctx.assignments[affinities[definition.tempId()]].first;
@@ -857,7 +867,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                if (register_file[i] != 0)
                   reg_free = false;
             }
-            assert(reg_free || !try_use_special_reg);
+            /* only assign if register is still free */
             if (reg_free) {
                definition.setFixed(reg);
                for (unsigned i = 0; i < definition.size(); i++)
@@ -866,9 +876,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          }
       }
 
-      it = block->instructions.begin();
-      /* Second, we find registers for phis without affinity or where the register was blocked */
-      for (;it != block->instructions.end(); ++it) {
+      /* find registers for phis without affinity or where the register was blocked */
+      for (it = block->instructions.begin();it != block->instructions.end(); ++it) {
          aco_ptr<Instruction>& phi = *it;
          if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
             break;
@@ -876,7 +885,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          Definition& definition = phi->getDefinition(0);
          if (definition.isKill())
             continue;
-         assert(definition.isTemp());
+
          renames[block->index][definition.tempId()] = definition.getTemp();
 
          if (!definition.isFixed()) {
@@ -888,7 +897,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   continue;
                PhysReg reg = ctx.assignments[phi->getOperand(i).tempId()].first;
                /* we tried this already on the previous loop */
-               if (reg == scc)
+               if (reg == scc || reg == exec)
                   continue;
                if (get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, phi, reg, 0)) {
                   definition.setFixed(reg);
