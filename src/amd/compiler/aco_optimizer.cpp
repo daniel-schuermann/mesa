@@ -62,7 +62,6 @@ struct ssa_info {
       Temp temp;
       Instruction* instr;
    };
-   uint32_t uses;
    std::bitset<32> label;
 
    void set_vec(Instruction* vec)
@@ -273,6 +272,7 @@ struct opt_ctx {
    ssa_info* info;
    std::pair<uint32_t,Temp> last_literal;
    std::vector<mad_info> mad_infos;
+   std::vector<uint16_t> uses;
 };
 
 bool can_swap_operands(aco_ptr<Instruction>& instr)
@@ -725,32 +725,6 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    }
 }
 
-
-void check_instruction_uses(opt_ctx &ctx, aco_ptr<Instruction>& instr, std::set<Temp>& live_outs)
-{
-   if (instr->num_definitions && !instr->isVMEM() && instr->opcode != aco_opcode::p_discard_if) {
-      bool is_used = false;
-      for (unsigned i = 0; i < instr->num_definitions; i++)
-      {
-         if ((instr->getDefinition(i).isFixed() && instr->getDefinition(i).physReg() == exec) ||
-             ctx.info[instr->getDefinition(i).tempId()].uses ||
-             live_outs.find(instr->getDefinition(i).getTemp()) != live_outs.end()) {
-            is_used = true;
-            break;
-         }
-      }
-      if (!is_used)
-         return;
-   }
-
-   /* add operand uses to ssa info */
-   for (unsigned i = 0; i < instr->num_operands; i++)
-   {
-      if (instr->getOperand(i).isTemp())
-         ctx.info[instr->getOperand(i).tempId()].uses++;
-   }
-}
-
 // TODO: we could possibly move the whole label_instruction pass to combine_instruction:
 // this would mean that we'd have to fix the instruction uses while value propagation
 
@@ -761,7 +735,7 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
    /* apply sgprs */
    uint32_t sgpr_idx = 0;
-   ssa_info* sgpr_info = nullptr;
+   uint32_t sgpr_info_id = 0;
    bool has_sgpr = false;
    uint32_t sgpr_ssa_id = 0;
    /* find 'best' possible sgpr */
@@ -778,33 +752,37 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          sgpr_ssa_id = instr->getOperand(i).tempId();
          continue;
       }
-      ssa_info* info = &ctx.info[instr->getOperand(i).tempId()];
-      if (info->is_temp() && info->temp.type() == sgpr) {
-         if (!sgpr_info || info->uses < sgpr_info->uses) {
+      ssa_info& info = ctx.info[instr->getOperand(i).tempId()];
+      if (info.is_temp() && info.temp.type() == sgpr) {
+         uint16_t uses = ctx.uses[instr->getOperand(i).tempId()];
+         if (sgpr_info_id == 0 || uses < ctx.uses[sgpr_info_id]) {
             sgpr_idx = i;
-            sgpr_info = info;
+            sgpr_info_id = instr->getOperand(i).tempId();
          }
       }
    }
-   if (!has_sgpr && sgpr_info) {
+   if (!has_sgpr && sgpr_info_id != 0) {
+      ssa_info& info = ctx.info[sgpr_info_id];
       if (sgpr_idx == 0 || instr->isVOP3()) {
-         instr->getOperand(sgpr_idx) = Operand(sgpr_info->temp);
-         sgpr_info->uses--;
-         ctx.info[sgpr_info->temp.id()].uses++;
+         instr->getOperand(sgpr_idx) = Operand(info.temp);
+         ctx.uses[sgpr_info_id]--;
+         ctx.uses[info.temp.id()]++;
       } else if (can_swap_operands(instr)) {
          instr->getOperand(sgpr_idx) = instr->getOperand(0);
-         instr->getOperand(0) = Operand(sgpr_info->temp);
-         sgpr_info->uses--;
-         ctx.info[sgpr_info->temp.id()].uses++;
+         instr->getOperand(0) = Operand(info.temp);
+         ctx.uses[sgpr_info_id]--;
+         ctx.uses[info.temp.id()]++;
       }
+
    /* we can have two sgprs on one instruction if it is the same sgpr! */
-   } else if (sgpr_info &&
-              sgpr_ssa_id == sgpr_info->temp.id() &&
-              sgpr_info->uses == 1 &&
+   } else if (sgpr_info_id != 0 &&
+              sgpr_ssa_id == sgpr_info_id &&
+              ctx.uses[sgpr_info_id] == 1 &&
               can_use_VOP3(instr)) {
       to_VOP3(ctx, instr);
-      instr->getOperand(sgpr_idx) = Operand(sgpr_info->temp);
-      sgpr_info->uses--;
+      instr->getOperand(sgpr_idx) = Operand(ctx.info[sgpr_info_id].temp);
+      ctx.uses[sgpr_info_id]--;
+      ctx.uses[ctx.info[sgpr_info_id].temp.id()]++;
    }
 
    /* check if we could apply omod on predecessor */
@@ -822,7 +800,7 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
          Instruction* omod_instr = ctx.info[instr->getOperand(1).tempId()].instr;
          /* check if we have an additional clamp modifier */
-         if (ctx.info[instr->getDefinition(0).tempId()].is_clamp() && ctx.info[instr->getDefinition(0).tempId()].uses == 1) {
+         if (ctx.info[instr->getDefinition(0).tempId()].is_clamp() && ctx.uses[instr->getDefinition(0).tempId()] == 1) {
             static_cast<VOP3A_instruction*>(omod_instr)->clamp = true;
             ctx.info[instr->getDefinition(0).tempId()].set_clamp_success(omod_instr);
          }
@@ -831,7 +809,7 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
          /* change the definition of instr to something unused, e.g. the original omod def */
          instr->getDefinition(0) = Definition(instr->getOperand(1).getTemp());
-         ctx.info[instr->getDefinition(0).tempId()].uses = 0;
+         ctx.uses[instr->getDefinition(0).tempId()] = 0;
          return;
       }
       /* in all other cases, label this instruction as option for multiply-add */
@@ -865,13 +843,13 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
          /* change the definition of instr to something unused, e.g. the original omod def */
          instr->getDefinition(0) = Definition(instr->getOperand(idx).getTemp());
-         ctx.info[instr->getDefinition(0).tempId()].uses = 0;
+         ctx.uses[instr->getDefinition(0).tempId()] = 0;
          return;
       }
    }
 
    /* apply omod / clamp modifiers if the def is used only once and the instruction can have modifiers */
-   if (instr->num_definitions && ctx.info[instr->getDefinition(0).tempId()].uses == 1 &&
+   if (instr->num_definitions && ctx.uses[instr->getDefinition(0).tempId()] == 1 &&
        can_use_VOP3(instr) && opcode_infos[(int)instr->opcode].can_use_output_modifiers) {
       if(ctx.info[instr->getDefinition(0).tempId()].is_omod2()) {
          to_VOP3(ctx, instr);
@@ -897,7 +875,7 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
        instr->opcode == aco_opcode::v_sub_f32 ||
        instr->opcode == aco_opcode::v_subrev_f32) {
 
-      if (ctx.info[instr->getDefinition(0).tempId()].uses == 0)
+      if (ctx.uses[instr->getDefinition(0).tempId()] == 0)
          return;
       uint32_t uses_src0 = UINT32_MAX;
       uint32_t uses_src1 = UINT32_MAX;
@@ -905,9 +883,9 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       unsigned add_op_idx;
       /* check if any of the operands is a multiplication */
       if (instr->getOperand(0).isTemp() && ctx.info[instr->getOperand(0).tempId()].is_mul())
-         uses_src0 = ctx.info[instr->getOperand(0).tempId()].uses;
+         uses_src0 = ctx.uses[instr->getOperand(0).tempId()];
       if (instr->getOperand(1).isTemp() && ctx.info[instr->getOperand(1).tempId()].is_mul())
-         uses_src1 = ctx.info[instr->getOperand(1).tempId()].uses;
+         uses_src1 = ctx.uses[instr->getOperand(1).tempId()];
 
       /* find the 'best' mul instruction to combine with the add */
       if (uses_src0 < uses_src1) {
@@ -963,12 +941,12 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          }
 
          /* convert to mad */
-         ctx.info[mul_instr->getDefinition(0).tempId()].uses--;
-         if (ctx.info[mul_instr->getDefinition(0).tempId()].uses) {
+         ctx.uses[mul_instr->getDefinition(0).tempId()]--;
+         if (ctx.uses[mul_instr->getDefinition(0).tempId()]) {
             if (op[0].isTemp())
-               ctx.info[op[0].tempId()].uses++;
+               ctx.uses[op[0].tempId()]++;
             if (op[1].isTemp())
-               ctx.info[op[1].tempId()].uses++;
+               ctx.uses[op[1].tempId()]++;
          }
 
          if (instr->isVOP3()) {
@@ -1023,29 +1001,22 @@ void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
    /* Dead Code Elimination:
     * We remove instructions if they define temporaries which all are unused */
-   if (instr->num_definitions && !instr->isVMEM() && instr->opcode != aco_opcode::p_discard_if) {
-      bool is_used = false;
-      for (unsigned i = 0; i < instr->num_definitions; i++)
-      {
-         if ((instr->getDefinition(i).isFixed() && instr->getDefinition(i).physReg() == exec) ||
-             ctx.info[instr->getDefinition(i).tempId()].uses) {
-            is_used = true;
-            break;
-         }
-      }
-      if (!is_used) {
-         instr.reset();
-         return;
-      }
+   bool is_used = instr->num_definitions == 0;
+   for (unsigned i = 0; !is_used && i < instr->num_definitions; i++) {
+      if (ctx.uses[instr->getDefinition(i).tempId()])
+         is_used = true;
+   }
+   if (!is_used) {
+      instr.reset();
+      return;
    }
 
    /* convert split_vector into extract_vector if only one definition is ever used */
    if (instr->opcode == aco_opcode::p_split_vector) {
       unsigned num_used = 0;
       unsigned idx = 0;
-      for (unsigned i = 0; i < instr->num_definitions; i++)
-      {
-         if (ctx.info[instr->getDefinition(i).tempId()].uses) {
+      for (unsigned i = 0; i < instr->num_definitions; i++) {
+         if (ctx.uses[instr->getDefinition(i).tempId()]) {
             num_used++;
             idx = i;
          }
@@ -1063,8 +1034,8 @@ void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    if (instr->opcode == aco_opcode::v_mad_f32 && ctx.info[instr->getDefinition(0).tempId()].is_mad()) {
       mad_info* info = &ctx.mad_infos[ctx.info[instr->getDefinition(0).tempId()].val];
       /* first, check profitability */
-      if (ctx.info[info->mul_temp_id].uses) {
-         ctx.info[info->mul_temp_id].uses++;
+      if (ctx.uses[info->mul_temp_id]) {
+         ctx.uses[info->mul_temp_id]++;
          instr.swap(info->add_instr);
 
       /* second, check possible literals */
@@ -1078,7 +1049,7 @@ void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             /* if one of the operands is sgpr, we cannot add a literal somewhere else */
             if (instr->getOperand(i).getTemp().type() == sgpr) {
                if (ctx.info[instr->getOperand(i).tempId()].is_literal()) {
-                  literal_uses = ctx.info[instr->getOperand(i).tempId()].uses;
+                  literal_uses = ctx.uses[instr->getOperand(i).tempId()];
                   literal_idx = i;
                } else {
                   literal_uses = UINT32_MAX;
@@ -1086,13 +1057,13 @@ void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
                break;
             }
             else if (ctx.info[instr->getOperand(i).tempId()].is_literal() &&
-                ctx.info[instr->getOperand(i).tempId()].uses < literal_uses) {
-               literal_uses = ctx.info[instr->getOperand(i).tempId()].uses;
+                ctx.uses[instr->getOperand(i).tempId()] < literal_uses) {
+               literal_uses = ctx.uses[instr->getOperand(i).tempId()];
                literal_idx = i;
             }
          }
          if (literal_uses < threshold) {
-            ctx.info[instr->getOperand(literal_idx).tempId()].uses--;
+            ctx.uses[instr->getOperand(literal_idx).tempId()]--;
             info->check_literal = true;
             info->literal_idx = literal_idx;
          }
@@ -1115,22 +1086,22 @@ void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             break;
          }
          if (ctx.info[instr->getOperand(i).tempId()].is_literal() &&
-             ctx.info[instr->getOperand(i).tempId()].uses < literal_uses) {
-            literal_uses = ctx.info[instr->getOperand(i).tempId()].uses;
+             ctx.uses[instr->getOperand(i).tempId()] < literal_uses) {
+            literal_uses = ctx.uses[instr->getOperand(i).tempId()];
             literal_idx = i;
          }
       }
       if (!has_literal && literal_uses < threshold) {
-         ctx.info[instr->getOperand(literal_idx).tempId()].uses--;
-         if (ctx.info[instr->getOperand(literal_idx).tempId()].uses == 0)
+         ctx.uses[instr->getOperand(literal_idx).tempId()]--;
+         if (ctx.uses[instr->getOperand(literal_idx).tempId()] == 0)
             instr->getOperand(literal_idx) = Operand(ctx.info[instr->getOperand(literal_idx).tempId()].val);
       }
    } else if (instr->isVALU() && !instr->isVOP3() &&
        instr->getOperand(0).isTemp() &&
        ctx.info[instr->getOperand(0).tempId()].is_literal() &&
-       ctx.info[instr->getOperand(0).tempId()].uses < threshold) {
-      ctx.info[instr->getOperand(0).tempId()].uses--;
-      if (ctx.info[instr->getOperand(0).tempId()].uses == 0)
+       ctx.uses[instr->getOperand(0).tempId()] < threshold) {
+      ctx.uses[instr->getOperand(0).tempId()]--;
+      if (ctx.uses[instr->getOperand(0).tempId()] == 0)
          instr->getOperand(0) = Operand(ctx.info[instr->getOperand(0).tempId()].val);
    }
 
@@ -1152,7 +1123,7 @@ void apply_literals(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          if (instr->getOperand(i).isLiteral())
             break;
          if (ctx.info[instr->getOperand(i).tempId()].is_literal() &&
-             ctx.info[instr->getOperand(i).tempId()].uses == 0)
+             ctx.uses[instr->getOperand(i).tempId()] == 0)
             instr->getOperand(i) = Operand(ctx.info[instr->getOperand(i).tempId()].val);
       }
    }
@@ -1161,7 +1132,7 @@ void apply_literals(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    else if (instr->isVALU() && !instr->isVOP3() &&
        instr->getOperand(0).isTemp() &&
        ctx.info[instr->getOperand(0).tempId()].is_literal() &&
-       ctx.info[instr->getOperand(0).tempId()].uses == 0) {
+       ctx.uses[instr->getOperand(0).tempId()] == 0) {
       instr->getOperand(0) = Operand(ctx.info[instr->getOperand(0).tempId()].val);
    }
 
@@ -1169,7 +1140,7 @@ void apply_literals(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    else if (instr->opcode == aco_opcode::v_mad_f32 && ctx.info[instr->getDefinition(0).tempId()].is_mad()) {
       mad_info* info = &ctx.mad_infos[ctx.info[instr->getDefinition(0).tempId()].val];
       aco_ptr<Instruction> new_mad;
-      if (info->check_literal && ctx.info[instr->getOperand(info->literal_idx).tempId()].uses == 0) {
+      if (info->check_literal && ctx.uses[instr->getOperand(info->literal_idx).tempId()] == 0) {
          if (info->literal_idx == 2) { /* add literal -> madak */
             new_mad.reset(create_instruction<VOP2_instruction>(aco_opcode::v_madak_f32, Format::VOP2, 3, 1));
             new_mad->getOperand(0) = instr->getOperand(0);
@@ -1202,15 +1173,7 @@ void optimize(Program* program)
          label_instruction(ctx, instr);
    }
 
-   /* Backward pass to calculate the number of uses for each instruction */
-   std::vector<std::set<Temp>> live_out_per_block = live_var_analysis<true>(program, nullptr).live_out;
-   for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it)
-   {
-      Block* block = it->get();
-      std::set<Temp>& live_outs = live_out_per_block[block->index];
-      for (std::vector<aco_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
-         check_instruction_uses(ctx, *it, live_outs);
-   }
+   ctx.uses = std::move(dead_code_analysis(program));
 
    /* 2. Combine v_mad, omod, clamp and propagate sgpr on VALU instructions */
    for (auto&& block : program->blocks) {
