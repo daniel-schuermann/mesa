@@ -1,0 +1,23 @@
+# Unofficial GCN ISA reference errata
+
+## v_sad_u32
+
+The Vega ISA reference writes it's behaviour as:
+```
+D.u = abs(S0.i - S1.i) + S2.u.
+```
+This is incorrect. The actual behaviour is what is written in the GCN3 reference
+guide:
+```
+ABS_DIFF (A,B) = (A>B) ? (A-B) : (B-A)
+D.u = ABS_DIFF (S0.u,S1.u) + S2.u
+```
+The instruction doesn't subtract the S0 and S1 and use the absolute value (the
+_signed_ distance), it uses the _unsigned_ distance between the operands. So
+`v_sad_u32(-5, 0, 0)` would return `4294967291` (`-5` interpreted as unsigned),
+not `5`.
+
+## s_bfe_*
+
+Both the Vega and GCN3 ISA references write that these instructions don't write
+SCC. They do.
