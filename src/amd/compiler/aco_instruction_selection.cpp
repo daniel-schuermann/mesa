@@ -3378,9 +3378,20 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp rsrc = convert_pointer_to_64_bit(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
    rsrc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), rsrc, Operand(0u));
 
+   // TODO: SMEM stores require some extra work to properly handle helper lanes
+   bool smem = ctx->divergent_vals[instr->src[2].ssa->index] &&
+               ctx->stage != MESA_SHADER_FRAGMENT &&
+               ctx->options->chip_class >= VI;
+   if (smem)
+      offset = bld.as_uniform(offset);
+
    while (writemask) {
       int start, count;
       u_bit_scan_consecutive_range(&writemask, &start, &count);
+      if (count == 3 && smem) {
+         writemask |= 1u << (start + 2);
+         count = 2;
+      }
       int num_bytes = count * elem_size_bytes;
 
       // TODO: we can only store 4 DWords at the same time. Fix for 64bit vectors
@@ -3390,49 +3401,77 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       Temp write_data;
       if (count != instr->num_components) {
          aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, count, 1)};
-         for (int i = 0; i < count; i++)
-            vec->getOperand(i) = Operand(emit_extract_vector(ctx, data, start + i, v1));
-         write_data = {ctx->program->allocateId(), getRegClass(vgpr, count)};
+         for (int i = 0; i < count; i++) {
+            Temp elem = emit_extract_vector(ctx, data, start + i, getRegClass(data.type(), 1));
+            vec->getOperand(i) = Operand(smem ? bld.as_uniform(elem) : elem);
+         }
+         write_data = {ctx->program->allocateId(), getRegClass(smem ? sgpr : vgpr, count)};
          vec->getDefinition(0) = Definition(write_data);
          ctx->block->instructions.emplace_back(std::move(vec));
-      } else if (data.type() != vgpr) {
+      } else if (!smem && data.type() != vgpr) {
          assert(num_bytes % 4 == 0);
          write_data = {ctx->program->allocateId(), getRegClass(vgpr, num_bytes / 4)};
          emit_v_mov(ctx, data, write_data);
+      } else if (smem && data.type() == vgpr) {
+         assert(num_bytes % 4 == 0);
+         write_data = bld.as_uniform(data);
       } else {
          write_data = data;
       }
 
-      aco_opcode op;
+      aco_opcode vmem_op, smem_op;
       switch (num_bytes) {
          case 4:
-            op = aco_opcode::buffer_store_dword;
+            vmem_op = aco_opcode::buffer_store_dword;
+            smem_op = aco_opcode::s_buffer_store_dword;
             break;
          case 8:
-            op = aco_opcode::buffer_store_dwordx2;
+            vmem_op = aco_opcode::buffer_store_dwordx2;
+            smem_op = aco_opcode::s_buffer_store_dwordx2;
             break;
          case 12:
-            op = aco_opcode::buffer_store_dwordx3;
+            vmem_op = aco_opcode::buffer_store_dwordx3;
+            assert(!smem);
             break;
          case 16:
-            op = aco_opcode::buffer_store_dwordx4;
+            vmem_op = aco_opcode::buffer_store_dwordx4;
+            smem_op = aco_opcode::s_buffer_store_dwordx4;
             break;
          default:
             unreachable("Store SSBO not implemented for this size.");
       }
 
-      aco_ptr<MUBUF_instruction> store{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 4, 0)};
-      store->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand();
-      store->getOperand(1) = Operand(rsrc);
-      store->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand((uint32_t) 0);
-      store->getOperand(3) = Operand(write_data);
-      store->offset = start * elem_size_bytes;
-      store->offen = (offset.type() == vgpr);
-      store->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT | ACCESS_NON_READABLE);
-      store->disable_wqm = true;
-      store->barrier = barrier_buffer;
-      ctx->program->needs_exact = true;
-      ctx->block->instructions.emplace_back(std::move(store));
+      if (smem) {
+         aco_ptr<SMEM_instruction> store{create_instruction<SMEM_instruction>(smem_op, Format::SMEM, 3, 0)};
+         store->getOperand(0) = Operand(rsrc);
+         if (start) {
+            Temp off = bld.sop2(aco_opcode::s_add_i32, bld.def(s1), bld.def(s1, scc),
+                                offset, Operand(start * elem_size_bytes));
+            store->getOperand(1) = Operand(off);
+         } else {
+            store->getOperand(1) = Operand(offset);
+         }
+         store->getOperand(1).setFixed(m0);
+         store->getOperand(2) = Operand(write_data);
+         store->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT | ACCESS_NON_READABLE);
+         store->disable_wqm = true;
+         store->barrier = barrier_buffer;
+         ctx->block->instructions.emplace_back(std::move(store));
+         ctx->program->wb_smem_l1_on_end = true;
+      } else {
+         aco_ptr<MUBUF_instruction> store{create_instruction<MUBUF_instruction>(vmem_op, Format::MUBUF, 4, 0)};
+         store->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand();
+         store->getOperand(1) = Operand(rsrc);
+         store->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand((uint32_t) 0);
+         store->getOperand(3) = Operand(write_data);
+         store->offset = start * elem_size_bytes;
+         store->offen = (offset.type() == vgpr);
+         store->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT | ACCESS_NON_READABLE);
+         store->disable_wqm = true;
+         store->barrier = barrier_buffer;
+         ctx->program->needs_exact = true;
+         ctx->block->instructions.emplace_back(std::move(store));
+      }
    }
 }
 
@@ -5838,7 +5877,10 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
 
    append_logical_end(ctx.block);
    ctx.block->kind |= block_kind_uniform;
-   ctx.block->instructions.push_back(aco_ptr<SOPP_instruction>(create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)));
+   Builder bld(ctx.program, ctx.block);
+   if (ctx.program->wb_smem_l1_on_end)
+      bld.smem(aco_opcode::s_dcache_wb, false);
+   bld.sopp(aco_opcode::s_endpgm);
 
    return program;
 }

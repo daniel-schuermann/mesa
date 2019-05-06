@@ -597,13 +597,13 @@ for code, name in SMEM_ATOMIC_64:
    opcode(name, code, Format.SMEM)
 
 SMEM_DCACHE = [
-   "s_dcache_inv",
-   "s_dcache_wb",
-   "s_dcache_inv_vol",
-   "s_dcache_wb_vol"
+   (32, "s_dcache_inv"),
+   (33, "s_dcache_wb"),
+   (34, "s_dcache_inv_vol"),
+   (35, "s_dcache_wb_vol")
 ]
-#for name in SMEM_DCACHE:
-#   opcode(name, 0, [])
+for code, name in SMEM_DCACHE:
+   opcode(name, code, Format.SMEM)
 
 SMEM_SPECIAL = [
    (36, "s_memtime"),
