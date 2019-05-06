@@ -656,11 +656,14 @@ struct SOP2_instruction : public Instruction {
  * Operand(2) / Definition(0): SDATA - SGPR for read / write result
  * Operand(n-1): SOffset - SGPR offset (Vega only)
  *
+ * Having no operands is also valid for instructions such as s_dcache_inv.
+ *
  */
 struct SMEM_instruction : public Instruction {
    bool glc; /* VI+: globally coherent */
    bool nv; /* VEGA only: Non-volatile */
    bool can_reorder;
+   bool disable_wqm;
    barrier_interaction barrier;
 };
 
@@ -906,6 +909,7 @@ public:
    gl_shader_stage stage;
    bool needs_exact = false; /* there exists an instruction with disable_wqm = true */
    bool needs_wqm = false; /* there exists a p_wqm instruction */
+   bool wb_smem_l1_on_end = false;
 
    uint32_t allocateId()
    {

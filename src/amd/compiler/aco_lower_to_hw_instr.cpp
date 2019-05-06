@@ -590,7 +590,7 @@ void lower_to_hw_instr(Program* program)
                aco_ptr<SOPP_instruction> branch{create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc1, Format::SOPP, 1, 0)};
                branch->getOperand(0) = Operand(branch_cond.getTemp());
                branch->getOperand(0).setFixed(scc);
-               branch->imm = 3; /* (8 + 4 dwords) / 4 */
+               branch->imm = program->wb_smem_l1_on_end ? 5 : 3; /* (8 + (wb_smem ? 8 : 0) + 4 dwords) / 4 */
                ctx.instructions.emplace_back(std::move(branch));
 
                aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
@@ -602,6 +602,11 @@ void lower_to_hw_instr(Program* program)
                exp->valid_mask = true;
                exp->dest = 9; /* NULL */
                ctx.instructions.emplace_back(std::move(exp));
+
+               if (program->wb_smem_l1_on_end) {
+                  aco_ptr<SMEM_instruction> smem{create_instruction<SMEM_instruction>(aco_opcode::s_dcache_wb, Format::SMEM, 0, 0)};
+                  ctx.instructions.emplace_back(std::move(smem));
+               }
 
                aco_ptr<SOPP_instruction> endpgm{create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)};
                ctx.instructions.emplace_back(std::move(endpgm));

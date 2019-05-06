@@ -69,15 +69,20 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       SMEM_instruction* smem = static_cast<SMEM_instruction*>(instr);
       uint32_t encoding = (0b110000 << 26);
       encoding |= opcode_infos[(int)instr->opcode].opcode << 18;
-      encoding |= instr->getOperand(1).isConstant() ? 1 << 17 : 0;
+      if (instr->num_operands >= 2)
+         encoding |= instr->getOperand(1).isConstant() ? 1 << 17 : 0;
       bool soe = instr->num_operands >= (instr->num_definitions ? 3 : 4);
       assert(!soe || ctx.chip_class >= GFX9);
       encoding |= soe ? 1 << 14 : 0;
       encoding |= smem->glc ? 1 << 16 : 0;
-      encoding |= (instr->num_definitions ? instr->getDefinition(0).physReg().reg : instr->getOperand(2).physReg().reg) << 6;
-      encoding |= instr->getOperand(0).physReg().reg >> 1;
+      if (instr->num_definitions || instr->num_operands >= 3)
+         encoding |= (instr->num_definitions ? instr->getDefinition(0).physReg().reg : instr->getOperand(2).physReg().reg) << 6;
+      if (instr->num_operands >= 1)
+         encoding |= instr->getOperand(0).physReg().reg >> 1;
       out.push_back(encoding);
-      encoding = instr->getOperand(1).isConstant() ? instr->getOperand(1).constantValue() : instr->getOperand(1).physReg().reg;
+      encoding = 0;
+      if (instr->num_operands >= 2)
+         encoding |= instr->getOperand(1).isConstant() ? instr->getOperand(1).constantValue() : instr->getOperand(1).physReg().reg;
       encoding |= soe ? instr->getOperand(instr->num_operands - 1).physReg().reg << 25 : 0;
       out.push_back(encoding);
       return;
