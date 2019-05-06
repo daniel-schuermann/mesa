@@ -36,3 +36,8 @@ is written in the GCN3 reference guide:
 ```
 D.u = CountOneBits(S0.u) + S1.u.
 ```
+
+## SMEM stores
+
+The Vega ISA references doesn't say this (or doesn't make it clear), but
+the offset for SMEM stores must be in m0 if IMM == 0.
