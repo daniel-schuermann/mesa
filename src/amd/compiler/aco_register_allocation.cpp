@@ -1006,7 +1006,9 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          if (instr->opcode == aco_opcode::v_mad_f32 &&
              instr->getOperand(2).isTemp() &&
              instr->getOperand(2).isKill() &&
-             instr->getOperand(2).getTemp().type() == vgpr) {
+             instr->getOperand(2).getTemp().type() == vgpr &&
+             instr->getOperand(1).isTemp() &&
+             instr->getOperand(1).getTemp().type == vgpr) { /* TODO: swap src0 and src1 in this case */
             VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr.get());
             bool can_use_mac = !(vop3->abs[0] || vop3->abs[1] || vop3->abs[2] ||
                                  vop3->opsel[0] || vop3->opsel[1] || vop3->opsel[2] ||
