@@ -125,7 +125,7 @@ bool can_move_barrier(aco_ptr<Instruction>& barrier, Instruction* current, bool 
          default:
             break;
          }
-         return can_reorder;
+         return can_reorder && !moving_ds;
       } else {
          return true;
       }
@@ -160,7 +160,7 @@ bool can_move_barrier(aco_ptr<Instruction>& barrier, Instruction* current, bool 
    case aco_opcode::p_memory_barrier_shared:
       return interaction != barrier_shared && !moving_ds;
    case aco_opcode::p_memory_barrier_all:
-      return interaction == barrier_none;
+      return interaction == barrier_none && !moving_ds;
    default:
       return false;
    }
