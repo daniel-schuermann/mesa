@@ -154,9 +154,11 @@ void validate(Program* program, FILE * output)
             break;
          }
          case Format::SMEM: {
-            check(instr->getOperand(0).isTemp() && instr->getOperand(0).getTemp().type() == sgpr, "SMEM operands must be sgpr", instr.get());
-            check(instr->getOperand(1).isConstant() || (instr->getOperand(1).isTemp() && instr->getOperand(1).getTemp().type() == sgpr),
-                  "SMEM offset must be constant or sgpr", instr.get());
+            if (instr->num_operands >= 1)
+               check(instr->getOperand(0).isTemp() && instr->getOperand(0).getTemp().type() == sgpr, "SMEM operands must be sgpr", instr.get());
+            if (instr->num_operands >= 2)
+               check(instr->getOperand(1).isConstant() || (instr->getOperand(1).isTemp() && instr->getOperand(1).getTemp().type() == sgpr),
+                     "SMEM offset must be constant or sgpr", instr.get());
             if (instr->num_definitions)
                check(instr->getDefinition(0).getTemp().type() == sgpr, "SMEM result must be sgpr", instr.get());
             break;
