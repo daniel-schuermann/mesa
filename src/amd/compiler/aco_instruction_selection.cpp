@@ -1519,6 +1519,17 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_i2i64: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      if (src.size() == 1) {
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), src, Operand(0u));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_i2f32: {
       assert(dst.size() == 1);
       emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f32_i32, dst);
