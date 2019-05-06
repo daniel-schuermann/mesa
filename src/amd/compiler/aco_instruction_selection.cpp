@@ -983,8 +983,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          Temp dst0 = bld.tmp(v1), dst1 = bld.tmp(v1);
          Temp carry = emit_v_add32(ctx, dst0, Operand(src00), Operand(src10), true);
          bld.vop2(aco_opcode::v_addc_co_u32, Definition(dst1), bld.def(s2),
-                  emit_extract_vector(ctx, src0, 1, getRegClass(src0.type(), 1)),
-                  emit_extract_vector(ctx, src1, 1, getRegClass(src0.type(), 1)),
+                  emit_extract_vector(ctx, src0, 1, v1),
+                  emit_extract_vector(ctx, src1, 1, v1),
                   carry).def(1).setHint(vcc);
 
          bld.pseudo(aco_opcode::p_create_vector, Definition(dst), dst0, dst1);
