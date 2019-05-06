@@ -510,11 +510,16 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    switch (instr->opcode) {
    case aco_opcode::p_create_vector: {
       unsigned num_ops = instr->num_operands;
+      bool is_undefined = true;
       for (unsigned i = 0; i < instr->num_operands; i++) {
+         if (!instr->getOperand(i).isUndefined())
+            is_undefined = false;
          if (instr->getOperand(i).isTemp() && ctx.info[instr->getOperand(i).tempId()].is_vec())
             num_ops += ctx.info[instr->getOperand(i).tempId()].instr->num_operands - 1;
       }
-      if (num_ops != instr->num_operands) {
+      if (is_undefined) {
+         ctx.info[instr->getDefinition(0).tempId()].set_undefined();
+      } else if (num_ops != instr->num_operands) {
          aco_ptr<Instruction> old_vec = std::move(instr);
          instr.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, num_ops, 1));
          instr->getDefinition(0) = old_vec->getDefinition(0);
