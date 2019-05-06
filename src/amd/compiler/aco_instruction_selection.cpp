@@ -4662,7 +4662,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       Temp mask_hi = bld.as_uniform(emit_extract_vector(ctx, src, 1, rc));
       Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
       Temp wqm_tmp = bld.vop3(aco_opcode::v_mbcnt_hi_u32_b32, bld.def(v1), mask_hi, tmp);
-      emit_wqm(ctx, tmp, dst);
+      emit_wqm(ctx, wqm_tmp, dst);
       break;
    }
    case nir_intrinsic_load_helper_invocation: {
