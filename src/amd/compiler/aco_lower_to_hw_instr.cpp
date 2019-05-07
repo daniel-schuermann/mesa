@@ -491,6 +491,9 @@ void lower_to_hw_instr(Program* program)
             {
             case aco_opcode::p_extract_vector:
             {
+               if (instr->getOperand(0).isUndefined())
+                  break;
+
                unsigned reg = instr->getOperand(0).physReg().reg + instr->getOperand(1).constantValue();
                RegClass rc = getRegClass(instr->getOperand(0).getTemp().type(), 1);
                RegClass rc_def = getRegClass(instr->getDefinition(0).getTemp().type(), 1);
@@ -507,6 +510,9 @@ void lower_to_hw_instr(Program* program)
             }
             case aco_opcode::p_create_vector:
             {
+               if (instr->getOperand(0).isUndefined())
+                  break;
+
                std::map<PhysReg, copy_operation> copy_operations;
                RegClass rc_def = getRegClass(instr->getDefinition(0).getTemp().type(), 1);
                unsigned reg_idx = 0;

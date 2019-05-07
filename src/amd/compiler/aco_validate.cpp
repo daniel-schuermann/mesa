@@ -133,10 +133,12 @@ void validate(Program* program, FILE * output)
                      check(instr->getOperand(i).isConstant() || instr->getOperand(i).isUndefined() || instr->getOperand(i).getTemp().type() == sgpr,
                            "Wrong Operand type for scalar vector", instr.get());
             } else if (instr->opcode == aco_opcode::p_extract_vector) {
-               check(instr->getOperand(0).isTemp() && instr->getOperand(1).isConstant(), "Wrong Operand types", instr.get());
-               check(instr->getOperand(1).constantValue() <= instr->getOperand(0).size(), "Index out of range", instr.get());
-               check(instr->getDefinition(0).getTemp().type() == vgpr || instr->getOperand(0).getTemp().type() == sgpr,
-                     "Cannot extract SGPR value from VGPR vector", instr.get());
+               check((instr->getOperand(0).isUndefined() || instr->getOperand(0).isTemp()) && instr->getOperand(1).isConstant(), "Wrong Operand types", instr.get());
+               if (!instr->getOperand(0).isUndefined()) {
+                  check(instr->getOperand(1).constantValue() <= instr->getOperand(0).size(), "Index out of range", instr.get());
+                  check(instr->getDefinition(0).getTemp().type() == vgpr || instr->getOperand(0).getTemp().type() == sgpr,
+                        "Cannot extract SGPR value from VGPR vector", instr.get());
+               }
             } else if (instr->opcode == aco_opcode::p_parallelcopy) {
                check(instr->num_definitions == instr->num_operands, "Number of Operands does not match number of Definitions", instr.get());
                for (unsigned i = 0; i < instr->num_operands; i++) {
