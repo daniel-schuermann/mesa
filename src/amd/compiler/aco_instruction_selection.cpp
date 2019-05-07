@@ -5027,7 +5027,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (has_ddx || has_ddy) {
       if (instr->sampler_dim == GLSL_SAMPLER_DIM_1D && ctx->options->chip_class >= GFX9) {
          derivs = bld.pseudo(aco_opcode::p_create_vector, bld.def(v4),
-                             Operand(0u), ddx, Operand(0u), ddy);
+                             ddx, Operand(0u), ddy, Operand(0u));
       } else {
          derivs = bld.pseudo(aco_opcode::p_create_vector, bld.def(vgpr, ddx.size() + ddy.size()), ddx, ddy);
       }
