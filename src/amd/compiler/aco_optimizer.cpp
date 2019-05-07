@@ -539,6 +539,11 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       break;
    }
    case aco_opcode::p_split_vector: {
+      if (instr->getOperand(0).isUndefined()) {
+         for (unsigned i = 0; i < instr->num_definitions; i++)
+            ctx.info[instr->getDefinition(i).tempId()].set_undefined();
+         break;
+      }
       if (!ctx.info[instr->getOperand(0).tempId()].is_vec())
          break;
       Instruction* vec = ctx.info[instr->getOperand(0).tempId()].instr;
@@ -560,6 +565,10 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       break;
    }
    case aco_opcode::p_extract_vector: { /* mov */
+      if (instr->getOperand(0).isUndefined()) {
+         ctx.info[instr->getDefinition(0).tempId()].set_undefined();
+         break;
+      }
       if (!ctx.info[instr->getOperand(0).tempId()].is_vec())
          break;
       Instruction* vec = ctx.info[instr->getOperand(0).tempId()].instr;
