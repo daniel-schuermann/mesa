@@ -529,6 +529,7 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
       }
       if (spill) {
          ctx.spills_entry[block_idx][pair.first] = spill_id;
+         partial_spills.erase(pair.first);
          if (pair.first.type() == vgpr)
             spilled_vgprs += pair.first.size();
          else
@@ -554,6 +555,7 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
       }
       if (spill) {
          ctx.spills_entry[block_idx][phi->getDefinition(0).getTemp()] = ctx.allocate_spill_id(phi->getDefinition(0).regClass());
+         partial_spills.erase(phi->getDefinition(0).getTemp());
          if (phi->getDefinition(0).getTemp().type() == vgpr)
             spilled_vgprs += phi->getDefinition(0).getTemp().size();
          else
@@ -569,9 +571,18 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
       for (unsigned i = 0; i < block->instructions[idx]->num_definitions; i++) {
          if (block->instructions[idx]->getDefinition(i).isTemp()) {
             if (block->instructions[idx]->getDefinition(i).getTemp().type() == vgpr)
-               reg_pressure_vgpr += block->instructions[idx]->getDefinition(i).size();
+               reg_pressure_vgpr -= block->instructions[idx]->getDefinition(i).size();
             else
-               reg_pressure_sgpr += block->instructions[idx]->getDefinition(i).size();
+               reg_pressure_sgpr -= block->instructions[idx]->getDefinition(i).size();
+         }
+      }
+      for (unsigned i = 0; i < block->instructions[idx]->num_operands; i++) {
+         if (block->instructions[idx]->getOperand(i).isTemp() &&
+             block->instructions[idx]->getOperand(i).isFirstKill()) {
+            if (block->instructions[idx]->getOperand(i).getTemp().type() == vgpr)
+               reg_pressure_vgpr += block->instructions[idx]->getOperand(i).size();
+            else
+               reg_pressure_sgpr += block->instructions[idx]->getOperand(i).size();
          }
       }
    } else {
@@ -582,15 +593,12 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
 
    while (reg_pressure_sgpr > ctx.target_sgpr) {
       assert(!partial_spills.empty());
-      unsigned distance = 0;
-      Temp to_spill;
 
       std::set<Temp>::iterator it = partial_spills.begin();
+      Temp to_spill = *it;
+      unsigned distance = ctx.next_use_distances_start[block_idx][*it].second;
       while (it != partial_spills.end()) {
-         if (ctx.spills_entry[block_idx].find(*it) != ctx.spills_entry[block_idx].end()) {
-            it = partial_spills.erase(it);
-            continue;
-         }
+         assert(ctx.spills_entry[block_idx].find(*it) == ctx.spills_entry[block_idx].end());
 
          if (it->type() == sgpr && ctx.next_use_distances_start[block_idx][*it].second > distance) {
             distance = ctx.next_use_distances_start[block_idx][*it].second;
@@ -607,15 +615,12 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
 
    while (reg_pressure_vgpr > ctx.target_vgpr) {
       assert(!partial_spills.empty());
-      unsigned distance = 0;
-      Temp to_spill;
 
       std::set<Temp>::iterator it = partial_spills.begin();
+      Temp to_spill = *it;
+      unsigned distance = ctx.next_use_distances_start[block_idx][*it].second;
       while (it != partial_spills.end()) {
-         if (ctx.spills_entry[block_idx].find(*it) != ctx.spills_entry[block_idx].end()) {
-            it = partial_spills.erase(it);
-            continue;
-         }
+         assert(ctx.spills_entry[block_idx].find(*it) == ctx.spills_entry[block_idx].end());
 
          if (it->type() == vgpr && ctx.next_use_distances_start[block_idx][*it].second > distance) {
             distance = ctx.next_use_distances_start[block_idx][*it].second;
