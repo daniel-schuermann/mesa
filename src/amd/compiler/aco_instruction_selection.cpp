@@ -5051,7 +5051,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
    if (ctx->options->chip_class >= GFX9 &&
        instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
-       instr->op != nir_texop_lod) {
+       instr->op != nir_texop_lod && instr->coord_components) {
       assert(coords.size() > 0 && coords.size() < 3);
 
       aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, coords.size() + 1, 1)};
@@ -5119,6 +5119,11 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          dmask = 1 << instr->component;
    } else if (instr->op == nir_texop_query_levels) {
       dmask = 1 << 3;
+   } else if (ctx->options->chip_class >= GFX9 &&
+              instr->op == nir_texop_txs &&
+              instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
+              instr->is_array) {
+      dmask = (dmask & 0x1) | ((dmask & 0x2) << 1);
    }
 
    aco_ptr<MIMG_instruction> tex;
@@ -5159,12 +5164,6 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          emit_split_vector(ctx, tmp_dst, tmp_dst.size());
          expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, dmask);
       }
-
-      if (ctx->options->chip_class >= GFX9 &&
-          instr->op == nir_texop_txs &&
-          instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
-          instr->is_array)
-         unreachable("Unimplemented tex instr type");
 
       return;
    }
