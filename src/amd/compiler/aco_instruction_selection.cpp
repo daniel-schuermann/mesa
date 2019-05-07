@@ -5223,7 +5223,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       } else {
          opcode = aco_opcode::image_sample_o;
          if (has_derivs)
-            opcode = aco_opcode::image_sample_c_d;
+            opcode = aco_opcode::image_sample_d_o;
          if (has_bias)
             opcode = aco_opcode::image_sample_b_o;
          if (level_zero)
