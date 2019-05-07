@@ -3394,9 +3394,6 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    if (smem)
       offset = bld.as_uniform(offset);
 
-   if (smem)
-      printf("smem!!!\n");
-
    while (writemask) {
       int start, count;
       u_bit_scan_consecutive_range(&writemask, &start, &count);
