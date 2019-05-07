@@ -3388,11 +3388,14 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    rsrc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), rsrc, Operand(0u));
 
    // TODO: SMEM stores require some extra work to properly handle helper lanes
-   bool smem = ctx->divergent_vals[instr->src[2].ssa->index] &&
+   bool smem = !ctx->divergent_vals[instr->src[2].ssa->index] &&
                ctx->stage != MESA_SHADER_FRAGMENT &&
                ctx->options->chip_class >= VI;
    if (smem)
       offset = bld.as_uniform(offset);
+
+   if (smem)
+      printf("smem!!!\n");
 
    while (writemask) {
       int start, count;
