@@ -4740,7 +4740,8 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 
 
 void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
-                           Temp *res_ptr, Temp *samp_ptr, Temp *fmask_ptr)
+                    Temp *res_ptr, Temp *samp_ptr, Temp *fmask_ptr,
+                    enum glsl_base_type *stype)
 {
    nir_deref_instr *texture_deref_instr = NULL;
    nir_deref_instr *sampler_deref_instr = NULL;
@@ -4757,6 +4758,8 @@ void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
          break;
       }
    }
+
+   *stype = glsl_get_sampler_result_type(texture_deref_instr->type);
 
    if (!sampler_deref_instr)
       sampler_deref_instr = texture_deref_instr;
@@ -4918,7 +4921,13 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    Temp resource, sampler, fmask_ptr, bias, coords, compare, sample_index,
         lod = Temp(), offset = Temp(), ddx = Temp(), ddy = Temp(), derivs = Temp();
    nir_const_value *sample_index_cv = NULL;
-   tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr);
+   enum glsl_base_type stype;
+   tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr, &stype);
+
+   bool tg4_integer_workarounds = ctx->options->chip_class <= VI && instr->op == nir_texop_tg4 &&
+                                  (stype == GLSL_TYPE_UINT || stype == GLSL_TYPE_INT);
+   bool tg4_integer_cube_workaround = tg4_integer_workarounds &&
+                                      instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE;
 
    for (unsigned i = 0; i < instr->num_srcs; i++) {
       switch (instr->src[i].src_type) {
@@ -5106,7 +5115,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    /* Build tex instruction */
    unsigned dmask = nir_ssa_def_components_read(&instr->dest.ssa);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-   Temp tmp_dst = util_bitcount(dmask) == instr->dest.ssa.num_components || instr->op == nir_texop_tg4 ?
+   Temp tmp_dst = (util_bitcount(dmask) == instr->dest.ssa.num_components ||
+                   instr->op == nir_texop_tg4) && !tg4_integer_cube_workaround ?
                   dst :
                   Temp{ctx->program->allocateId(), getRegClass(vgpr, util_bitcount(dmask))};
 
@@ -5166,6 +5176,96 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       }
 
       return;
+   }
+
+   Temp tg4_compare_cube_wa64;
+
+   if (tg4_integer_workarounds) {
+      tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_get_resinfo, Format::MIMG, 2, 1));
+      tex->getOperand(0) = bld.vop1(aco_opcode::v_mov_b32, bld.def(v1), Operand(0u));
+      tex->getOperand(1) = Operand(resource);
+      tex->dmask = 0x3;
+      tex->da = da;
+      Temp size = bld.tmp(v2);
+      tex->getDefinition(0) = Definition(size);
+      tex->can_reorder = true;
+      ctx->block->instructions.emplace_back(std::move(tex));
+      emit_split_vector(ctx, size, size.size());
+
+      Temp half_texel[2];
+      for (unsigned i = 0; i < 2; i++) {
+         half_texel[i] = emit_extract_vector(ctx, size, i, v1);
+         half_texel[i] = bld.vop1(aco_opcode::v_cvt_f32_i32, bld.def(v1), half_texel[i]);
+         half_texel[i] = bld.vop1(aco_opcode::v_rcp_iflag_f32, bld.def(v1), half_texel[i]);
+         half_texel[i] = bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), Operand(0xbf000000/*-0.5*/), half_texel[i]);
+      }
+
+      Temp orig_coords[2] = {
+         emit_extract_vector(ctx, coords, 0, v1),
+         emit_extract_vector(ctx, coords, 1, v1)};
+      Temp new_coords[2] = {
+         bld.vop2(aco_opcode::v_add_f32, bld.def(v1), orig_coords[0], half_texel[0]),
+         bld.vop2(aco_opcode::v_add_f32, bld.def(v1), orig_coords[1], half_texel[1])
+      };
+
+      if (tg4_integer_cube_workaround) {
+         // see comment in ac_nir_to_llvm.c's lower_gather4_integer()
+         Temp desc[resource.size()];
+         aco_ptr<Instruction> split{create_instruction<Instruction>(aco_opcode::p_split_vector,
+                                                                    Format::PSEUDO, 1, resource.size())};
+         split->getOperand(0) = Operand(resource);
+         for (unsigned i = 0; i < resource.size(); i++) {
+            desc[i] = bld.tmp(s1);
+            split->getDefinition(i) = Definition(desc[i]);
+         }
+         ctx->block->instructions.emplace_back(std::move(split));
+
+         Temp dfmt = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), desc[1], Operand(20u | (6u << 16)));
+         Temp compare_cube_wa = bld.sopc(aco_opcode::s_cmp_eq_u32, bld.def(s1, scc), dfmt,
+                                         Operand((uint32_t)V_008F14_IMG_DATA_FORMAT_8_8_8_8));
+
+         Temp nfmt;
+         if (stype == GLSL_TYPE_UINT) {
+            nfmt = bld.sop2(aco_opcode::s_cselect_b32, bld.def(s1),
+                            Operand((uint32_t)V_008F14_IMG_NUM_FORMAT_USCALED),
+                            Operand((uint32_t)V_008F14_IMG_NUM_FORMAT_UINT),
+                            bld.scc(compare_cube_wa));
+         } else {
+            nfmt = bld.sop2(aco_opcode::s_cselect_b32, bld.def(s1),
+                            Operand((uint32_t)V_008F14_IMG_NUM_FORMAT_SSCALED),
+                            Operand((uint32_t)V_008F14_IMG_NUM_FORMAT_SINT),
+                            bld.scc(compare_cube_wa));
+         }
+         tg4_compare_cube_wa64 = as_divergent_bool(ctx, compare_cube_wa, true);
+         nfmt = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), nfmt, Operand(26u));
+
+         desc[1] = bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), desc[1],
+                            Operand((uint32_t)C_008F14_NUM_FORMAT_GFX6));
+         desc[1] = bld.sop2(aco_opcode::s_or_b32, bld.def(s1), bld.def(s1, scc), desc[1], nfmt);
+
+         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector,
+                                                                  Format::PSEUDO, resource.size(), 1)};
+         for (unsigned i = 0; i < resource.size(); i++)
+            vec->getOperand(i) = Operand(desc[i]);
+         resource = bld.tmp(resource.regClass());
+         vec->getDefinition(0) = Definition(resource);
+         ctx->block->instructions.emplace_back(std::move(vec));
+
+         new_coords[0] = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1),
+                                  new_coords[0], orig_coords[0], tg4_compare_cube_wa64);
+         new_coords[1] = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1),
+                                  new_coords[1], orig_coords[1], tg4_compare_cube_wa64);
+      }
+
+      if (coords.size() == 3) {
+         coords = bld.pseudo(aco_opcode::p_create_vector, bld.def(v3),
+                             new_coords[0], new_coords[1],
+                             emit_extract_vector(ctx, coords, 2, v1));
+      } else {
+         assert(coords.size() == 2);
+         coords = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2),
+                             new_coords[0], new_coords[1]);
+      }
    }
 
    if (!(has_ddx && has_ddy) && !has_lod && !level_zero &&
@@ -5347,7 +5447,26 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    ctx->block->instructions.emplace_back(std::move(tex));
 
    emit_split_vector(ctx, tmp_dst, tmp_dst.size());
-   expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, nir_ssa_def_components_read(&instr->dest.ssa));
+
+   if (tg4_integer_cube_workaround) {
+      assert(tmp_dst.id() != dst.id());
+      assert(tmp_dst.size() == dst.size() && dst.size() == 4);
+
+      Temp val[4];
+      for (unsigned i = 0; i < dst.size(); i++) {
+         val[i] = emit_extract_vector(ctx, tmp_dst, i, v1);
+         Temp cvt_val;
+         if (stype == GLSL_TYPE_UINT)
+            cvt_val = bld.vop1(aco_opcode::v_cvt_u32_f32, bld.def(v1), val[i]);
+         else
+            cvt_val = bld.vop1(aco_opcode::v_cvt_i32_f32, bld.def(v1), val[i]);
+         val[i] = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), val[i], cvt_val, tg4_compare_cube_wa64);
+      }
+      bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
+                 val[0], val[1], val[2], val[3]);
+   } else {
+      expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, nir_ssa_def_components_read(&instr->dest.ssa));
+   }
 }
 
 
