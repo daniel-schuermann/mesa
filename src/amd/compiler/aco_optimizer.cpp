@@ -404,6 +404,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             continue;
          }
          if (info.is_constant()) {
+            assert(i != 2 || instr->opcode != aco_opcode::v_cndmask_b32);
             if (i == 0) {
                instr->getOperand(i) = Operand(info.val);
                continue;
