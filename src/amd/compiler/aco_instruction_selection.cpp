@@ -2325,10 +2325,19 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
       unsigned base = nir_intrinsic_base(instr) / 4;
       unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
       unsigned component = nir_intrinsic_component(instr);
-
       Operand P0;
       P0.setFixed(PhysReg{2});
-      bld.vintrp(aco_opcode::v_interp_mov_f32, Definition(dst), P0, bld.m0(ctx->prim_mask), idx, component);
+
+      if (dst.size() == 1) {
+         bld.vintrp(aco_opcode::v_interp_mov_f32, Definition(dst), P0, bld.m0(ctx->prim_mask), idx, component);
+      } else {
+         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size(), 1)};
+         for (unsigned i = 0; i < dst.size(); i++)
+            vec->getOperand(i) = bld.vintrp(aco_opcode::v_interp_mov_f32, bld.def(v1), P0, bld.m0(ctx->prim_mask), idx, component + i);
+         vec->getDefinition(0) = Definition(dst);
+         bld.insert(std::move(vec));
+      }
+
    } else {
       unreachable("Shader stage not implemented");
    }
