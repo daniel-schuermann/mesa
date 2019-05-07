@@ -4780,7 +4780,50 @@ void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
       *fmask_ptr = get_sampler_desc(ctx, texture_deref_instr, ACO_DESC_FMASK, instr, false, false);
 }
 
-void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is_array)
+void build_cube_select(isel_context *ctx, Temp ma, Temp id, Temp deriv,
+                       Temp *out_ma, Temp *out_sc, Temp *out_tc)
+{
+   Builder bld(ctx->program, ctx->block);
+
+   Temp deriv_x = emit_extract_vector(ctx, deriv, 0, v1);
+   Temp deriv_y = emit_extract_vector(ctx, deriv, 1, v1);
+   Temp deriv_z = emit_extract_vector(ctx, deriv, 2, v1);
+
+   Operand neg_one(0xbf800000u);
+   Operand one(0x3f800000u);
+   Operand two(0x40000000u);
+   Operand four(0x40800000u);
+
+   Temp is_ma_positive = bld.vopc(aco_opcode::v_cmp_le_f32, bld.hint_vcc(bld.def(s2)), Operand(0u), ma);
+   Temp sgn_ma = bld.vop2_e64(aco_opcode::v_cndmask_b32, bld.def(v1), neg_one, one, is_ma_positive);
+   Temp neg_sgn_ma = bld.vop2(aco_opcode::v_sub_f32, bld.def(v1), Operand(0u), sgn_ma);
+
+   Temp is_ma_z = bld.vopc(aco_opcode::v_cmp_le_f32, bld.hint_vcc(bld.def(s2)), four, id);
+   Temp is_ma_y = bld.vopc(aco_opcode::v_cmp_le_f32, bld.def(s2), two, id);
+   is_ma_y = bld.sop2(aco_opcode::s_andn2_b64, bld.hint_vcc(bld.def(s2)), is_ma_y, is_ma_z);
+   Temp is_not_ma_x = bld.sop2(aco_opcode::s_or_b64, bld.hint_vcc(bld.def(s2)), is_ma_z, is_ma_y);
+
+   // select sc
+   Temp tmp = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), deriv_z, deriv_x, is_not_ma_x);
+   Temp sgn = bld.vop2_e64(aco_opcode::v_cndmask_b32, bld.def(v1),
+                       bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), neg_sgn_ma, sgn_ma, is_ma_z),
+                       one, is_ma_y);
+   *out_sc = bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), tmp, sgn);
+
+   // select tc
+   tmp = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), deriv_y, deriv_z, is_ma_y);
+   sgn = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), neg_one, sgn_ma, is_ma_y);
+   *out_tc = bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), tmp, sgn);
+
+   // select ma
+   tmp = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1),
+                  bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), deriv_x, deriv_y, is_ma_y),
+                  deriv_z, is_ma_z);
+   tmp = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(0x7fffffffu), tmp);
+   *out_ma = bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), two, tmp);
+}
+
+void prepare_cube_coords(isel_context *ctx, Temp* coords, Temp* ddx, Temp* ddy, bool is_deriv, bool is_array)
 {
    Builder bld(ctx->program, ctx->block);
    Temp coord_args[4], ma, tc, sc, id;
@@ -4802,24 +4845,49 @@ void prepare_cube_coords(isel_context *ctx, Temp* coords, bool is_deriv, bool is
    aco_ptr<VOP3A_instruction> vop3a{create_instruction<VOP3A_instruction>(aco_opcode::v_rcp_f32, asVOP3(Format::VOP1), 1, 1)};
    vop3a->getOperand(0) = Operand(ma);
    vop3a->abs[0] = true;
-   ma = {ctx->program->allocateId(), v1};
-   vop3a->getDefinition(0) = Definition(ma);
+   Temp invma = bld.tmp(v1);
+   vop3a->getDefinition(0) = Definition(invma);
    ctx->block->instructions.emplace_back(std::move(vop3a));
 
    sc = bld.vop3(aco_opcode::v_cubesc_f32, bld.def(v1), coord_args[0], coord_args[1], coord_args[2]);
-   sc = bld.vop2(aco_opcode::v_madak_f32, bld.def(v1), sc, ma, Operand(0x3fc00000u/*1.5*/));
+   if (!is_deriv)
+      sc = bld.vop2(aco_opcode::v_madak_f32, bld.def(v1), sc, invma, Operand(0x3fc00000u/*1.5*/));
 
    tc = bld.vop3(aco_opcode::v_cubetc_f32, bld.def(v1), coord_args[0], coord_args[1], coord_args[2]);
-   tc = bld.vop2(aco_opcode::v_madak_f32, bld.def(v1), tc, ma, Operand(0x3fc00000u/*1.5*/));
+   if (!is_deriv)
+      tc = bld.vop2(aco_opcode::v_madak_f32, bld.def(v1), tc, invma, Operand(0x3fc00000u/*1.5*/));
 
    id = bld.vop3(aco_opcode::v_cubeid_f32, bld.def(v1), coord_args[0], coord_args[1], coord_args[2]);
+
+   if (is_deriv) {
+      sc = bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), sc, invma);
+      tc = bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), tc, invma);
+
+      for (unsigned i = 0; i < 2; i++) {
+         // see comment in ac_prepare_cube_coords()
+         Temp deriv_ma;
+         Temp deriv_sc, deriv_tc;
+         build_cube_select(ctx, ma, id, i ? *ddy : *ddx,
+                           &deriv_ma, &deriv_sc, &deriv_tc);
+
+         deriv_ma = bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), deriv_ma, invma);
+
+         Temp x = bld.vop2(aco_opcode::v_sub_f32, bld.def(v1),
+                               bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), deriv_sc, invma),
+                               bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), deriv_ma, sc));
+         Temp y = bld.vop2(aco_opcode::v_sub_f32, bld.def(v1),
+                               bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), deriv_tc, invma),
+                               bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), deriv_ma, tc));
+         *(i ? ddy : ddx) = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2), x, y);
+      }
+
+      sc = bld.vop2(aco_opcode::v_add_f32, bld.def(v1), Operand(0x3fc00000u/*1.5*/), sc);
+      tc = bld.vop2(aco_opcode::v_add_f32, bld.def(v1), Operand(0x3fc00000u/*1.5*/), tc);
+   }
 
    if (is_array)
       id = bld.vop2(aco_opcode::v_madmk_f32, bld.def(v1), coord_args[3], id, Operand(0x41000000u/*8.0*/));
    *coords = bld.pseudo(aco_opcode::p_create_vector, bld.def(v3), sc, tc, id);
-
-   if (is_deriv)
-      fprintf(stderr, "Unimplemented tex instr type: cube coords2");
 
 }
 
@@ -4952,6 +5020,9 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       offset = pack;
    }
 
+   if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && instr->coord_components)
+      prepare_cube_coords(ctx, &coords, &ddx, &ddy, instr->op == nir_texop_txd, instr->is_array && instr->op != nir_texop_lod);
+
    /* pack derivatives */
    if (has_ddx || has_ddy) {
       if (instr->sampler_dim == GLSL_SAMPLER_DIM_1D && ctx->options->chip_class >= GFX9) {
@@ -4962,9 +5033,6 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       }
       has_derivs = true;
    }
-
-   if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && instr->coord_components)
-      prepare_cube_coords(ctx, &coords, instr->op == nir_texop_txd, instr->is_array && instr->op != nir_texop_lod);
 
    if (instr->coord_components > 1 &&
        instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
