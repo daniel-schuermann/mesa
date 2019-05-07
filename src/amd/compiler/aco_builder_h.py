@@ -199,6 +199,11 @@ public:
        return def;
    }
 
+   Definition hint_${fixed}(Definition def) {
+       def.setHint(aco::${fixed});
+       return def;
+   }
+
 % endfor
    /* hand-written helpers */
    Temp as_uniform(Op op)
