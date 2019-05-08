@@ -443,8 +443,8 @@ aco_print_block_kind(uint16_t kind, FILE *output)
       fprintf(output, "invert, ");
    if (kind & block_kind_uses_discard_if)
       fprintf(output, "discard_if, ");
-   if (kind & block_kind_uses_load_helper)
-      fprintf(output, "load_helper, ");
+   if (kind & block_kind_needs_lowering)
+      fprintf(output, "needs_lowering, ");
 }
 
 void aco_print_block(const struct Block* block, FILE *output)

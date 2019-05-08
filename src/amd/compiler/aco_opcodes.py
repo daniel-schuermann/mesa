@@ -226,6 +226,8 @@ opcode("p_is_helper")
 
 opcode("p_as_uniform")
 
+opcode("p_fs_buffer_store_smem", format=Format.SMEM)
+
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
 SOP2_SCC = {
    (0, "s_add_u32"), 
