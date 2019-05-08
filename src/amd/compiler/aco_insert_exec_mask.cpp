@@ -124,7 +124,7 @@ bool needs_exact(aco_ptr<Instruction>& instr) {
       MIMG_instruction *mimg = static_cast<MIMG_instruction *>(instr.get());
       return mimg->disable_wqm;
    } else {
-      return false;
+      return instr->opcode == aco_opcode::p_fs_buffer_store_smem;
    }
 }
 
@@ -234,7 +234,7 @@ void calculate_wqm_needs(exec_ctx& exec_ctx)
       if (exec_ctx.program->blocks[i]->kind & block_kind_uses_discard_if ||
           exec_ctx.program->blocks[i]->kind & block_kind_discard)
          preserve_wqm = true;
-      if (exec_ctx.program->blocks[i]->kind & block_kind_uses_load_helper)
+      if (exec_ctx.program->blocks[i]->kind & block_kind_needs_lowering)
          exec_ctx.info[i].block_needs |= Exact;
 
       ever_again_needs |= exec_ctx.info[i].block_needs;
@@ -495,6 +495,43 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
    return i;
 }
 
+void lower_fs_buffer_store_smem(Builder& bld, bool need_check, aco_ptr<Instruction>& instr, Temp cur_exec)
+{
+   Operand offset = instr->getOperand(1);
+   if (need_check) {
+      /* if exec is zero, then use UINT32_MAX as an offset and make this store a no-op */
+      Temp nonempty = bld.sopc(aco_opcode::s_cmp_lg_u64, bld.def(s1, scc), cur_exec, Operand(0u));
+
+      if (offset.isLiteral())
+         offset = bld.sop1(aco_opcode::s_mov_b32, bld.def(s1), offset);
+
+      offset = bld.sop2(aco_opcode::s_cselect_b32, bld.hint_m0(bld.def(s1)),
+                        offset, Operand(UINT32_MAX), bld.scc(nonempty));
+   } else if (offset.isConstant() && offset.constantValue() > 0xFFFFF) {
+      offset = bld.sop1(aco_opcode::s_mov_b32, bld.hint_m0(bld.def(s1)), offset);
+   }
+   if (!offset.isConstant())
+      offset.setFixed(m0);
+
+   switch (instr->getOperand(2).size()) {
+   case 1:
+      instr->opcode = aco_opcode::s_buffer_store_dword;
+      break;
+   case 2:
+      instr->opcode = aco_opcode::s_buffer_store_dwordx2;
+      break;
+   case 4:
+      instr->opcode = aco_opcode::s_buffer_store_dwordx4;
+      break;
+   default:
+      unreachable("Invalid SMEM buffer store size");
+   }
+   instr->getOperand(1) = offset;
+   /* as_uniform() needs to be done here so it's done in exact mode and helper
+    * lanes don't contribute. */
+   instr->getOperand(2) = Operand(bld.as_uniform(instr->getOperand(2)));
+}
+
 void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
                           std::vector<aco_ptr<Instruction>>& instructions,
                           unsigned idx)
@@ -503,7 +540,7 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
    bool process = ctx.handle_wqm ||
                   ctx.info[block->index].block_needs == (WQM | Exact) ||
                   block->kind & block_kind_uses_discard_if ||
-                  block->kind & block_kind_uses_load_helper;
+                  block->kind & block_kind_needs_lowering;
    if (!process) {
       std::vector<aco_ptr<Instruction>>::iterator it = std::next(block->instructions.begin(), idx);
       instructions.insert(instructions.end(),
@@ -563,6 +600,10 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
             instr->getDefinition(0) = dst;
             instr->getDefinition(1) = bld.def(s1, scc);
          }
+      } else if (instr->opcode == aco_opcode::p_fs_buffer_store_smem) {
+         bool need_check = ctx.info[block->index].exec.size() != 1 &&
+                           !(ctx.info[block->index].exec[ctx.info[block->index].exec.size() - 2].second & Exact);
+         lower_fs_buffer_store_smem(bld, need_check, instr, ctx.info[block->index].exec.back().first);
       }
 
       bld.insert(std::move(instr));

@@ -875,7 +875,7 @@ enum block_kind {
    block_kind_merge = 1 << 9,
    block_kind_invert = 1 << 10,
    block_kind_uses_discard_if = 1 << 11,
-   block_kind_uses_load_helper = 1 << 12,
+   block_kind_needs_lowering = 1 << 12,
 };
 
 /* CFG */

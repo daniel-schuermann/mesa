@@ -3425,12 +3425,11 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp rsrc = convert_pointer_to_64_bit(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
    rsrc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), rsrc, Operand(0u));
 
-   // TODO: SMEM stores require some extra work to properly handle helper lanes
    bool smem = !ctx->divergent_vals[instr->src[2].ssa->index] &&
-               ctx->stage != MESA_SHADER_FRAGMENT &&
                ctx->options->chip_class >= VI;
    if (smem)
       offset = bld.as_uniform(offset);
+   bool smem_nonfs = smem && ctx->stage != MESA_SHADER_FRAGMENT;
 
    while (writemask) {
       int start, count;
@@ -3450,16 +3449,16 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
          aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, count, 1)};
          for (int i = 0; i < count; i++) {
             Temp elem = emit_extract_vector(ctx, data, start + i, getRegClass(data.type(), 1));
-            vec->getOperand(i) = Operand(smem ? bld.as_uniform(elem) : elem);
+            vec->getOperand(i) = Operand(smem_nonfs ? bld.as_uniform(elem) : elem);
          }
-         write_data = {ctx->program->allocateId(), getRegClass(smem ? sgpr : vgpr, count)};
+         write_data = {ctx->program->allocateId(), getRegClass(smem_nonfs ? sgpr : data.type(), count)};
          vec->getDefinition(0) = Definition(write_data);
          ctx->block->instructions.emplace_back(std::move(vec));
       } else if (!smem && data.type() != vgpr) {
          assert(num_bytes % 4 == 0);
          write_data = {ctx->program->allocateId(), getRegClass(vgpr, num_bytes / 4)};
          emit_v_mov(ctx, data, write_data);
-      } else if (smem && data.type() == vgpr) {
+      } else if (smem_nonfs && data.type() == vgpr) {
          assert(num_bytes % 4 == 0);
          write_data = bld.as_uniform(data);
       } else {
@@ -3478,6 +3477,7 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
             break;
          case 12:
             vmem_op = aco_opcode::buffer_store_dwordx3;
+            smem_op = aco_opcode::last_opcode;
             assert(!smem);
             break;
          case 16:
@@ -3487,6 +3487,8 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
          default:
             unreachable("Store SSBO not implemented for this size.");
       }
+      if (ctx->stage == MESA_SHADER_FRAGMENT)
+         smem_op = aco_opcode::p_fs_buffer_store_smem;
 
       if (smem) {
          aco_ptr<SMEM_instruction> store{create_instruction<SMEM_instruction>(smem_op, Format::SMEM, 3, 0)};
@@ -3498,13 +3500,18 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
          } else {
             store->getOperand(1) = Operand(offset);
          }
-         store->getOperand(1).setFixed(m0);
+         if (smem_op != aco_opcode::p_fs_buffer_store_smem)
+            store->getOperand(1).setFixed(m0);
          store->getOperand(2) = Operand(write_data);
          store->glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT | ACCESS_NON_READABLE);
          store->disable_wqm = true;
          store->barrier = barrier_buffer;
          ctx->block->instructions.emplace_back(std::move(store));
          ctx->program->wb_smem_l1_on_end = true;
+         if (smem_op == aco_opcode::p_fs_buffer_store_smem) {
+            ctx->block->kind |= block_kind_needs_lowering;
+            ctx->program->needs_exact = true;
+         }
       } else {
          aco_ptr<MUBUF_instruction> store{create_instruction<MUBUF_instruction>(vmem_op, Format::MUBUF, 4, 0)};
          store->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand();
@@ -4884,7 +4891,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_load_helper_invocation: {
       Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
       bld.pseudo(aco_opcode::p_is_helper, Definition(dst));
-      ctx->block->kind |= block_kind_uses_load_helper;
+      ctx->block->kind |= block_kind_needs_lowering;
       ctx->program->needs_exact = true;
       break;
    }
