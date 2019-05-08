@@ -120,7 +120,8 @@ fs_input get_interp_input(nir_intrinsic_op intrin, enum glsl_interp_mode interp)
    switch (interp) {
    case INTERP_MODE_SMOOTH:
    case INTERP_MODE_NONE:
-      if (intrin == nir_intrinsic_load_barycentric_pixel)
+      if (intrin == nir_intrinsic_load_barycentric_pixel ||
+          intrin == nir_intrinsic_load_barycentric_at_sample)
          return fs_input::persp_center_p1;
       else if (intrin == nir_intrinsic_load_barycentric_centroid)
          return fs_input::persp_centroid_p1;
@@ -336,6 +337,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_barycentric_sample:
                   case nir_intrinsic_load_barycentric_pixel:
                   case nir_intrinsic_load_barycentric_centroid:
+                  case nir_intrinsic_load_barycentric_at_sample:
                   case nir_intrinsic_load_interpolated_input:
                   case nir_intrinsic_load_frag_coord:
                   case nir_intrinsic_load_layer_id:
@@ -435,7 +437,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                switch(intrinsic->intrinsic) {
                   case nir_intrinsic_load_barycentric_sample:
                   case nir_intrinsic_load_barycentric_pixel:
-                  case nir_intrinsic_load_barycentric_centroid: {
+                  case nir_intrinsic_load_barycentric_centroid:
+                  case nir_intrinsic_load_barycentric_at_sample: {
                      glsl_interp_mode mode = (glsl_interp_mode)nir_intrinsic_interp_mode(intrinsic);
                      ctx->fs_vgpr_args[get_interp_input(intrinsic->intrinsic, mode)] = true;
                      break;
@@ -583,7 +586,7 @@ static void allocate_user_sgprs(isel_context *ctx,
       }
       break;
    case MESA_SHADER_FRAGMENT:
-      user_sgpr_count += ctx->program->info->info.ps.needs_sample_positions;
+      //user_sgpr_count += ctx->program->info->info.ps.needs_sample_positions;
       break;
    case MESA_SHADER_COMPUTE:
       if (ctx->program->info->info.cs.uses_grid_size)
@@ -785,7 +788,7 @@ void add_startpgm(struct isel_context *ctx)
    assert(!user_sgpr_info.indirect_all_descriptor_sets && "Not yet implemented.");
    arg_info args = {};
 
-   if (user_sgpr_info.need_ring_offsets && !ctx->options->supports_spill)
+   if (user_sgpr_info.need_ring_offsets/* && !ctx->options->supports_spill*/)
       add_arg(&args, s2, &ctx->ring_offsets, 0);
 
    if (ctx->options->supports_spill || user_sgpr_info.need_ring_offsets) {
