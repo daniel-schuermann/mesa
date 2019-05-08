@@ -648,14 +648,14 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       if (instr->getOperand(0).constantEquals(0x7FFFFFFF) && instr->getOperand(1).isTemp())
          ctx.info[instr->getDefinition(0).tempId()].set_abs(instr->getOperand(1).getTemp());
       break;
-   case aco_opcode::v_sub_f32:
-   case aco_opcode::v_subrev_f32: { /* neg */
-      int first = instr->opcode == aco_opcode::v_subrev_f32;
-      if (instr->getOperand(first).constantEquals(0) && instr->getOperand(!first).isTemp() &&
-          (!instr->isVOP3() || !static_cast<VOP3A_instruction*>(instr.get())->neg[!first])) {
-         ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(!first).getTemp());
-         if (instr->isVOP3() && static_cast<VOP3A_instruction*>(instr.get())->abs[!first]) /* neg(abs(x)) */
-            ctx.info[instr->getDefinition(0).tempId()].set_abs(instr->getOperand(!first).getTemp());
+   case aco_opcode::v_xor_b32: { /* neg */
+      for (unsigned i = 0; i < 2; i++) {
+         if (instr->getOperand(i).constantEquals(0x80000000u) && instr->getOperand(!i).isTemp()) {
+            ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(!i).getTemp());
+            if (ctx.info[instr->getOperand(!i).tempId()].is_abs()) /* neg(abs(x)) */
+               ctx.info[instr->getDefinition(0).tempId()].set_abs(ctx.info[instr->getOperand(!i).tempId()].temp);
+            break;
+         }
       }
       break;
    }
