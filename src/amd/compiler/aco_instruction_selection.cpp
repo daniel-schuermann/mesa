@@ -458,6 +458,24 @@ void emit_vopc_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
             case aco_opcode::v_cmp_ge_u32:
                op = aco_opcode::v_cmp_le_u32;
                break;
+            case aco_opcode::v_cmp_lt_f64:
+               op = aco_opcode::v_cmp_gt_f64;
+               break;
+            case aco_opcode::v_cmp_ge_f64:
+               op = aco_opcode::v_cmp_le_f64;
+               break;
+            case aco_opcode::v_cmp_lt_i64:
+               op = aco_opcode::v_cmp_gt_i64;
+               break;
+            case aco_opcode::v_cmp_ge_i64:
+               op = aco_opcode::v_cmp_le_i64;
+               break;
+            case aco_opcode::v_cmp_lt_u64:
+               op = aco_opcode::v_cmp_gt_u64;
+               break;
+            case aco_opcode::v_cmp_ge_u64:
+               op = aco_opcode::v_cmp_le_u64;
+               break;
             default: /* eq and ne are commutative */
                break;
          }
@@ -1820,33 +1838,49 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_flt: {
-      emit_comparison(ctx, instr, aco_opcode::v_cmp_lt_f32, dst);
+      if (instr->src[0].src.ssa->bit_size == 32)
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_lt_f32, dst);
+      else if (instr->src[0].src.ssa->bit_size == 64)
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_lt_f64, dst);
       break;
    }
    case nir_op_fge: {
-      emit_comparison(ctx, instr, aco_opcode::v_cmp_ge_f32, dst);
+      if (instr->src[0].src.ssa->bit_size == 32)
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_ge_f32, dst);
+      else if (instr->src[0].src.ssa->bit_size == 64)
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_ge_f64, dst);
       break;
    }
    case nir_op_feq: {
-      emit_comparison(ctx, instr, aco_opcode::v_cmp_eq_f32, dst);
+      if (instr->src[0].src.ssa->bit_size == 32)
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_eq_f32, dst);
+      else if (instr->src[0].src.ssa->bit_size == 64)
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_eq_f64, dst);
       break;
    }
    case nir_op_fne: {
-      emit_comparison(ctx, instr, aco_opcode::v_cmp_neq_f32, dst);
+      if (instr->src[0].src.ssa->bit_size == 32)
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_neq_f32, dst);
+      else if (instr->src[0].src.ssa->bit_size == 64)
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_neq_f64, dst);
       break;
    }
    case nir_op_ilt: {
-      if (dst.regClass() == s2)
+      if (dst.regClass() == s2 && instr->src[0].src.ssa->bit_size == 32)
          emit_comparison(ctx, instr, aco_opcode::v_cmp_lt_i32, dst);
-      else
+      else if (dst.regClass() == s1 && instr->src[0].src.ssa->bit_size == 32)
          emit_comparison(ctx, instr, aco_opcode::s_cmp_lt_i32, dst);
+      else if (dst.regClass() == s2 && instr->src[0].src.ssa->bit_size == 64)
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_lt_i64, dst);
       break;
    }
    case nir_op_ige: {
-      if (dst.regClass() == s2)
+      if (dst.regClass() == s2 && instr->src[0].src.ssa->bit_size == 32)
          emit_comparison(ctx, instr, aco_opcode::v_cmp_ge_i32, dst);
-      else
+      else if (dst.regClass() == s1 && instr->src[0].src.ssa->bit_size == 32)
          emit_comparison(ctx, instr, aco_opcode::s_cmp_ge_i32, dst);
+      else if (dst.regClass() == s2 && instr->src[0].src.ssa->bit_size == 64)
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_ge_i64, dst);
       break;
    }
    case nir_op_ieq: {
@@ -1900,17 +1934,21 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_ult: {
-      if (dst.regClass() == s2)
+      if (dst.regClass() == s2 && instr->src[0].src.ssa->bit_size == 32)
          emit_comparison(ctx, instr, aco_opcode::v_cmp_lt_u32, dst);
-      else
+      else if (dst.regClass() == s1 && instr->src[0].src.ssa->bit_size == 32)
          emit_comparison(ctx, instr, aco_opcode::s_cmp_lt_u32, dst);
+      else if (dst.regClass() == s2 && instr->src[0].src.ssa->bit_size == 64)
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_lt_u64, dst);
       break;
    }
    case nir_op_uge: {
-      if (dst.regClass() == s2)
+      if (dst.regClass() == s2 && instr->src[0].src.ssa->bit_size == 32)
          emit_comparison(ctx, instr, aco_opcode::v_cmp_ge_u32, dst);
-      else
+      else if (dst.regClass() == s1 && instr->src[0].src.ssa->bit_size == 32)
          emit_comparison(ctx, instr, aco_opcode::s_cmp_ge_u32, dst);
+      else if (dst.regClass() == s2 && instr->src[0].src.ssa->bit_size == 64)
+         emit_comparison(ctx, instr, aco_opcode::v_cmp_ge_u64, dst);
       break;
    }
    case nir_op_fddx:
