@@ -186,7 +186,10 @@ visit_intrinsic(bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_load_interpolated_input:
    case nir_intrinsic_load_barycentric_pixel:
    case nir_intrinsic_load_barycentric_centroid:
+   case nir_intrinsic_load_barycentric_at_sample:
+   case nir_intrinsic_load_barycentric_at_offset:
    case nir_intrinsic_load_frag_coord:
+   case nir_intrinsic_load_sample_pos:
    case nir_intrinsic_load_layer_id:
    case nir_intrinsic_load_view_index:
    case nir_intrinsic_load_invocation_id:
