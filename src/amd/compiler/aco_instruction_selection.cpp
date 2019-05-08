@@ -1345,7 +1345,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_fneg: {
       Temp src = get_alu_src(ctx, instr->src[0]);
       if (dst.size() == 1) {
-         bld.vop2(aco_opcode::v_sub_f32, Definition(dst), Operand(0u), as_vgpr(ctx, src));
+         bld.vop2(aco_opcode::v_xor_b32, Definition(dst), Operand(0x80000000u), as_vgpr(ctx, src));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
