@@ -3662,6 +3662,7 @@ void visit_load_global(isel_context *ctx, nir_intrinsic_instr *instr)
 
 void visit_store_global(isel_context *ctx, nir_intrinsic_instr *instr)
 {
+   Builder bld(ctx->program, ctx->block);
    unsigned elem_size_bytes = instr->src[0].ssa->bit_size / 8;
 
    Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
@@ -3681,6 +3682,24 @@ void visit_store_global(isel_context *ctx, nir_intrinsic_instr *instr)
          write_data = {ctx->program->allocateId(), getRegClass(vgpr, count)};
          vec->getDefinition(0) = Definition(write_data);
          ctx->block->instructions.emplace_back(std::move(vec));
+      }
+
+      unsigned offset = start * elem_size_bytes;
+      if (offset > 0 && ctx->options->chip_class < GFX9) {
+         Temp addr0 = bld.tmp(v1), addr1 = bld.tmp(v1);
+         Temp new_addr0 = bld.tmp(v1), new_addr1 = bld.tmp(v1);
+         Temp carry = bld.tmp(s2);
+         bld.pseudo(aco_opcode::p_split_vector, Definition(addr0), Definition(addr1), addr);
+
+         bld.vop2(aco_opcode::v_add_co_u32, Definition(new_addr0), bld.hint_vcc(Definition(carry)),
+                  Operand(offset), addr0);
+         bld.vop2(aco_opcode::v_addc_co_u32, Definition(new_addr1), bld.def(s2),
+                  Operand(0u), addr1,
+                  carry).def(1).setHint(vcc);
+
+         addr = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2), new_addr0, new_addr1);
+
+         offset = 0;
       }
 
       bool glc = nir_intrinsic_access(instr) & (ACCESS_VOLATILE | ACCESS_COHERENT | ACCESS_NON_READABLE);
@@ -3707,7 +3726,7 @@ void visit_store_global(isel_context *ctx, nir_intrinsic_instr *instr)
       flat->getOperand(1) = Operand();
       flat->getOperand(2) = Operand(data);
       flat->glc = glc;
-      flat->offset = start * elem_size_bytes;
+      flat->offset = offset;
       ctx->block->instructions.emplace_back(std::move(flat));
    }
 }
