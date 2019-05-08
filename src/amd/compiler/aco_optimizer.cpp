@@ -885,8 +885,53 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       }
    }
 
+   /* neg(mul(a, b)) -> mad(neg(a), b, 0) */
+   if (ctx.info[instr->getDefinition(0).tempId()].is_neg()) {
+      Temp val = ctx.info[instr->getDefinition(0).tempId()].temp;
+
+      if (ctx.uses[instr->getDefinition(0).tempId()] == 0 || !ctx.info[val.id()].is_mul())
+         return;
+
+      Instruction* mul_instr = ctx.info[val.id()].instr;
+
+      if (mul_instr->getOperand(0).isLiteral())
+         return;
+      if (mul_instr->isVOP3() && static_cast<VOP3A_instruction*>(mul_instr)->clamp)
+         return;
+
+      /* convert to mad */
+      ctx.uses[mul_instr->getDefinition(0).tempId()]--;
+      if (ctx.uses[mul_instr->getDefinition(0).tempId()]) {
+         if (mul_instr->getOperand(0).isTemp())
+            ctx.uses[mul_instr->getOperand(0).tempId()]++;
+         if (mul_instr->getOperand(1).isTemp())
+            ctx.uses[mul_instr->getOperand(1).tempId()]++;
+      }
+
+      aco_ptr<VOP3A_instruction> mad{create_instruction<VOP3A_instruction>(aco_opcode::v_mad_f32, Format::VOP3A, 3, 1)};
+      mad->getOperand(0) = mul_instr->getOperand(0);
+      mad->getOperand(1) = mul_instr->getOperand(1);
+      mad->getOperand(2) = Operand(0u);
+      if (mul_instr->isVOP3()) {
+         VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(mul_instr);
+         mad->neg[0] = vop3->neg[0];
+         mad->neg[1] = vop3->neg[1];
+         mad->abs[0] = vop3->abs[0];
+         mad->abs[1] = vop3->abs[1];
+         mad->omod = vop3->omod;
+      }
+      mad->neg[0] ^= true;
+      mad->clamp = false;
+      mad->getDefinition(0) = instr->getDefinition(0);
+
+      /* mark this ssa_def to be re-checked for profitability and literals */
+      ctx.mad_infos.emplace_back(std::move(instr), mul_instr->getDefinition(0).tempId(), true);
+      ctx.info[mad->getDefinition(0).tempId()].set_mad(mad.get(), ctx.mad_infos.size() - 1);
+      instr.reset(mad.release());
+      return;
+   }
    /* combine mul+add -> mad */
-   if (instr->opcode == aco_opcode::v_add_f32 ||
+   else if (instr->opcode == aco_opcode::v_add_f32 ||
        instr->opcode == aco_opcode::v_sub_f32 ||
        instr->opcode == aco_opcode::v_subrev_f32) {
 
