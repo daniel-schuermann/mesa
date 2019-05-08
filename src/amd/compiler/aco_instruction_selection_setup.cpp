@@ -213,10 +213,12 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      break;
                   case nir_op_ilt:
                   case nir_op_ige:
-                  case nir_op_ieq:
-                  case nir_op_ine:
                   case nir_op_ult:
                   case nir_op_uge:
+                     size = alu_instr->src[0].src.ssa->bit_size == 64 ? 2 : 1;
+                     /* fallthrough */
+                  case nir_op_ieq:
+                  case nir_op_ine:
                   case nir_op_i2b1:
                      if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index]) {
                         size = 2;
