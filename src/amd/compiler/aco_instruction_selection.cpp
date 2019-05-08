@@ -4248,6 +4248,93 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       emit_split_vector(ctx, dst, 2);
       break;
    }
+   case nir_intrinsic_load_barycentric_at_sample: {
+      uint32_t sample_pos_offset = RING_PS_SAMPLE_POSITIONS * 16;
+      switch (ctx->options->key.fs.num_samples) {
+         case 2: sample_pos_offset += 1 << 3; break;
+         case 4: sample_pos_offset += 3 << 3; break;
+         case 8: sample_pos_offset += 7 << 3; break;
+         default: break;
+      }
+      Temp sample_pos;
+      Temp addr = get_ssa_temp(ctx, instr->src[0].ssa);
+      nir_const_value* const_addr = nir_src_as_const_value(instr->src[0]);
+      if (addr.type() == sgpr) {
+         Operand offset;
+         if (const_addr) {
+            sample_pos_offset += const_addr->u32 << 3;
+            offset = Operand(sample_pos_offset);
+         } else if (ctx->options->chip_class >= GFX9) {
+            offset = bld.sop2(aco_opcode::s_lshl3_add_u32, bld.def(s1), bld.def(s1, scc), addr, Operand(sample_pos_offset));
+         } else {
+            offset = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), addr, Operand(3u));
+            offset = bld.sop2(aco_opcode::s_add_u32, bld.def(s1), bld.def(s1, scc), addr, Operand(sample_pos_offset));
+         }
+         addr = ctx->ring_offsets;
+         sample_pos = bld.smem(aco_opcode::s_load_dwordx2, bld.def(s2), addr, Operand(offset));
+
+      } else if (ctx->options->chip_class >= GFX9) {
+         addr = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(3u), addr);
+         aco_ptr<FLAT_instruction> flat{create_instruction<FLAT_instruction>(aco_opcode::global_load_dwordx2, Format::GLOBAL, 2, 1)};
+         sample_pos = bld.tmp(v2);
+         flat->getDefinition(0) = Definition(sample_pos);
+         flat->getOperand(0) = Operand(addr);
+         flat->getOperand(1) = Operand(ctx->ring_offsets);
+         flat->offset = sample_pos_offset;
+         ctx->block->instructions.emplace_back(std::move(flat));
+      } else {
+         /* addr += ctx->ring_offsets + sample_pos_offset */
+         Temp tmp0 = bld.tmp(s1);
+         Temp tmp1 = bld.tmp(s1);
+         bld.pseudo(aco_opcode::p_split_vector, Definition(tmp0), Definition(tmp1), ctx->ring_offsets);
+         Definition scc_tmp = bld.def(s1, scc);
+         tmp0 = bld.sop2(aco_opcode::s_add_u32, bld.def(s1), scc_tmp, tmp0, Operand(sample_pos_offset));
+         tmp1 = bld.sop2(aco_opcode::s_addc_u32, bld.def(s1), bld.def(s1, scc), tmp1, Operand(0u), scc_tmp.getTemp());
+         addr = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(3u), addr);
+         Temp pck0 = bld.tmp(v1);
+         Temp carry = emit_v_add32(ctx, pck0, Operand(tmp0), Operand(addr), true);
+         tmp1 = as_vgpr(ctx, tmp1);
+         Temp pck1 = bld.vop2_e64(aco_opcode::v_addc_co_u32, bld.def(v1), bld.hint_vcc(bld.def(s2)), tmp1, Operand(0u), carry);
+         addr = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2), pck0, pck1);
+
+         /* sample_pos = flat_load_dwordx2 addr */
+         aco_ptr<FLAT_instruction> flat{create_instruction<FLAT_instruction>(aco_opcode::flat_load_dwordx2, Format::FLAT, 2, 1)};
+         sample_pos = bld.tmp(v2);
+         flat->getDefinition(0) = Definition(sample_pos);
+         flat->getOperand(0) = Operand(addr);
+         flat->getOperand(1) = Operand();
+         flat->offset = 0;
+         ctx->block->instructions.emplace_back(std::move(flat));
+      }
+
+      Temp p1 = ctx->fs_inputs[fs_input::persp_center_p1];
+      Temp p2 = ctx->fs_inputs[fs_input::persp_center_p2];
+
+      /* Build DD X/Y */
+      Temp tl_1 = bld.vop1_dpp(aco_opcode::v_mov_b32, bld.def(v1), p1, dpp_quad_perm(0, 0, 0, 0));
+      Temp ddx_1 = bld.vop2_dpp(aco_opcode::v_sub_f32, bld.def(v1), p1, tl_1, dpp_quad_perm(1, 1, 1, 1));
+      Temp ddy_1 = bld.vop2_dpp(aco_opcode::v_sub_f32, bld.def(v1), p1, tl_1, dpp_quad_perm(2, 2, 2, 2));
+      Temp tl_2 = bld.vop1_dpp(aco_opcode::v_mov_b32, bld.def(v1), p2, dpp_quad_perm(0, 0, 0, 0));
+      Temp ddx_2 = bld.vop2_dpp(aco_opcode::v_sub_f32, bld.def(v1), p2, tl_2, dpp_quad_perm(1, 1, 1, 1));
+      Temp ddy_2 = bld.vop2_dpp(aco_opcode::v_sub_f32, bld.def(v1), p2, tl_2, dpp_quad_perm(2, 2, 2, 2));
+
+      /* sample_pos -= 0.5 */
+      Temp pos1 = bld.tmp(getRegClass(sample_pos.type(), 1));
+      Temp pos2 = bld.tmp(getRegClass(sample_pos.type(), 1));
+      bld.pseudo(aco_opcode::p_split_vector, Definition(pos1), Definition(pos2), sample_pos);
+      pos1 = bld.vop2_e64(aco_opcode::v_sub_f32, bld.def(v1), pos1, Operand(0x3f000000u));
+      pos2 = bld.vop2_e64(aco_opcode::v_sub_f32, bld.def(v1), pos2, Operand(0x3f000000u));
+
+      /* res_k = p_k + ddx_k * pos1 + ddy_k * pos2 */
+      Temp tmp1 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddx_1, pos1, p1);
+      Temp tmp2 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddx_2, pos1, p2);
+      tmp1 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddy_1, pos2, tmp1);
+      tmp2 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddy_2, pos2, tmp2);
+      Temp wqm_dst = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2), tmp1, tmp2);
+      emit_wqm(ctx, wqm_dst, get_ssa_temp(ctx, &instr->dest.ssa));
+
+      break;
+   }
    case nir_intrinsic_load_front_face: {
       bld.vopc(aco_opcode::v_cmp_lg_u32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)),
                Operand(0u), ctx->fs_inputs[fs_input::front_face]).def(0).setHint(vcc);
