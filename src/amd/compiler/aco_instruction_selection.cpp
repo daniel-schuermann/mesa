@@ -4142,7 +4142,7 @@ Temp emit_boolean_reduce(isel_context *ctx, nir_op op, unsigned cluster_size, Te
       if (cluster_mask != 0xffffffff)
          tmp = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(cluster_mask), tmp);
 
-      Definition cmp_def;
+      Definition cmp_def = Definition();
       if (op == nir_op_iand) {
          cmp_def = bld.vopc(aco_opcode::v_cmp_eq_u32, bld.def(s2), Operand(cluster_mask), tmp).def(0);
       } else if (op == nir_op_ior) {
@@ -4176,7 +4176,7 @@ Temp emit_boolean_exclusive_scan(isel_context *ctx, nir_op op, Temp src)
    Temp mbcnt = bld.vop3(aco_opcode::v_mbcnt_hi_u32_b32, bld.def(v1), hi,
                          bld.vop3(aco_opcode::v_mbcnt_lo_u32_b32, bld.def(v1), lo, Operand(0u)));
 
-   Definition cmp_def;
+   Definition cmp_def = Definition();
    if (op == nir_op_iand)
       cmp_def = bld.vopc(aco_opcode::v_cmp_eq_u32, bld.def(s2), Operand(0u), mbcnt).def(0);
    else if (op == nir_op_ior)
@@ -5048,7 +5048,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    Builder bld(ctx->program, ctx->block);
    bool has_bias = false, has_lod = false, level_zero = false, has_compare = false,
         has_offset = false, has_ddx = false, has_ddy = false, has_derivs = false, has_sample_index = false;
-   Temp resource, sampler, fmask_ptr, bias, coords, compare, sample_index,
+   Temp resource, sampler, fmask_ptr, bias, coords, compare, sample_index = Temp(),
         lod = Temp(), offset = Temp(), ddx = Temp(), ddy = Temp(), derivs = Temp();
    nir_const_value *sample_index_cv = NULL;
    enum glsl_base_type stype;
@@ -5245,10 +5245,10 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    /* Build tex instruction */
    unsigned dmask = nir_ssa_def_components_read(&instr->dest.ssa);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-   Temp tmp_dst = (util_bitcount(dmask) == instr->dest.ssa.num_components ||
-                   instr->op == nir_texop_tg4) && !tg4_integer_cube_workaround ?
-                  dst :
-                  Temp{ctx->program->allocateId(), getRegClass(vgpr, util_bitcount(dmask))};
+   Temp tmp_dst = dst;
+   if ((util_bitcount(dmask) != instr->dest.ssa.num_components && instr->op != nir_texop_tg4) ||
+       tg4_integer_cube_workaround || instr->op == nir_texop_samples_identical)
+      tmp_dst = Temp{ctx->program->allocateId(), getRegClass(vgpr, util_bitcount(dmask))};
 
    /* gather4 selects the component by dmask and always returns vec4 */
    if (instr->op == nir_texop_tg4) {
@@ -5308,7 +5308,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       return;
    }
 
-   Temp tg4_compare_cube_wa64;
+   Temp tg4_compare_cube_wa64 = Temp();
 
    if (tg4_integer_workarounds) {
       tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_get_resinfo, Format::MIMG, 2, 1));
