@@ -4226,6 +4226,33 @@ void emit_uniform_subgroup(isel_context *ctx, nir_intrinsic_instr *instr, Temp s
    }
 }
 
+void emit_interp_center(isel_context *ctx, Temp dst, Temp pos1, Temp pos2)
+{
+   Builder bld(ctx->program, ctx->block);
+   Temp p1 = ctx->fs_inputs[fs_input::persp_center_p1];
+   Temp p2 = ctx->fs_inputs[fs_input::persp_center_p2];
+
+   /* Build DD X/Y */
+   Temp tl_1 = bld.vop1_dpp(aco_opcode::v_mov_b32, bld.def(v1), p1, dpp_quad_perm(0, 0, 0, 0));
+   Temp ddx_1 = bld.vop2_dpp(aco_opcode::v_sub_f32, bld.def(v1), p1, tl_1, dpp_quad_perm(1, 1, 1, 1));
+   Temp ddy_1 = bld.vop2_dpp(aco_opcode::v_sub_f32, bld.def(v1), p1, tl_1, dpp_quad_perm(2, 2, 2, 2));
+   Temp tl_2 = bld.vop1_dpp(aco_opcode::v_mov_b32, bld.def(v1), p2, dpp_quad_perm(0, 0, 0, 0));
+   Temp ddx_2 = bld.vop2_dpp(aco_opcode::v_sub_f32, bld.def(v1), p2, tl_2, dpp_quad_perm(1, 1, 1, 1));
+   Temp ddy_2 = bld.vop2_dpp(aco_opcode::v_sub_f32, bld.def(v1), p2, tl_2, dpp_quad_perm(2, 2, 2, 2));
+
+   /* res_k = p_k + ddx_k * pos1 + ddy_k * pos2 */
+   Temp tmp1 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddx_1, pos1, p1);
+   Temp tmp2 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddx_2, pos1, p2);
+   tmp1 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddy_1, pos2, tmp1);
+   tmp2 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddy_2, pos2, tmp2);
+   Temp wqm1 = bld.tmp(v1);
+   emit_wqm(ctx, tmp1, wqm1);
+   Temp wqm2 = bld.tmp(v1);
+   emit_wqm(ctx, tmp2, wqm2);
+   bld.pseudo(aco_opcode::p_create_vector, Definition(dst), wqm1, wqm2);
+   return;
+}
+
 void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Builder bld(ctx->program, ctx->block);
@@ -4307,17 +4334,6 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
          ctx->block->instructions.emplace_back(std::move(flat));
       }
 
-      Temp p1 = ctx->fs_inputs[fs_input::persp_center_p1];
-      Temp p2 = ctx->fs_inputs[fs_input::persp_center_p2];
-
-      /* Build DD X/Y */
-      Temp tl_1 = bld.vop1_dpp(aco_opcode::v_mov_b32, bld.def(v1), p1, dpp_quad_perm(0, 0, 0, 0));
-      Temp ddx_1 = bld.vop2_dpp(aco_opcode::v_sub_f32, bld.def(v1), p1, tl_1, dpp_quad_perm(1, 1, 1, 1));
-      Temp ddy_1 = bld.vop2_dpp(aco_opcode::v_sub_f32, bld.def(v1), p1, tl_1, dpp_quad_perm(2, 2, 2, 2));
-      Temp tl_2 = bld.vop1_dpp(aco_opcode::v_mov_b32, bld.def(v1), p2, dpp_quad_perm(0, 0, 0, 0));
-      Temp ddx_2 = bld.vop2_dpp(aco_opcode::v_sub_f32, bld.def(v1), p2, tl_2, dpp_quad_perm(1, 1, 1, 1));
-      Temp ddy_2 = bld.vop2_dpp(aco_opcode::v_sub_f32, bld.def(v1), p2, tl_2, dpp_quad_perm(2, 2, 2, 2));
-
       /* sample_pos -= 0.5 */
       Temp pos1 = bld.tmp(getRegClass(sample_pos.type(), 1));
       Temp pos2 = bld.tmp(getRegClass(sample_pos.type(), 1));
@@ -4325,14 +4341,16 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       pos1 = bld.vop2_e64(aco_opcode::v_sub_f32, bld.def(v1), pos1, Operand(0x3f000000u));
       pos2 = bld.vop2_e64(aco_opcode::v_sub_f32, bld.def(v1), pos2, Operand(0x3f000000u));
 
-      /* res_k = p_k + ddx_k * pos1 + ddy_k * pos2 */
-      Temp tmp1 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddx_1, pos1, p1);
-      Temp tmp2 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddx_2, pos1, p2);
-      tmp1 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddy_1, pos2, tmp1);
-      tmp2 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddy_2, pos2, tmp2);
-      Temp wqm_dst = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2), tmp1, tmp2);
-      emit_wqm(ctx, wqm_dst, get_ssa_temp(ctx, &instr->dest.ssa));
-
+      emit_interp_center(ctx, get_ssa_temp(ctx, &instr->dest.ssa), pos1, pos2);
+      break;
+   }
+   case nir_intrinsic_load_barycentric_at_offset: {
+      Temp offset = get_ssa_temp(ctx, instr->src[0].ssa);
+      emit_split_vector(ctx, offset, 2);
+      RegClass rc = getRegClass(offset.type(), 1);
+      Temp pos1 = emit_extract_vector(ctx, offset, 0, rc);
+      Temp pos2 = emit_extract_vector(ctx, offset, 1, rc);
+      emit_interp_center(ctx, get_ssa_temp(ctx, &instr->dest.ssa), pos1, pos2);
       break;
    }
    case nir_intrinsic_load_front_face: {
