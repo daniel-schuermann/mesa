@@ -342,6 +342,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_barycentric_at_offset:
                   case nir_intrinsic_load_interpolated_input:
                   case nir_intrinsic_load_frag_coord:
+                  case nir_intrinsic_load_sample_pos:
                   case nir_intrinsic_load_layer_id:
                   case nir_intrinsic_load_view_index:
                   case nir_intrinsic_load_local_invocation_id:
@@ -459,7 +460,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                         }
                      }
                      break;
-                  case nir_intrinsic_load_frag_coord: {
+                  case nir_intrinsic_load_frag_coord:
+                  case nir_intrinsic_load_sample_pos: {
                      uint8_t mask = nir_ssa_def_components_read(&intrinsic->dest.ssa);
                      for (unsigned i = 0; i < 4; i++) {
                         if (mask & (1 << i))

@@ -4372,6 +4372,12 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       emit_load_frag_coord(ctx, get_ssa_temp(ctx, &instr->dest.ssa), 4);
       break;
    }
+   case nir_intrinsic_load_sample_pos: {
+      bld.pseudo(aco_opcode::p_create_vector, Definition(get_ssa_temp(ctx, &instr->dest.ssa)),
+                 bld.vop1(aco_opcode::v_fract_f32, bld.def(v1), ctx->fs_inputs[fs_input::frag_pos_0]),
+                 bld.vop1(aco_opcode::v_fract_f32, bld.def(v1), ctx->fs_inputs[fs_input::frag_pos_1]));
+      break;
+   }
    case nir_intrinsic_load_interpolated_input:
       visit_load_interpolated_input(ctx, instr);
       break;
