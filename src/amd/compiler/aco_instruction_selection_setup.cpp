@@ -121,7 +121,8 @@ fs_input get_interp_input(nir_intrinsic_op intrin, enum glsl_interp_mode interp)
    case INTERP_MODE_SMOOTH:
    case INTERP_MODE_NONE:
       if (intrin == nir_intrinsic_load_barycentric_pixel ||
-          intrin == nir_intrinsic_load_barycentric_at_sample)
+          intrin == nir_intrinsic_load_barycentric_at_sample ||
+          intrin == nir_intrinsic_load_barycentric_at_offset)
          return fs_input::persp_center_p1;
       else if (intrin == nir_intrinsic_load_barycentric_centroid)
          return fs_input::persp_centroid_p1;
@@ -338,6 +339,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_barycentric_pixel:
                   case nir_intrinsic_load_barycentric_centroid:
                   case nir_intrinsic_load_barycentric_at_sample:
+                  case nir_intrinsic_load_barycentric_at_offset:
                   case nir_intrinsic_load_interpolated_input:
                   case nir_intrinsic_load_frag_coord:
                   case nir_intrinsic_load_layer_id:
@@ -438,7 +440,8 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_barycentric_sample:
                   case nir_intrinsic_load_barycentric_pixel:
                   case nir_intrinsic_load_barycentric_centroid:
-                  case nir_intrinsic_load_barycentric_at_sample: {
+                  case nir_intrinsic_load_barycentric_at_sample:
+                  case nir_intrinsic_load_barycentric_at_offset: {
                      glsl_interp_mode mode = (glsl_interp_mode)nir_intrinsic_interp_mode(intrinsic);
                      ctx->fs_vgpr_args[get_interp_input(intrinsic->intrinsic, mode)] = true;
                      break;
