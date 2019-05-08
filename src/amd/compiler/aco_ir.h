@@ -776,7 +776,7 @@ struct MIMG_instruction : public Instruction {
  *
  */
 struct FLAT_instruction : public Instruction {
-   uint16_t offset;
+   uint16_t offset; /* Vega only */
    bool slc;
    bool glc;
    bool lds;
