@@ -50,6 +50,13 @@ bool VALU_writes_sgpr(aco_ptr<Instruction>& instr)
    return false;
 }
 
+bool regs_intersect(PhysReg a_reg, unsigned a_size, PhysReg b_reg, unsigned b_size)
+{
+   return a_reg.reg > b_reg.reg ?
+          (a_reg.reg - b_reg.reg < a_size) :
+          (b_reg.reg - a_reg.reg < b_size);
+}
+
 int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
                             std::vector<aco_ptr<Instruction>>& old_instructions,
                             std::vector<aco_ptr<Instruction>>& new_instructions)
@@ -59,6 +66,43 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
 
    // TODO: setreg / getreg / m0 writes
    // TODO: try to schedule the NOP-causing instruction up to reduce the number of stall cycles
+
+   /* break off from prevous SMEM clause if needed */
+   if (instr->format == Format::SMEM && ctx.chip_class >= VI) {
+      bool is_store = instr->num_definitions == 0;
+      for (int pred_idx = new_idx - 1; pred_idx >= 0; pred_idx--) {
+         aco_ptr<Instruction>& pred = new_instructions[pred_idx];
+         if (pred->format != Format::SMEM)
+            break;
+
+         /* Don't allow clauses with store instructions since the clause's
+          * instructions may use the same address. */
+         if (is_store || pred->num_definitions == 0)
+            return 1;
+
+         Definition& instr_def = instr->getDefinition(0);
+         Definition& pred_def = pred->getDefinition(0);
+
+         /* ISA reference doesn't say anything about this, but best to be safe */
+         if (regs_intersect(instr_def.physReg(), instr_def.size(), pred_def.physReg(), pred_def.size()))
+            return 1;
+
+         for (unsigned i = 0; i < pred->num_operands; i++) {
+            Operand& op = pred->getOperand(i);
+            if (op.isConstant() || op.isUndefined() || !op.isFixed())
+               continue;
+            if (regs_intersect(instr_def.physReg(), instr_def.size(), op.physReg(), op.size()))
+               return 1;
+         }
+         for (unsigned j = 0; j < instr->num_operands; j++) {
+            Operand& op = instr->getOperand(j);
+            if (op.isConstant() || op.isUndefined() || !op.isFixed())
+               continue;
+            if (regs_intersect(pred_def.physReg(), pred_def.size(), op.physReg(), op.size()))
+               return 1;
+         }
+      }
+   }
 
    if (instr->isVALU()) {
       if (instr->isDPP()) {
@@ -164,14 +208,16 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
             if (pred->getDefinition(i).physReg().reg > 102)
                continue;
 
-            for (unsigned j = 0; j < pred->getDefinition(i).size(); j++) {
-               for (unsigned k = 0; instr->num_operands > 1 && k < instr->getOperand(1).size(); k++)
-                  if (instr->getOperand(1).physReg().reg + k == pred->getDefinition(i).physReg().reg + j)
-                     return 5 + pred_idx - new_idx + 1;
+            if (instr->num_operands > 1 &&
+                regs_intersect(instr->getOperand(1).physReg(), instr->getOperand(1).size(),
+                               pred->getDefinition(i).physReg(), pred->getDefinition(i).size())) {
+                  return 5 + pred_idx - new_idx + 1;
+            }
 
-               for (unsigned k = 0; instr->num_operands > 2 && k < instr->getOperand(2).size(); k++)
-                  if (instr->getOperand(2).physReg().reg + k == pred->getDefinition(i).physReg().reg + j)
-                     return 5 + pred_idx - new_idx + 1;
+            if (instr->num_operands > 2 &&
+                regs_intersect(instr->getOperand(2).physReg(), instr->getOperand(2).size(),
+                               pred->getDefinition(i).physReg(), pred->getDefinition(i).size())) {
+                  return 5 + pred_idx - new_idx + 1;
             }
          }
       }
