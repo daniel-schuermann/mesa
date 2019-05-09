@@ -3078,8 +3078,24 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    if (dim == GLSL_SAMPLER_DIM_BUF) {
       Temp rsrc = get_sampler_desc(ctx, nir_instr_as_deref(instr->src[0].ssa->parent_instr), ACO_DESC_BUFFER, nullptr, true, true);
       Temp vindex = emit_extract_vector(ctx, get_ssa_temp(ctx, instr->src[1].ssa), 0, v1);
-
-      aco_ptr<MUBUF_instruction> store{create_instruction<MUBUF_instruction>(aco_opcode::buffer_store_format_xyzw, Format::MUBUF, 4, 0)};
+      aco_opcode opcode;
+      switch (data.size()) {
+      case 1:
+         opcode = aco_opcode::buffer_store_format_x;
+         break;
+      case 2:
+         opcode = aco_opcode::buffer_store_format_xy;
+         break;
+      case 3:
+         opcode = aco_opcode::buffer_store_format_xyz;
+         break;
+      case 4:
+         opcode = aco_opcode::buffer_store_format_xyzw;
+         break;
+      default:
+         unreachable(">4 channel buffer image store");
+      }
+      aco_ptr<MUBUF_instruction> store{create_instruction<MUBUF_instruction>(opcode, Format::MUBUF, 4, 0)};
       store->getOperand(0) = Operand(vindex);
       store->getOperand(1) = Operand(rsrc);
       store->getOperand(2) = Operand((uint32_t) 0);
@@ -3103,7 +3119,7 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    store->getOperand(2) = Operand();
    store->getOperand(3) = Operand(data);
    store->glc = glc;
-   store->dmask = 0xF;
+   store->dmask = (1 << data.size()) - 1;
    store->unrm = true;
    store->da = should_declare_array(ctx, dim, glsl_sampler_type_is_array(type));
    store->disable_wqm = true;
