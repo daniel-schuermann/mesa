@@ -1003,6 +1003,9 @@ void process_block(spill_ctx& ctx, unsigned block_idx, std::unique_ptr<Block>& b
       idx++;
    }
 
+   if (block->vgpr_demand > ctx.target_vgpr || block->sgpr_demand > ctx.target_sgpr)
+      local_next_use_distance = local_next_uses(ctx, block);
+
    while (idx < block->instructions.size()) {
       aco_ptr<Instruction>& instr = block->instructions[idx];
 
@@ -1053,10 +1056,7 @@ void process_block(spill_ctx& ctx, unsigned block_idx, std::unique_ptr<Block>& b
             vgpr_demand = std::max<int>(ctx.register_demand[block_idx][idx - 1].second, vgpr_demand);
          }
 
-         /* compute local next use distances on demand */
-         if ((sgpr_demand - spilled_sgprs > ctx.target_sgpr || vgpr_demand - spilled_vgprs > ctx.target_vgpr) &&
-             local_next_use_distance.empty())
-            local_next_use_distance = local_next_uses(ctx, block);
+         assert(!local_next_use_distance.empty());
 
          /* if reg pressure is too high, spill variable with furthest next use */
          while (std::max(vgpr_demand - spilled_vgprs, 0) > ctx.target_vgpr ||
