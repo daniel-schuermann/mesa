@@ -2463,8 +2463,29 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
    nir_const_value* const_offset = nir_src_as_const_value(instr->src[1]);
 
    Builder bld(ctx->program, ctx->block);
-   rsrc = convert_pointer_to_64_bit(ctx, rsrc);
-   rsrc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), rsrc, Operand(0u));
+
+   nir_intrinsic_instr* idx_instr = nir_instr_as_intrinsic(instr->src[0].ssa->parent_instr);
+   unsigned desc_set = nir_intrinsic_desc_set(idx_instr);
+   unsigned binding = nir_intrinsic_binding(idx_instr);
+   radv_descriptor_set_layout *layout = ctx->options->layout->set[desc_set].layout;
+
+   if (layout->binding[binding].type == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT) {
+      uint32_t desc_type = S_008F0C_DST_SEL_X(V_008F0C_SQ_SEL_X) |
+                           S_008F0C_DST_SEL_Y(V_008F0C_SQ_SEL_Y) |
+                           S_008F0C_DST_SEL_Z(V_008F0C_SQ_SEL_Z) |
+                           S_008F0C_DST_SEL_W(V_008F0C_SQ_SEL_W) |
+                           S_008F0C_NUM_FORMAT(V_008F0C_BUF_NUM_FORMAT_FLOAT) |
+                           S_008F0C_DATA_FORMAT(V_008F0C_BUF_DATA_FORMAT_32);
+      Temp upper_dwords = bld.pseudo(aco_opcode::p_create_vector, bld.def(s3),
+                                     Operand(S_008F04_BASE_ADDRESS_HI(ctx->options->address32_hi)),
+                                     Operand(0xFFFFFFFFu),
+                                     Operand(desc_type));
+      rsrc = bld.pseudo(aco_opcode::p_create_vector, bld.def(s4),
+                        rsrc, upper_dwords);
+   } else {
+      rsrc = convert_pointer_to_64_bit(ctx, rsrc);
+      rsrc = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), rsrc, Operand(0u));
+   }
 
    if (dst.type() == sgpr) {
       aco_opcode op;
