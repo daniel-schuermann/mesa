@@ -3012,6 +3012,7 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
 
 void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
 {
+   Builder bld(ctx->program, ctx->block);
    const nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
    const struct glsl_type *type = glsl_without_array(var->type);
    const enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
@@ -3045,7 +3046,7 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
       load->getOperand(1) = Operand(rsrc);
       load->getOperand(2) = Operand((uint32_t) 0);
       Temp tmp;
-      if (num_channels == instr->dest.ssa.num_components)
+      if (num_channels == instr->dest.ssa.num_components && dst.type() == vgpr)
          tmp = dst;
       else
          tmp = {ctx->program->allocateId(), getRegClass(RegType::vgpr, num_channels)};
@@ -3054,6 +3055,10 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
       load->barrier = barrier_image;
       ctx->block->instructions.emplace_back(std::move(load));
 
+      if (dst.type() == sgpr) {
+         Temp tmp_ = tmp.size() == dst.size() ? dst : bld.tmp(getRegClass(sgpr, tmp.size()));
+         tmp = bld.pseudo(aco_opcode::p_as_uniform, Definition(tmp_), tmp);
+      }
       emit_split_vector(ctx, tmp, num_channels);
       expand_vector(ctx, tmp, dst, instr->dest.ssa.num_components, (1 << num_channels) - 1);
       return;
@@ -3066,7 +3071,7 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
    unsigned dmask = nir_ssa_def_components_read(&instr->dest.ssa);
    unsigned num_components = util_bitcount(dmask);
    Temp tmp;
-   if (num_components == instr->dest.ssa.num_components)
+   if (num_components == instr->dest.ssa.num_components && dst.type() == vgpr)
       tmp = dst;
    else
       tmp = {ctx->program->allocateId(), getRegClass(RegType::vgpr, num_components)};
@@ -3082,6 +3087,10 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
    load->barrier = barrier_image;
    ctx->block->instructions.emplace_back(std::move(load));
 
+   if (dst.type() == sgpr) {
+      Temp tmp_ = tmp.size() == dst.size() ? dst : bld.tmp(getRegClass(sgpr, tmp.size()));
+      tmp = bld.pseudo(aco_opcode::p_as_uniform, Definition(tmp_), tmp);
+   }
    emit_split_vector(ctx, tmp, num_components);
    expand_vector(ctx, tmp, dst, instr->dest.ssa.num_components, dmask);
    return;
@@ -5130,7 +5139,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    Builder bld(ctx->program, ctx->block);
    bool has_bias = false, has_lod = false, level_zero = false, has_compare = false,
         has_offset = false, has_ddx = false, has_ddy = false, has_derivs = false, has_sample_index = false;
-   Temp resource, sampler, fmask_ptr, bias, coords, compare, sample_index = Temp(),
+   Temp resource, sampler, fmask_ptr, bias = Temp(), coords, compare = Temp(), sample_index = Temp(),
         lod = Temp(), offset = Temp(), ddx = Temp(), ddy = Temp(), derivs = Temp();
    nir_const_value *sample_index_cv = NULL;
    enum glsl_base_type stype;
@@ -5329,7 +5338,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    Temp tmp_dst = dst;
    if ((util_bitcount(dmask) != instr->dest.ssa.num_components && instr->op != nir_texop_tg4) ||
-       tg4_integer_cube_workaround || instr->op == nir_texop_samples_identical)
+       tg4_integer_cube_workaround || dst.type() == sgpr)
       tmp_dst = Temp{ctx->program->allocateId(), getRegClass(vgpr, util_bitcount(dmask))};
 
    /* gather4 selects the component by dmask and always returns vec4 */
@@ -5382,11 +5391,14 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
                     emit_extract_vector(ctx, tmp_dst, 1, v1),
                     by_6);
 
-      } else if (dst.id() != tmp_dst.id()) {
-         emit_split_vector(ctx, tmp_dst, tmp_dst.size());
-         expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, dmask);
       }
 
+      if (dst.type() == sgpr) {
+         Temp tmp = tmp_dst.size() == dst.size() ? dst : bld.tmp(getRegClass(sgpr, tmp_dst.size()));
+         tmp_dst = bld.pseudo(aco_opcode::p_as_uniform, Definition(tmp), tmp_dst);
+      }
+      emit_split_vector(ctx, tmp_dst, tmp_dst.size());
+      expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, dmask);
       return;
    }
 
@@ -5538,7 +5550,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       }
 
       /* if the instruction return value matches exactly the nir dest ssa, we can use it directly */
-      if (last_bit == instr->dest.ssa.num_components)
+      if (last_bit == instr->dest.ssa.num_components && dst.type() == vgpr)
          tmp_dst = dst;
       else
          tmp_dst = {ctx->program->allocateId(), getRegClass(vgpr, last_bit)};
@@ -5551,9 +5563,12 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       mubuf->idxen = true;
       mubuf->can_reorder = true;
       ctx->block->instructions.emplace_back(std::move(mubuf));
-      emit_split_vector(ctx, tmp_dst, last_bit);
 
-      /* otherwise, we create a new vector matching the nir dest ssa */
+      if (dst.type() == sgpr) {
+         Temp tmp = tmp_dst.size() == dst.size() ? dst : bld.tmp(getRegClass(sgpr, tmp_dst.size()));
+         tmp_dst = bld.pseudo(aco_opcode::p_as_uniform, Definition(tmp), tmp_dst);
+      }
+      emit_split_vector(ctx, tmp_dst, last_bit);
       expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, (1 << last_bit) - 1);
       return;
    }
@@ -5580,6 +5595,10 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          bld.vopc(aco_opcode::v_cmp_eq_u32, Definition(tmp), Operand(0u), tmp_dst).def(0).setHint(vcc);
          bld.vop2_e64(aco_opcode::v_cndmask_b32, Definition(dst), Operand(0u), Operand((uint32_t)-1), tmp);
       } else {
+         if (dst.type() == sgpr) {
+            Temp tmp = tmp_dst.size() == dst.size() ? dst : bld.tmp(getRegClass(sgpr, tmp_dst.size()));
+            tmp_dst = bld.pseudo(aco_opcode::p_as_uniform, Definition(tmp), tmp_dst);
+         }
          emit_split_vector(ctx, tmp_dst, tmp_dst.size());
          expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, dmask);
       }
@@ -5658,12 +5677,11 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    tex->can_reorder = true;
    ctx->block->instructions.emplace_back(std::move(tex));
 
-   emit_split_vector(ctx, tmp_dst, tmp_dst.size());
-
    if (tg4_integer_cube_workaround) {
       assert(tmp_dst.id() != dst.id());
       assert(tmp_dst.size() == dst.size() && dst.size() == 4);
 
+      emit_split_vector(ctx, tmp_dst, tmp_dst.size());
       Temp val[4];
       for (unsigned i = 0; i < dst.size(); i++) {
          val[i] = emit_extract_vector(ctx, tmp_dst, i, v1);
@@ -5676,9 +5694,15 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       }
       bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
                  val[0], val[1], val[2], val[3]);
-   } else {
-      expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, nir_ssa_def_components_read(&instr->dest.ssa));
    }
+
+   if (dst.type() == sgpr) {
+      Temp tmp = tmp_dst.size() == dst.size() ? dst : bld.tmp(getRegClass(sgpr, tmp_dst.size()));
+      tmp_dst = bld.pseudo(aco_opcode::p_as_uniform, Definition(tmp), tmp_dst);
+   }
+   emit_split_vector(ctx, tmp_dst, tmp_dst.size());
+   expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, nir_ssa_def_components_read(&instr->dest.ssa));
+
 }
 
 
