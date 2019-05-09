@@ -362,7 +362,6 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_ssbo_atomic_xor:
                   case nir_intrinsic_ssbo_atomic_exchange:
                   case nir_intrinsic_ssbo_atomic_comp_swap:
-                  case nir_intrinsic_image_deref_load:
                   case nir_intrinsic_image_deref_atomic_add:
                   case nir_intrinsic_image_deref_atomic_min:
                   case nir_intrinsic_image_deref_atomic_max:
@@ -489,13 +488,17 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                break;
             }
             case nir_instr_type_tex: {
-               unsigned size = nir_instr_as_tex(instr)->dest.ssa.num_components;
-               if (nir_instr_as_tex(instr)->dest.ssa.bit_size == 64)
+               nir_tex_instr* tex = nir_instr_as_tex(instr);
+               unsigned size = tex->dest.ssa.num_components;
+
+               if (tex->dest.ssa.bit_size == 64)
                   size *= 2;
-               if (nir_instr_as_tex(instr)->op == nir_texop_texture_samples)
-                  reg_class[nir_instr_as_tex(instr)->dest.ssa.index] = getRegClass(sgpr, size);
+               if (tex->op == nir_texop_texture_samples)
+                  assert(!ctx->divergent_vals[tex->dest.ssa.index]);
+               if (ctx->divergent_vals[tex->dest.ssa.index])
+                  reg_class[tex->dest.ssa.index] = getRegClass(vgpr, size);
                else
-                  reg_class[nir_instr_as_tex(instr)->dest.ssa.index] = getRegClass(vgpr, size);
+                  reg_class[tex->dest.ssa.index] = getRegClass(sgpr, size);
                break;
             }
             case nir_instr_type_parallel_copy: {
