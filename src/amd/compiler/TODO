@@ -1,16 +1,17 @@
 ACO TODOs
 
 Features:
-- implement subgroup operations
 - implement other shader stages
+    - VS without GS/TES/TCS is mostly implemented in the branch "backend-vs"
+        - doesn't work with everything (e.g. Dota 2)
+        - register usage is very high, probably needs some kind of scheduling/code motion
 - implement missing features for games or just CTS
 
 Fixes:
-- fix discard_if to check if anywhere(!) are lanes active:
-	%tmp = active_lanes_at_start_of_program
-	%tmp = %tmp & ~cond . EXEC &= %tmp. if %tmp == 0 endpgm
-	- also schedule discard_if
 - p_parallelcopy clobbers scc when swapping sgprs
+- XNACK replay is broken
+- because they use different caches, mixed SMEM/VMEM SSBO loads/stores are broken
+    - for example: a SMEM store and later a VMEM load of the same SSBO
 
 Optimizations:
 - optimize V_OR3_B32/V_AND_OR_B32/V_LSHL_ADD_U32/etc (VEGA)
@@ -25,9 +26,6 @@ Optimizations:
 	- it is necessary to lower to CSSA for correctness wrt spilling (we don't have mem-to-mem moves)
 	- also, it can enable much better jump threading by keeping empty blocks empty
 - rework register coalescing to also use negative affinities (hard problem)
-- jump threading
-	- if a block is empty, not only remove the branch, but also change the exec mask handling in the surrounding blocks
-	- a rework of how exec mask is handled might help (maybe with pseudo ops)
 - GCM/LICM
 	- long-term-goal is global code motion with register contraints
 	- a good heuristic might do fine, but unrestricted GCM can do more harm than good
@@ -36,12 +34,11 @@ Optimizations:
 	- currently, we only spill sgprs, and sometimes even const values
 	- it might be beneficial to spill if it helps to squeeze in an additional wave (we can easily test different thresholds here)
 - the RA should avoid moving temporaries that are created by VMEM/SMEM/DS instructions if they haven't yet been used
-- implement inline push constants like the LLVM baackend
-- global dead code elimination
-    - this combined with exports taking undef instead of temporaries when it's operand is disabled can cause some shaders to be mostly dead-code eliminated
+- implement push constants in user sgprs like the LLVM backend
 - don't always try to keep vectors intact during RA
     - often, a vector will only ever be split. so, when moving, it makes little sense to create extra moves when only a some of it's elements needs to be moved
     - if this is always done, the number of moves required should always be less than the amount of space required
+- schedule discard_if
 
 Refactorings (lower priority):
 - create an Instruction Builder class to be used for isel
@@ -52,3 +49,4 @@ NIR TODOs
 - pointer analysis / alias analysis
 	- we really want to schedule independent memory operations
 - ABI lowering for future hardware and maybe in very far future radeonSI
+- dead control flow elimination (discards & null exports)
