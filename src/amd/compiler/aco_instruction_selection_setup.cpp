@@ -614,10 +614,13 @@ static void allocate_user_sgprs(isel_context *ctx,
 
    uint32_t available_sgprs = ctx->options->chip_class >= GFX9 ? 32 : 16;
    uint32_t num_desc_set = util_bitcount(ctx->program->info->info.desc_set_used_mask);
-   user_sgpr_info.num_sgpr = user_sgpr_count + num_desc_set;
 
-   if (available_sgprs < user_sgpr_info.num_sgpr)
+   if (available_sgprs < user_sgpr_count + num_desc_set) {
       user_sgpr_info.indirect_all_descriptor_sets = true;
+      user_sgpr_info.num_sgpr = user_sgpr_count + 1;
+   } else {
+      user_sgpr_info.num_sgpr = user_sgpr_count + num_desc_set;
+   }
 }
 
 #define MAX_ARGS 23
@@ -652,16 +655,8 @@ add_arg(arg_info *info, RegClass type, Temp *param_ptr, unsigned reg)
    info->count++;
 }
 
-static inline void
-add_array_arg(arg_info *info, RegClass type, Temp *param_ptr, unsigned reg)
-{
-   info->array_params_mask |= (1 << info->count);
-   add_arg(info, type, param_ptr, reg);
-}
-
 static void
-set_loc(struct radv_userdata_info *ud_info, uint8_t *sgpr_idx, uint8_t num_sgprs,
-        bool indirect)
+set_loc(struct radv_userdata_info *ud_info, uint8_t *sgpr_idx, uint8_t num_sgprs)
 {
    ud_info->sgpr_idx = *sgpr_idx;
    ud_info->num_sgprs = num_sgprs;
@@ -675,7 +670,7 @@ set_loc_shader(isel_context *ctx, int idx, uint8_t *sgpr_idx,
    struct radv_userdata_info *ud_info = &ctx->program->info->user_sgprs_locs.shader_data[idx];
    assert(ud_info);
 
-   set_loc(ud_info, sgpr_idx, num_sgprs, false);
+   set_loc(ud_info, sgpr_idx, num_sgprs);
 }
 
 static void
@@ -687,17 +682,14 @@ set_loc_shader_ptr(isel_context *ctx, int idx, uint8_t *sgpr_idx)
 }
 
 static void
-set_loc_desc(isel_context *ctx, int idx,  uint8_t *sgpr_idx,
-             bool indirect)
+set_loc_desc(isel_context *ctx, int idx,  uint8_t *sgpr_idx)
 {
    struct radv_userdata_locations *locs = &ctx->program->info->user_sgprs_locs;
    struct radv_userdata_info *ud_info = &locs->descriptor_sets[idx];
    assert(ud_info);
 
-   set_loc(ud_info, sgpr_idx, 1, indirect);
-
-   if (!indirect)
-      locs->descriptor_sets_enabled |= 1 << idx;
+   set_loc(ud_info, sgpr_idx, 1);
+   locs->descriptor_sets_enabled |= 1 << idx;
 }
 
 static void
@@ -707,38 +699,23 @@ declare_global_input_sgprs(isel_context *ctx,
                            struct arg_info *args,
                            Temp *desc_sets)
 {
-   unsigned num_sets = ctx->options->layout ? ctx->options->layout->num_sets : 0;
-   unsigned stage_mask = 1 << ctx->stage;
-
-   //if (has_previous_stage)
-   //   stage_mask |= 1 << previous_stage;
-
    /* 1 for each descriptor set */
    if (!user_sgpr_info->indirect_all_descriptor_sets) {
-      for (unsigned i = 0; i < num_sets; ++i) {
-         if ((ctx->program->info->info.desc_set_used_mask & (1 << i)) &&
-             ctx->options->layout->set[i].layout->shader_stages & stage_mask) {
-            add_array_arg(args, s1, &desc_sets[i], user_sgpr_info->user_sgpr_idx);
-            set_loc_desc(ctx, i, &user_sgpr_info->user_sgpr_idx, false);
-         }
+      uint32_t mask = ctx->program->info->info.desc_set_used_mask;
+      while (mask) {
+         int i = u_bit_scan(&mask);
+         add_arg(args, s1, &desc_sets[i], user_sgpr_info->user_sgpr_idx);
+         set_loc_desc(ctx, i, &user_sgpr_info->user_sgpr_idx);
       }
    } else {
-      unreachable("Fix access to indirect descriptor sets.");
-      add_array_arg(args, s1, desc_sets, user_sgpr_info->user_sgpr_idx);
+      add_arg(args, s1, desc_sets, user_sgpr_info->user_sgpr_idx);
       set_loc_shader_ptr(ctx, AC_UD_INDIRECT_DESCRIPTOR_SETS, &user_sgpr_info->user_sgpr_idx);
-      /*
-      for (unsigned i = 0; i < num_sets; ++i) {
-         if ((ctx->program->info->info.desc_set_used_mask & (1 << i)) &&
-             ctx->options->layout->set[i].layout->shader_stages & stage_mask)
-            set_loc_desc(ctx, i, &user_sgpr_info->user_sgpr_idx, i * 8);
-      }
-      */
       ctx->program->info->need_indirect_descriptor_sets = true;
    }
 
    if (ctx->program->info->info.loads_push_constants) {
       /* 1 for push constants and dynamic descriptors */
-      add_array_arg(args, s1, &ctx->push_constants, user_sgpr_info->user_sgpr_idx);
+      add_arg(args, s1, &ctx->push_constants, user_sgpr_info->user_sgpr_idx);
       set_loc_shader_ptr(ctx, AC_UD_PUSH_CONSTANTS, &user_sgpr_info->user_sgpr_idx);
    }
 
@@ -794,8 +771,6 @@ void add_startpgm(struct isel_context *ctx)
    user_sgpr_info user_sgpr_info;
    bool needs_view_index = needs_view_index_sgpr(ctx);
    allocate_user_sgprs(ctx, needs_view_index, user_sgpr_info);
-
-   assert(!user_sgpr_info.indirect_all_descriptor_sets && "Not yet implemented.");
    arg_info args = {};
 
    if (user_sgpr_info.need_ring_offsets/* && !ctx->options->supports_spill*/)
