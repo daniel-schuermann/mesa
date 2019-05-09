@@ -363,6 +363,8 @@ Temp get_alu_src(struct isel_context *ctx, nir_alu_src src)
 
 Temp convert_pointer_to_64_bit(isel_context *ctx, Temp ptr)
 {
+   if (ptr.size() == 2)
+      return ptr;
    Builder bld(ctx->program, ctx->block);
    return bld.pseudo(aco_opcode::p_create_vector, bld.def(s2),
                      ptr, Operand((unsigned)ctx->options->address32_hi));
@@ -2381,6 +2383,18 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
    }
 }
 
+Temp load_desc_ptr(isel_context *ctx, unsigned desc_set)
+{
+   if (ctx->program->info->need_indirect_descriptor_sets) {
+      Builder bld(ctx->program, ctx->block);
+      Temp ptr64 = convert_pointer_to_64_bit(ctx, ctx->descriptor_sets[0]);
+      return bld.smem(aco_opcode::s_load_dword, bld.def(s1), ptr64, Operand(desc_set << 2));//, false, false, false);
+   }
+
+   return ctx->descriptor_sets[desc_set];
+}
+
+
 void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Temp index = get_ssa_temp(ctx, instr->src[0].ssa);
@@ -2394,7 +2408,7 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
    unsigned desc_set = nir_intrinsic_desc_set(instr);
    unsigned binding = nir_intrinsic_binding(instr);
 
-   Temp desc_ptr = ctx->descriptor_sets[desc_set];
+   Temp desc_ptr;
    radv_pipeline_layout *pipeline_layout = ctx->options->layout;
    radv_descriptor_set_layout *layout = pipeline_layout->set[desc_set].layout;
    unsigned offset = layout->binding[binding].offset;
@@ -2405,8 +2419,10 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
       desc_ptr = ctx->push_constants;
       offset = pipeline_layout->push_constant_size + 16 * idx;
       stride = 16;
-   } else
+   } else {
+      desc_ptr = load_desc_ptr(ctx, desc_set);
       stride = layout->binding[binding].size;
+   }
 
    nir_const_value* nir_const_index = nir_src_as_const_value(instr->src[0]);
    unsigned const_index = nir_const_index ? nir_const_index->u32 : 0;
@@ -2574,10 +2590,7 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
    unsigned offset = nir_intrinsic_base(instr);
    if (offset != 0) // TODO check if index != 0 as well
       index = bld.sop2(aco_opcode::s_add_i32, bld.def(s1), bld.def(s1, scc), Operand(offset), index);
-   Temp ptr = ctx->push_constants;
-   if (ptr.size() == 1) {
-      ptr = convert_pointer_to_64_bit(ctx, ptr);
-   }
+   Temp ptr = convert_pointer_to_64_bit(ctx, ctx->push_constants);
 
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    aco_opcode op;
@@ -2798,11 +2811,8 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
       base_index = deref_instr->var->data.binding;
    }
 
-   Temp list = ctx->descriptor_sets[descriptor_set];
-   if (list.size() == 1) {
-      list = convert_pointer_to_64_bit(ctx, list);
-      //ctx->descriptor_sets[descriptor_set] = list;
-   }
+   Temp list = load_desc_ptr(ctx, descriptor_set);
+   list = convert_pointer_to_64_bit(ctx, list);
 
    struct radv_descriptor_set_layout *layout = ctx->options->layout->set[descriptor_set].layout;
    struct radv_descriptor_set_binding_layout *binding = layout->binding + base_index;
