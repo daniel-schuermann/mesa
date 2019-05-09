@@ -1098,6 +1098,10 @@ void process_block(spill_ctx& ctx, unsigned block_idx, std::unique_ptr<Block>& b
                ctx.interferences[spill_id].second.emplace(pair.second);
                ctx.interferences[pair.second].second.emplace(spill_id);
             }
+            for (std::pair<Temp, std::pair<Temp, uint32_t>> pair : reloads) {
+               ctx.interferences[spill_id].second.emplace(pair.second.second);
+               ctx.interferences[pair.second.second].second.emplace(spill_id);
+            }
 
             current_spills[to_spill] = spill_id;
             if (to_spill.type() == vgpr)
