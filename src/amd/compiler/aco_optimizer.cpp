@@ -363,7 +363,9 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             switch (instr->opcode) {
             case aco_opcode::p_create_vector:
             case aco_opcode::p_split_vector:
-            case aco_opcode::p_extract_vector: {
+            case aco_opcode::p_extract_vector:
+            case aco_opcode::p_linear_phi:
+            case aco_opcode::p_phi: {
                bool all_vgpr = true;
                for (unsigned i = 0; all_vgpr && i < instr->num_definitions; i++) {
                   if (instr->getDefinition(i).getTemp().type() != vgpr)
