@@ -5764,15 +5764,54 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
       return;
    }
 
+   /* try to scalarize vector phis */
+   if (dst.size() > 1) {
+      // TODO: scalarize linear phis on divergent ifs
+      bool can_scalarize = (opcode == aco_opcode::p_phi || !(ctx->block->kind & block_kind_merge));
+      std::array<Temp, 4> new_vec;
+      for (std::pair<const unsigned, nir_ssa_def*>& pair : phi_src) {
+         Temp src = get_ssa_temp(ctx, pair.second);
+         if (ctx->allocated_vec.find(src.id()) == ctx->allocated_vec.end()) {
+            can_scalarize = false;
+            break;
+         }
+      }
+      if (can_scalarize) {
+         unsigned num_components = instr->dest.ssa.num_components;
+         assert(dst.size() % num_components == 0);
+         RegClass rc = getRegClass(dst.type(), dst.size() / num_components);
+
+         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, num_components, 1)};
+         for (unsigned k = 0; k < num_components; k++) {
+            phi.reset(create_instruction<Instruction>(opcode, Format::PSEUDO, num_src, 1));
+            std::map<unsigned, nir_ssa_def*>::iterator it = phi_src.begin();
+            for (unsigned i = 0; i < num_src; i++) {
+               Temp src = get_ssa_temp(ctx, it->second);
+               phi->getOperand(i) = Operand(ctx->allocated_vec[src.id()][k]);
+               ++it;
+            }
+            Temp phi_dst = {ctx->program->allocateId(), rc};
+            phi->getDefinition(0) = Definition(phi_dst);
+            ctx->block->instructions.emplace(ctx->block->instructions.begin(), std::move(phi));
+            new_vec[k] = phi_dst;
+         }
+         vec->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vec));
+         ctx->allocated_vec.emplace(dst.id(), new_vec);
+         return;
+      }
+   }
+
    phi.reset(create_instruction<Instruction>(opcode, Format::PSEUDO, num_src, 1));
 
    /* if we have a linear phi on a divergent if, we know that one src is undef */
-   if (num_src == 2 && opcode == aco_opcode::p_linear_phi && ctx->block->logical_predecessors[0] != ctx->block->linear_predecessors[0]) {
+   if (opcode == aco_opcode::p_linear_phi && ctx->block->kind & block_kind_merge) {
       Block* block;
       /* we place the phi either in the between-block or in the current block */
       if (phi_src.begin()->second->parent_instr->type != nir_instr_type_ssa_undef) {
          assert((++phi_src.begin())->second->parent_instr->type == nir_instr_type_ssa_undef);
          block = ctx->block->linear_predecessors[1]->linear_predecessors[0];
+         assert(block->kind & block_kind_invert);
          phi->getOperand(0) = Operand(get_ssa_temp(ctx, phi_src.begin()->second));
       } else {
          assert((++phi_src.begin())->second->parent_instr->type != nir_instr_type_ssa_undef);
