@@ -612,7 +612,7 @@ static void allocate_user_sgprs(isel_context *ctx,
    if (ctx->program->info->info.loads_push_constants)
       user_sgpr_count += 1; /* we use 32bit pointers */
 
-   uint32_t available_sgprs = ctx->options->chip_class >= GFX9 ? 32 : 16;
+   uint32_t available_sgprs = ctx->options->chip_class >= GFX9 && ctx->stage != MESA_SHADER_COMPUTE ? 32 : 16;
    uint32_t num_desc_set = util_bitcount(ctx->program->info->info.desc_set_used_mask);
 
    if (available_sgprs < user_sgpr_count + num_desc_set) {
