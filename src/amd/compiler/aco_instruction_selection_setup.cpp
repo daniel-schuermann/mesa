@@ -707,6 +707,8 @@ declare_global_input_sgprs(isel_context *ctx,
          add_arg(args, s1, &desc_sets[i], user_sgpr_info->user_sgpr_idx);
          set_loc_desc(ctx, i, &user_sgpr_info->user_sgpr_idx);
       }
+      /* NIR->LLVM might have set this to true if RADV_DEBUG=compiletime */
+      ctx->program->info->need_indirect_descriptor_sets = false;
    } else {
       add_arg(args, s1, desc_sets, user_sgpr_info->user_sgpr_idx);
       set_loc_shader_ptr(ctx, AC_UD_INDIRECT_DESCRIPTOR_SETS, &user_sgpr_info->user_sgpr_idx);
