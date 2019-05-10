@@ -5722,8 +5722,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tmp_dst = bld.pseudo(aco_opcode::p_create_vector, Definition(tmp),
                            val[0], val[1], val[2], val[3]);
    }
-
-   expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, nir_ssa_def_components_read(&instr->dest.ssa));
+   unsigned mask = instr->op == nir_texop_tg4 ? 0xF : dmask;
+   expand_vector(ctx, tmp_dst, dst, instr->dest.ssa.num_components, mask);
 
 }
 
