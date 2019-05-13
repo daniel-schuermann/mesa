@@ -1154,7 +1154,7 @@ setup_isel_context(Program* program, nir_shader *nir,
                                     (nir_variable_mode)(nir_var_mem_ssbo | nir_var_mem_ubo |
                                                         nir_var_mem_push_const | nir_var_mem_shared),
                                     NULL, get_align)) {
-      nir_lower_alu_to_scalar(nir);
+      nir_lower_alu_to_scalar(nir, NULL);
       nir_lower_pack(nir);
    }
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
