@@ -2876,7 +2876,7 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
       type = s4;
       opcode = aco_opcode::s_load_dwordx4;
       if (binding->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-         offset += 64;
+         offset += radv_combined_image_descriptor_sampler_offset(binding);
       break;
    case ACO_DESC_BUFFER:
       type = s4;
