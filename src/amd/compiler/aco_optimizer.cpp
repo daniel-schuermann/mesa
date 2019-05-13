@@ -651,13 +651,11 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          ctx.info[instr->getDefinition(0).tempId()].set_abs(instr->getOperand(1).getTemp());
       break;
    case aco_opcode::v_xor_b32: { /* neg */
-      for (unsigned i = 0; i < 2; i++) {
-         if (instr->getOperand(i).constantEquals(0x80000000u) && instr->getOperand(!i).isTemp()) {
-            ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(!i).getTemp());
-            if (ctx.info[instr->getOperand(!i).tempId()].is_abs()) /* neg(abs(x)) */
-               ctx.info[instr->getDefinition(0).tempId()].set_abs(ctx.info[instr->getOperand(!i).tempId()].temp);
-            break;
-         }
+      if (instr->getOperand(0).constantEquals(0x80000000u) && instr->getOperand(1).isTemp()) {
+         ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(1).getTemp());
+         if (ctx.info[instr->getOperand(1).tempId()].is_abs()) /* neg(abs(x)) */
+            ctx.info[instr->getDefinition(0).tempId()].set_abs(ctx.info[instr->getOperand(1).tempId()].temp);
+         break;
       }
       break;
    }
@@ -887,8 +885,8 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       }
    }
 
-   /* neg(mul(a, b)) -> mad(neg(a), b, 0) */
-   if (ctx.info[instr->getDefinition(0).tempId()].is_neg()) {
+   /* neg(mul(a, b)) -> mul(neg(a), b) */
+   if (ctx.info[instr->getDefinition(0).tempId()].is_neg() && ctx.uses[instr->getOperand(1).tempId()] == 1) {
       Temp val = ctx.info[instr->getDefinition(0).tempId()].temp;
 
       if (ctx.uses[instr->getDefinition(0).tempId()] == 0 || !ctx.info[val.id()].is_mul())
@@ -901,35 +899,26 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       if (mul_instr->isVOP3() && static_cast<VOP3A_instruction*>(mul_instr)->clamp)
          return;
 
-      /* convert to mad */
+      /* convert to mul(neg(a), b) */
       ctx.uses[mul_instr->getDefinition(0).tempId()]--;
-      if (ctx.uses[mul_instr->getDefinition(0).tempId()]) {
-         if (mul_instr->getOperand(0).isTemp())
-            ctx.uses[mul_instr->getOperand(0).tempId()]++;
-         if (mul_instr->getOperand(1).isTemp())
-            ctx.uses[mul_instr->getOperand(1).tempId()]++;
-      }
-
-      aco_ptr<VOP3A_instruction> mad{create_instruction<VOP3A_instruction>(aco_opcode::v_mad_f32, Format::VOP3A, 3, 1)};
-      mad->getOperand(0) = mul_instr->getOperand(0);
-      mad->getOperand(1) = mul_instr->getOperand(1);
-      mad->getOperand(2) = Operand(0u);
+      Definition def = instr->getDefinition(0);
+      instr.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_mul_f32, asVOP3(Format::VOP2), 2, 1));
+      instr->getOperand(0) = mul_instr->getOperand(0);
+      instr->getOperand(1) = mul_instr->getOperand(1);
+      instr->getDefinition(0) = def;
+      VOP3A_instruction* new_mul = static_cast<VOP3A_instruction*>(instr.get());
       if (mul_instr->isVOP3()) {
-         VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(mul_instr);
-         mad->neg[0] = vop3->neg[0];
-         mad->neg[1] = vop3->neg[1];
-         mad->abs[0] = vop3->abs[0];
-         mad->abs[1] = vop3->abs[1];
-         mad->omod = vop3->omod;
+         VOP3A_instruction* mul = static_cast<VOP3A_instruction*>(mul_instr);
+         new_mul->neg[0] = mul->neg[0];
+         new_mul->neg[1] = mul->neg[1];
+         new_mul->abs[0] = mul->abs[0];
+         new_mul->abs[1] = mul->abs[1];
+         new_mul->omod = mul->omod;
       }
-      mad->neg[0] ^= true;
-      mad->clamp = false;
-      mad->getDefinition(0) = instr->getDefinition(0);
+      new_mul->neg[0] ^= true;
+      new_mul->clamp = false;
 
-      /* mark this ssa_def to be re-checked for profitability and literals */
-      ctx.mad_infos.emplace_back(std::move(instr), mul_instr->getDefinition(0).tempId(), true);
-      ctx.info[mad->getDefinition(0).tempId()].set_mad(mad.get(), ctx.mad_infos.size() - 1);
-      instr.reset(mad.release());
+      ctx.info[instr->getDefinition(0).tempId()].set_mul(instr.get());
       return;
    }
    /* combine mul+add -> mad */
