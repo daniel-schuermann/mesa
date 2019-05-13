@@ -1,5 +1,17 @@
 ACO TODOs
 
+Refactorings (High priority for upstreaming)
+- nir_opt_sink(): should either be merged with nir_opt_move_load_ubo() or be done more generic (also avoid loops)
+- nir_lower_io_explicit(): cleanup and comment
+- nir_opt_load_store_vectorize(): cleanup and comment
+- nir_divergence_analysis(): cleanup
+- nir_to_lcssa(): -
+- radv: cleanup changes / remove 'compiletime' and aco as default
+- aco: make code style consistent
+- aco: refactor remaining functions to use Builder
+- aco/scheduler: make SMEM/VMEM use the same function (lower priority)
+
+
 Features:
 - implement other shader stages
     - VS without GS/TES/TCS is mostly implemented in the branch "backend-vs"
@@ -25,6 +37,7 @@ Optimizations:
 	- idea from the paper "Revisiting Out-of-SSA Translation for Correctness, CodeQuality, and Efficiency"
 	- it is necessary to lower to CSSA for correctness wrt spilling (we don't have mem-to-mem moves)
 	- also, it can enable much better jump threading by keeping empty blocks empty
+	- needs fix for linear phis due to control flow refactoring
 - rework register coalescing to also use negative affinities (hard problem)
 - GCM/LICM
 	- long-term-goal is global code motion with register contraints
@@ -39,14 +52,13 @@ Optimizations:
     - often, a vector will only ever be split. so, when moving, it makes little sense to create extra moves when only a some of it's elements needs to be moved
     - if this is always done, the number of moves required should always be less than the amount of space required
 - schedule discard_if
-
-Refactorings (lower priority):
-- create an Instruction Builder class to be used for isel
-- nir_opt_sink() should either be merged with nir_opt_move_load_ubo() or be done by GCM
-
+- speed up compiletime:
+	- make std::vector<std::unique_ptr<Block>> only std::vector<Block> (remark: we need forward pointers/indices while isel)
+	- make aco_ptr<Instruction> containing the Format, Opcode, num_operands, num_definitions + unique_ptr to specific data
 
 NIR TODOs
 - pointer analysis / alias analysis
 	- we really want to schedule independent memory operations
+	- also needed as proof per SMEM ssbo loads/stores
 - ABI lowering for future hardware and maybe in very far future radeonSI
 - dead control flow elimination (discards & null exports)
