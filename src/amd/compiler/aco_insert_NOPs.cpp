@@ -53,8 +53,8 @@ bool VALU_writes_sgpr(aco_ptr<Instruction>& instr)
 bool regs_intersect(PhysReg a_reg, unsigned a_size, PhysReg b_reg, unsigned b_size)
 {
    return a_reg.reg > b_reg.reg ?
-          (a_reg.reg - b_reg.reg < a_size) :
-          (b_reg.reg - a_reg.reg < b_size);
+          (a_reg.reg - b_reg.reg < b_size) :
+          (b_reg.reg - a_reg.reg < a_size);
 }
 
 int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
