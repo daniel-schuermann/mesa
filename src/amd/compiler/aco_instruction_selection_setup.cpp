@@ -516,13 +516,17 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
             }
             case nir_instr_type_phi: {
                nir_phi_instr* phi = nir_instr_as_phi(instr);
+               RegType type;
+               unsigned size = phi->dest.ssa.num_components;
 
                if (phi->dest.ssa.bit_size == 1) {
-                  reg_class[phi->dest.ssa.index] = ctx->divergent_vals[phi->dest.ssa.index] ? s2 : s1;
+                  assert(size == 1 && "multiple components not yet supported on boolean phis.");
+                  type = sgpr;
+                  size *= ctx->divergent_vals[phi->dest.ssa.index] ? 2 : 1;
+                  reg_class[phi->dest.ssa.index] = getRegClass(type, size);
                   break;
                }
 
-               RegType type;
                if (ctx->divergent_vals[phi->dest.ssa.index]) {
                   type = vgpr;
                } else {
@@ -535,7 +539,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   }
                }
 
-               unsigned size = phi->dest.ssa.bit_size == 64 ? 2 : 1;
+               size *= phi->dest.ssa.bit_size == 64 ? 2 : 1;
                RegClass rc = getRegClass(type, size);
                if (rc != reg_class[phi->dest.ssa.index]) {
                   done = false;
