@@ -535,15 +535,14 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   }
                }
 
-               int size = -1;
-               nir_foreach_phi_src(src, phi) {
-                  int src_size = sizeOf(reg_class[src->src.ssa->index]);
-                  assert(size == -1 || src_size == size);
-                  size = src_size;
-               }
+               unsigned size = phi->dest.ssa.bit_size == 64 ? 2 : 1;
                RegClass rc = getRegClass(type, size);
-               if (rc != reg_class[phi->dest.ssa.index])
+               if (rc != reg_class[phi->dest.ssa.index]) {
                   done = false;
+               } else {
+                  nir_foreach_phi_src(src, phi)
+                     assert(sizeOf(reg_class[src->src.ssa->index]) == sizeOf(rc));
+               }
                reg_class[phi->dest.ssa.index] = rc;
                break;
             }
