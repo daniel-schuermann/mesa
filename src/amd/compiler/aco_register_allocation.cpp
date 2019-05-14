@@ -129,6 +129,52 @@ void print_regs(ra_ctx& ctx, bool vgprs, std::array<uint32_t, 512>& reg_file)
 }
 #endif
 
+
+void adjust_max_used_regs(ra_ctx& ctx, RegClass rc, unsigned reg)
+{
+   unsigned max_addressible_sgpr = ctx.program->chip_class >= VI ? 102 : 104;
+   unsigned size = sizeOf(rc);
+   if (typeOf(rc) == vgpr) {
+      unsigned hi = reg - 256 + size - 1;
+      ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, hi);
+   } else if (reg + sizeOf(rc) <= max_addressible_sgpr) {
+      unsigned hi = reg + size - 1;
+      ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, std::min(hi, max_addressible_sgpr));
+   }
+}
+
+
+std::pair<PhysReg, bool> get_reg_simple(ra_ctx& ctx,
+                                        std::array<uint32_t, 512>& reg_file,
+                                        uint32_t lb, uint32_t ub,
+                                        uint32_t size, uint32_t stride,
+                                        bool is_sgpr)
+{
+   bool found = false;
+   unsigned reg_lo = lb;
+   unsigned reg_hi = lb + size - 1;
+   while (!found && reg_lo + size <= ub) {
+      if (reg_file[reg_lo] != 0) {
+         reg_lo += stride;
+         continue;
+      }
+      reg_hi = reg_lo + size - 1;
+      found = true;
+      for (unsigned reg = reg_lo + 1; found && reg <= reg_hi; reg++) {
+         if (reg_file[reg] != 0)
+            found = false;
+      }
+      if (found) {
+         adjust_max_used_regs(ctx, is_sgpr ? s1 : v1, reg_hi);
+         return std::make_pair(PhysReg{reg_lo}, true);
+      }
+
+      reg_lo += stride;
+   }
+
+   return std::make_pair(PhysReg{0}, false);
+}
+
 bool get_reg_for_copies(ra_ctx& ctx,
                       std::array<uint32_t, 512>& reg_file,
                       std::vector<std::pair<Operand, Definition>>& parallelcopies,
@@ -147,7 +193,7 @@ bool get_reg_for_copies(ra_ctx& ctx,
             stride = 4;
       }
       unsigned num_moves = 0;
-      std::pair<PhysReg, bool> res = get_reg_impl(ctx, reg_file, parallelcopies, lb, ub, sizeOf(var.second), stride, num_moves, is_sgpr);
+      std::pair<PhysReg, bool> res = get_reg_simple(ctx, reg_file, lb, ub, sizeOf(var.second), stride, is_sgpr);
       while (!res.second && remaining_moves > 0 && num_moves < sizeOf(var.second)) {
          remaining_moves--;
          num_moves++;
@@ -177,20 +223,6 @@ bool get_reg_for_copies(ra_ctx& ctx,
 }
 
 
-void adjust_max_used_regs(ra_ctx& ctx, RegClass rc, unsigned reg)
-{
-   unsigned max_addressible_sgpr = ctx.program->chip_class >= VI ? 102 : 104;
-   unsigned size = sizeOf(rc);
-   if (typeOf(rc) == vgpr) {
-      unsigned hi = reg - 256 + size - 1;
-      ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, hi);
-   } else if (reg + sizeOf(rc) <= max_addressible_sgpr) {
-      unsigned hi = reg + size - 1;
-      ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, std::min(hi, max_addressible_sgpr));
-   }
-}
-
-
 std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
                                       std::array<uint32_t, 512>& reg_file,
                                       std::vector<std::pair<Operand, Definition>>& parallelcopies,
@@ -200,35 +232,10 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
                                       bool is_sgpr)
 {
    assert(num_moves <= size); // FIXME: extend this algorithm
-   unsigned reg_lo = lb;
-   unsigned reg_hi = lb + size - 1;
-   /* trivial case: without moves */
-   if (num_moves == 0) {
-      bool found = false;
-      while (!found && reg_lo + size <= ub) {
-         if (reg_file[reg_lo] != 0) {
-            reg_lo += stride;
-            continue;
-         }
-         reg_hi = reg_lo + size - 1;
-         found = true;
-         for (unsigned reg = reg_lo + 1; reg <= reg_hi; reg++) {
-            if (reg_file[reg] != 0) {
-               found = false;
-               break;
-            }
-         }
-         if (found) {
-            adjust_max_used_regs(ctx, is_sgpr ? s1 : v1, reg_hi);
-            return std::make_pair(PhysReg{reg_lo}, true);
-         }
-         while (reg_lo <= reg_hi)
-            reg_lo += stride;
-      }
-      return std::make_pair(PhysReg{0}, false);
-   }
 
    /* we use a sliding window to find potential positions */
+   unsigned reg_lo = lb;
+   unsigned reg_hi = lb + size - 1;
    for (reg_lo = lb, reg_hi = lb + size - 1; reg_hi < ub; reg_lo += stride, reg_hi += stride) {
       /* first check the edges: this is what we have to fix to allow for num_moves > size */
       if (reg_lo > lb + 1 && reg_file[reg_lo] != 0 && reg_file[reg_lo] == reg_file[reg_lo - 1])
@@ -298,7 +305,7 @@ std::pair<PhysReg, bool> get_reg_helper(ra_ctx& ctx,
                                         uint32_t num_moves)
 {
    if (num_moves == 0)
-      return get_reg_impl(ctx, reg_file, pc, lb, ub, size, stride, 0, typeOf(rc) == sgpr);
+      return get_reg_simple(ctx, reg_file, lb, ub, size, stride, typeOf(rc) == sgpr);
 
    std::pair<PhysReg, bool> res = get_reg_impl(ctx, reg_file, pc, lb, ub, size, stride, num_moves, typeOf(rc) == sgpr);
    if (!res.second)
@@ -391,7 +398,6 @@ std::pair<PhysReg, bool> get_reg_helper(ra_ctx& ctx,
 
 std::pair<PhysReg, bool> get_reg_vec(ra_ctx& ctx,
                                      std::array<uint32_t, 512>& reg_file,
-                                     std::vector<std::pair<Operand, Definition>>& pc,
                                      RegClass rc)
 {
    uint32_t size = sizeOf(rc);
@@ -408,7 +414,7 @@ std::pair<PhysReg, bool> get_reg_vec(ra_ctx& ctx,
       else if (size >= 4)
          stride = 4;
    }
-   return get_reg_impl(ctx, reg_file, pc, lb, ub, size, stride, 0, typeOf(rc) == sgpr);
+   return get_reg_simple(ctx, reg_file, lb, ub, size, stride, typeOf(rc) == sgpr);
 }
 
 
@@ -1162,7 +1168,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      k += vec->getOperand(i).size();
                   }
                   if (!definition.isFixed()) {
-                     std::pair<PhysReg, bool> res = get_reg_vec(ctx, register_file, parallelcopy, vec->getDefinition(0).regClass());
+                     std::pair<PhysReg, bool> res = get_reg_vec(ctx, register_file, vec->getDefinition(0).regClass());
                      PhysReg reg = res.first;
                      if (res.second) {
                         reg.reg += offset;
