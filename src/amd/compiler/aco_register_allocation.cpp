@@ -949,7 +949,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   /* check if target reg is blocked, and move away the blocking var */
                   if (register_file[operand.physReg().reg]) {
                      uint32_t blocking_id = register_file[operand.physReg().reg];
-                     RegClass rc = operand.physReg() == scc ? RegClass::s1 : ctx.assignments[blocking_id].second;
+                     RegClass rc = ctx.assignments[blocking_id].second;
                      Operand pc_op = Operand(Temp{blocking_id, rc});
                      pc_op.setFixed(operand.physReg());
                      Definition pc_def = Definition(Temp{program->allocateId(), pc_op.regClass()});
@@ -974,7 +974,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   }
                   /* move operand to fixed reg and create parallelcopy pair */
                   Operand pc_op = operand;
-                  Temp tmp = Temp{program->allocateId(), operand.physReg() == scc ? RegClass::b : operand.regClass()};
+                  Temp tmp = Temp{program->allocateId(), operand.regClass()};
                   Definition pc_def = Definition(tmp);
                   pc_def.setFixed(operand.physReg());
                   pc_op.setFixed(ctx.assignments[operand.tempId()].first);
@@ -1048,7 +1048,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   Temp tmp = {register_file[definition.physReg().reg], ctx.assignments[register_file[definition.physReg().reg]].second};
                   Operand pc_op = Operand(tmp);
                   pc_op.setFixed(ctx.assignments[register_file[definition.physReg().reg]].first);
-                  RegClass rc = definition.physReg() == scc ? RegClass::s1 : pc_op.regClass();
+                  RegClass rc = pc_op.regClass();
                   tmp = Temp{program->allocateId(), rc};
                   Definition pc_def = Definition(tmp);
 

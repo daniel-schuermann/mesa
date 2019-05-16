@@ -42,7 +42,6 @@ struct radv_shader_variant_info;
 struct radv_nir_compiler_options;
 
 typedef enum {
-   b = 0,
    s1 = 1,
    s2 = 2,
    s3 = 3,
@@ -155,7 +154,7 @@ static inline Format asVOP3(Format format) {
 };
 
 enum RegType {
-   scc_bit,
+   none = 0,
    sgpr,
    vgpr,
    linear_vgpr,
@@ -163,21 +162,18 @@ enum RegType {
 
 static inline RegType typeOf(RegClass rc)
 {
-   if (rc == RegClass::b) return RegType::scc_bit;
    if (rc <= RegClass::s16) return RegType::sgpr;
    else return RegType::vgpr;
 }
 
 static inline unsigned sizeOf(RegClass rc)
 {
-   if (rc == RegClass::b)
-      return 1;
    return (unsigned) rc & 0x1F;
 }
 
 static inline RegClass getRegClass(RegType type, unsigned size)
 {
-   return type == scc_bit ? b : (RegClass) ((type == vgpr ? 1 << 5 : 0) | size);
+   return (RegClass) ((type == vgpr ? 1 << 5 : 0) | size);
 }
 
 /**
