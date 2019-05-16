@@ -2488,7 +2488,7 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
          tmp->getOperand(1) = Operand(index);
          index = {ctx->program->allocateId(), index.regClass()};
          tmp->getDefinition(0) = Definition(index);
-         tmp->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
+         tmp->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
          ctx->block->instructions.emplace_back(std::move(tmp));
       }
    }
@@ -2502,7 +2502,7 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
       tmp->getOperand(1) = Operand(desc_ptr);
       index = {ctx->program->allocateId(), index.regClass()};
       tmp->getDefinition(0) = Definition(index);
-      tmp->getDefinition(1) = Definition(ctx->program->allocateId(), scc, b);
+      tmp->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
       ctx->block->instructions.emplace_back(std::move(tmp));
    }
 
