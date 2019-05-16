@@ -37,7 +37,6 @@ static
 void aco_print_reg_class(const RegClass rc, FILE *output)
 {
    switch (rc) {
-      case b: fprintf(output, "  b: "); return;
       case s1: fprintf(output, " s1: "); return;
       case s2: fprintf(output, " s2: "); return;
       case s3: fprintf(output, " s3: "); return;
