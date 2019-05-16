@@ -336,8 +336,10 @@ public:
          setFixed(PhysReg{247});
       else if (v == 0x3fc45f306dc9c882) /* 1/(2*PI) */
          setFixed(PhysReg{248});
-      else /* Literal Constant: we don't know if it is a long or double.*/
+      else { /* Literal Constant: we don't know if it is a long or double.*/
          control_[2] = 0;
+         assert(false && "attempt to create a 64-bit literal constant");
+      }
    };
    explicit Operand(RegClass type=s1) noexcept
    {
