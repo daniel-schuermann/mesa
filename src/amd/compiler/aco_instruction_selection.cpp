@@ -5794,6 +5794,7 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
             phi->getDefinition(0) = Definition(phi_dst);
             ctx->block->instructions.emplace(ctx->block->instructions.begin(), std::move(phi));
             new_vec[k] = phi_dst;
+            vec->getOperand(k) = Operand(phi_dst);
          }
          vec->getDefinition(0) = Definition(dst);
          ctx->block->instructions.emplace_back(std::move(vec));
