@@ -129,6 +129,12 @@ class Format(Enum):
                  ('uint8_t', 'row_mask', '0xF'),
                  ('uint8_t', 'bank_mask', '0xF'),
                  ('bool', 'bound_ctrl', 'false')]
+      elif self in [Format.FLAT, Format.GLOBAL, Format.SCRATCH]:
+         return [('uint16_t', 'offset', 0),
+                 ('bool', 'glc', 'false'),
+                 ('bool', 'slc', 'false'),
+                 ('bool', 'lds', 'false'),
+                 ('bool', 'nv', 'false')]
       else:
          return []
 
@@ -139,7 +145,7 @@ class Format(Enum):
       return [(f[3] if len(f) >= 4 else f[1]) for f in self.get_builder_fields()]
 
    def get_builder_field_decls(self):
-      return [('%s %s=%s' % (f[0], f[1], f[2]) if f[2] else '%s %s' % (f[0], f[1])) for f in self.get_builder_fields()]
+      return [('%s %s=%s' % (f[0], f[1], f[2]) if f[2] != None else '%s %s' % (f[0], f[1])) for f in self.get_builder_fields()]
 
 
 class Opcode(object):

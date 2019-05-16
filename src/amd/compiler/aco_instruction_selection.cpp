@@ -115,16 +115,12 @@ static void add_edge(Block *pred, Block *succ)
 
 static void append_logical_start(Block *b)
 {
-   b->instructions.push_back(
-      aco_ptr<Instruction>(create_instruction<Instruction>(aco_opcode::p_logical_start,
-                                                                   Format::PSEUDO, 0, 0)));
+   Builder(NULL, b).pseudo(aco_opcode::p_logical_start);
 }
 
 static void append_logical_end(Block *b)
 {
-   b->instructions.push_back(
-      aco_ptr<Instruction>(create_instruction<Instruction>(aco_opcode::p_logical_end,
-                                                                   Format::PSEUDO, 0, 0)));
+   Builder(NULL, b).pseudo(aco_opcode::p_logical_end);
 }
 
 Temp get_ssa_temp(struct isel_context *ctx, nir_ssa_def *def)
@@ -144,26 +140,14 @@ Temp emit_v_add32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_
       std::swap(a, b);
    assert(b.isTemp() && typeOf(b.regClass()) == RegType::vgpr); // in case two SGPRs are given
 
-   if (ctx->options->chip_class < GFX9)
-      carry_out = true;
-
-   aco_opcode op = carry_out ? aco_opcode::v_add_co_u32 : aco_opcode::v_add_u32;
-   int num_defs = carry_out ? 2 : 1;
-
-   Temp carry;
-
-   aco_ptr<VOP2_instruction> add{create_instruction<VOP2_instruction>(op, Format::VOP2, 2, num_defs)};
-   add->getOperand(0) = Operand(a);
-   add->getOperand(1) = Operand(b);
-   add->getDefinition(0) = Definition(dst);
-   if (carry_out) {
-      carry = {ctx->program->allocateId(), s2};
-      add->getDefinition(1) = Definition(carry);
-      add->getDefinition(1).setHint(vcc);
+   Builder bld(ctx->program, ctx->block);
+   if (ctx->options->chip_class < GFX9 || carry_out) {
+      return bld.vop2(aco_opcode::v_add_co_u32, Definition(dst),
+                      bld.hint_vcc(bld.def(s2)), a, b).def(1).getTemp();
+   } else {
+      bld.vop2(aco_opcode::v_add_u32, Definition(dst), a, b);
+      return Temp();
    }
-   ctx->block->instructions.emplace_back(std::move(add));
-
-   return carry;
 }
 
 Temp emit_v_sub32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_out = false, Operand borrow = Operand())
@@ -2260,12 +2244,8 @@ void emit_load_frag_coord(isel_context *ctx, Temp dst, unsigned num_components)
 
    if (ctx->fs_vgpr_args[fs_input::frag_pos_3]) {
       assert(num_components == 4);
-      aco_ptr<Instruction> rcp{create_instruction<VOP1_instruction>(aco_opcode::v_rcp_f32, Format::VOP1, 1, 1)};
-      rcp->getOperand(0) = Operand(ctx->fs_inputs[fs_input::frag_pos_3]);
-      Temp frag_pos_3 = {ctx->program->allocateId(), v1};
-      rcp->getDefinition(0) = Definition(frag_pos_3);
-      ctx->block->instructions.emplace_back(std::move(rcp));
-      vec->getOperand(3) = Operand(frag_pos_3);
+      Builder bld(ctx->program, ctx->block);
+      vec->getOperand(3) = bld.vop1(aco_opcode::v_rcp_f32, bld.def(v1), ctx->fs_inputs[fs_input::frag_pos_3]);
    }
 
    vec->getDefinition(0) = Definition(dst);
@@ -2436,14 +2416,8 @@ Temp load_desc_ptr(isel_context *ctx, unsigned desc_set)
 
 void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
 {
-   Temp index = get_ssa_temp(ctx, instr->src[0].ssa);
-   if (index.type() != RegType::sgpr) {
-      aco_ptr<Instruction> readlane{create_instruction<Instruction>(aco_opcode::p_as_uniform, Format::PSEUDO, 1, 1)};
-      readlane->getOperand(0) = Operand(index);
-      index = {ctx->program->allocateId(), s1};
-      readlane->getDefinition(0) = Definition(index);
-      ctx->block->instructions.emplace_back(std::move(readlane));
-   }
+   Builder bld(ctx->program, ctx->block);
+   Temp index = bld.as_uniform(get_ssa_temp(ctx, instr->src[0].ssa));
    unsigned desc_set = nir_intrinsic_desc_set(instr);
    unsigned binding = nir_intrinsic_binding(instr);
 
@@ -2469,45 +2443,26 @@ void visit_load_resource(isel_context *ctx, nir_intrinsic_instr *instr)
       if (nir_const_index) {
          const_index = const_index * stride;
       } else {
-         aco_ptr<Instruction> tmp;
-         tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_mul_i32, Format::SOP2, 2, 1));
-         tmp->getOperand(0) = Operand(stride);
-         tmp->getOperand(1) = Operand(index);
-         index = {ctx->program->allocateId(), index.regClass()};
-         tmp->getDefinition(0) = Definition(index);
-         ctx->block->instructions.emplace_back(std::move(tmp));
+         index = bld.sop2(aco_opcode::s_mul_i32, bld.def(s1), Operand(stride), Operand(index));
       }
    }
    if (offset) {
       if (nir_const_index) {
          const_index = const_index + offset;
       } else {
-         aco_ptr<Instruction> tmp;
-         tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 2));
-         tmp->getOperand(0) = Operand(offset);
-         tmp->getOperand(1) = Operand(index);
-         index = {ctx->program->allocateId(), index.regClass()};
-         tmp->getDefinition(0) = Definition(index);
-         tmp->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
-         ctx->block->instructions.emplace_back(std::move(tmp));
+         index = bld.sop2(aco_opcode::s_add_i32, bld.def(s1), bld.def(s1, scc), Operand(offset), Operand(index));
       }
    }
 
    if (nir_const_index && const_index == 0) {
       index = desc_ptr;
    } else {
-      aco_ptr<Instruction> tmp;
-      tmp.reset(create_instruction<SOP2_instruction>(aco_opcode::s_add_i32, Format::SOP2, 2, 2));
-      tmp->getOperand(0) = nir_const_index ? Operand(const_index) : Operand(index);
-      tmp->getOperand(1) = Operand(desc_ptr);
-      index = {ctx->program->allocateId(), index.regClass()};
-      tmp->getDefinition(0) = Definition(index);
-      tmp->getDefinition(1) = Definition(ctx->program->allocateId(), scc, s1);
-      ctx->block->instructions.emplace_back(std::move(tmp));
+      index = bld.sop2(aco_opcode::s_add_i32, bld.def(s1), bld.def(s1, scc),
+                       nir_const_index ? Operand(const_index) : Operand(index),
+                       Operand(desc_ptr));
    }
 
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-   Builder bld(ctx->program, ctx->block);
    bld.sop1(aco_opcode::s_mov_b32, Definition(dst), index);
 }
 
@@ -3890,15 +3845,8 @@ Operand load_lds_size_m0(isel_context *ctx)
 {
    if (ctx->options->chip_class >= GFX9) //m0 does not need to be initialized on GFX9+
       return Operand(m0, s1);
-   aco_ptr<Instruction> instr{create_instruction<SOPK_instruction>(aco_opcode::s_movk_i32, Format::SOPK, 0, 1)};
-   static_cast<SOPK_instruction*>(instr.get())->imm = 0xffff;
-   Temp dst = {ctx->program->allocateId(), s1};
-   instr->getDefinition(0) = Definition(dst);
-   instr->getDefinition(0).setFixed(m0);
-   ctx->block->instructions.emplace_back(std::move(instr));
-   Operand op(dst);
-   op.setFixed(m0);
-   return op;
+   Builder bld(ctx->program, ctx->block);
+   return bld.m0((Temp)bld.sopk(aco_opcode::s_movk_i32, bld.def(s1, m0), 0xffff));
 }
 
 
@@ -4432,13 +4380,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
 
       } else if (ctx->options->chip_class >= GFX9) {
          addr = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(3u), addr);
-         aco_ptr<FLAT_instruction> flat{create_instruction<FLAT_instruction>(aco_opcode::global_load_dwordx2, Format::GLOBAL, 2, 1)};
-         sample_pos = bld.tmp(v2);
-         flat->getDefinition(0) = Definition(sample_pos);
-         flat->getOperand(0) = Operand(addr);
-         flat->getOperand(1) = Operand(ctx->ring_offsets);
-         flat->offset = sample_pos_offset;
-         ctx->block->instructions.emplace_back(std::move(flat));
+         sample_pos = bld.global(aco_opcode::global_load_dwordx2, bld.def(v2), addr, ctx->ring_offsets, sample_pos_offset);
       } else {
          /* addr += ctx->ring_offsets + sample_pos_offset */
          Temp tmp0 = bld.tmp(s1);
@@ -4455,13 +4397,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
          addr = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2), pck0, pck1);
 
          /* sample_pos = flat_load_dwordx2 addr */
-         aco_ptr<FLAT_instruction> flat{create_instruction<FLAT_instruction>(aco_opcode::flat_load_dwordx2, Format::FLAT, 2, 1)};
-         sample_pos = bld.tmp(v2);
-         flat->getDefinition(0) = Definition(sample_pos);
-         flat->getOperand(0) = Operand(addr);
-         flat->getOperand(1) = Operand();
-         flat->offset = 0;
-         ctx->block->instructions.emplace_back(std::move(flat));
+         sample_pos = bld.flat(aco_opcode::flat_load_dwordx2, bld.def(v2), addr, Operand());
       }
 
       /* sample_pos -= 0.5 */
@@ -6311,41 +6247,30 @@ aco_ptr<Instruction> create_s_mov(Definition dst, Operand src) {
 
 void handle_bc_optimize(isel_context *ctx)
 {
+   /* needed when SPI_PS_IN_CONTROL.BC_OPTIMIZE_DISABLE is set to 0 */
+   Builder bld(ctx->program, ctx->block);
    uint32_t spi_ps_input_ena = ctx->program->config->spi_ps_input_ena;
    bool uses_center = G_0286CC_PERSP_CENTER_ENA(spi_ps_input_ena) || G_0286CC_LINEAR_CENTER_ENA(spi_ps_input_ena);
    bool uses_centroid = G_0286CC_PERSP_CENTROID_ENA(spi_ps_input_ena) || G_0286CC_LINEAR_CENTROID_ENA(spi_ps_input_ena);
    if (uses_center && uses_centroid) {
-      /* needed when SPI_PS_IN_CONTROL.BC_OPTIMIZE_DISABLE is set to 0 */
-      Temp sel{ctx->program->allocateId(), s2};
-      aco_ptr<Instruction> instr{create_instruction<VOP3A_instruction>(aco_opcode::v_cmp_lt_i32, asVOP3(Format::VOPC), 2, 1)};
-      instr->getOperand(0) = Operand(ctx->prim_mask);
-      instr->getOperand(1) = Operand((uint32_t) 0);
-      instr->getDefinition(0) = Definition(sel);
-      instr->getDefinition(0).setHint(vcc);
-      ctx->block->instructions.emplace_back(std::move(instr));
+      Temp sel = bld.vopc_e64(aco_opcode::v_cmp_lt_i32, bld.hint_vcc(bld.def(s2)), ctx->prim_mask, Operand(0u));
 
       if (G_0286CC_PERSP_CENTROID_ENA(spi_ps_input_ena)) {
          for (unsigned i = 0; i < 2; i++) {
-            Temp new_coord{ctx->program->allocateId(), v1};
-            instr.reset(create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
-            instr->getOperand(0) = Operand(ctx->fs_inputs[fs_input::persp_centroid_p1 + i]);
-            instr->getOperand(1) = Operand(ctx->fs_inputs[fs_input::persp_center_p1 + i]);
-            instr->getOperand(2) = Operand(sel);
-            instr->getDefinition(0) = Definition(new_coord);
-            ctx->block->instructions.emplace_back(std::move(instr));
+            Temp new_coord = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1),
+                                      ctx->fs_inputs[fs_input::persp_centroid_p1 + i],
+                                      ctx->fs_inputs[fs_input::persp_center_p1 + i],
+                                      sel);
             ctx->fs_inputs[fs_input::persp_centroid_p1 + i] = new_coord;
          }
       }
 
       if (G_0286CC_LINEAR_CENTROID_ENA(spi_ps_input_ena)) {
          for (unsigned i = 0; i < 2; i++) {
-            Temp new_coord{ctx->program->allocateId(), v1};
-            instr.reset(create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1));
-            instr->getOperand(0) = Operand(ctx->fs_inputs[fs_input::linear_centroid_p1 + i]);
-            instr->getOperand(1) = Operand(ctx->fs_inputs[fs_input::linear_center_p1 + i]);
-            instr->getOperand(2) = Operand(sel);
-            instr->getDefinition(0) = Definition(new_coord);
-            ctx->block->instructions.emplace_back(std::move(instr));
+            Temp new_coord = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1),
+                                      ctx->fs_inputs[fs_input::linear_centroid_p1 + i],
+                                      ctx->fs_inputs[fs_input::linear_center_p1 + i],
+                                      sel);
             ctx->fs_inputs[fs_input::linear_centroid_p1 + i] = new_coord;
          }
       }
