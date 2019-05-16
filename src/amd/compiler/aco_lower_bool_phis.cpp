@@ -173,7 +173,7 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
          merge->getOperand(1) = Operand(exec, s2);
          Temp tmp1{program->allocateId(), s2};
          merge->getDefinition(0) = Definition(tmp1);
-         merge->getDefinition(1) = Definition(program->allocateId(), scc, b);
+         merge->getDefinition(1) = Definition(program->allocateId(), scc, s1);
          insert_before_logical_end(pred, std::move(merge));
 
          merge.reset(create_instruction<SOP2_instruction>(aco_opcode::s_and_b64, Format::SOP2, 2, 2));
@@ -181,14 +181,14 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
          merge->getOperand(1) = Operand(exec, s2);
          Temp tmp2{program->allocateId(), s2};
          merge->getDefinition(0) = Definition(tmp2);
-         merge->getDefinition(1) = Definition(program->allocateId(), scc, b);
+         merge->getDefinition(1) = Definition(program->allocateId(), scc, s1);
          insert_before_logical_end(pred, std::move(merge));
 
          merge.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 2));
          merge->getOperand(0) = Operand(tmp1);
          merge->getOperand(1) = Operand(tmp2);
          merge->getDefinition(0) = Definition(new_cur);
-         merge->getDefinition(1) = Definition(program->allocateId(), scc, b);
+         merge->getDefinition(1) = Definition(program->allocateId(), scc, s1);
          insert_before_logical_end(pred, std::move(merge));
       }
    }
