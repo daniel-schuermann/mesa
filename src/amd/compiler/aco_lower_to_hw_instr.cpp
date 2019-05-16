@@ -31,6 +31,7 @@
 #include "aco_ir.h"
 #include "aco_builder.h"
 #include "util/u_math.h"
+#include "common/sid.h"
 
 
 namespace aco {
@@ -314,6 +315,7 @@ struct copy_operation {
 
 void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context* ctx, chip_class chip_class)
 {
+   Builder bld(ctx->program, &ctx->instructions);
    aco_ptr<Instruction> mov;
    std::map<PhysReg, copy_operation>::iterator it = copy_map.begin();
    std::map<PhysReg, copy_operation>::iterator target;
@@ -362,25 +364,14 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
             }
          }
 
-         if (it->second.def.physReg().reg == scc.reg) {
-            mov.reset(create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_i32, Format::SOPC, 2, 1));
-            mov->getOperand(1) = Operand((uint32_t) 0);
-            mov->getOperand(0) = it->second.op;
-            mov->getDefinition(0) = it->second.def;
-            ctx->instructions.emplace_back(std::move(mov));
-         } else if (it->second.size == 2 && it->second.def.getTemp().type() == RegType::sgpr) {
-            mov.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
-            mov->getOperand(0) = it->second.op;
-            mov->getDefinition(0) = it->second.def;
-            ctx->instructions.emplace_back(std::move(mov));
-         } else if (it->second.def.getTemp().type() == RegType::sgpr) {
+         if (it->second.def.physReg().reg == scc.reg)
+            bld.sopc(aco_opcode::s_cmp_lg_i32, it->second.def, it->second.op, Operand(0u));
+         else if (it->second.size == 2 && it->second.def.getTemp().type() == RegType::sgpr)
+            bld.sop1(aco_opcode::s_mov_b64, it->second.def, it->second.op);
+         else if (it->second.def.getTemp().type() == RegType::sgpr)
             ctx->instructions.emplace_back(std::move(create_s_mov(it->second.def, it->second.op)));
-         } else {
-            mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
-            mov->getOperand(0) = it->second.op;
-            mov->getDefinition(0) = it->second.def;
-            ctx->instructions.emplace_back(std::move(mov));
-         }
+         else
+            bld.vop1(aco_opcode::v_mov_b32, it->second.def, it->second.op);
 
          /* reduce the number of uses of the operand reg by one */
          if (!it->second.op.isConstant()) {
@@ -421,30 +412,15 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
       Operand def_as_op = Operand(swap.def.physReg(), swap.def.regClass());
       Definition op_as_def = Definition(swap.op.physReg(), swap.op.regClass());
       if (chip_class >= GFX9 && swap.def.getTemp().type() == RegType::vgpr) {
-         mov.reset(create_instruction<Instruction>(aco_opcode::v_swap_b32, Format::VOP1, 2, 2));
-         mov->getOperand(0) = swap.op;
-         mov->getOperand(1) = def_as_op;
-         mov->getDefinition(0) = swap.def;
-         mov->getDefinition(1) = op_as_def;
-         ctx->instructions.emplace_back(std::move(mov));
+         bld.vop1(aco_opcode::v_swap_b32, swap.def, op_as_def, swap.op, def_as_op);
+      } else if (swap.def.getTemp().type() == RegType::sgpr) {
+         bld.sop2(aco_opcode::s_xor_b32, op_as_def, Definition(scc, s1), swap.op, def_as_op);
+         bld.sop2(aco_opcode::s_xor_b32, swap.def, Definition(scc, s1), swap.op, def_as_op);
+         bld.sop2(aco_opcode::s_xor_b32, op_as_def, Definition(scc, s1), swap.op, def_as_op);
       } else {
-         aco_opcode opcode = swap.def.getTemp().type() == RegType::sgpr ? aco_opcode::s_xor_b32 : aco_opcode::v_xor_b32;
-         Format format = swap.def.getTemp().type() == RegType::sgpr ? Format::SOP2 : Format::VOP2;
-         mov.reset(create_instruction<Instruction>(opcode, format, 2, 1));
-         mov->getOperand(0) = swap.op;
-         mov->getOperand(1) = def_as_op;
-         mov->getDefinition(0) = op_as_def;
-         ctx->instructions.emplace_back(std::move(mov));
-         mov.reset(create_instruction<Instruction>(opcode, format, 2, 1));
-         mov->getOperand(0) = swap.op;
-         mov->getOperand(1) = def_as_op;
-         mov->getDefinition(0) = swap.def;
-         ctx->instructions.emplace_back(std::move(mov));
-         mov.reset(create_instruction<Instruction>(opcode, format, 2, 1));
-         mov->getOperand(0) = swap.op;
-         mov->getOperand(1) = def_as_op;
-         mov->getDefinition(0) = op_as_def;
-         ctx->instructions.emplace_back(std::move(mov));
+         bld.vop2(aco_opcode::v_xor_b32, op_as_def, swap.op, def_as_op);
+         bld.vop2(aco_opcode::v_xor_b32, swap.def, swap.op, def_as_op);
+         bld.vop2(aco_opcode::v_xor_b32, op_as_def, swap.op, def_as_op);
       }
 
       /* change the operand reg of the target's use */
@@ -466,10 +442,7 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
          if (it->second.def.getTemp().type() == RegType::sgpr) {
             ctx->instructions.emplace_back(std::move(create_s_mov(it->second.def, it->second.op)));
          } else {
-            mov.reset(create_instruction<VOP1_instruction>(aco_opcode::v_mov_b32, Format::VOP1, 1, 1));
-            mov->getOperand(0) = it->second.op;
-            mov->getDefinition(0) = it->second.def;
-            ctx->instructions.emplace_back(std::move(mov));
+            bld.vop1(aco_opcode::v_mov_b32, it->second.def, it->second.op);
          }
       }
    }
@@ -483,6 +456,7 @@ void lower_to_hw_instr(Program* program)
       Block* block = it->get();
       lower_context ctx;
       ctx.program = program;
+      Builder bld(program, &ctx.instructions);
       for (auto&& instr : block->instructions)
       {
          aco_ptr<Instruction> mov;
@@ -585,49 +559,33 @@ void lower_to_hw_instr(Program* program)
                aco_ptr<Instruction> sop2;
                /* backwards, to finally branch on the global exec mask */
                for (int i = instr->num_operands - 2; i >= 0; i--) {
-                  sop2.reset(create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2));
-                  sop2->getOperand(0) = instr->getOperand(i); /* old mask */
-                  sop2->getOperand(1) = discard_cond;
-                  sop2->getDefinition(0) = instr->getDefinition(i); /* new mask */
-                  sop2->getDefinition(1) = branch_cond; /* scc */
-                  ctx.instructions.emplace_back(std::move(sop2));
+                  bld.sop2(aco_opcode::s_andn2_b64,
+                           instr->getDefinition(i), /* new mask */
+                           branch_cond, /* scc */
+                           instr->getOperand(i), /* old mask */
+                           discard_cond);
                }
 
-               aco_ptr<SOPP_instruction> branch{create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc1, Format::SOPP, 1, 0)};
-               branch->getOperand(0) = Operand(branch_cond.getTemp());
-               branch->getOperand(0).setFixed(scc);
-               branch->imm = program->wb_smem_l1_on_end ? 5 : 3; /* (8 + (wb_smem ? 8 : 0) + 4 dwords) / 4 */
-               ctx.instructions.emplace_back(std::move(branch));
+               unsigned jump_dwords = program->wb_smem_l1_on_end ? 5 : 3; /* (8 + (wb_smem ? 8 : 0) + 4 dwords) / 4 */;
+               bld.sopp(aco_opcode::s_cbranch_scc1, bld.scc(branch_cond.getTemp()), NULL, jump_dwords);
 
-               aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
-               for (unsigned i = 0; i < 4; i++)
-                  exp->getOperand(i) = Operand();
-               exp->enabled_mask = 0;
-               exp->compressed = false;
-               exp->done = true;
-               exp->valid_mask = true;
-               exp->dest = 9; /* NULL */
-               ctx.instructions.emplace_back(std::move(exp));
+               bld.exp(aco_opcode::exp, Operand(), Operand(), Operand(), Operand(),
+                       0, V_008DFC_SQ_EXP_NULL, false, true, true);
 
                if (program->wb_smem_l1_on_end) {
-                  aco_ptr<SMEM_instruction> smem{create_instruction<SMEM_instruction>(aco_opcode::s_dcache_wb, Format::SMEM, 0, 0)};
-                  ctx.instructions.emplace_back(std::move(smem));
+                  bld.smem(aco_opcode::s_dcache_wb);
                }
 
-               aco_ptr<SOPP_instruction> endpgm{create_instruction<SOPP_instruction>(aco_opcode::s_endpgm, Format::SOPP, 0, 0)};
-               ctx.instructions.emplace_back(std::move(endpgm));
+               bld.sopp(aco_opcode::s_endpgm);
                break;
             }
             case aco_opcode::p_spill:
             {
                assert(instr->getOperand(0).regClass() == v1_linear);
                for (unsigned i = 0; i < instr->getOperand(2).size(); i++) {
-                  aco_ptr<VOP3A_instruction> writelane{create_instruction<VOP3A_instruction>(aco_opcode::v_writelane_b32, Format::VOP3A, 2, 1)};
-                  writelane->getOperand(0) = Operand(PhysReg{instr->getOperand(2).physReg().reg + i}, s1);
-                  writelane->getOperand(1) = Operand(instr->getOperand(1).constantValue() + i);
-                  writelane->getDefinition(0) = Definition(instr->getOperand(0).getTemp());
-                  writelane->getDefinition(0).setFixed(instr->getOperand(0).physReg());
-                  ctx.instructions.emplace_back(std::move(writelane));
+                  bld.vop3(aco_opcode::v_writelane_b32, bld.def(v1, instr->getOperand(0).physReg()),
+                           Operand(PhysReg{instr->getOperand(2).physReg().reg + i}, s1),
+                           Operand(instr->getOperand(1).constantValue() + i));
                }
                break;
             }
@@ -635,11 +593,9 @@ void lower_to_hw_instr(Program* program)
             {
                assert(instr->getOperand(0).regClass() == v1_linear);
                for (unsigned i = 0; i < instr->getDefinition(0).size(); i++) {
-                  aco_ptr<VOP3A_instruction> readlane{create_instruction<VOP3A_instruction>(aco_opcode::v_readlane_b32, Format::VOP3A, 2, 1)};
-                  readlane->getOperand(0) = instr->getOperand(0);
-                  readlane->getOperand(1) = Operand(instr->getOperand(1).constantValue() + i);
-                  readlane->getDefinition(0) = Definition(PhysReg{instr->getDefinition(0).physReg().reg + i}, s1);
-                  ctx.instructions.emplace_back(std::move(readlane));
+                  bld.vop3(aco_opcode::v_readlane_b32,
+                           bld.def(s1, PhysReg{instr->getDefinition(0).physReg().reg + i}),
+                           instr->getOperand(0), Operand(instr->getOperand(1).constantValue() + i));
                }
                break;
             }
@@ -654,12 +610,9 @@ void lower_to_hw_instr(Program* program)
                assert(typeOf(instr->getDefinition(0).regClass()) == RegType::sgpr);
                assert(instr->getOperand(0).size() == instr->getDefinition(0).size());
                for (unsigned i = 0; i < instr->getDefinition(0).size(); i++) {
-                  aco_ptr<VOP1_instruction> readfirstlane{create_instruction<VOP1_instruction>(aco_opcode::v_readfirstlane_b32, Format::VOP1, 1, 1)};
-                  readfirstlane->getOperand(0) = instr->getOperand(0);
-                  readfirstlane->getOperand(0).setFixed(PhysReg{instr->getOperand(0).physReg().reg + i});
-                  readfirstlane->getDefinition(0) = instr->getDefinition(0);
-                  readfirstlane->getDefinition(0).setFixed(PhysReg{instr->getDefinition(0).physReg().reg + i});
-                  ctx.instructions.emplace_back(std::move(readfirstlane));
+                  bld.vop1(aco_opcode::v_readfirstlane_b32,
+                           bld.def(s1, PhysReg{instr->getDefinition(0).physReg().reg + i}),
+                           Operand(PhysReg{instr->getOperand(0).physReg().reg + i}, v1));
                }
                break;
             }
@@ -680,33 +633,31 @@ void lower_to_hw_instr(Program* program)
             aco_ptr<SOPP_instruction> sopp;
             switch (instr->opcode) {
                case aco_opcode::p_branch:
-                  sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_branch, Format::SOPP, 0, 0));
+                  bld.sopp(aco_opcode::s_branch, branch->targets[0]);
                   break;
                case aco_opcode::p_cbranch_nz:
                   if (branch->getOperand(0).physReg() == exec)
-                     sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_execnz, Format::SOPP, 0, 0));
+                     bld.sopp(aco_opcode::s_cbranch_execnz, branch->targets[0]);
                   else if (branch->getOperand(0).physReg() == vcc)
-                     sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_vccnz, Format::SOPP, 0, 0));
+                     bld.sopp(aco_opcode::s_cbranch_vccnz, branch->targets[0]);
                   else {
                      assert(branch->getOperand(0).physReg() == scc);
-                     sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc1, Format::SOPP, 0, 0));
+                     bld.sopp(aco_opcode::s_cbranch_scc1, branch->targets[0]);
                   }
                   break;
                case aco_opcode::p_cbranch_z:
                   if (branch->getOperand(0).physReg() == exec)
-                     sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_execz, Format::SOPP, 0, 0));
+                     bld.sopp(aco_opcode::s_cbranch_execz, branch->targets[0]);
                   else if (branch->getOperand(0).physReg() == vcc)
-                     sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_vccz, Format::SOPP, 0, 0));
+                     bld.sopp(aco_opcode::s_cbranch_vccz, branch->targets[0]);
                   else {
                      assert(branch->getOperand(0).physReg() == scc);
-                     sopp.reset(create_instruction<SOPP_instruction>(aco_opcode::s_cbranch_scc0, Format::SOPP, 0, 0));
+                     bld.sopp(aco_opcode::s_cbranch_scc0, branch->targets[0]);
                   }
                   break;
                default:
                   unreachable("Unknown Pseudo branch instruction!");
             }
-            sopp->block = branch->targets[0];
-            ctx.instructions.emplace_back(std::move(sopp));
 
          } else if (instr->format == Format::PSEUDO_REDUCTION) {
             Pseudo_reduction_instruction* reduce = static_cast<Pseudo_reduction_instruction*>(instr.get());
