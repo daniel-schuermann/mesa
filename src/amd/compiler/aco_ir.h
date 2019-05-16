@@ -314,6 +314,7 @@ public:
    explicit Operand(uint64_t v) noexcept
    {
       control_[2] = 1; /* isConst */
+      control_[6] = 1; /* is64BitConst */
       if (v <= 64)
          setFixed(PhysReg{128 + (uint32_t) v});
       else if (v >= 0xFFFFFFFFFFFFFFF0) /* [-16 .. -1] */
@@ -382,7 +383,7 @@ public:
    unsigned size() const noexcept
    {
       if (isConstant())
-         return 1;
+         return control_[6] ? 2 : 1;
       else
          return data_.temp.size();
    }
