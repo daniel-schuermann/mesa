@@ -357,7 +357,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       ssa_info info = ctx.info[instr->getOperand(i).tempId()];
       /* propagate undef */
       if (info.is_undefined())
-         instr->getOperand(i) = Operand();
+         instr->getOperand(i) = Operand(instr->getOperand(i).regClass());
       /* propagate reg->reg of same type */
       if (info.is_temp() && info.temp.regClass() == instr->getOperand(i).getTemp().regClass()) {
          instr->getOperand(i).setTemp(ctx.info[instr->getOperand(i).tempId()].temp);
@@ -443,7 +443,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          MUBUF_instruction *mubuf = static_cast<MUBUF_instruction *>(instr.get());
          if (mubuf->offen && i == 0 && info.is_constant_or_literal() && mubuf->offset + info.val < 4096) {
             assert(!mubuf->idxen);
-            instr->getOperand(i) = Operand();
+            instr->getOperand(i) = Operand(v1);
             mubuf->offset += info.val;
             mubuf->offen = false;
             continue;
@@ -981,7 +981,7 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          }
       }
       if (mul_instr) {
-         Operand op[3];
+         Operand op[3] = {Operand(v1), Operand(v1), Operand(v1)};
          bool neg[3] = {false, false, false};
          bool abs[3] = {false, false, false};
          unsigned omod = 0;
