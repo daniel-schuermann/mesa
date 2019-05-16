@@ -83,6 +83,7 @@ void aco_print_operand(const Operand *operand, FILE *output)
       return;
    }
    if (operand->isUndefined()) {
+      aco_print_reg_class(operand->regClass(), output);
       fprintf(output, "undef");
       return;
    }
