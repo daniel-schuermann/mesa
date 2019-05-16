@@ -44,7 +44,7 @@ struct lower_context {
 void emit_dpp_op(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1, PhysReg vtmp, PhysReg wrtmp,
                  aco_opcode op, Format format, bool clobber_vcc, unsigned dpp_ctrl,
                  unsigned row_mask, unsigned bank_mask, bool bound_ctrl_zero,
-                 Operand identity=Operand()) /* for VOP3 with sparse writes */
+                 Operand identity=Operand(v1)) /* for VOP3 with sparse writes */
 {
    if (format == Format::VOP3) {
       Builder bld(ctx->program, &ctx->instructions);
@@ -489,6 +489,9 @@ void lower_to_hw_instr(Program* program)
                unsigned reg_idx = 0;
                for (unsigned i = 0; i < instr->num_operands; i++)
                {
+                  if (instr->getOperand(i).isUndefined())
+                     continue;
+
                   if (instr->getOperand(i).isConstant()) {
                      PhysReg reg = {instr->getDefinition(0).physReg().reg + reg_idx};
                      Definition def = Definition(reg, rc_def);
@@ -569,7 +572,7 @@ void lower_to_hw_instr(Program* program)
                unsigned jump_dwords = program->wb_smem_l1_on_end ? 5 : 3; /* (8 + (wb_smem ? 8 : 0) + 4 dwords) / 4 */;
                bld.sopp(aco_opcode::s_cbranch_scc1, bld.scc(branch_cond.getTemp()), NULL, jump_dwords);
 
-               bld.exp(aco_opcode::exp, Operand(), Operand(), Operand(), Operand(),
+               bld.exp(aco_opcode::exp, Operand(v1), Operand(v1), Operand(v1), Operand(v1),
                        0, V_008DFC_SQ_EXP_NULL, false, true, true);
 
                if (program->wb_smem_l1_on_end) {

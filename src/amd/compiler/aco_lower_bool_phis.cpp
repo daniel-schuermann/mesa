@@ -58,7 +58,7 @@ Operand get_ssa(Program *program, Block *block, ssa_state *state)
 
       size_t pred = block->linear_predecessors.size();
       if (pred == 0) {
-         return Operand();
+         return Operand(s2);
       } else if (pred == 1) {
          block = block->linear_predecessors[0];
          continue;

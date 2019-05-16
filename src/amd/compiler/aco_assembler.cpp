@@ -357,7 +357,7 @@ void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
       /* we didn't find an Export instruction and have to insert a null export */
       aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
       for (unsigned i = 0; i < 4; i++)
-         exp->getOperand(i) = Operand();
+         exp->getOperand(i) = Operand(v1);
       exp->enabled_mask = 0;
       exp->compressed = false;
       exp->done = true;
