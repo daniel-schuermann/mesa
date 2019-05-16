@@ -339,9 +339,10 @@ public:
       else /* Literal Constant: we don't know if it is a long or double.*/
          control_[2] = 0;
    };
-   explicit Operand() noexcept
+   explicit Operand(RegClass type=s1) noexcept
    {
       control_[4] = 1; /* undefined */
+      data_.temp = Temp(0, type);
       setFixed(PhysReg{128});
    };
    explicit Operand(PhysReg reg, RegClass type) noexcept
@@ -378,7 +379,7 @@ public:
 
    unsigned size() const noexcept
    {
-      if (isConstant() || isUndefined())
+      if (isConstant())
          return 1;
       else
          return data_.temp.size();

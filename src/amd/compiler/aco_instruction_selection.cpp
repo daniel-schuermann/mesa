@@ -150,7 +150,7 @@ Temp emit_v_add32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_
    }
 }
 
-Temp emit_v_sub32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_out = false, Operand borrow = Operand())
+Temp emit_v_sub32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_out = false, Operand borrow = Operand(s2))
 {
    if (!borrow.isUndefined() || ctx->options->chip_class < GFX9)
       carry_out = true;
@@ -319,7 +319,7 @@ void expand_vector(isel_context* ctx, Temp vec_src, Temp dst, unsigned num_compo
             src = bld.as_uniform(src);
          vec->getOperand(i) = Operand(src);
       } else {
-         vec->getOperand(i) = Operand();
+         vec->getOperand(i) = Operand(getRegClass(dst.type(), 1));
       }
       elems[i] = vec->getOperand(i).getTemp();
    }
@@ -2053,7 +2053,7 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
          Temp tmp = emit_extract_vector(ctx, src, i, v1);
          values[i] = Operand(tmp);
       } else {
-         values[i] = Operand();
+         values[i] = Operand(v1);
       }
    }
 
@@ -2078,7 +2078,7 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
          col_format = (unsigned) -1;
 
          values[2] = values[0];
-         values[0] = Operand();
+         values[0] = Operand(v1);
       } else {
          aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
          exp->valid_mask = false;
@@ -2087,7 +2087,7 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
          exp->dest = V_008DFC_SQ_EXP_MRTZ;
          exp->enabled_mask = 0xc;
          for (int i = 0; i < 4; i++)
-            exp->getOperand(i) = Operand();
+            exp->getOperand(i) = Operand(v1);
          exp->getOperand(1) = Operand(values[0]);
          ctx->block->instructions.emplace_back(std::move(exp));
          return;
@@ -2118,7 +2118,7 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
       exp->enabled_mask = 0x3;
       exp->getOperand(0) = Operand(tmp);
       for (int i = 1; i < 4; i++)
-         exp->getOperand(i) = Operand();
+         exp->getOperand(i) = Operand(v1);
       ctx->block->instructions.emplace_back(std::move(exp));
       return;
 
@@ -2202,7 +2202,7 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
             values[i] = Operand(tmp);
             ctx->block->instructions.emplace_back(std::move(compr));
          } else {
-            values[i] = Operand();
+            values[i] = Operand(v1);
          }
       }
    }
@@ -2215,12 +2215,12 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
    exp->enabled_mask = enabled_channels;
    if ((bool) compr_op) {
       for (int i = 0; i < 2; i++)
-         exp->getOperand(i) = enabled_channels & (3 << (i * 2)) ? values[i] : Operand();
-      exp->getOperand(2) = Operand();
-      exp->getOperand(3) = Operand();
+         exp->getOperand(i) = enabled_channels & (3 << (i * 2)) ? values[i] : Operand(v1);
+      exp->getOperand(2) = Operand(v1);
+      exp->getOperand(3) = Operand(v1);
    } else {
       for (int i = 0; i < 4; i++)
-         exp->getOperand(i) = enabled_channels & (1 << i) ? values[i] : Operand();
+         exp->getOperand(i) = enabled_channels & (1 << i) ? values[i] : Operand(v1);
    }
 
    ctx->block->instructions.emplace_back(std::move(exp));
@@ -2685,7 +2685,7 @@ void visit_discard(isel_context* ctx, nir_intrinsic_instr *instr)
          /* program just ends here */
          ctx->block->kind |= block_kind_uniform;
          ctx->cf_info.has_branch = true; /* not really, but doesn't need one */
-         bld.exp(aco_opcode::exp, Operand(), Operand(), Operand(), Operand(),
+         bld.exp(aco_opcode::exp, Operand(v1), Operand(v1), Operand(v1), Operand(v1),
                  0 /* enabled mask */, 9 /* dest */,
                  false /* compressed */, true/* done */, true /* valid mask */);
          bld.sopp(aco_opcode::s_endpgm);
@@ -3140,7 +3140,7 @@ void visit_image_store(isel_context *ctx, nir_intrinsic_instr *instr)
    aco_ptr<MIMG_instruction> store{create_instruction<MIMG_instruction>(aco_opcode::image_store, Format::MIMG, 4, 0)};
    store->getOperand(0) = Operand(coords);
    store->getOperand(1) = Operand(resource);
-   store->getOperand(2) = Operand();
+   store->getOperand(2) = Operand(s4);
    store->getOperand(3) = Operand(data);
    store->glc = glc;
    store->dmask = (1 << data.size()) - 1;
@@ -3244,7 +3244,7 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
    aco_ptr<MIMG_instruction> mimg{create_instruction<MIMG_instruction>(image_op, Format::MIMG, 4, return_previous ? 1 : 0)};
    mimg->getOperand(0) = Operand(coords);
    mimg->getOperand(1) = Operand(resource);
-   mimg->getOperand(2) = Operand(); /* no sampler */
+   mimg->getOperand(2) = Operand(s4); /* no sampler */
    mimg->getOperand(3) = Operand(data);
    if (return_previous)
       mimg->getDefinition(0) = Definition(dst);
@@ -3390,7 +3390,7 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
             unreachable("Load SSBO not implemented for this size.");
       }
       aco_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 3, 1)};
-      mubuf->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand();
+      mubuf->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand(v1);
       mubuf->getOperand(1) = Operand(rsrc);
       mubuf->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand((uint32_t) 0);
       mubuf->offen = (offset.type() == vgpr);
@@ -3554,7 +3554,7 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
          }
       } else {
          aco_ptr<MUBUF_instruction> store{create_instruction<MUBUF_instruction>(vmem_op, Format::MUBUF, 4, 0)};
-         store->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand();
+         store->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand(v1);
          store->getOperand(1) = Operand(rsrc);
          store->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand((uint32_t) 0);
          store->getOperand(3) = Operand(write_data);
@@ -3637,7 +3637,7 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
    }
 
    aco_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 4, return_previous ? 1 : 0)};
-   mubuf->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand();
+   mubuf->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand(v1);
    mubuf->getOperand(1) = Operand(rsrc);
    mubuf->getOperand(2) = offset.type() == sgpr ? Operand(offset) : Operand((uint32_t) 0);
    mubuf->getOperand(3) = Operand(data);
@@ -3692,7 +3692,7 @@ void visit_load_global(isel_context *ctx, nir_intrinsic_instr *instr)
       }
       aco_ptr<FLAT_instruction> flat{create_instruction<FLAT_instruction>(op, global ? Format::GLOBAL : Format::FLAT, 2, 1)};
       flat->getOperand(0) = Operand(addr);
-      flat->getOperand(1) = Operand();
+      flat->getOperand(1) = Operand(s1);
       flat->glc = glc;
 
       if (dst.type() == sgpr) {
@@ -3808,7 +3808,7 @@ void visit_store_global(isel_context *ctx, nir_intrinsic_instr *instr)
       }
       aco_ptr<FLAT_instruction> flat{create_instruction<FLAT_instruction>(op, global ? Format::GLOBAL : Format::FLAT, 3, 0)};
       flat->getOperand(0) = Operand(addr);
-      flat->getOperand(1) = Operand();
+      flat->getOperand(1) = Operand(s1);
       flat->getOperand(2) = Operand(data);
       flat->glc = glc;
       flat->offset = offset;
@@ -4397,7 +4397,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
          addr = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2), pck0, pck1);
 
          /* sample_pos = flat_load_dwordx2 addr */
-         sample_pos = bld.flat(aco_opcode::flat_load_dwordx2, bld.def(v2), addr, Operand());
+         sample_pos = bld.flat(aco_opcode::flat_load_dwordx2, bld.def(v2), addr, Operand(s1));
       }
 
       /* sample_pos -= 0.5 */
@@ -4775,8 +4775,8 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
          reduce->getOperand(0) = Operand(src);
          // filled in by aco_reduce_assign.cpp, used internally as part of the
          // reduce sequence
-         reduce->getOperand(1) = Operand();
-         reduce->getOperand(2) = Operand();
+         reduce->getOperand(1) = Operand(dst.size() == 2 ? v2_linear : v1_linear);
+         reduce->getOperand(2) = Operand(v1_linear);
 
          Temp tmp_dst = bld.tmp(dst.regClass());
          reduce->getDefinition(0) = Definition(tmp_dst);
@@ -5687,15 +5687,11 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
    if (all_undef) {
       Builder bld(ctx->program, ctx->block);
       if (dst.regClass() == s1) {
-         bld.sop1(aco_opcode::s_mov_b32, Definition(dst), Operand());
+         bld.sop1(aco_opcode::s_mov_b32, Definition(dst), Operand(s1));
       } else if (dst.regClass() == v1) {
-         bld.vop1(aco_opcode::v_mov_b32, Definition(dst), Operand());
+         bld.vop1(aco_opcode::v_mov_b32, Definition(dst), Operand(v1));
       } else {
-         phi.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size(), 1));
-         for (unsigned i = 0; i < dst.size(); i++)
-            phi->getOperand(i) = Operand();
-         phi->getDefinition(0) = Definition(dst);
-         ctx->block->instructions.emplace_back(std::move(phi));
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), Operand(dst.regClass()));
       }
       return;
    }
@@ -5755,7 +5751,7 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
          block = ctx->block;
          phi->getOperand(0) = Operand(get_ssa_temp(ctx, (++phi_src.begin())->second));
       }
-      phi->getOperand(1) = Operand();
+      phi->getOperand(1) = Operand(dst.regClass());
       phi->getDefinition(0) = Definition(dst);
       block->instructions.emplace(block->instructions.begin(), std::move(phi));
       return;
@@ -5780,10 +5776,9 @@ void visit_undef(isel_context *ctx, nir_ssa_undef_instr *instr)
    if (dst.size() == 1) {
       undef.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
    } else {
-      undef.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size(), 1));
+      undef.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 1, 1));
    }
-   for (unsigned i = 0; i < dst.size(); i++)
-      undef->getOperand(i) = Operand();
+   undef->getOperand(0) = Operand(dst.regClass());
    undef->getDefinition(0) = Definition(dst);
    ctx->block->instructions.emplace_back(std::move(undef));
 }

@@ -87,30 +87,28 @@ struct isel_context {
    /* FS inputs */
    bool fs_vgpr_args[fs_input::max_inputs];
    Temp fs_inputs[fs_input::max_inputs];
-   Temp prim_mask;
+   Temp prim_mask = Temp(0, s1);
    Temp descriptor_sets[RADV_UD_MAX_SETS];
-   Temp push_constants;
-   Temp ring_offsets;
-   Temp sample_pos_offset;
-   //std::unordered_map<uint64_t, Temp> tex_desc;
+   Temp push_constants = Temp(0, s1);
+   Temp ring_offsets = Temp(0, s2);
 
    /* VS inputs */
-   Temp vertex_buffers;
-   Temp base_vertex;
-   Temp start_instance;
-   Temp draw_id;
-   Temp view_index;
-   Temp es2gs_offset;
-   Temp vertex_id;
-   Temp rel_auto_id;
-   Temp instance_id;
-   Temp vs_prim_id;
+   Temp vertex_buffers = Temp(0, s1);
+   Temp base_vertex = Temp(0, s1);
+   Temp start_instance = Temp(0, s1);
+   Temp draw_id = Temp(0, s1);
+   Temp view_index = Temp(0, s1);
+   Temp es2gs_offset = Temp(0, s1);
+   Temp vertex_id = Temp(0, v1);
+   Temp rel_auto_id = Temp(0, v1);
+   Temp instance_id = Temp(0, v1);
+   Temp vs_prim_id = Temp(0, v1);
 
    /* CS inputs */
-   Temp num_workgroups[3];
-   Temp workgroup_ids[3];
-   Temp tg_size;
-   Temp local_invocation_ids[3];
+   Temp num_workgroups[3] = {Temp(0, s1), Temp(0, s1), Temp(0, s1)};
+   Temp workgroup_ids[3] = {Temp(0, s1), Temp(0, s1), Temp(0, s1)};
+   Temp tg_size = Temp(0, s1);
+   Temp local_invocation_ids[3] = {Temp(0, v1), Temp(0, v1), Temp(0, v1)};
 
    uint64_t input_mask;
 };
@@ -1147,6 +1145,12 @@ setup_isel_context(Program* program, nir_shader *nir,
    ctx.program = program;
    ctx.options = options;
    ctx.stage = nir->info.stage;
+
+   for (unsigned i = 0; i < fs_input::max_inputs; ++i)
+      ctx.fs_inputs[i] = Temp(0, v1);
+   ctx.fs_inputs[fs_input::persp_pull_model] = Temp(0, v3);
+   for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i)
+      ctx.descriptor_sets[i] = Temp(0, s1);
 
    /* the variable setup has to be done before lower_io / CSE */
    setup_variables(&ctx, nir);
