@@ -8,7 +8,6 @@ Refactorings (High priority for upstreaming)
 - nir_to_lcssa(): -
 - radv: cleanup changes / remove 'compiletime' and aco as default
 - aco: make code style consistent
-- aco: refactor remaining functions to use Builder
 - aco/scheduler: make SMEM/VMEM use the same function (lower priority)
 
 
