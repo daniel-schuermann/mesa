@@ -244,7 +244,9 @@ formats = [("pseudo", [Format.PSEUDO], 'Instruction', itertools.product(range(5)
            ("vopc_dpp", [Format.VOPC, Format.DPP], 'DPP_instruction', itertools.product([1, 2], [2])),
            ("vop1_e64", [Format.VOP1, Format.VOP3A], 'VOP3A_instruction', itertools.product([1], [1])),
            ("vop2_e64", [Format.VOP2, Format.VOP3A], 'VOP3A_instruction', itertools.product([1, 2], [2, 3])),
-           ("vopc_e64", [Format.VOPC, Format.VOP3A], 'VOP3A_instruction', itertools.product([1, 2], [2]))]
+           ("vopc_e64", [Format.VOPC, Format.VOP3A], 'VOP3A_instruction', itertools.product([1, 2], [2])),
+           ("flat", [Format.FLAT], 'FLAT_instruction', [(0, 3), (1, 2)]),
+           ("global", [Format.GLOBAL], 'FLAT_instruction', [(0, 3), (1, 2)])]
 %>\\
 % for name, formats, struct, shapes in formats:
     % for num_definitions, num_operands in shapes:
