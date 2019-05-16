@@ -98,6 +98,10 @@ public:
       Definition& def(unsigned index) const {
          return instr->getDefinition(index);
       }
+
+      aco_ptr<Instruction> get_ptr() const {
+        return aco_ptr<Instruction>(instr);
+      }
    };
 
    struct Op {

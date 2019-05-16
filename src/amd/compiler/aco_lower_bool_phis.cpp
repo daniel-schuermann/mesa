@@ -29,6 +29,7 @@
 #include <utility>
 
 #include "aco_ir.h"
+#include "aco_builder.h"
 
 
 namespace aco {
@@ -141,6 +142,8 @@ void insert_before_logical_end(Block *block, aco_ptr<Instruction> instr)
 
 aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, aco_ptr<Instruction>& phi)
 {
+   Builder bld(program);
+
    ssa_state state;
    for (unsigned i = 0; i < phi->operandCount(); i++) {
       Block *pred = block->logical_predecessors[i];
@@ -148,14 +151,11 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
       assert(phi->getOperand(i).isTemp());
       Temp phi_src = phi->getOperand(i).getTemp();
       if (phi_src.regClass() == s1) {
-         aco_ptr<Instruction> cselect{create_instruction<SOP2_instruction>(aco_opcode::s_cselect_b64, Format::SOP2, 3, 1)};
-         cselect->getOperand(0) = Operand((uint32_t) -1);
-         cselect->getOperand(1) = Operand((uint32_t) 0);
-         cselect->getOperand(2) = Operand(phi_src);
-         cselect->getOperand(2).setFixed(scc);
-         phi_src = {program->allocateId(), s2};
-         cselect->getDefinition(0) = Definition(phi_src);
-         insert_before_logical_end(pred, std::move(cselect));
+         Temp new_phi_src = bld.tmp(s2);
+         insert_before_logical_end(pred,
+            bld.sop2(aco_opcode::s_cselect_b64, Definition(new_phi_src),
+                     Operand((uint32_t)-1), Operand(0u), bld.scc(phi_src)).get_ptr());
+         phi_src = new_phi_src;
       }
       assert(phi_src.regClass() == s2);
 
@@ -163,59 +163,39 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
       Temp new_cur = write_ssa(program, pred, &state, cur.isTemp() ? cur.tempId() : 0);
 
       if (cur.isUndefined()) {
-         aco_ptr<Instruction> merge{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
-         merge->getOperand(0) = Operand(phi_src);
-         merge->getDefinition(0) = Definition(new_cur);
-         insert_before_logical_end(pred, std::move(merge));
+         insert_before_logical_end(pred, bld.sop1(aco_opcode::s_mov_b64, Definition(new_cur), phi_src).get_ptr());
       } else {
-         aco_ptr<Instruction> merge{create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2)};
-         merge->getOperand(0) = cur;
-         merge->getOperand(1) = Operand(exec, s2);
-         Temp tmp1{program->allocateId(), s2};
-         merge->getDefinition(0) = Definition(tmp1);
-         merge->getDefinition(1) = Definition(program->allocateId(), scc, s1);
-         insert_before_logical_end(pred, std::move(merge));
-
-         merge.reset(create_instruction<SOP2_instruction>(aco_opcode::s_and_b64, Format::SOP2, 2, 2));
-         merge->getOperand(0) = Operand(phi_src);
-         merge->getOperand(1) = Operand(exec, s2);
-         Temp tmp2{program->allocateId(), s2};
-         merge->getDefinition(0) = Definition(tmp2);
-         merge->getDefinition(1) = Definition(program->allocateId(), scc, s1);
-         insert_before_logical_end(pred, std::move(merge));
-
-         merge.reset(create_instruction<SOP2_instruction>(aco_opcode::s_or_b64, Format::SOP2, 2, 2));
-         merge->getOperand(0) = Operand(tmp1);
-         merge->getOperand(1) = Operand(tmp2);
-         merge->getDefinition(0) = Definition(new_cur);
-         merge->getDefinition(1) = Definition(program->allocateId(), scc, s1);
-         insert_before_logical_end(pred, std::move(merge));
+         Temp tmp1 = bld.tmp(s2), tmp2 = bld.tmp(s2);
+         insert_before_logical_end(pred,
+            bld.sop2(aco_opcode::s_andn2_b64, Definition(tmp1), bld.def(s1, scc),
+                     cur, Operand(exec, s2)).get_ptr());
+         insert_before_logical_end(pred,
+            bld.sop2(aco_opcode::s_and_b64, Definition(tmp2), bld.def(s1, scc),
+                     phi_src, Operand(exec, s2)).get_ptr());
+         insert_before_logical_end(pred,
+            bld.sop2(aco_opcode::s_or_b64, Definition(new_cur), bld.def(s1, scc),
+                     tmp1, tmp2).get_ptr());
       }
    }
 
-   aco_ptr<Instruction> copy{create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1)};
-   copy->getOperand(0) = Operand(get_ssa(program, block, &state));
-   copy->getDefinition(0) = phi->getDefinition(0);
-   return copy;
+   return bld.sop1(aco_opcode::s_mov_b64, phi->getDefinition(0), get_ssa(program, block, &state)).get_ptr();
 }
 
 void lower_linear_bool_phi(Program *program, Block *block, aco_ptr<Instruction>& phi)
 {
+   Builder bld(program);
+
    for (unsigned i = 0; i < phi->operandCount(); i++) {
       if (!phi->getOperand(i).isTemp())
          continue;
 
       Temp phi_src = phi->getOperand(i).getTemp();
       if (phi_src.regClass() == s2) {
-         aco_ptr<Instruction> cmp{create_instruction<SOPC_instruction>(aco_opcode::s_cmp_lg_u64, Format::SOPC, 2, 1)};
-         cmp->getOperand(0) = Operand(0u);
-         cmp->getOperand(1) = Operand(phi_src);
-         phi_src = {program->allocateId(), s1};
-         cmp->getDefinition(0) = Definition(phi_src);
-         cmp->getDefinition(0).setFixed(scc);
-         insert_before_logical_end(block->linear_predecessors[i], std::move(cmp));
-
-         phi->getOperand(i).setTemp(phi_src);
+         Temp new_phi_src = bld.tmp(s1);
+         insert_before_logical_end(block->linear_predecessors[i],
+            bld.sopc(aco_opcode::s_cmp_lg_u64, bld.scc(Definition(new_phi_src)),
+                     Operand(0u), phi_src).get_ptr());
+         phi->getOperand(i).setTemp(new_phi_src);
       }
    }
 }
