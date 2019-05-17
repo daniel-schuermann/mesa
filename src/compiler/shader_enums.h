@@ -27,6 +27,7 @@
 #define SHADER_ENUMS_H
 
 #include <stdbool.h>
+#include "mesa/main/config.h"
 
 #ifdef __cplusplus
 extern "C" {
