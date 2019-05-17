@@ -34,6 +34,8 @@
  * when all is said and done.
  */
 
+#define MAX_SLOTS MAX2(MAX_VARYINGS_INCL_PATCH, FRAG_RESULT_MAX)
+
 static const struct glsl_type *
 resize_array_vec_type(const struct glsl_type *type, unsigned num_components)
 {
@@ -50,10 +52,6 @@ resize_array_vec_type(const struct glsl_type *type, unsigned num_components)
 static bool
 variable_can_rewrite(const nir_variable *var)
 {
-   /* Only touch user defined varyings as these are the only ones we split */
-   if (var->data.location < VARYING_SLOT_VAR0)
-      return false;
-
    /* Skip complex types we don't split in the first place */
    if (!glsl_type_is_vector_or_scalar(glsl_without_array(var->type)))
       return false;
@@ -102,15 +100,15 @@ variables_can_merge(nir_shader *shader,
 
 static bool
 create_new_io_vars(nir_shader *shader, struct exec_list *io_list,
-                   nir_variable *old_vars[MAX_VARYINGS_INCL_PATCH][4],
-                   nir_variable *new_vars[MAX_VARYINGS_INCL_PATCH][4])
+                   nir_variable *old_vars[MAX_SLOTS][4],
+                   nir_variable *new_vars[MAX_SLOTS][4])
 {
    if (exec_list_is_empty(io_list))
       return false;
 
    nir_foreach_variable(var, io_list) {
       if (variable_can_rewrite(var)) {
-         unsigned loc = var->data.location - VARYING_SLOT_VAR0;
+         unsigned loc = var->data.location;
          unsigned frac = var->data.location_frac;
          old_vars[loc][frac] = var;
       }
@@ -121,7 +119,7 @@ create_new_io_vars(nir_shader *shader, struct exec_list *io_list,
    /* We don't handle combining vars of different type e.g. different array
     * lengths.
     */
-   for (unsigned loc = 0; loc < MAX_VARYINGS_INCL_PATCH; loc++) {
+   for (unsigned loc = 0; loc < MAX_SLOTS; loc++) {
       unsigned frac = 0;
       while (frac < 4) {
          nir_variable *first_var = old_vars[loc][frac];
@@ -197,10 +195,10 @@ nir_lower_io_to_vector_impl(nir_function_impl *impl, nir_variable_mode modes)
    nir_metadata_require(impl, nir_metadata_dominance);
 
    nir_shader *shader = impl->function->shader;
-   nir_variable *old_inputs[MAX_VARYINGS_INCL_PATCH][4] = {{0}};
-   nir_variable *new_inputs[MAX_VARYINGS_INCL_PATCH][4] = {{0}};
-   nir_variable *old_outputs[MAX_VARYINGS_INCL_PATCH][4] = {{0}};
-   nir_variable *new_outputs[MAX_VARYINGS_INCL_PATCH][4] = {{0}};
+   nir_variable *old_inputs[MAX_SLOTS][4] = {{0}};
+   nir_variable *new_inputs[MAX_SLOTS][4] = {{0}};
+   nir_variable *old_outputs[MAX_SLOTS][4] = {{0}};
+   nir_variable *new_outputs[MAX_SLOTS][4] = {{0}};
 
    if (modes & nir_var_shader_in) {
       /* Vertex shaders support overlapping inputs.  We don't do those */
@@ -215,11 +213,6 @@ nir_lower_io_to_vector_impl(nir_function_impl *impl, nir_variable_mode modes)
    }
 
    if (modes & nir_var_shader_out) {
-      /* Fragment shader outputs are always vec4.  You shouldn't have
-       * scalarized them and it doesn't make sense to vectorize them.
-       */
-      assert(b.shader->info.stage != MESA_SHADER_FRAGMENT);
-
       /* If we don't actually merge any variables, remove that bit from modes
        * so we don't bother doing extra non-work.
        */
@@ -256,13 +249,12 @@ nir_lower_io_to_vector_impl(nir_function_impl *impl, nir_variable_mode modes)
                break;
 
             if (old_deref->mode == nir_var_shader_out)
-               assert(b.shader->info.stage == MESA_SHADER_TESS_CTRL);
+               assert(b.shader->info.stage == MESA_SHADER_TESS_CTRL ||
+                      b.shader->info.stage == MESA_SHADER_FRAGMENT);
 
             nir_variable *old_var = nir_deref_instr_get_variable(old_deref);
-            if (old_var->data.location < VARYING_SLOT_VAR0)
-               break;
 
-            const unsigned loc = old_var->data.location - VARYING_SLOT_VAR0;
+            const unsigned loc = old_var->data.location;
             const unsigned old_frac = old_var->data.location_frac;
             nir_variable *new_var = old_deref->mode == nir_var_shader_in ?
                                     new_inputs[loc][old_frac] :
@@ -270,7 +262,7 @@ nir_lower_io_to_vector_impl(nir_function_impl *impl, nir_variable_mode modes)
             if (!new_var)
                break;
 
-            assert(new_var->data.location == VARYING_SLOT_VAR0 + loc);
+            assert(new_var->data.location == loc);
             const unsigned new_frac = new_var->data.location_frac;
 
             nir_component_mask_t vec4_comp_mask =
@@ -309,16 +301,14 @@ nir_lower_io_to_vector_impl(nir_function_impl *impl, nir_variable_mode modes)
                break;
 
             nir_variable *old_var = nir_deref_instr_get_variable(old_deref);
-            if (old_var->data.location < VARYING_SLOT_VAR0)
-               break;
 
-            const unsigned loc = old_var->data.location - VARYING_SLOT_VAR0;
+            const unsigned loc = old_var->data.location;
             const unsigned old_frac = old_var->data.location_frac;
             nir_variable *new_var = new_outputs[loc][old_frac];
             if (!new_var)
                break;
 
-            assert(new_var->data.location == VARYING_SLOT_VAR0 + loc);
+            assert(new_var->data.location == loc);
             const unsigned new_frac = new_var->data.location_frac;
 
             b.cursor = nir_before_instr(&intrin->instr);
