@@ -383,8 +383,10 @@ radv_shader_compile_to_nir(struct radv_device *device,
 		NIR_PASS_V(nir, nir_split_var_copies);
 		NIR_PASS_V(nir, nir_split_per_member_structs);
 
-		if (nir->info.stage == MESA_SHADER_FRAGMENT)
+		if (nir->info.stage == MESA_SHADER_FRAGMENT) {
+			NIR_PASS_V(nir, nir_lower_io_to_vector, nir_var_shader_out);
 			NIR_PASS_V(nir, nir_lower_input_attachments, true);
+		}
 
 		NIR_PASS_V(nir, nir_remove_dead_variables,
 		           nir_var_shader_in | nir_var_shader_out | nir_var_system_value);
