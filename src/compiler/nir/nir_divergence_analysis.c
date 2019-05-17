@@ -29,6 +29,8 @@
  * That is, the variable has the same value for all invocations
  * of the group.
  *
+ * This divergence analysis pass expects the shader to be in LCSSA-form.
+ *
  * This algorithm implements "The Simple Divergence Analysis" from
  * Diogo Sampaio, Rafael De Souza, Sylvain Collange, Fernando Magno Quintão Pereira.
  * Divergence Analysis.  ACM Transactions on Programming Languages and Systems (TOPLAS),
@@ -245,6 +247,7 @@ visit_tex(bool *divergent, nir_tex_instr *instr)
 
    bool is_divergent = false;
 
+   /* tex instructions are divergent if they have divergent coordinates */
    for (unsigned i = 0; i < instr->num_srcs; i++) {
       switch (instr->src[i].src_type) {
       case nir_tex_src_coord:
@@ -265,12 +268,12 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
    /* There are 3 types of phi instructions:
     * (1) gamma: represent the joining point of different paths
     *     created by an “if-then-else” branch.
-    *     The resulting value is divergent iff the branch condition
+    *     The resulting value is divergent if the branch condition
     *     or any of the source values is divergent.
     *
     * (2) mu: which only exist at loop headers,
     *     merge initial and loop-carried values.
-    *     The resulting value is divergent iff any source value
+    *     The resulting value is divergent if any source value
     *     is divergent or a divergent loop continue condition
     *     is associated with a different ssa-def.
     *
@@ -278,6 +281,7 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
     *     The resulting value is divergent if the source value is divergent
     *     or any loop exit condition is divergent for a value which is
     *     not loop-invariant.
+    *     (note: there should be no phi for loop-invariant variables.)
     */
 
    if (divergent[instr->dest.ssa.index])
@@ -298,26 +302,36 @@ visit_phi(bool *divergent, nir_phi_instr *instr)
 
    if (!prev) {
       /* mu: if no predecessor node exists, the phi must be at a loop header */
-
-      /* first, find the two unconditional ssa-defs (from incoming- and back-edge) */
       nir_loop *loop = nir_cf_node_as_loop(instr->instr.block->cf_node.parent);
       prev = nir_cf_node_prev(instr->instr.block->cf_node.parent);
-      unsigned unconditional[2];
-      unsigned idx = 0;
+      nir_ssa_def* same = NULL;
+      bool all_same = true;
 
+      /* first, check if all loop-carried values are the from the same ssa-def */
       nir_foreach_phi_src(src, instr) {
-         if (src->pred == nir_loop_last_block(loop) ||
-             src->pred == nir_cf_node_as_block(prev))
-            unconditional[idx++] = src->src.ssa->index;
+         if (src->pred == nir_cf_node_as_block(prev))
+            continue;
+         if (src->src.ssa->parent_instr->type == nir_instr_type_ssa_undef)
+            continue;
+         if (!same)
+            same = src->src.ssa;
+         else if (same != src->src.ssa)
+            all_same = false;
       }
-      assert(idx == 2);
 
-      /* check if the loop-carried values come from a different ssa-def
-       * and the corresponding condition is divergent.
-       */
+      /* if all loop-carried values are the same, the resulting value is uniform */
+      if (all_same)
+         return false;
+
+      /* check if the loop-carried values come from different ssa-defs
+       * and the corresponding condition is divergent. */
       nir_foreach_phi_src(src, instr) {
-         if (src->src.ssa->index == unconditional[0] ||
-             src->src.ssa->index == unconditional[1])
+         /* skip the loop preheader */
+         if (src->pred == nir_cf_node_as_block(prev))
+            continue;
+
+         /* skip the unconditional back-edge */
+         if (src->pred == nir_loop_last_block(loop))
             continue;
 
          /* if the value is undef, we don't need to check the condition */
