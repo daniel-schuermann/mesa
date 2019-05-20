@@ -50,13 +50,14 @@
 #include "nir_worklist.h"
 
 struct intrinsic_info {
-   nir_variable_mode mode;
+   nir_variable_mode mode; /* 0 if the mode is obtained from the deref. */
    nir_intrinsic_op op;
-   bool atomic;
-   int resource_src;
-   int base_src;
-   int deref_src;
-   int value_src;
+   bool is_atomic;
+   /* Indices into nir_intrinsic::src[] or -1 if not applicable. */
+   int resource_src; /* resource (e.g. from vulkan_resource_index) */
+   int base_src; /* offset which it loads/stores from */
+   int deref_src; /* deref which is loads/stores from */
+   int value_src; /* the data it is storing */
 };
 
 static const struct intrinsic_info *
@@ -114,6 +115,13 @@ case nir_intrinsic_##op: {\
    return NULL;
 }
 
+/*
+ * Information used to compare memory operations.
+ * It canonically represents an offset as:
+ * `offset_base + offset_defs[0]*offset_defs_mul[0] + offset_defs[1]*offset_defs_mul[1] + ...`
+ * "offset_defs" is sorted in ascenting order by the ssa definition's index.
+ * "resource" or "var" may be NULL.
+ */
 struct entry_key {
    nir_ssa_def *resource;
    nir_variable *var;
@@ -123,6 +131,7 @@ struct entry_key {
    uint32_t *offset_defs_mul;
 };
 
+/* Information on a single memory operation. */
 struct entry {
    struct list_head head;
    bool behind_barrier;
@@ -140,7 +149,7 @@ struct entry {
    nir_deref_instr *deref;
 };
 
-struct state {
+struct block_state {
    struct list_head entries[nir_num_variable_modes];
 };
 
@@ -148,7 +157,7 @@ struct vectorize_ctx {
    nir_variable_mode modes;
    int (*type_size)(nir_variable_mode, const struct glsl_type *);
    int (*align)(nir_variable_mode, bool, unsigned, unsigned);
-   struct state *block_states;
+   struct block_state *block_states;
 };
 
 static unsigned
@@ -157,6 +166,9 @@ get_bit_size(struct entry *entry)
    return entry->store_value ? entry->store_value->bit_size : entry->intrin->dest.ssa.bit_size;
 }
 
+/* If "def" is from an alu instruction with the opcode "op" and one of it's
+ * sources is a constant, update "def" to be the non-constant source, fill "c"
+ * with the constant and return true. */
 static bool
 parse_alu(nir_ssa_def **def, nir_op op, uint32_t *c)
 {
@@ -180,6 +192,7 @@ parse_alu(nir_ssa_def **def, nir_op op, uint32_t *c)
    return false;
 }
 
+/* Parses an offset expression such as "a * 16 + 4" and "(a * 16 + 4) * 64 + 32". */
 static void
 parse_offset(nir_ssa_def **base, uint32_t *base_mul, uint32_t *offset)
 {
@@ -535,6 +548,8 @@ cast_deref(nir_builder *b, unsigned num_components, unsigned bit_size, nir_src s
    return nir_build_deref_cast(b, &deref->dest.ssa, deref->mode, type, 0);
 }
 
+/* Reinterpret "def" as a vector with "size"-sized elements and extract an
+ * element at bit "offset". */
 static nir_ssa_def *
 extract_vector(nir_builder *b, nir_ssa_def *def, unsigned size, unsigned offset)
 {
@@ -563,25 +578,30 @@ extract_vector(nir_builder *b, nir_ssa_def *def, unsigned size, unsigned offset)
    }
 }
 
+/* Reinterpret "def" as a vector with "low_size"-sized elements and extract
+ * "count" elements at bit "start". */
 static nir_ssa_def *
-extract_subvector(nir_builder *b, nir_ssa_def *def, unsigned low_start, unsigned low_count, unsigned low_size)
+extract_subvector(nir_builder *b, nir_ssa_def *def, unsigned start, unsigned count, unsigned size)
 {
-   assert(low_start % low_size == 0);
-   assert(low_count <= 16);
-   assert(low_count <= NIR_MAX_VEC_COMPONENTS);
-   assert(low_start + low_count * low_size <= def->bit_size * def->num_components);
+   assert(start % size == 0);
+   assert(count <= 16);
+   assert(count <= NIR_MAX_VEC_COMPONENTS);
+   assert(start + count * size <= def->bit_size * def->num_components);
 
    nir_ssa_def *res[NIR_MAX_VEC_COMPONENTS];
-   for (unsigned i = 0; i < low_count; i++) {
-      unsigned offset = low_start + i * low_size;
-      assert(offset % low_size == 0);
-      res[i] = extract_vector(b, def, low_size, offset);
+   for (unsigned i = 0; i < count; i++) {
+      unsigned offset = start + i * size;
+      assert(offset % size == 0);
+      res[i] = extract_vector(b, def, size, offset);
    }
-   if (low_count == 1)
+   if (count == 1)
       return res[0];
-   return nir_vec(b, res, low_count);
+   return nir_vec(b, res, count);
 }
 
+/* Return true if the write mask "write_mask" of a store with "old_bit_size"
+ * bits per element can be represented for a store with "new_bit_size" bits per
+ * element. */
 static bool
 writemask_representable(unsigned write_mask, unsigned old_bit_size, unsigned new_bit_size)
 {
@@ -598,6 +618,8 @@ writemask_representable(unsigned write_mask, unsigned old_bit_size, unsigned new
    return true;
 }
 
+/* Return true if "new_bit_size" is a usable bit size for a vectorized store of
+ * "low" and "high". */
 static bool
 new_bitsize_acceptable(struct vectorize_ctx *ctx, unsigned new_bit_size,
                        struct entry *low, struct entry *high,
@@ -632,6 +654,8 @@ new_bitsize_acceptable(struct vectorize_ctx *ctx, unsigned new_bit_size,
    return true;
 }
 
+/* Updates a write mask, "write_mask", so that it can be used with a
+ * "new_bit_size"-bit store instead of a "old_bit_size"-bit store. */
 static uint32_t
 update_writemask(unsigned write_mask, unsigned old_bit_size, unsigned new_bit_size)
 {
@@ -647,11 +671,11 @@ update_writemask(unsigned write_mask, unsigned old_bit_size, unsigned new_bit_si
 }
 
 static void
-vectorize_adjacent_loads(nir_builder *b,
-                         struct entry *low, struct entry *high,
-                         struct entry *first, struct entry *second,
-                         unsigned new_bit_size, unsigned new_num_components,
-                         unsigned high_start)
+vectorize_loads(nir_builder *b,
+                struct entry *low, struct entry *high,
+                struct entry *first, struct entry *second,
+                unsigned new_bit_size, unsigned new_num_components,
+                unsigned high_start)
 {
    unsigned low_bit_size = get_bit_size(low);
    unsigned high_bit_size = get_bit_size(high);
@@ -699,11 +723,11 @@ vectorize_adjacent_loads(nir_builder *b,
 }
 
 static void
-vectorize_adjacent_stores(nir_builder *b,
-                         struct entry *low, struct entry *high,
-                         struct entry *first, struct entry *second,
-                         unsigned new_bit_size, unsigned new_num_components,
-                         unsigned high_start)
+vectorize_stores(nir_builder *b,
+                 struct entry *low, struct entry *high,
+                 struct entry *first, struct entry *second,
+                 unsigned new_bit_size, unsigned new_num_components,
+                 unsigned high_start)
 {
    unsigned low_size = low->intrin->num_components * get_bit_size(low);
 
@@ -824,15 +848,15 @@ try_vectorize(nir_function_impl *impl, struct vectorize_ctx *ctx, struct entry *
    }
 
    if (first->store_value)
-      vectorize_adjacent_stores(&b, low, high, first, second, new_bit_size, new_num_components, diff * 8u);
+      vectorize_stores(&b, low, high, first, second, new_bit_size, new_num_components, diff * 8u);
    else
-      vectorize_adjacent_loads(&b, low, high, first, second, new_bit_size, new_num_components, diff * 8u);
+      vectorize_loads(&b, low, high, first, second, new_bit_size, new_num_components, diff * 8u);
 
    return true;
 }
 
 static bool
-handle_barrier(struct state *state, nir_instr *instr)
+handle_barrier(struct block_state *state, nir_instr *instr)
 {
    unsigned modes = 0;
    if (instr->type == nir_instr_type_intrinsic) {
@@ -870,7 +894,7 @@ handle_barrier(struct state *state, nir_instr *instr)
    return true;
 }
 
-/* false means they might be either different or same */
+/* Returns true if it can prove that "a" and "b" point to different resources. */
 static bool
 resources_different(nir_ssa_def *a, nir_ssa_def *b)
 {
@@ -932,7 +956,7 @@ static bool
 can_vectorize(struct entry *first, struct entry *second)
 {
    return first->info == second->info && first->access == second->access &&
-          !(first->access & ACCESS_VOLATILE) && !first->info->atomic;
+          !(first->access & ACCESS_VOLATILE) && !first->info->is_atomic;
 }
 
 static void
@@ -957,7 +981,7 @@ process_block(nir_function_impl *impl, struct vectorize_ctx *ctx, nir_block *blo
 {
    bool progress = false;
 
-   struct state *state = &ctx->block_states[block->index];
+   struct block_state *state = &ctx->block_states[block->index];
 
    for (unsigned i = 0; i < nir_num_variable_modes; i++)
       list_inithead(&state->entries[i]);
@@ -1028,7 +1052,7 @@ nir_opt_load_store_vectorize(nir_shader *shader, nir_variable_mode modes,
          nir_metadata_require(function->impl,
                               nir_metadata_block_index | nir_metadata_dominance);
 
-         ctx->block_states = ralloc_array(ctx, struct state, function->impl->num_blocks);
+         ctx->block_states = ralloc_array(ctx, struct block_state, function->impl->num_blocks);
          nir_foreach_block(block, function->impl)
             progress |= process_block(function->impl, ctx, block);
          ralloc_free(ctx->block_states);
