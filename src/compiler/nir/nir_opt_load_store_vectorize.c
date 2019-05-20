@@ -27,7 +27,8 @@
  * ssbo and push constant loads/stores.
  *
  * This doesn't handle copy_deref intrinsics and assumes that
- * nir_lower_alu_to_scalar() has been called.
+ * nir_lower_alu_to_scalar() has been called and that the IR is free from ALU
+ * modifiers.
  *
  * After vectorization, the backend may want to call nir_lower_alu_to_scalar()
  * and nir_lower_pack(). Also this creates cast instructions taking derefs as a
