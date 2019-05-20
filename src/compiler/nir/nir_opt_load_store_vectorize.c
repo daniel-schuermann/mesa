@@ -162,7 +162,10 @@ parse_alu(nir_ssa_def **def, nir_op op, uint32_t *c)
 {
    nir_src src = nir_src_for_ssa(*def);
    nir_alu_instr *alu = nir_src_as_alu_instr(src);
-   if (!alu || alu->op != op)
+   if (!alu || alu->op != op || alu->dest.dest.ssa.num_components != 1)
+      return false;
+
+   if (alu->src[0].swizzle[0] != 0 || alu->src[1].swizzle[0] != 0)
       return false;
 
    for (unsigned i = op == nir_op_ishl ? 1 : 0; i < 2; i++) {
@@ -256,7 +259,7 @@ create_entry_key_from_deref(void *mem_ctx, struct vectorize_ctx *ctx, nir_deref_
    uint32_t offset_defs_mul_stack[32];
    nir_ssa_def **offset_defs = offset_defs_stack;
    uint32_t *offset_defs_mul = offset_defs_mul_stack;
-   if (path_len) {
+   if (path_len > 32) {
       offset_defs = malloc(path_len * sizeof(nir_ssa_def *));
       offset_defs_mul = malloc(path_len * sizeof(uint32_t));
    }
@@ -266,9 +269,6 @@ create_entry_key_from_deref(void *mem_ctx, struct vectorize_ctx *ctx, nir_deref_
    key.resource = NULL;
    key.var = NULL;
    key.offset_base = 0;
-   key.offset_def_count = 0;
-   key.offset_defs = offset_defs;
-   key.offset_defs_mul = offset_defs_mul;
 
    for (unsigned i = 0; i < path_len; i++) {
       nir_deref_instr *parent = i ? path->path[i - 1] : NULL;
@@ -291,18 +291,18 @@ create_entry_key_from_deref(void *mem_ctx, struct vectorize_ctx *ctx, nir_deref_
 
          key.offset_base += offset * stride;
          if (base) {
-            for (unsigned i = 0; i <= offset_def_count; i++) {
-               if (i == offset_def_count || base->index > offset_defs[i]->index) {
-                  /* insert before i */
-                  memmove(offset_defs + i + 1, offset_defs + i, offset_def_count - i);
-                  memmove(offset_defs_mul + i + 1, offset_defs_mul + i, offset_def_count - i);
-                  offset_defs[i] = base;
-                  offset_defs_mul[i] = base_mul * stride;
+            for (unsigned j = 0; j <= offset_def_count; j++) {
+               if (j == offset_def_count || base->index > offset_defs[j]->index) {
+                  /* insert before j */
+                  memmove(offset_defs + j + 1, offset_defs + j, (offset_def_count - j) * sizeof(nir_ssa_def *));
+                  memmove(offset_defs_mul + j + 1, offset_defs_mul + j, (offset_def_count - j) * sizeof(uint32_t));
+                  offset_defs[j] = base;
+                  offset_defs_mul[j] = base_mul * stride;
                   offset_def_count++;
                   break;
-               } else if (base->index == offset_defs[i]->index) {
+               } else if (base->index == offset_defs[j]->index) {
                   /* merge with offset_def at i */
-                  offset_defs_mul[i] += base_mul * stride;
+                  offset_defs_mul[j] += base_mul * stride;
                   break;
                }
             }
@@ -517,16 +517,21 @@ schedule_ssa_def(nir_ssa_def *def, nir_instr *use_instr)
 }
 
 static nir_deref_instr *
+strip_deref_casts(nir_deref_instr *deref)
+{
+   while (deref->deref_type == nir_deref_type_cast)
+      deref = nir_src_as_deref(deref->parent);
+   return deref;
+}
+
+static nir_deref_instr *
 cast_deref(nir_builder *b, unsigned num_components, unsigned bit_size, nir_src src)
 {
    enum glsl_base_type types[] = {
       GLSL_TYPE_UINT8, GLSL_TYPE_UINT16, GLSL_TYPE_UINT, GLSL_TYPE_UINT64};
    const struct glsl_type *type = glsl_vector_type(types[ffs(bit_size / 8u) - 1u], num_components);
 
-   nir_deref_instr *deref = nir_instr_as_deref(src.ssa->parent_instr);
-   while (deref->deref_type == nir_deref_type_cast)
-      deref = nir_src_as_deref(deref->parent);
-
+   nir_deref_instr *deref = strip_deref_casts(nir_instr_as_deref(src.ssa->parent_instr));
    return nir_build_deref_cast(b, &deref->dest.ssa, deref->mode, type, 0);
 }
 
@@ -566,7 +571,7 @@ extract_subvector(nir_builder *b, nir_ssa_def *def, unsigned low_start, unsigned
    assert(low_count <= NIR_MAX_VEC_COMPONENTS);
    assert(low_start + low_count * low_size <= def->bit_size * def->num_components);
 
-   nir_ssa_def *res[16];
+   nir_ssa_def *res[NIR_MAX_VEC_COMPONENTS];
    for (unsigned i = 0; i < low_count; i++) {
       unsigned offset = low_start + i * low_size;
       assert(offset % low_size == 0);
@@ -912,6 +917,12 @@ may_alias(struct entry *a, struct entry *b)
          return llabs(diff) < MAX2(b->intrin->num_components, 1u) * (get_bit_size(b) / 8u);
       else
          return diff < MAX2(a->intrin->num_components, 1u) * (get_bit_size(a) / 8u);
+   }
+
+   if (a->deref || b->deref) {
+      assert(a->deref && b->deref);
+      return nir_compare_derefs(strip_deref_casts(a->deref), strip_deref_casts(b->deref)) &
+             nir_derefs_may_alias_bit;
    }
 
    return true;
