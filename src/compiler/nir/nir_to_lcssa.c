@@ -91,9 +91,8 @@ is_defined_before_loop(nir_ssa_def *def, nir_loop *loop)
    nir_block *block_before_loop =
       nir_cf_node_as_block(nir_cf_node_prev(&loop->cf_node));
 
-   if (instr->block->index <= block_before_loop->index) {
+   if (instr->block->index <= block_before_loop->index)
       return true;
-   }
 
    return false;
 }
