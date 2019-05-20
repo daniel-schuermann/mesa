@@ -1187,15 +1187,15 @@ setup_isel_context(Program* program, nir_shader *nir,
    nir_opt_sink(nir);
    nir_opt_move_load_ubo(nir);
 
-   struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
-   nir_index_ssa_defs(func->impl);
+   nir_function_impl *func = nir_shader_get_entrypoint(nir);
+   nir_index_ssa_defs(func);
 
    if (options->dump_preoptir) {
       fprintf(stderr, "NIR shader before instruction selection:\n");
       nir_print_shader(nir, stderr);
    }
    ctx.divergent_vals = nir_divergence_analysis(nir);
-   init_context(&ctx, func->impl);
+   init_context(&ctx, func);
 
    ctx.program->blocks.push_back(std::unique_ptr<Block>{new Block});
    ctx.block = ctx.program->blocks.back().get();
