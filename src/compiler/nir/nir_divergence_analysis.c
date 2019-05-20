@@ -37,6 +37,8 @@
  * ACM, 2013, 35 (4), pp.13:1-13:36. <10.1145/2523815>. <hal-00909072v2>
  */
 
+static bool
+nir_divergence_analysis_impl(bool *divergent, struct exec_list *list);
 
 static bool
 alu_src_is_divergent(bool *divergent, nir_alu_src src, unsigned num_input_components)
@@ -435,61 +437,103 @@ visit_deref(bool *divergent, nir_deref_instr *instr)
    return true;
 }
 
+static bool
+visit_block(bool *divergent, nir_block *block)
+{
+   bool has_changed = false;
+
+   nir_foreach_instr(instr, block) {
+      switch (instr->type) {
+      case nir_instr_type_alu:
+         has_changed |= visit_alu(divergent, nir_instr_as_alu(instr));
+         break;
+      case nir_instr_type_intrinsic:
+         has_changed |= visit_intrinsic(divergent, nir_instr_as_intrinsic(instr));
+         break;
+      case nir_instr_type_tex:
+         has_changed |= visit_tex(divergent, nir_instr_as_tex(instr));
+         break;
+      case nir_instr_type_phi:
+         has_changed |= visit_phi(divergent, nir_instr_as_phi(instr));
+         break;
+      case nir_instr_type_parallel_copy:
+         has_changed |= visit_parallel_copy(divergent, nir_instr_as_parallel_copy(instr));
+         break;
+      case nir_instr_type_load_const:
+         has_changed |= visit_load_const(divergent, nir_instr_as_load_const(instr));
+         break;
+      case nir_instr_type_ssa_undef:
+         has_changed |= visit_ssa_undef(divergent, nir_instr_as_ssa_undef(instr));
+         break;
+      case nir_instr_type_deref:
+         has_changed |= visit_deref(divergent, nir_instr_as_deref(instr));
+         break;
+      case nir_instr_type_jump:
+         break;
+      case nir_instr_type_call:
+         assert(false);
+      default:
+         unreachable("Invalid instruction type");
+         break;
+      }
+   }
+
+   return has_changed;
+}
+
+static bool
+visit_if(bool *divergent, nir_if *if_stmt)
+{
+   return nir_divergence_analysis_impl(divergent, &if_stmt->then_list) |
+          nir_divergence_analysis_impl(divergent, &if_stmt->else_list);
+}
+
+static bool
+visit_loop(bool *divergent, nir_loop *loop)
+{
+   bool has_changed = false;
+   bool repeat = true;
+
+   while (repeat){
+      repeat = nir_divergence_analysis_impl(divergent, &loop->body);
+      has_changed |= repeat;
+   }
+
+   return has_changed;
+}
+
+static bool
+nir_divergence_analysis_impl(bool *divergent, struct exec_list *list)
+{
+   bool has_changed = false;
+
+   foreach_list_typed(nir_cf_node, node, node, list) {
+      switch (node->type) {
+      case nir_cf_node_block:
+         has_changed |= visit_block(divergent, nir_cf_node_as_block(node));
+         break;
+      case nir_cf_node_if:
+         has_changed |= visit_if(divergent, nir_cf_node_as_if(node));
+         break;
+      case nir_cf_node_loop:
+         has_changed |= visit_loop(divergent, nir_cf_node_as_loop(node));
+         break;
+      default:
+         unreachable("unimplemented cf list type");
+      }
+   }
+
+   return has_changed;
+}
+
+
 bool*
 nir_divergence_analysis(nir_shader *shader)
 {
    nir_function_impl *impl = nir_shader_get_entrypoint(shader);
    bool *t = rzalloc_array(shader, bool, impl->ssa_alloc);
-   nir_block_worklist worklist;
-   nir_block_worklist_init(&worklist, impl->num_blocks, NULL);
-   nir_block_worklist_add_all(&worklist, impl);
 
-   while (!nir_block_worklist_is_empty(&worklist)) {
-      nir_block *block = nir_block_worklist_pop_head(&worklist);
-      bool has_changed = false;
-
-      nir_foreach_instr(instr, block) {
-         switch (instr->type) {
-         case nir_instr_type_alu:
-            has_changed |= visit_alu(t, nir_instr_as_alu(instr));
-            break;
-         case nir_instr_type_intrinsic:
-            has_changed |= visit_intrinsic(t, nir_instr_as_intrinsic(instr));
-            break;
-         case nir_instr_type_tex:
-            has_changed |= visit_tex(t, nir_instr_as_tex(instr));
-            break;
-         case nir_instr_type_phi:
-            has_changed |= visit_phi(t, nir_instr_as_phi(instr));
-            break;
-         case nir_instr_type_parallel_copy:
-            has_changed |= visit_parallel_copy(t, nir_instr_as_parallel_copy(instr));
-            break;
-         case nir_instr_type_load_const:
-            has_changed |= visit_load_const(t, nir_instr_as_load_const(instr));
-            break;
-         case nir_instr_type_ssa_undef:
-            has_changed |= visit_ssa_undef(t, nir_instr_as_ssa_undef(instr));
-            break;
-         case nir_instr_type_deref:
-            has_changed |= visit_deref(t, nir_instr_as_deref(instr));
-            break;
-         case nir_instr_type_jump:
-            break;
-         case nir_instr_type_call:
-            assert(false);
-         default:
-            unreachable("Invalid instruction type");
-            break;
-         }
-      }
-
-      if (has_changed) {
-         // FIXME: this is quite inefficient!
-         nir_block_worklist_add_all(&worklist, impl);
-      }
-   }
-   nir_block_worklist_fini(&worklist);
+   nir_divergence_analysis_impl(t, &impl->body);
 
    return t;
 }
