@@ -119,6 +119,13 @@ def_is_invariant(nir_ssa_def *def, nir_loop *loop)
    return def->parent_instr->pass_flags;
 }
 
+static bool
+src_is_invariant(nir_src *src, void *state)
+{
+   assert(src->is_ssa);
+   return def_is_invariant(src->ssa, (nir_loop *)state) == invariant;
+}
+
 static instr_invariance
 instr_is_invariant(nir_instr *instr, nir_loop *loop)
 {
@@ -128,6 +135,9 @@ instr_is_invariant(nir_instr *instr, nir_loop *loop)
    case nir_instr_type_load_const:
    case nir_instr_type_ssa_undef: {
       return invariant;
+   }
+   case nir_instr_type_call: {
+      return not_invariant;
    }
    case nir_instr_type_phi: {
       /* base case: it's a phi at the loop header */
@@ -145,53 +155,15 @@ instr_is_invariant(nir_instr *instr, nir_loop *loop)
       }
       return invariant;
    }
-   case nir_instr_type_alu: {
-      nir_alu_instr *alu = nir_instr_as_alu(instr);
-      unsigned num_src = nir_op_infos[alu->op].num_inputs;
-      for (unsigned i = 0; i < num_src; i++) {
-         if (def_is_invariant(alu->src[i].src.ssa, loop) == not_invariant)
-            return not_invariant;
-      }
-      return invariant;
-   }
-   case nir_instr_type_parallel_copy: {
-      nir_parallel_copy_instr *copy = nir_instr_as_parallel_copy(instr);
-      nir_foreach_parallel_copy_entry(entry, copy) {
-         if (def_is_invariant(entry->src.ssa, loop) == not_invariant)
-            return not_invariant;
-      }
-      return invariant;
-   }
-   case nir_instr_type_tex: {
-      nir_tex_instr *tex = nir_instr_as_tex(instr);
-      for (unsigned i = 0; i < tex->num_srcs; i++) {
-         if (def_is_invariant(tex->src[i].src.ssa, loop) == not_invariant)
-            return not_invariant;
-      }
-      return invariant;
-   }
-   case nir_instr_type_deref: {
-      nir_deref_instr *deref = nir_instr_as_deref(instr);
-      instr_invariance invariance = invariant;
-      if (deref->deref_type != nir_deref_type_var)
-         invariance = def_is_invariant(deref->parent.ssa, loop);
-      if (invariance == invariant && deref->deref_type == nir_deref_type_array)
-         invariance = def_is_invariant(deref->arr.index.ssa, loop);
-      return invariance;
-   }
    case nir_instr_type_intrinsic: {
       nir_intrinsic_instr *intrinsic = nir_instr_as_intrinsic(instr);
       if (!(nir_intrinsic_infos[intrinsic->intrinsic].flags & NIR_INTRINSIC_CAN_REORDER))
          return not_invariant;
-
-      for (unsigned i = 0; i < nir_intrinsic_infos[intrinsic->intrinsic].num_srcs; i++) {
-         if (def_is_invariant(intrinsic->src[i].ssa, loop) == not_invariant)
-            return not_invariant;
-      }
-      return invariant;
+      /* fallthrough */
    }
-   default:
-      return invariant;
+   default: {
+      return nir_foreach_src(instr, src_is_invariant, loop) ? invariant : not_invariant;
+   }
    }
 
    return invariant;
