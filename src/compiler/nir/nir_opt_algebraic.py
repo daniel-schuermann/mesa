@@ -729,7 +729,6 @@ optimizations = [
    (('fabs', ('b2f', a)), ('b2f', a)),
    (('iabs', ('b2i', a)), ('b2i', a)),
    (('inot', ('f2b1', a)), ('feq', a, 0.0)),
-   (('fmul', ('b2f', 'a@1'), b), ('bcsel', a, b, 0.0)),
 
    # Ironically, mark these as imprecise because removing the conversions may
    # preserve more precision than doing the conversions (e.g.,
