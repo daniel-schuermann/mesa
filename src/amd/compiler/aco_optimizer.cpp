@@ -399,7 +399,11 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             instr->getOperand(i) = Operand(info.temp);
             static_cast<VOP3A_instruction*>(instr.get())->abs[i] = true;
          }
-         if (info.is_neg() && can_use_VOP3(instr) && opcode_infos[(int)instr->opcode].can_use_input_modifiers) {
+         if (info.is_neg() && instr->opcode == aco_opcode::v_add_f32) {
+            instr->opcode = i ? aco_opcode::v_sub_f32 : aco_opcode::v_subrev_f32;
+            instr->getOperand(i).setTemp(info.temp);
+            continue;
+         } else if (info.is_neg() && can_use_VOP3(instr) && opcode_infos[(int)instr->opcode].can_use_input_modifiers) {
             to_VOP3(ctx, instr);
             instr->getOperand(i) = Operand(info.temp);
             static_cast<VOP3A_instruction*>(instr.get())->neg[i] = true;
