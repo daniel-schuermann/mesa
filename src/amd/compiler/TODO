@@ -54,6 +54,7 @@ Optimizations:
 - speed up compiletime:
 	- make std::vector<std::unique_ptr<Block>> only std::vector<Block> (remark: we need forward pointers/indices while isel)
 	- make aco_ptr<Instruction> containing the Format, Opcode, num_operands, num_definitions + unique_ptr to specific data
+- tweak loop unrolling factors
 
 NIR TODOs
 - pointer analysis / alias analysis
