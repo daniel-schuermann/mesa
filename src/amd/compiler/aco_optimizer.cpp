@@ -748,7 +748,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
 void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 {
-   if (!instr->isVALU())
+   if (!instr->isVALU() || !ctx.uses[instr->getDefinition(0).tempId()])
       return;
 
    /* apply sgprs */
@@ -897,7 +897,7 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    if (ctx.info[instr->getDefinition(0).tempId()].is_neg() && ctx.uses[instr->getOperand(1).tempId()] == 1) {
       Temp val = ctx.info[instr->getDefinition(0).tempId()].temp;
 
-      if (ctx.uses[instr->getDefinition(0).tempId()] == 0 || !ctx.info[val.id()].is_mul())
+      if (!ctx.info[val.id()].is_mul())
          return;
 
       Instruction* mul_instr = ctx.info[val.id()].instr;
@@ -934,8 +934,6 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
        instr->opcode == aco_opcode::v_sub_f32 ||
        instr->opcode == aco_opcode::v_subrev_f32) {
 
-      if (ctx.uses[instr->getDefinition(0).tempId()] == 0)
-         return;
       uint32_t uses_src0 = UINT32_MAX;
       uint32_t uses_src1 = UINT32_MAX;
       Instruction* mul_instr = nullptr;
