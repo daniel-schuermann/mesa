@@ -652,10 +652,13 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       break;
    case aco_opcode::v_xor_b32: { /* neg */
       if (instr->getOperand(0).constantEquals(0x80000000u) && instr->getOperand(1).isTemp()) {
-         ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(1).getTemp());
-         if (ctx.info[instr->getOperand(1).tempId()].is_abs()) /* neg(abs(x)) */
-            ctx.info[instr->getDefinition(0).tempId()].set_abs(ctx.info[instr->getOperand(1).tempId()].temp);
-         break;
+         if (ctx.info[instr->getOperand(1).tempId()].is_neg()) {
+            ctx.info[instr->getDefinition(0).tempId()].set_temp(ctx.info[instr->getOperand(1).tempId()].temp);
+         } else {
+            ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(1).getTemp());
+            if (ctx.info[instr->getOperand(1).tempId()].is_abs()) /* neg(abs(x)) */
+               ctx.info[instr->getDefinition(0).tempId()].set_abs(ctx.info[instr->getOperand(1).tempId()].temp);
+         }
       }
       break;
    }
