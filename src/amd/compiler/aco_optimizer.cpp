@@ -790,6 +790,11 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          instr->getOperand(0) = Operand(info.temp);
          ctx.uses[sgpr_info_id]--;
          ctx.uses[info.temp.id()]++;
+      } else if (can_use_VOP3(instr)) {
+         to_VOP3(ctx, instr);
+         instr->getOperand(sgpr_idx) = Operand(info.temp);
+         ctx.uses[sgpr_info_id]--;
+         ctx.uses[info.temp.id()]++;
       }
 
    /* we can have two sgprs on one instruction if it is the same sgpr! */
