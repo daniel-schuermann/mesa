@@ -264,6 +264,17 @@ struct ssa_info {
       return label.test(17);
    }
 
+   void set_b2f(Temp val)
+   {
+      label.set(18,1);
+      temp = val;
+   }
+
+   bool is_b2f()
+   {
+      return label.test(18);
+   }
+
 };
 
 struct opt_ctx {
@@ -695,6 +706,10 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
           instr->getOperand(1).constantEquals(0xFFFFFFFF) &&
           instr->getOperand(2).isTemp())
          ctx.info[instr->getDefinition(0).tempId()].set_vcc(instr->getOperand(2).getTemp());
+      else if (instr->getOperand(0).constantEquals(0) &&
+               instr->getOperand(1).constantEquals(0x3f800000u) &&
+               instr->getOperand(2).isTemp())
+         ctx.info[instr->getDefinition(0).tempId()].set_b2f(instr->getOperand(2).getTemp());
       break;
    case aco_opcode::v_cmp_lg_u32:
       if (instr->getOperand(0).constantEquals(0) &&
@@ -1051,6 +1066,26 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          ctx.info[mad->getDefinition(0).tempId()].set_mad(mad.get(), ctx.mad_infos.size() - 1);
          instr.reset(mad.release());
          return;
+      }
+   }
+   /* v_mul_f32(v_cndmask_b32(0, 1.0, cond), a) -> v_cndmask_b32(0, a, cond) */
+   else if (instr->opcode == aco_opcode::v_mul_f32 && !instr->isVOP3()) {
+      for (unsigned i = 0; i < 2; i++) {
+         if (instr->getOperand(i).isTemp() && ctx.info[instr->getOperand(i).tempId()].is_b2f() &&
+             ctx.uses[instr->getOperand(i).tempId()] == 1 &&
+             instr->getOperand(!i).isTemp() && instr->getOperand(!i).getTemp().type() == vgpr) {
+            ctx.uses[instr->getOperand(i).tempId()]--;
+            ctx.uses[ctx.info[instr->getOperand(i).tempId()].temp.id()]++;
+
+            aco_ptr<VOP2_instruction> new_instr{create_instruction<VOP2_instruction>(aco_opcode::v_cndmask_b32, Format::VOP2, 3, 1)};
+            new_instr->getOperand(0) = Operand(0u);
+            new_instr->getOperand(1) = instr->getOperand(!i);
+            new_instr->getOperand(2) = Operand(ctx.info[instr->getOperand(i).tempId()].temp);
+            new_instr->getDefinition(0) = instr->getDefinition(0);
+            instr.reset(new_instr.release());
+            ctx.info[instr->getDefinition(0).tempId()].label.reset();
+            return;
+         }
       }
    }
 }
