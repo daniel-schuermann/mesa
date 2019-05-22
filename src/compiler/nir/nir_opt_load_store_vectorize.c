@@ -943,12 +943,6 @@ may_alias(struct entry *a, struct entry *b)
          return diff < MAX2(a->intrin->num_components, 1u) * (get_bit_size(a) / 8u);
    }
 
-   if (a->deref || b->deref) {
-      assert(a->deref && b->deref);
-      return nir_compare_derefs(strip_deref_casts(a->deref), strip_deref_casts(b->deref)) &
-             nir_derefs_may_alias_bit;
-   }
-
    return true;
 }
 
