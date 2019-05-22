@@ -509,7 +509,6 @@ static const struct debug_control radv_debug_options[] = {
 	{"nongg", RADV_DEBUG_NO_NGG},
 	{"noshaderballot", RADV_DEBUG_NO_SHADER_BALLOT},
 	{"allentrypoints", RADV_DEBUG_ALL_ENTRYPOINTS},
-	{"compiletime", RADV_DEBUG_COMPILETIME},
 	{NULL, 0}
 };
 
