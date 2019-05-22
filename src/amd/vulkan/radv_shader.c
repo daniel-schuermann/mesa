@@ -1130,12 +1130,6 @@ radv_dump_nir_shaders(struct nir_shader * const *shaders,
 	return ret;
 }
 
-#include <time.h>
-#define NANOS 1000000000LL
-static double total_llvm = 0;
-static double total_aco = 0;
-static unsigned num = 0;
-
 static struct radv_shader_variant *
 shader_variant_compile(struct radv_device *device,
 		       struct radv_shader_module *module,
@@ -1205,43 +1199,10 @@ shader_variant_compile(struct radv_device *device,
 					    &variant_info, options);
 	} else {
 		if (use_aco) {
-			bool aco_compile_time = device->instance->debug_flags & RADV_DEBUG_COMPILETIME;
-			struct timespec user1,user2;
-
-			if (aco_compile_time) {
-				struct nir_shader *llvm_shaders[shader_count];
-				for (int i = 0; i < shader_count; i++)
-					llvm_shaders[i] = nir_shader_clone(ralloc_parent(shaders[i]), shaders[i]);
-
-				clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &user1);
-				radv_compile_nir_shader(&ac_llvm, &binary, &variant_info,
-							llvm_shaders, shader_count, options);
-				clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &user2);
-
-				for (int i = 0; i < shader_count; i++)
-					ralloc_free(llvm_shaders[i]);
-
-				fprintf(stderr, "%3d: ", num++);
-				double user_elapsed = (user2.tv_sec*NANOS + user2.tv_nsec - (user1.tv_sec*NANOS + user1.tv_nsec)) / (double) (NANOS / 1000);
-				total_llvm += user_elapsed;
-				fprintf(stderr, "LLVM CPU time: %8.4fms\t|\ttotal: %8.4fms\t\t||\t", user_elapsed, total_llvm);
-				clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &user1);
-
-				free(binary);
-				memset(&variant_info, 0, sizeof(variant_info));
-			}
-
 			assert(shader_count == 1);
 			radv_nir_shader_info_init(&variant_info.info);
 			radv_nir_shader_info_pass(shaders[0], options, &variant_info.info);
 			aco_compile_shader(shaders[0], &binary, &variant_info, options);
-
-			if (aco_compile_time) {
-				clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &user2);
-				double user_elapsed = (user2.tv_sec*NANOS + user2.tv_nsec - (user1.tv_sec*NANOS + user1.tv_nsec)) / (double) (NANOS / 1000);
-				total_aco += user_elapsed;
-				fprintf(stderr, "ACO CPU time:  %8.4fms\t|\ttotal: %8.4fms\n", user_elapsed, total_aco);
-			}
 		} else {
 			radv_compile_nir_shader(&ac_llvm, &binary, &variant_info,
 						shaders, shader_count, options);
