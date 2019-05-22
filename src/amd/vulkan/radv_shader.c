@@ -52,18 +52,18 @@
 
 #include "util/string_buffer.h"
 
-static const struct nir_shader_compiler_options nir_options = {
+static const struct nir_shader_compiler_options nir_options_llvm = {
 	.vertex_id_zero_based = true,
 	.lower_scmp = true,
 	.lower_flrp16 = true,
 	.lower_flrp32 = true,
 	.lower_flrp64 = true,
 	.lower_device_index_to_zero = true,
-	.lower_fsat = false,
+	.lower_fsat = true,
 	.lower_fdiv = true,
 	.lower_bitfield_insert_to_bitfield_select = true,
 	.lower_bitfield_extract = true,
-	.lower_sub = false,
+	.lower_sub = true,
 	.lower_pack_snorm_2x16 = true,
 	.lower_pack_snorm_4x8 = true,
 	.lower_pack_unorm_2x16 = true,
@@ -72,13 +72,40 @@ static const struct nir_shader_compiler_options nir_options = {
 	.lower_unpack_snorm_4x8 = true,
 	.lower_unpack_unorm_2x16 = true,
 	.lower_unpack_unorm_4x8 = true,
-	.lower_unpack_half_2x16 = true, //TODO: only set this on ACO and remove the ac->nir code for this
 	.lower_extract_byte = true,
 	.lower_extract_word = true,
 	.lower_ffma = true,
 	.lower_fpow = true,
 	.lower_mul_2x32_64 = true,
 	.lower_rotate = true,
+	.max_unroll_iterations = 32,
+	.use_interpolated_input_intrinsics = true,
+};
+
+static const struct nir_shader_compiler_options nir_options_aco = {
+	.vertex_id_zero_based = true,
+	.lower_scmp = true,
+	.lower_flrp16 = true,
+	.lower_flrp32 = true,
+	.lower_flrp64 = true,
+	.lower_device_index_to_zero = true,
+	.lower_fdiv = true,
+	.lower_bitfield_insert_to_bitfield_select = true,
+	.lower_bitfield_extract = true,
+	.lower_pack_snorm_2x16 = true,
+	.lower_pack_snorm_4x8 = true,
+	.lower_pack_unorm_2x16 = true,
+	.lower_pack_unorm_4x8 = true,
+	.lower_unpack_snorm_2x16 = true,
+	.lower_unpack_snorm_4x8 = true,
+	.lower_unpack_unorm_2x16 = true,
+	.lower_unpack_unorm_4x8 = true,
+	.lower_unpack_half_2x16 = true,
+	.lower_extract_byte = true,
+	.lower_extract_word = true,
+	.lower_ffma = true,
+	.lower_fpow = true,
+	.lower_mul_2x32_64 = true,
 	.max_unroll_iterations = 32,
 	.use_interpolated_input_intrinsics = true,
 };
@@ -102,6 +129,16 @@ radv_can_dump_shader_stats(struct radv_device *device,
 	/* Only dump non-meta shader stats. */
 	return device->instance->debug_flags & RADV_DEBUG_DUMP_SHADER_STATS &&
 	       module && !module->nir;
+}
+
+static bool
+should_use_aco(struct radv_device *device, gl_shader_stage stage, bool has_gs, bool has_ts)
+{
+	bool llvm_vs = device->instance->perftest_flags & RADV_PERFTEST_LLVM_VS;
+	return device->physical_device->use_aco &&
+	       (stage == MESA_SHADER_FRAGMENT ||
+	        stage == MESA_SHADER_COMPUTE ||
+	        (stage == MESA_SHADER_VERTEX && !llvm_vs && !has_gs && !has_ts));
 }
 
 unsigned shader_io_get_unique_index(gl_varying_slot slot)
@@ -260,15 +297,18 @@ radv_shader_compile_to_nir(struct radv_device *device,
 			   gl_shader_stage stage,
 			   const VkSpecializationInfo *spec_info,
 			   const VkPipelineCreateFlags flags,
-			   const struct radv_pipeline_layout *layout)
+			   const struct radv_pipeline_layout *layout,
+			   bool has_gs, bool has_ts)
 {
 	nir_shader *nir;
+	const nir_shader_compiler_options *nir_options =
+		should_use_aco(device, stage, has_gs, has_ts) ? &nir_options_aco : &nir_options_llvm;
 	if (module->nir) {
 		/* Some things such as our meta clear/blit code will give us a NIR
 		 * shader directly.  In that case, we just ignore the SPIR-V entirely
 		 * and just use the NIR shader */
 		nir = module->nir;
-		nir->options = &nir_options;
+		nir->options = nir_options;
 		nir_validate_shader(nir, "in internal shader");
 
 		assert(exec_list_length(&nir->functions) == 1);
@@ -347,7 +387,7 @@ radv_shader_compile_to_nir(struct radv_device *device,
 		nir = spirv_to_nir(spirv, module->size / 4,
 				   spec_entries, num_spec_entries,
 				   stage, entrypoint_name,
-				   &spirv_options, &nir_options);
+				   &spirv_options, nir_options);
 		assert(nir->info.stage == stage);
 		nir_validate_shader(nir, "after spirv_to_nir");
 
@@ -1139,6 +1179,7 @@ shader_variant_compile(struct radv_device *device,
 		       struct radv_nir_compiler_options *options,
 		       bool gs_copy_shader,
 		       bool keep_shader_info,
+		       bool has_gs, bool has_ts,
 		       struct radv_shader_binary **binary_out)
 {
 	enum radeon_family chip_family = device->physical_device->rad_info.family;
@@ -1187,17 +1228,12 @@ shader_variant_compile(struct radv_device *device,
 				chip_family, tm_options,
 				options->wave_size);
 
-	bool llvm_vs = device->instance->perftest_flags & RADV_PERFTEST_LLVM_VS;
-	bool use_aco = device->physical_device->use_aco &&
-		       ((shaders[0]->info.stage == MESA_SHADER_FRAGMENT) ||
-		        (shaders[0]->info.stage == MESA_SHADER_COMPUTE) ||
-		        (shaders[0]->info.stage == MESA_SHADER_VERTEX && !llvm_vs && !options->key.vs.out.as_ls && !options->key.vs.out.as_es));
-
 	if (gs_copy_shader) {
 		assert(shader_count == 1);
 		radv_compile_gs_copy_shader(&ac_llvm, *shaders, &binary,
 					    &variant_info, options);
 	} else {
+		bool use_aco = should_use_aco(device, shaders[0]->info.stage, has_gs, has_ts);
 		if (use_aco) {
 			assert(shader_count == 1);
 			radv_nir_shader_info_init(&variant_info.info);
@@ -1248,6 +1284,7 @@ radv_shader_variant_compile(struct radv_device *device,
 			   struct radv_pipeline_layout *layout,
 			   const struct radv_shader_variant_key *key,
 			   bool keep_shader_info,
+			   bool has_gs, bool has_ts,
 			   struct radv_shader_binary **binary_out)
 {
 	struct radv_nir_compiler_options options = {0};
@@ -1261,7 +1298,7 @@ radv_shader_variant_compile(struct radv_device *device,
 	options.robust_buffer_access = device->robust_buffer_access;
 
 	return shader_variant_compile(device, module, shaders, shader_count, shaders[shader_count - 1]->info.stage,
-				     &options, false, keep_shader_info, binary_out);
+				     &options, false, keep_shader_info, has_gs, has_ts, binary_out);
 }
 
 struct radv_shader_variant *
@@ -1276,7 +1313,7 @@ radv_create_gs_copy_shader(struct radv_device *device,
 	options.key.has_multiview_view_index = multiview;
 
 	return shader_variant_compile(device, NULL, &shader, 1, MESA_SHADER_VERTEX,
-				     &options, true, keep_shader_info, binary_out);
+				     &options, true, keep_shader_info, false, false, binary_out);
 }
 
 void
