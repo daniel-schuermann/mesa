@@ -1395,6 +1395,7 @@ struct radv_shader_module;
 #define RADV_HASH_SHADER_SISCHED             (1 << 1)
 #define RADV_HASH_SHADER_UNSAFE_MATH         (1 << 2)
 #define RADV_HASH_SHADER_NO_NGG              (1 << 3)
+#define RADV_HASH_SHADER_ACO                 (1 << 4)
 
 void
 radv_hash_shaders(unsigned char *hash,
