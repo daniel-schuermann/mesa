@@ -2778,8 +2778,9 @@ radv_dst_access_flush(struct radv_cmd_buffer *cmd_buffer,
 			              RADV_CMD_FLAG_INV_L2;
 			break;
 		case VK_ACCESS_SHADER_READ_BIT:
-			#warning "TODO: don't flush SMEM L1 if ACO is disabled"
-			flush_bits |= RADV_CMD_FLAG_INV_VCACHE | RADV_CMD_FLAG_INV_SCACHE;
+			flush_bits |= RADV_CMD_FLAG_INV_VCACHE;
+			if (cmd_buffer->device->instance->perftest_flags & RADV_PERFTEST_ACO)
+				flush_bits |= RADV_CMD_FLAG_INV_SCACHE;
 
 			if (!image_is_coherent)
 				flush_bits |= RADV_CMD_FLAG_INV_L2;
