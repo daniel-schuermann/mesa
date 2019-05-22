@@ -1188,7 +1188,7 @@ setup_isel_context(Program* program, nir_shader *nir,
    nir_lower_phis_to_scalar(nir);
    nir_opt_dce(nir);
    nir_opt_shrink_load(nir);
-   nir_opt_sink(nir);
+   nir_opt_sink(nir, true);
    nir_opt_move_load_ubo(nir);
 
    nir_function_impl *func = nir_shader_get_entrypoint(nir);
