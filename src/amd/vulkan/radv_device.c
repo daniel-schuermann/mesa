@@ -623,6 +623,8 @@ VkResult radv_CreateInstance(
 						   radv_perftest_options);
 	#warning "ACO enabled by default"
 	instance->perftest_flags |= RADV_PERFTEST_ACO;
+	if (instance->perftest_flags & RADV_PERFTEST_ACO)
+		fprintf(stderr, "WARNING: Experimental compiler backend enabled. Here be dragons! Incorrect rendering, GPU hangs and/or resets are likely\n");
 
 	if (instance->debug_flags & RADV_DEBUG_STARTUP)
 		radv_logi("Created an instance");
