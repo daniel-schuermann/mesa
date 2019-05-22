@@ -166,7 +166,6 @@ files_libnir = files(
   'nir_lower_bit_size.c',
   'nir_lower_uniforms_to_ubo.c',
   'nir_metadata.c',
-  'nir_move_load_const.c',
   'nir_move_vec_src_uses_to_dest.c',
   'nir_normalize_cubemap_coords.c',
   'nir_opt_combine_stores.c',

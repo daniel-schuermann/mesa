@@ -121,7 +121,7 @@ ir2_optimize_nir(nir_shader *s, bool lower)
 	ir2_optimize_loop(s);
 
 	OPT_V(s, nir_remove_dead_variables, nir_var_function_temp);
-	OPT_V(s, nir_move_load_const);
+	OPT_V(s, nir_opt_sink, false);
 
 	/* TODO we dont want to get shaders writing to depth for depth textures */
 	if (s->info.stage == MESA_SHADER_FRAGMENT) {

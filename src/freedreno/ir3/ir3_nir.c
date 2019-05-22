@@ -264,7 +264,7 @@ ir3_optimize_nir(struct ir3_shader *shader, nir_shader *s,
 
 	OPT_V(s, nir_remove_dead_variables, nir_var_function_temp);
 
-	OPT_V(s, nir_move_load_const);
+	OPT_V(s, nir_opt_sink, false);
 
 	if (ir3_shader_debug & IR3_DBG_DISASM) {
 		debug_printf("----------------------\n");
