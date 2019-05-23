@@ -85,7 +85,7 @@ radv_get_device_uuid(struct radeon_info *info, void *uuid)
 }
 
 static void
-radv_get_device_name(enum radeon_family family, char *name, size_t name_len)
+radv_get_device_name(enum radeon_family family, char *name, size_t name_len, bool aco)
 {
 	const char *chip_string;
 
@@ -119,7 +119,7 @@ radv_get_device_name(enum radeon_family family, char *name, size_t name_len)
 	default: chip_string = "AMD RADV unknown"; break;
 	}
 
-	snprintf(name, name_len, "%s (LLVM " MESA_LLVM_VERSION_STRING ")", chip_string);
+	snprintf(name, name_len, "%s (%sLLVM " MESA_LLVM_VERSION_STRING ")", chip_string, aco ? "ACO and " : "");
 }
 
 static uint64_t
@@ -314,7 +314,8 @@ radv_physical_device_init(struct radv_physical_device *device,
 
 	radv_handle_env_var_force_family(device);
 
-	radv_get_device_name(device->rad_info.family, device->name, sizeof(device->name));
+	radv_get_device_name(device->rad_info.family, device->name, sizeof(device->name),
+			     instance->perftest_flags & RADV_PERFTEST_ACO);
 
 	if (radv_device_get_cache_uuid(device->rad_info.family, device->cache_uuid)) {
 		device->ws->destroy(device->ws);
