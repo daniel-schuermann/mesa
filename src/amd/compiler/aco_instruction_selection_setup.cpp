@@ -30,6 +30,8 @@
 
 #include "util/u_math.h"
 
+#define MAX_INLINE_PUSH_CONSTS 8
+
 namespace aco {
 
 enum fs_input {
@@ -90,6 +92,9 @@ struct isel_context {
    Temp prim_mask = Temp(0, s1);
    Temp descriptor_sets[RADV_UD_MAX_SETS];
    Temp push_constants = Temp(0, s1);
+   Temp inline_push_consts[MAX_INLINE_PUSH_CONSTS];
+   unsigned num_inline_push_consts = 0;
+   unsigned base_inline_push_consts = 0;
    Temp ring_offsets = Temp(0, s2);
 
    /* VS inputs */
@@ -559,10 +564,61 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
 
 struct user_sgpr_info {
    uint8_t num_sgpr;
+   uint8_t remaining_sgprs;
    uint8_t user_sgpr_idx;
    bool need_ring_offsets;
    bool indirect_all_descriptor_sets;
 };
+
+static void allocate_inline_push_consts(isel_context *ctx,
+                                        user_sgpr_info& user_sgpr_info)
+{
+   uint8_t remaining_sgprs = user_sgpr_info.remaining_sgprs;
+
+   /* Only supported if shaders use push constants. */
+   if (ctx->program->info->info.min_push_constant_used == UINT8_MAX)
+      return;
+
+   /* Only supported if shaders don't have indirect push constants. */
+   if (ctx->program->info->info.has_indirect_push_constants)
+      return;
+
+   /* Only supported for 32-bit push constants. */
+   //TODO: it's possible that some day, the load/store vectorization could make this inaccurate
+   if (!ctx->program->info->info.has_only_32bit_push_constants)
+      return;
+
+   uint8_t num_push_consts =
+      (ctx->program->info->info.max_push_constant_used -
+       ctx->program->info->info.min_push_constant_used) / 4;
+
+   /* Check if the number of user SGPRs is large enough. */
+   if (num_push_consts < remaining_sgprs) {
+      ctx->program->info->info.num_inline_push_consts = num_push_consts;
+   } else {
+      ctx->program->info->info.num_inline_push_consts = remaining_sgprs;
+   }
+
+   /* Clamp to the maximum number of allowed inlined push constants. */
+   if (ctx->program->info->info.num_inline_push_consts > MAX_INLINE_PUSH_CONSTS)
+      ctx->program->info->info.num_inline_push_consts = MAX_INLINE_PUSH_CONSTS;
+
+   if (ctx->program->info->info.num_inline_push_consts == num_push_consts &&
+       !ctx->program->info->info.loads_dynamic_offsets) {
+      /* Disable the default push constants path if all constants are
+       * inlined and if shaders don't use dynamic descriptors.
+       */
+      ctx->program->info->info.loads_push_constants = false;
+      user_sgpr_info.num_sgpr--;
+      user_sgpr_info.remaining_sgprs++;
+   }
+
+   ctx->program->info->info.base_inline_push_consts =
+      ctx->program->info->info.min_push_constant_used / 4;
+
+   user_sgpr_info.num_sgpr += ctx->program->info->info.num_inline_push_consts;
+   user_sgpr_info.remaining_sgprs -= ctx->program->info->info.num_inline_push_consts;
+}
 
 static void allocate_user_sgprs(isel_context *ctx,
                                 /* TODO bool has_previous_stage, gl_shader_stage previous_stage, */
@@ -614,14 +670,19 @@ static void allocate_user_sgprs(isel_context *ctx,
       user_sgpr_count += 1; /* we use 32bit pointers */
 
    uint32_t available_sgprs = ctx->options->chip_class >= GFX9 && ctx->stage != MESA_SHADER_COMPUTE ? 32 : 16;
+   uint32_t remaining_sgprs = available_sgprs - user_sgpr_count;
    uint32_t num_desc_set = util_bitcount(ctx->program->info->info.desc_set_used_mask);
 
    if (available_sgprs < user_sgpr_count + num_desc_set) {
       user_sgpr_info.indirect_all_descriptor_sets = true;
       user_sgpr_info.num_sgpr = user_sgpr_count + 1;
+      user_sgpr_info.remaining_sgprs = remaining_sgprs - 1;
    } else {
       user_sgpr_info.num_sgpr = user_sgpr_count + num_desc_set;
+      user_sgpr_info.remaining_sgprs = remaining_sgprs - num_desc_set;
    }
+
+   allocate_inline_push_consts(ctx, user_sgpr_info);
 }
 
 #define MAX_ARGS 23
@@ -720,6 +781,16 @@ declare_global_input_sgprs(isel_context *ctx,
       /* 1 for push constants and dynamic descriptors */
       add_arg(args, s1, &ctx->push_constants, user_sgpr_info->user_sgpr_idx);
       set_loc_shader_ptr(ctx, AC_UD_PUSH_CONSTANTS, &user_sgpr_info->user_sgpr_idx);
+   }
+
+   if (ctx->program->info->info.num_inline_push_consts) {
+      unsigned count = ctx->program->info->info.num_inline_push_consts;
+      for (unsigned i = 0; i < count; i++)
+         add_arg(args, s1, &ctx->inline_push_consts[i], user_sgpr_info->user_sgpr_idx + i);
+      set_loc_shader(ctx, AC_UD_INLINE_PUSH_CONSTANTS, &user_sgpr_info->user_sgpr_idx, count);
+
+      ctx->num_inline_push_consts = ctx->program->info->info.num_inline_push_consts;
+      ctx->base_inline_push_consts = ctx->program->info->info.base_inline_push_consts;
    }
 
    if (ctx->program->info->info.so.num_outputs) {
@@ -1151,6 +1222,8 @@ setup_isel_context(Program* program, nir_shader *nir,
    ctx.fs_inputs[fs_input::persp_pull_model] = Temp(0, v3);
    for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i)
       ctx.descriptor_sets[i] = Temp(0, s1);
+   for (unsigned i = 0; i < MAX_INLINE_PUSH_CONSTS; ++i)
+      ctx.inline_push_consts[i] = Temp(0, s1);
 
    /* the variable setup has to be done before lower_io / CSE */
    setup_variables(&ctx, nir);

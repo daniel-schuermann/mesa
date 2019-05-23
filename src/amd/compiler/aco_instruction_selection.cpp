@@ -2580,13 +2580,34 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
 void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Builder bld(ctx->program, ctx->block);
-   Temp index = bld.as_uniform(get_ssa_temp(ctx, instr->src[0].ssa));
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+
    unsigned offset = nir_intrinsic_base(instr);
+   nir_const_value *index_cv = nir_src_as_const_value(instr->src[0]);
+   if (index_cv && instr->dest.ssa.bit_size == 32) {
+
+      unsigned count = instr->dest.ssa.num_components;
+      unsigned start = (offset + index_cv->u32) / 4u;
+      start -= ctx->base_inline_push_consts;
+      if (start + count <= ctx->num_inline_push_consts) {
+         std::array<Temp,NIR_MAX_VEC_COMPONENTS> elems;
+         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, count, 1)};
+         for (unsigned i = 0; i < count; ++i) {
+            elems[i] = ctx->inline_push_consts[start + i];
+            vec->getOperand(i) = Operand{elems[i]};
+         }
+         vec->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vec));
+         ctx->allocated_vec.emplace(dst.id(), elems);
+         return;
+      }
+   }
+
+   Temp index = bld.as_uniform(get_ssa_temp(ctx, instr->src[0].ssa));
    if (offset != 0) // TODO check if index != 0 as well
       index = bld.sop2(aco_opcode::s_add_i32, bld.def(s1), bld.def(s1, scc), Operand(offset), index);
    Temp ptr = convert_pointer_to_64_bit(ctx, ctx->push_constants);
 
-   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    aco_opcode op;
    RegClass rc;
    switch (dst.size()) {
