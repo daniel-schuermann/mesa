@@ -1225,6 +1225,7 @@ shader_variant_compile(struct radv_device *device,
 			}
 
 			assert(shader_count == 1);
+			radv_nir_shader_info_init(&variant_info.info);
 			radv_nir_shader_info_pass(shaders[0], options, &variant_info.info);
 			aco_compile_shader(shaders[0], &variant->config,
 				           &binary, &variant_info, options);
