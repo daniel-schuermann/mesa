@@ -46,7 +46,6 @@ Optimizations:
 	- currently, we only spill sgprs, and sometimes even const values
 	- it might be beneficial to spill if it helps to squeeze in an additional wave (we can easily test different thresholds here)
 - the RA should avoid moving temporaries that are created by VMEM/SMEM/DS instructions if they haven't yet been used
-- implement push constants in user sgprs like the LLVM backend
 - don't always try to keep vectors intact during RA
     - often, a vector will only ever be split. so, when moving, it makes little sense to create extra moves when only a some of it's elements needs to be moved
     - if this is always done, the number of moves required should always be less than the amount of space required
