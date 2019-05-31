@@ -573,7 +573,7 @@ void lower_to_hw_instr(Program* program)
                bld.sopp(aco_opcode::s_cbranch_scc1, bld.scc(branch_cond.getTemp()), NULL, jump_dwords);
 
                bld.exp(aco_opcode::exp, Operand(v1), Operand(v1), Operand(v1), Operand(v1),
-                       0, V_008DFC_SQ_EXP_NULL, false, true, true);
+                       0, V_008DFC_SQ_EXP_NULL, false, true, true, true);
 
                if (program->wb_smem_l1_on_end) {
                   bld.smem(aco_opcode::s_dcache_wb);
