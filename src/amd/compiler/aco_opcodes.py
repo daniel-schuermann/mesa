@@ -114,7 +114,8 @@ class Format(Enum):
                  ('unsigned', 'dest', None),
                  ('bool', 'compr', 'false', 'compressed'),
                  ('bool', 'done', 'false'),
-                 ('bool', 'vm', 'false', 'valid_mask')]
+                 ('bool', 'vm', 'false', 'valid_mask'),
+                 ('bool', 'waitcnt_ignore', 'false')]
       elif self == Format.PSEUDO_BRANCH:
          return [('Block*', 'target0', None, 'targets[0]'),
                  ('Block*', 'target1', 'NULL', 'targets[1]')]
