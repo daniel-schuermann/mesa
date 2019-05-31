@@ -5436,7 +5436,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          }
          ctx->block->instructions.emplace_back(std::move(split));
 
-         Temp dfmt = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), desc[1], Operand(20u | (6u << 16)));
+         Temp dfmt = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), bld.def(s1, scc), desc[1], Operand(20u | (6u << 16)));
          Temp compare_cube_wa = bld.sopc(aco_opcode::s_cmp_eq_u32, bld.def(s1, scc), dfmt,
                                          Operand((uint32_t)V_008F14_IMG_DATA_FORMAT_8_8_8_8));
 
