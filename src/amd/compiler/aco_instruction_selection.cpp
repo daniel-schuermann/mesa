@@ -5334,7 +5334,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    Temp tmp_dst = dst;
    if ((util_bitcount(dmask) != instr->dest.ssa.num_components && instr->op != nir_texop_tg4) ||
-       tg4_integer_cube_workaround || dst.type() == sgpr)
+       tg4_integer_cube_workaround || dst.type() == sgpr || instr->op == nir_texop_samples_identical)
       tmp_dst = Temp{ctx->program->allocateId(), getRegClass(vgpr, util_bitcount(dmask))};
 
    /* gather4 selects the component by dmask and always returns vec4 */
@@ -5577,6 +5577,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
       if (instr->op == nir_texop_samples_identical) {
          assert(dmask == 1 && dst.regClass() == v1);
+         assert(dst.id() != tmp_dst.id());
 
          Temp tmp = bld.tmp(s2);
          bld.vopc(aco_opcode::v_cmp_eq_u32, Definition(tmp), Operand(0u), tmp_dst).def(0).setHint(vcc);
