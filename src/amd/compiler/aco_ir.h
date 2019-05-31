@@ -789,6 +789,7 @@ struct Export_instruction : public Instruction {
    bool compressed;
    bool done;
    bool valid_mask;
+   bool waitcnt_ignore; /* set for discards to prevent "s_waitcnt expcnt(0)" */
 
 };
 

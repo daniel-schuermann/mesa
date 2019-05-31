@@ -536,6 +536,9 @@ bool gen(Instruction* instr, wait_ctx& ctx)
    switch(instr->format) {
    case Format::EXP: {
       Export_instruction* exp_instr = static_cast<Export_instruction*>(instr);
+      if (exp_instr->waitcnt_ignore)
+         return false;
+
       wait_type t;
       if (exp_instr->dest <= 7) {
          t = wait_type::exp_color;
