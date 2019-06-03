@@ -233,8 +233,12 @@ bool ra_fail(FILE *output, Location loc, Location loc2, const char *fmt, ...) {
    va_end(args);
 
    fprintf(stderr, "RA error found at instruction in BB%d:\n", loc.block->index);
-   aco_print_instr(loc.instr, stderr);
-   fprintf(stderr, "\n%s", msg);
+   if (loc.instr) {
+      aco_print_instr(loc.instr, stderr);
+      fprintf(stderr, "\n%s", msg);
+   } else {
+      fprintf(stderr, "%s", msg);
+   }
    if (loc2.block) {
       fprintf(stderr, " in BB%d:\n", loc2.block->index);
       aco_print_instr(loc2.instr, stderr);
@@ -301,6 +305,18 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
 
       std::set<Temp> live;
       live.insert(live_vars.live_out[block->index].begin(), live_vars.live_out[block->index].end());
+
+      /* check live out */
+      for (Temp tmp : live) {
+         PhysReg reg = assignments.at(tmp.id()).reg;
+         for (unsigned i = 0; i < tmp.size(); i++) {
+            if (regs[reg.reg + i]) {
+               err |= ra_fail(output, loc, Location(), "Assignment of element %d of %%%d already taken by %%%d in live-out", i, tmp.id(), regs[reg.reg + i]);
+            }
+            regs[reg.reg + i] = tmp.id();
+         }
+      }
+      regs.fill(0);
 
       for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
          aco_ptr<Instruction>& instr = *it;
