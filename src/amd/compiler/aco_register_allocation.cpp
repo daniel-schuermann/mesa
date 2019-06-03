@@ -1365,8 +1365,9 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       }
    }
 
-   program->config->num_vgprs = ctx.max_used_vgpr + 1;
-   program->config->num_sgprs = ctx.max_used_sgpr + 1 + 2;
+   /* num_gpr = rnd_up(max_used_gpr + 1) */
+   program->config->num_vgprs = (ctx.max_used_vgpr + 1 + 3) & ~3;
+   program->config->num_sgprs = (ctx.max_used_sgpr + 1 + 2 + 7) & ~7; /* + 2 sgprs for vcc */
 }
 
 }
