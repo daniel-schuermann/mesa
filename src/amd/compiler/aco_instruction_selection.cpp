@@ -2186,6 +2186,9 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    }
 
+   if (target == V_008DFC_SQ_EXP_NULL)
+      return;
+
    if ((bool)compr_op)
    {
       for (int i = 0; i < 2; i++)
