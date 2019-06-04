@@ -28,6 +28,11 @@
 
 #include "../vulkan/radv_shader.h" // for radv_nir_compiler_options
 
+#define SMEM_WINDOW_SIZE (350 - ctx.num_waves * 35)
+#define VMEM_WINDOW_SIZE (1024 - ctx.num_waves * 64)
+#define SMEM_MAX_MOVES (80 - ctx.num_waves * 8)
+#define VMEM_MAX_MOVES (128 - ctx.num_waves * 4)
+
 namespace aco {
 
 struct sched_ctx {
@@ -171,7 +176,8 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
                    Instruction* current, int idx)
 {
    assert(idx != 0);
-   int window_size = 25 - ctx.num_waves;
+   int window_size = SMEM_WINDOW_SIZE;
+   int max_moves = SMEM_MAX_MOVES;
    int16_t k = 0;
 
    /* create the initial set of values which current depends on */
@@ -189,7 +195,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
    int insert_idx = idx + 1;
    bool moving_ds = false;
 
-   for (int candidate_idx = idx - 1; candidate_idx > (int) idx - window_size; candidate_idx--) {
+   for (int candidate_idx = idx - 1; k < max_moves && candidate_idx > (int) idx - window_size; candidate_idx--) {
       assert(candidate_idx >= 0);
       aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
 
@@ -298,7 +304,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
    bool found_dependency = false;
    /* second, check if we have instructions after current to move up */
-   for (int candidate_idx = idx + 1; candidate_idx < (int) idx + window_size; candidate_idx++) {
+   for (int candidate_idx = idx + 1; k < max_moves && candidate_idx < (int) idx + window_size; candidate_idx++) {
       assert(candidate_idx < (int) block->instructions.size());
       aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
 
@@ -418,7 +424,9 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
                    Instruction* current, int idx)
 {
    assert(idx != 0);
-   int window_size = 25 - ctx.num_waves;
+   int window_size = VMEM_WINDOW_SIZE;
+   int max_moves = VMEM_MAX_MOVES;
+   int16_t k = 0;
 
    /* create the initial set of values which current depends on */
    std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
@@ -435,7 +443,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
    int insert_idx = idx + 1;
    bool moving_ds = false;
 
-   for (int candidate_idx = idx - 1; candidate_idx > (int) idx - window_size; candidate_idx--) {
+   for (int candidate_idx = idx - 1; k < max_moves && candidate_idx > (int) idx - window_size; candidate_idx--) {
       assert(candidate_idx >= 0);
       aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
 
@@ -524,6 +532,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       vgpr_pressure = vgpr_pressure - candidate_vgpr_diff;
       sgpr_pressure = sgpr_pressure - candidate_sgpr_diff;
       insert_idx--;
+      k++;
       if (candidate_idx < ctx.last_SMEM_dep_idx)
          ctx.last_SMEM_stall++;
    }
@@ -542,7 +551,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
    bool found_dependency = false;
    /* second, check if we have instructions after current to move up */
-   for (int candidate_idx = idx + 1; candidate_idx < (int) idx + window_size; candidate_idx++) {
+   for (int candidate_idx = idx + 1; k < max_moves && candidate_idx < (int) idx + window_size; candidate_idx++) {
       assert(candidate_idx < (int) block->instructions.size());
       aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
 
@@ -642,6 +651,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       vgpr_pressure = vgpr_pressure + candidate_vgpr_diff;
       sgpr_pressure = sgpr_pressure + candidate_sgpr_diff;
       insert_idx++;
+      k++;
    }
 }
 
