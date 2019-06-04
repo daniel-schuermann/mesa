@@ -753,7 +753,15 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             continue;
 
          uint32_t offset = offset_op.isTemp() ? ctx.info[offset_op.tempId()].val : offset_op.constantValue();
-         ctx.info[instr->getDefinition(0).tempId()].set_base_offset(base.getTemp(), offset);
+         if (ctx.info[base.tempId()].is_base_offset()) {
+            ssa_info *prev = &ctx.info[base.tempId()];
+            ctx.info[instr->getDefinition(0).tempId()].set_base_offset(prev->temp, prev->val + offset);
+
+            instr->getOperand(0) = Operand(prev->val + offset);
+            instr->getOperand(1) = Operand(prev->temp);
+         } else {
+            ctx.info[instr->getDefinition(0).tempId()].set_base_offset(base.getTemp(), offset);
+         }
          break;
       }
       break;
