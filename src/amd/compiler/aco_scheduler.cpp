@@ -110,12 +110,18 @@ static std::pair<uint16_t, uint16_t> getTempRegisters(aco_ptr<Instruction>& inst
    return temp_registers;
 }
 
-bool can_move_barrier(aco_ptr<Instruction>& barrier, Instruction* current, bool moving_ds)
+bool can_move_instr(aco_ptr<Instruction>& instr, Instruction* current, bool moving_ds)
 {
+   /* don't move exports so that they stay closer together */
+   if (instr->format == Format::EXP)
+      return false;
+
+   /* handle barriers */
+
    /* TODO: instead of stopping, maybe try to move the barriers and any
     * instructions interacting with them instead? */
-   if (barrier->format != Format::PSEUDO_BARRIER) {
-      if (barrier->opcode == aco_opcode::s_barrier) {
+   if (instr->format != Format::PSEUDO_BARRIER) {
+      if (instr->opcode == aco_opcode::s_barrier) {
          bool can_reorder = false;
          switch (current->format) {
          case Format::SMEM:
@@ -155,7 +161,7 @@ bool can_move_barrier(aco_ptr<Instruction>& barrier, Instruction* current, bool 
       return false;
    }
 
-   switch (barrier->opcode) {
+   switch (instr->opcode) {
    case aco_opcode::p_memory_barrier_atomic:
       return interaction != barrier_atomic;
    case aco_opcode::p_memory_barrier_buffer:
@@ -229,7 +235,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          break;
       if (candidate->opcode == aco_opcode::p_logical_start)
          break;
-      if (!can_move_barrier(candidate, current, moving_ds))
+      if (!can_move_instr(candidate, current, moving_ds))
          break;
 
       sgpr_pressure = std::max(sgpr_pressure, (int) register_demand[candidate_idx].first);
@@ -330,7 +336,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
       if (candidate->opcode == aco_opcode::p_logical_end)
          break;
-      if (!can_move_barrier(candidate, current, moving_ds))
+      if (!can_move_instr(candidate, current, moving_ds))
          break;
 
       bool writes_exec = false;
@@ -473,7 +479,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          break;
       if (candidate->opcode == aco_opcode::p_logical_start)
          break;
-      if (!can_move_barrier(candidate, current, moving_ds))
+      if (!can_move_instr(candidate, current, moving_ds))
          break;
 
       /* break if we'd make the previous SMEM instruction stall */
@@ -578,7 +584,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
       if (candidate->opcode == aco_opcode::p_logical_end)
          break;
-      if (!can_move_barrier(candidate, current, moving_ds))
+      if (!can_move_instr(candidate, current, moving_ds))
          break;
 
       bool writes_exec = false;
