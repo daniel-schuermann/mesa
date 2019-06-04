@@ -615,7 +615,9 @@ PhysReg get_reg(ra_ctx& ctx,
          regs_free++;
    }
 
-   assert(regs_free <= size);
+   /* We should only fail here because keeping under the limit would require
+    * too many moves. */
+   assert(regs_free >= size);
 
    /* try using more registers */
    uint16_t max_addressible_sgpr = ctx.program->chip_class >= VI ? 102 : 104;
