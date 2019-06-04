@@ -171,6 +171,25 @@ bool can_move_barrier(aco_ptr<Instruction>& barrier, Instruction* current, bool 
    }
 }
 
+bool can_reorder(Instruction* candidate, bool allow_smem)
+{
+   switch (candidate->format) {
+   case Format::SMEM:
+      return allow_smem || static_cast<SMEM_instruction*>(candidate)->can_reorder;
+   case Format::MUBUF:
+      return static_cast<MUBUF_instruction*>(candidate)->can_reorder;
+   case Format::MIMG:
+      return static_cast<MIMG_instruction*>(candidate)->can_reorder;
+   case Format::FLAT:
+   case Format::GLOBAL:
+   case Format::SCRATCH:
+   case Format::MTBUF:
+      return false;
+   default:
+      return true;
+   }
+}
+
 void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
                    std::vector<std::pair<uint16_t,uint16_t>>& register_demand,
                    Instruction* current, int idx)
@@ -179,6 +198,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
    int window_size = SMEM_WINDOW_SIZE;
    int max_moves = SMEM_MAX_MOVES;
    int16_t k = 0;
+   bool can_reorder_cur = can_reorder(current, false);
 
    /* create the initial set of values which current depends on */
    std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
@@ -205,7 +225,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          break;
 
       /* break when encountering another MEM instruction, logical_start or barriers */
-      if (candidate->isVMEM() || candidate->format == Format::SMEM || candidate->isFlatOrGlobal())
+      if (!can_reorder(candidate.get(), false) && !can_reorder_cur)
          break;
       if (candidate->opcode == aco_opcode::p_logical_start)
          break;
@@ -348,7 +368,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          }
       }
 
-      if (candidate->isVMEM() || candidate->format == Format::SMEM || candidate->isFlatOrGlobal())
+      if (!can_reorder(candidate.get(), false) && !can_reorder_cur)
          break;
 
       if (!found_dependency) {
@@ -427,6 +447,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
    int window_size = VMEM_WINDOW_SIZE;
    int max_moves = VMEM_MAX_MOVES;
    int16_t k = 0;
+   bool can_reorder_cur = can_reorder(current, false);
 
    /* create the initial set of values which current depends on */
    std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
@@ -448,7 +469,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
 
       /* break when encountering another VMEM instruction, logical_start or barriers */
-      if (candidate->isVMEM() || candidate->isFlatOrGlobal())
+      if (!can_reorder(candidate.get(), true) && !can_reorder_cur)
          break;
       if (candidate->opcode == aco_opcode::p_logical_start)
          break;
@@ -569,7 +590,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          break;
 
       /* check if candidate depends on current */
-      bool is_dependency = candidate->isVMEM() || candidate->isFlatOrGlobal();
+      bool is_dependency = !can_reorder(candidate.get(), true) && !can_reorder_cur;
       for (unsigned i = 0; !is_dependency && i < candidate->num_operands; i++) {
          if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()])
             is_dependency = true;
