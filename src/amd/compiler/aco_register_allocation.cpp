@@ -172,6 +172,42 @@ std::pair<PhysReg, bool> get_reg_simple(ra_ctx& ctx,
                                         uint32_t size, uint32_t stride,
                                         RegClass rc)
 {
+   /* best fit algorithm: find the smallest gap to fit in the variable */
+   if (stride == 1) {
+      unsigned best_pos = 0xFFFF;
+      unsigned gap_size = 0xFFFF;
+      unsigned next_pos = 0xFFFF;
+
+      for (unsigned reg_lo = lb; reg_lo < ub; reg_lo++) {
+         if (reg_file[reg_lo] != 0) {
+            if (next_pos != 0xFFFF &&
+                next_pos + size <= reg_lo &&
+                reg_lo - next_pos < gap_size) {
+               best_pos = next_pos;
+               gap_size = reg_lo - next_pos;
+            }
+            next_pos = 0xFFFF;
+            continue;
+         }
+
+         if (next_pos == 0xFFFF)
+            next_pos = reg_lo;
+      }
+
+      /* final check */
+      if (next_pos != 0xFFFF &&
+          next_pos + size <= ub &&
+          ub - next_pos < gap_size) {
+         best_pos = next_pos;
+         gap_size = ub - next_pos;
+      }
+      if (best_pos != 0xFFFF) {
+         adjust_max_used_regs(ctx, rc, best_pos);
+         return {PhysReg{best_pos}, true};
+      }
+      return {{}, false};
+   }
+
    bool found = false;
    unsigned reg_lo = lb;
    unsigned reg_hi = lb + size - 1;
@@ -188,7 +224,7 @@ std::pair<PhysReg, bool> get_reg_simple(ra_ctx& ctx,
       }
       if (found) {
          adjust_max_used_regs(ctx, rc, reg_lo);
-         return std::make_pair(PhysReg{reg_lo}, true);
+         return {PhysReg{reg_lo}, true};
       }
 
       reg_lo += stride;
