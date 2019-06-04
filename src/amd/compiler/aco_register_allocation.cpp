@@ -112,6 +112,10 @@ void print_regs(ra_ctx& ctx, bool vgprs, std::array<uint32_t, 512>& reg_file)
          size++;
       }
    }
+   if (prev && size > 1)
+      printf("-%d]\n", ub - lb - 1);
+   else if (prev)
+      printf("]\n");
 }
 #endif
 
