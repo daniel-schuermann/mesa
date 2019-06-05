@@ -41,6 +41,7 @@ namespace aco {
 namespace {
 
 struct ra_ctx {
+   std::bitset<512> war_hint;
    Program* program;
    std::unordered_map<unsigned, std::pair<PhysReg, RegClass>> assignments;
    std::map<unsigned, Temp> orig_names;
@@ -178,20 +179,28 @@ std::pair<PhysReg, bool> get_reg_simple(ra_ctx& ctx,
       unsigned gap_size = 0xFFFF;
       unsigned next_pos = 0xFFFF;
 
-      for (unsigned reg_lo = lb; reg_lo < ub; reg_lo++) {
-         if (reg_file[reg_lo] != 0) {
-            if (next_pos != 0xFFFF &&
-                next_pos + size <= reg_lo &&
-                reg_lo - next_pos < gap_size) {
+      for (unsigned current_reg = lb; current_reg < ub; current_reg++) {
+         if (reg_file[current_reg] != 0 || ctx.war_hint[current_reg]) {
+            if (next_pos == 0xFFFF)
+               continue;
+
+            /* check if the variable fits */
+            if (next_pos + size > current_reg) {
+               next_pos = 0xFFFF;
+               continue;
+            }
+
+            /* check if the tested gap is smaller */
+            if (current_reg - next_pos < gap_size) {
                best_pos = next_pos;
-               gap_size = reg_lo - next_pos;
+               gap_size = current_reg - next_pos;
             }
             next_pos = 0xFFFF;
             continue;
          }
 
          if (next_pos == 0xFFFF)
-            next_pos = reg_lo;
+            next_pos = current_reg;
       }
 
       /* final check */
@@ -1002,6 +1011,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       /* initialize register file */
       assert(block->index != 0 || live.empty());
       std::array<uint32_t, 512> register_file = {0};
+      ctx.war_hint.reset();
 
       for (Temp t : live) {
          Temp renamed = handle_live_in(t, block.get());
@@ -1186,6 +1196,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             } else {
                assert(ctx.assignments.find(operand.tempId()) != ctx.assignments.end());
                operand.setFixed(ctx.assignments[operand.tempId()].first);
+               if (instr->format == Format::EXP)
+                  ctx.war_hint.set(operand.physReg().reg);
             }
             std::map<unsigned, phi_info>::iterator phi = phi_map.find(operand.getTemp().id());
             if (phi != phi_map.end())
