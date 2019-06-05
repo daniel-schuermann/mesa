@@ -449,6 +449,7 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
       unsigned remaining_op_moves = op_moves;
       unsigned last_var = 0;
       bool found = true;
+      bool aligned = rc == RegClass::v4 && reg_lo % 4 == 0;
       for (unsigned j = reg_lo; found && j <= reg_hi; j++) {
          if (reg_file[j] == 0 || reg_file[j] == last_var)
             continue;
@@ -475,12 +476,15 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
          k += sizeOf(ctx.assignments[reg_file[j]].second);
          n++;
          last_var = reg_file[j];
-
-         if (k > num_moves || (k == num_moves && n <= num_vars)) {
-            found = false;
-            break;
-         }
       }
+
+      if (!found || k > num_moves)
+         continue;
+      if (k == num_moves && n < num_vars)
+         continue;
+      if (!aligned && k == num_moves && n == num_vars)
+         continue;
+
       if (found) {
          best_pos = reg_lo;
          num_moves = k;
@@ -701,11 +705,12 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
          if (instr->getOperand(j).physReg().reg != reg_lo + offset)
             k += instr->getOperand(j).size();
       }
+      bool aligned = rc == RegClass::v4 && reg_lo % 4 == 0;
+      if (k > num_moves || (!aligned && k == num_moves))
+         continue;
 
-      if (k < num_moves) {
-         best_pos = reg_lo;
-         num_moves = k;
-      }
+      best_pos = reg_lo;
+      num_moves = k;
    }
 
    if (num_moves >= size)
