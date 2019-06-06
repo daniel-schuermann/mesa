@@ -1511,7 +1511,7 @@ void spill(Program* program, live& live_vars, const struct radv_nir_compiler_opt
    /* test if it possible to increase occupancy with little spilling */
    for (unsigned num_waves_next = 2; num_waves_next <= 8; num_waves_next++) {
       uint16_t target_vgpr_next = (256 / num_waves_next) & ~3;
-      uint16_t target_sgpr_next = std::min<uint16_t>((total_sgpr_regs / num_waves_next) & ~7, max_addressible_sgpr) - 2;
+      uint16_t target_sgpr_next = std::min<uint16_t>(((total_sgpr_regs / num_waves_next) & ~7) - 2, max_addressible_sgpr);
 
       /* Currently no vgpr spilling supported.
        * Spill as many sgprs as necessary to not hinder occupancy */
@@ -1551,6 +1551,7 @@ void spill(Program* program, live& live_vars, const struct radv_nir_compiler_opt
    /* update live variable information */
    live_vars = live_var_analysis<true>(program, options);
 
+   assert(program->num_waves >= num_waves);
 }
 
 }
