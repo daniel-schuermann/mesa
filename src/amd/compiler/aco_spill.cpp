@@ -1186,7 +1186,7 @@ void spill_block(spill_ctx& ctx, unsigned block_idx)
 
    Block* loop_header = ctx.loop_header.top();
 
-   /* save original renames at end of loop header block */
+   /* preserve original renames at end of loop header block */
    std::map<Temp, Temp> renames = std::move(ctx.renames[loop_header->index]);
 
    /* add coupling code to all loop header predecessors */
@@ -1220,33 +1220,31 @@ void spill_block(spill_ctx& ctx, unsigned block_idx)
          }
 
          std::map<Temp, std::pair<uint32_t, uint32_t>>::iterator it = ctx.next_use_distances_start[idx].find(rename.first);
+
          /* variable is not live at beginning of this block */
          if (it == ctx.next_use_distances_start[idx].end())
             continue;
-         /* variable is not used in this block but later */
-         if (it->second.first != idx) {
-            ctx.renames[idx].insert(rename);
-            continue;
-         }
-
-         /* rename all uses in this block */
-         while (instr_it != current->instructions.end()) {
-            aco_ptr<Instruction>& instr = *instr_it;
-            for (unsigned i = 0; i < instr->num_operands; i++) {
-               if (!instr->getOperand(i).isTemp())
-                  continue;
-               if (instr->getOperand(i).getTemp() == rename.first)
-                  instr->getOperand(i).setTemp(rename.second);
-               /* we can stop with this block as soon as the variable is spilled */
-               if (instr->opcode == aco_opcode::p_spill)
-                  break;
-            }
-            instr_it++;
-         }
 
          /* if the variable is live at the block's exit, add rename */
          if (ctx.next_use_distances_end[idx].find(rename.first) != ctx.next_use_distances_end[idx].end())
             ctx.renames[idx].insert(rename);
+
+         /* rename all uses in this block */
+         bool renamed = false;
+         while (!renamed && instr_it != current->instructions.end()) {
+            aco_ptr<Instruction>& instr = *instr_it;
+            for (unsigned i = 0; i < instr->num_operands; i++) {
+               if (!instr->getOperand(i).isTemp())
+                  continue;
+               if (instr->getOperand(i).getTemp() == rename.first) {
+                  instr->getOperand(i).setTemp(rename.second);
+                  /* we can stop with this block as soon as the variable is spilled */
+                  if (instr->opcode == aco_opcode::p_spill)
+                    renamed = true;
+               }
+            }
+            instr_it++;
+         }
       }
    }
 
@@ -1552,6 +1550,7 @@ void spill(Program* program, live& live_vars, const struct radv_nir_compiler_opt
 
    /* update live variable information */
    live_vars = live_var_analysis<true>(program, options);
+
 }
 
 }
