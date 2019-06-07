@@ -725,7 +725,6 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
          discard->getDefinition(i) = Definition(new_mask);
          ctx.info[block->index].exec[i].first = new_mask;
       }
-      discard->getDefinition(num - 1).setFixed(exec);
       discard->getOperand(num) = bld.exec(cond);
       discard->getDefinition(num) = bld.def(s1, scc);
 
