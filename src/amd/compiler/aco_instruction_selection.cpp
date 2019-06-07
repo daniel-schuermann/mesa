@@ -6117,7 +6117,9 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       BB_then_linear->kind |= block_kind_uniform;
       Block* BB_between = new Block();
       BB_between->loop_nest_depth = ctx->cf_info.loop_nest_depth;
-      BB_between->kind |= (block_kind_invert | (BB_if->kind & block_kind_top_level));
+      /* Invert blocks are intentionally not marked as top level because they
+       * are not part of the logical cfg. */
+      BB_between->kind |= block_kind_invert;
       Block* BB_else_logical = new Block();
       BB_else_logical->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       Block* BB_else_linear = new Block();
