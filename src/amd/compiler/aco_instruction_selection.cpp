@@ -5939,6 +5939,16 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
       ctx->block->kind |= (block_kind_continue | block_kind_uniform);
       bld.reset(ctx->block);
       bld.branch(aco_opcode::p_branch, loop_entry);
+   } else {
+      /* fixup phis in loop header */
+      for (auto&& instr : loop_entry->instructions) {
+         if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi) {
+            /* the last operand should be the one that needs to be removed */
+            instr->num_operands--;
+         } else {
+            break;
+         }
+      }
    }
 
    ctx->cf_info.has_branch = false;
