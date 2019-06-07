@@ -5933,7 +5933,7 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    append_logical_start(ctx->block);
    visit_cf_list(ctx, &loop->body);
 
-   if (!ctx->cf_info.has_branch) {
+   if (!ctx->cf_info.has_branch && !ctx->cf_info.parent_loop.has_divergent_branch) {
       append_logical_end(ctx->block);
       add_edge(ctx->block, loop_entry);
       ctx->block->kind |= (block_kind_continue | block_kind_uniform);
