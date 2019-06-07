@@ -294,7 +294,6 @@ void value_numbering(Program* program)
 {
    std::vector<expr_set> expr_values(program->blocks.size());
    std::map<uint32_t, Temp> renames;
-   expr_set empty;
 
    for (std::unique_ptr<Block>& block : program->blocks) {
       if (block->logical_idom != -1) {
@@ -302,6 +301,7 @@ void value_numbering(Program* program)
          expr_values[block->index] = expr_values[block->logical_idom];
          process_block(block, expr_values[block->index], renames);
       } else {
+         expr_set empty;
          process_block(block, empty, renames);
       }
    }
