@@ -446,7 +446,6 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
 
    if (preds.size() == 1) {
       ctx.info[idx].exec = ctx.info[preds[0]->index].exec;
-      assert(!(block->kind & block_kind_top_level));
    } else {
       assert(preds.size() == 2);
       /* if one of the predecessors ends in exact mask, we pop it from stack */
