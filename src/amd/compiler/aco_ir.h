@@ -861,6 +861,16 @@ T* create_instruction(aco_opcode opcode, Format format, uint32_t num_operands, u
    return inst;
 }
 
+static inline bool is_phi(Instruction* instr)
+{
+   return instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi;
+}
+
+static inline bool is_phi(aco_ptr<Instruction>& instr)
+{
+   return is_phi(instr.get());
+}
+
 enum block_kind {
    /* uniform indicates that leaving this block,
     * all actives lanes stay active */
