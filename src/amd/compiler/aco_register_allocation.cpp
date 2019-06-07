@@ -267,7 +267,7 @@ bool get_regs_for_copies(ra_ctx& ctx,
 
       /* check if this is a dead operand, then we can re-use the space from the definition */
       bool is_dead_operand = false;
-      for (unsigned i = 0; !is_dead_operand && i < instr->num_operands; i++) {
+      for (unsigned i = 0; !is_phi(instr) && !is_dead_operand && i < instr->num_operands; i++) {
          if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill() && instr->getOperand(i).tempId() == id)
             is_dead_operand = true;
       }
@@ -417,7 +417,7 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
 
    /* mark and count killed operands */
    unsigned killed_ops = 0;
-   for (unsigned j = 0; j < instr->num_operands; j++) {
+   for (unsigned j = 0; !is_phi(instr) && j < instr->num_operands; j++) {
       if (instr->getOperand(j).isTemp() &&
           instr->getOperand(j).isFirstKill() &&
           instr->getOperand(j).getTemp().type() == typeOf(rc)) {
@@ -503,7 +503,7 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
 
    if (num_moves == 0xFF) {
       /* remove killed operands from reg_file once again */
-      for (unsigned i = 0; i < instr->num_operands; i++) {
+      for (unsigned i = 0; !is_phi(instr) && i < instr->num_operands; i++) {
          if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill()) {
             for (unsigned k = 0; k < instr->getOperand(i).getTemp().size(); k++)
                reg_file[instr->getOperand(i).physReg().reg + k] = 0;
@@ -538,7 +538,7 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
       }
    } else {
       /* re-enable the killed operands */
-      for (unsigned j = 0; j < instr->num_operands; j++) {
+      for (unsigned j = 0; !is_phi(instr) && j < instr->num_operands; j++) {
          if (instr->getOperand(j).isTemp() && instr->getOperand(j).isFirstKill()) {
             for (unsigned k = 0; k < instr->getOperand(j).getTemp().size(); k++)
                reg_file[instr->getOperand(j).physReg().reg + k] = instr->getOperand(j).tempId();
@@ -555,7 +555,7 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
    update_renames(ctx, reg_file, parallelcopies, instr);
 
    /* remove killed operands from reg_file once again */
-   for (unsigned i = 0; i < instr->num_operands; i++) {
+   for (unsigned i = 0; !is_phi(instr) && i < instr->num_operands; i++) {
       if (!instr->getOperand(i).isTemp() || !instr->getOperand(i).isFixed())
          continue;
       assert(!instr->getOperand(i).isUndefined());
@@ -923,7 +923,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             }
          }
          /* recursively try to remove trivial phis */
-         if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi) {
+         if (is_phi(instr)) {
             std::map<unsigned, phi_info>::iterator it = phi_map.find(instr->getDefinition(0).tempId());
             if (it != phi_map.end() && it != info)
                phi_users.emplace_back(it);
@@ -961,7 +961,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       std::vector<aco_ptr<Instruction>>::reverse_iterator rit;
       for (rit = block->instructions.rbegin(); rit != block->instructions.rend(); ++rit) {
          aco_ptr<Instruction>& instr = *rit;
-         if (instr->opcode != aco_opcode::p_linear_phi && instr->opcode != aco_opcode::p_phi) {
+         if (!is_phi(instr)) {
             for (unsigned i = 0; i < instr->num_operands; i++) {
                if (instr->getOperand(i).isTemp())
                   live.emplace(instr->getOperand(i).getTemp());
@@ -1030,7 +1030,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       /* handle fixed phi definitions */
       for (it = block->instructions.begin(); it != block->instructions.end(); ++it) {
          aco_ptr<Instruction>& phi = *it;
-         if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
+         if (!is_phi(phi))
             break;
          Definition& definition = phi->getDefinition(0);
          if (definition.isKill() || !definition.isFixed())
@@ -1046,7 +1046,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       /* look up the affinities */
       for (it = block->instructions.begin(); it != block->instructions.end(); ++it) {
          aco_ptr<Instruction>& phi = *it;
-         if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
+         if (!is_phi(phi))
             break;
          Definition& definition = phi->getDefinition(0);
          if (definition.isKill() || definition.isFixed())
@@ -1085,7 +1085,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       /* find registers for phis without affinity or where the register was blocked */
       for (it = block->instructions.begin();it != block->instructions.end(); ++it) {
          aco_ptr<Instruction>& phi = *it;
-         if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
+         if (!is_phi(phi))
             break;
 
          Definition& definition = phi->getDefinition(0);
@@ -1112,7 +1112,43 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             }
             if (!definition.isFixed())
                definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, phi));
-            assert(parallelcopy.empty());
+
+            /* process parallelcopy */
+            for (std::pair<Operand, Definition> pc : parallelcopy) {
+               /* rename */
+               std::map<unsigned, Temp>::iterator orig_it = ctx.orig_names.find(pc.first.tempId());
+               Temp orig = pc.first.getTemp();
+               if (orig_it != ctx.orig_names.end())
+                  orig = orig_it->second;
+               else
+                  ctx.orig_names[pc.second.tempId()] = orig;
+               renames[block->index][orig.id()] = pc.second.getTemp();
+               renames[block->index][pc.second.tempId()] = pc.second.getTemp();
+
+               /* see if it's a copy from a previous phi */
+               //TODO: prefer moving some previous phis over live-ins
+               Instruction *prev_phi = NULL;
+               for (auto it2 = block->instructions.begin(); !prev_phi && (it2 != it); ++it2) {
+                  if (*it2 && (*it2)->getDefinition(0).tempId() == pc.first.tempId())
+                     prev_phi = it2->get();
+               }
+               if (prev_phi) {
+                  /* if so, just update that phi */
+                  prev_phi->getDefinition(0) = pc.second;
+                  continue;
+               }
+
+               /* otherwise, this is a live-in and we need to create a new phi
+                * to move it in this block's predecessors */
+               aco_opcode opcode = pc.first.getTemp().is_linear() ? aco_opcode::p_linear_phi : aco_opcode::p_phi;
+               std::vector<Block*>& preds = pc.first.getTemp().is_linear() ? block->linear_predecessors : block->logical_predecessors;
+               aco_ptr<Instruction> new_phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
+               new_phi->getDefinition(0) = pc.second;
+               for (unsigned i = 0; i < preds.size(); i++)
+                  new_phi->getOperand(i) = Operand(pc.first);
+               instructions.emplace_back(std::move(new_phi));
+            }
+
             for (unsigned i = 0; i < definition.size(); i++)
                register_file[definition.physReg().reg + i] = definition.tempId();
          }
@@ -1133,7 +1169,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          aco_ptr<Instruction>& instr = *it;
          std::vector<std::pair<Operand, Definition>> parallelcopy;
 
-         assert(instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi);
+         assert(!is_phi(instr));
 
          /* handle operands */
          for (unsigned i = 0; i < instr->num_operands; ++i) {
@@ -1517,7 +1553,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             }
             /* complete the original phi nodes, but no need to check triviality */
             for (aco_ptr<Instruction>& instr : succ->instructions) {
-               if (instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi)
+               if (!is_phi(instr))
                   break;
                std::vector<Block*> preds = instr->opcode == aco_opcode::p_phi ? succ->logical_predecessors : succ->linear_predecessors;
 
@@ -1541,7 +1577,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
    for (std::unique_ptr<Block>& block : program->blocks) {
       std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
       for (; it != block->instructions.end();) {
-         if ((*it)->opcode != aco_opcode::p_phi && (*it)->opcode != aco_opcode::p_linear_phi)
+         if (!is_phi(*it))
             break;
          if (!(*it)->num_definitions)
             it = block->instructions.erase(it);
