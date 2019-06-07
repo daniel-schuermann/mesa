@@ -700,11 +700,16 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
 
       /* combine new reload instructions with original block */
       if (!instructions.empty()) {
-         ctx.register_demand[block->index].insert(ctx.register_demand[block->index].begin(), instructions.size(), std::pair<uint16_t, uint16_t>(0, 0));
-         instructions.insert(instructions.end(),
-                             std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(block->instructions.begin()),
-                             std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(block->instructions.end()));
-         block->instructions = std::move(instructions);
+         unsigned insert_idx = 0;
+         while (block->instructions[insert_idx]->opcode == aco_opcode::p_phi ||
+                block->instructions[insert_idx]->opcode == aco_opcode::p_linear_phi) {
+            insert_idx++;
+         }
+         ctx.register_demand[block->index].insert(std::next(ctx.register_demand[block->index].begin(), insert_idx),
+                                                  instructions.size(), std::pair<uint16_t, uint16_t>(0, 0));
+         block->instructions.insert(std::next(block->instructions.begin(), insert_idx),
+                                    std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(instructions.begin()),
+                                    std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(instructions.end()));
       }
       return;
    }
