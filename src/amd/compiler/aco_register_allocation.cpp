@@ -1438,7 +1438,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                renames[block->index][pc->getDefinition(i).tempId()] = pc->getDefinition(i).getTemp();
                std::map<unsigned, phi_info>::iterator phi = phi_map.find(pc->getOperand(i).tempId());
                if (phi != phi_map.end())
-                  phi->second.uses.emplace(instr.get());
+                  phi->second.uses.emplace(pc.get());
             }
             instructions.emplace_back(std::move(pc));
          }
