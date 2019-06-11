@@ -168,7 +168,7 @@ void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
 
       WQMState needs = needs_exact(instr) ? Exact : Unspecified;
       bool propagate_wqm = instr->opcode == aco_opcode::p_wqm;
-
+      bool preserve_wqm = instr->opcode == aco_opcode::p_discard_if;
       bool pred_by_exec = pred_by_exec_mask(instr);
       for (unsigned j = 0; j < instr->definitionCount(); j++) {
          if (!instr->getDefinition(j).isTemp())
@@ -187,6 +187,8 @@ void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
                continue;
             set_needs_wqm(ctx, block, instr->getOperand(j).getTemp());
          }
+      } else if (preserve_wqm && info.block_needs & WQM) {
+         needs = Preserve_WQM;
       }
 
       /* ensure the condition controlling the control flow for this phi is in WQM */
@@ -221,23 +223,25 @@ void calculate_wqm_needs(exec_ctx& exec_ctx)
    }
 
    uint8_t ever_again_needs = 0;
-   bool preserve_wqm = false;
    for (int i = exec_ctx.program->blocks.size() - 1; i >= 0; i--) {
       exec_ctx.info[i].ever_again_needs = ever_again_needs;
 
-      /* if discard is used somewhere in nested CF, we need to preserve the WQM mask */
-      if (preserve_wqm && ever_again_needs & WQM &&
-          exec_ctx.program->blocks[i]->kind & block_kind_top_level) {
-         exec_ctx.info[i].ever_again_needs |= Preserve_WQM;
-         preserve_wqm = false;
-      }
-      if (exec_ctx.program->blocks[i]->kind & block_kind_uses_discard_if ||
-          exec_ctx.program->blocks[i]->kind & block_kind_discard)
-         preserve_wqm = true;
       if (exec_ctx.program->blocks[i]->kind & block_kind_needs_lowering)
          exec_ctx.info[i].block_needs |= Exact;
 
+      /* if discard is used somewhere in nested CF, we need to preserve the WQM mask */
+      if ((exec_ctx.program->blocks[i]->kind & block_kind_discard ||
+           exec_ctx.program->blocks[i]->kind & block_kind_uses_discard_if) &&
+          ever_again_needs & WQM)
+         exec_ctx.info[i].block_needs |= Preserve_WQM;
+
       ever_again_needs |= exec_ctx.info[i].block_needs;
+
+      /* don't propagate WQM preservation further than the next top_level block */
+      if (exec_ctx.program->blocks[i]->kind & block_kind_top_level)
+         ever_again_needs &= ~Preserve_WQM;
+      else
+         exec_ctx.info[i].block_needs &= ~Preserve_WQM;
    }
    exec_ctx.handle_wqm = true;
 }
@@ -431,6 +435,13 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
       }
 
       if (ctx.handle_wqm) {
+         if (block->kind & block_kind_top_level && ctx.info[idx].exec.size() == 2) {
+            if ((ctx.info[idx].block_needs | ctx.info[idx].ever_again_needs) == 0 ||
+                (ctx.info[idx].block_needs | ctx.info[idx].ever_again_needs) == Exact) {
+               ctx.info[idx].exec.back().second |= mask_type_global;
+               ctx.handle_wqm = false;
+            }
+         }
          if (ctx.info[idx].block_needs == WQM)
             transition_to_WQM(ctx, bld, idx);
          else if (ctx.info[idx].block_needs == Exact)
@@ -480,6 +491,13 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
 
    /* try to satisfy the block's needs */
    if (ctx.handle_wqm) {
+      if (block->kind & block_kind_top_level && ctx.info[idx].exec.size() == 2) {
+         if ((ctx.info[idx].block_needs | ctx.info[idx].ever_again_needs) == 0 ||
+             (ctx.info[idx].block_needs | ctx.info[idx].ever_again_needs) == Exact) {
+            ctx.info[idx].exec.back().second |= mask_type_global;
+            ctx.handle_wqm = false;
+         }
+      }
       if (ctx.info[idx].block_needs == WQM)
          transition_to_WQM(ctx, bld, idx);
       else if (ctx.info[idx].block_needs == Exact)
@@ -563,6 +581,11 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
       WQMState needs = ctx.handle_wqm ? ctx.info[block->index].instr_needs[idx] : Unspecified;
 
       if (instr->opcode == aco_opcode::p_discard_if) {
+         if (ctx.info[block->index].block_needs & Preserve_WQM) {
+            assert(block->kind & block_kind_top_level);
+            transition_to_WQM(ctx, bld, block->index);
+            ctx.info[block->index].exec.back().second &= ~mask_type_global;
+         }
          unsigned num = ctx.info[block->index].exec.size();
          assert(num);
          Operand cond = instr->getOperand(0);
@@ -614,21 +637,22 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
    unsigned idx = block->index;
    Builder bld(ctx.program, block.get());
 
-   if (idx == ctx.program->blocks.size() - 1) {
-      // TODO: add exec to endpgm
+   if (idx == ctx.program->blocks.size() - 1)
       return;
-   }
 
    /* try to disable wqm handling */
-   if (ctx.handle_wqm && block->kind & block_kind_top_level &&
-       ctx.info[idx].exec.back().second & mask_type_global) {
+   if (ctx.handle_wqm && block->kind & block_kind_top_level) {
+      if (ctx.info[idx].exec.size() == 3) {
+         assert(ctx.info[idx].exec[1].second == mask_type_wqm);
+         ctx.info[idx].exec.pop_back();
+      }
       assert(ctx.info[idx].exec.size() <= 2);
 
       if (ctx.info[idx].ever_again_needs == 0) {
          if (ctx.info[idx].exec.size() == 2) {
             ctx.info[idx].exec[0] = ctx.info[idx].exec[1];
             ctx.info[idx].exec.pop_back();
-            assert(ctx.info[idx].exec[0].second & mask_type_global);
+            //assert(ctx.info[idx].exec[0].second & mask_type_global);
          }
          ctx.handle_wqm = false;
 
@@ -636,25 +660,30 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
          /* transition to Exact */
          aco_ptr<Instruction> branch = std::move(block->instructions.back());
          block->instructions.pop_back();
+         ctx.info[idx].exec.back().second |= mask_type_global;
          transition_to_Exact(ctx, bld, idx);
          bld.insert(std::move(branch));
          ctx.handle_wqm = false;
 
-      } else if (ctx.info[idx].ever_again_needs & Preserve_WQM) {
+      } else if (ctx.info[idx].block_needs & Preserve_WQM) {
          /* transition to WQM and remove global flag */
          aco_ptr<Instruction> branch = std::move(block->instructions.back());
          block->instructions.pop_back();
          transition_to_WQM(ctx, bld, idx);
-         assert(ctx.info[idx].exec.size() == 2);
          ctx.info[idx].exec.back().second &= ~mask_type_global;
          bld.insert(std::move(branch));
-
-         if (!(ctx.info[idx].ever_again_needs & Exact)) {
-            /* if we don't ever again need Exact, remove it and disable wqm handling */
+      }
+      if (!(ctx.info[idx].ever_again_needs & Exact)) {
+         /* transition to WQM and disable WQM handling */
+         aco_ptr<Instruction> branch = std::move(block->instructions.back());
+         block->instructions.pop_back();
+         transition_to_WQM(ctx, bld, idx);
+         bld.insert(std::move(branch));
+         if (ctx.info[idx].exec.size() == 2) {
             ctx.info[idx].exec[0] = ctx.info[idx].exec[1];
             ctx.info[idx].exec.pop_back();
-            ctx.handle_wqm = false;
          }
+         ctx.handle_wqm = false;
       }
    }
 
