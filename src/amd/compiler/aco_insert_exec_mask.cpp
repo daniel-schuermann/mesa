@@ -236,6 +236,9 @@ void calculate_wqm_needs(exec_ctx& exec_ctx)
          exec_ctx.info[i].block_needs |= Preserve_WQM;
 
       ever_again_needs |= exec_ctx.info[i].block_needs;
+      if (exec_ctx.program->blocks[i]->kind & block_kind_discard ||
+          exec_ctx.program->blocks[i]->kind & block_kind_uses_discard_if)
+         ever_again_needs |= Exact;
 
       /* don't propagate WQM preservation further than the next top_level block */
       if (exec_ctx.program->blocks[i]->kind & block_kind_top_level)
@@ -596,6 +599,7 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
             instr->getDefinition(i) = Definition(new_mask);
             ctx.info[block->index].exec[i].first = new_mask;
          }
+         assert((ctx.info[block->index].exec[0].second & mask_type_wqm) == 0);
          instr->getDefinition(num - 1).setFixed(exec);
          instr->getOperand(num) = cond;
          instr->getDefinition(num) = bld.def(s1, scc);
@@ -753,6 +757,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
          discard->getDefinition(i) = Definition(new_mask);
          ctx.info[block->index].exec[i].first = new_mask;
       }
+      assert((ctx.info[block->index].exec[0].second & mask_type_wqm) == 0);
       discard->getOperand(num) = bld.exec(cond);
       discard->getDefinition(num) = bld.def(s1, scc);
 
