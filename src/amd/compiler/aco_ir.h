@@ -793,6 +793,9 @@ struct Export_instruction : public Instruction {
 
 };
 
+struct Pseudo_instruction : public Instruction {
+};
+
 struct Pseudo_branch_instruction : public Instruction {
    Block *targets[2];
 };

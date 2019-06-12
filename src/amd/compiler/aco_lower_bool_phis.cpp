@@ -66,7 +66,7 @@ Operand get_ssa(Program *program, Block *block, ssa_state *state)
          unsigned res = program->allocateId();
          state->latest[block] = res;
 
-         aco_ptr<Instruction> phi{create_instruction<Instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, pred, 1)};
+         aco_ptr<Pseudo_instruction> phi{create_instruction<Pseudo_instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, pred, 1)};
          for (unsigned i = 0; i < pred; i++) {
             phi->getOperand(i) = get_ssa(program, block->linear_predecessors[i], state);
             if (phi->getOperand(i).isTemp()) {

@@ -94,7 +94,7 @@ void setup_reduce_temp(Program* program)
 
          if ((int)last_top_level_block_idx != inserted_at) {
             reduceTmp = {program->allocateId(), reduceTmp.regClass()};
-            aco_ptr<Instruction> create{create_instruction<Instruction>(aco_opcode::p_start_linear_vgpr, Format::PSEUDO, 0, 1)};
+            aco_ptr<Pseudo_instruction> create{create_instruction<Pseudo_instruction>(aco_opcode::p_start_linear_vgpr, Format::PSEUDO, 0, 1)};
             create->getDefinition(0) = Definition(reduceTmp);
             /* find the right place to insert this definition */
             if (last_top_level_block_idx == block->index) {
@@ -118,7 +118,7 @@ void setup_reduce_temp(Program* program)
          vtmp_in_loop |= need_vtmp && block->loop_nest_depth > 0;
          if (need_vtmp && (int)last_top_level_block_idx != vtmp_inserted_at) {
             vtmp = {program->allocateId(), vtmp.regClass()};
-            aco_ptr<Instruction> create{create_instruction<Instruction>(aco_opcode::p_start_linear_vgpr, Format::PSEUDO, 0, 1)};
+            aco_ptr<Pseudo_instruction> create{create_instruction<Pseudo_instruction>(aco_opcode::p_start_linear_vgpr, Format::PSEUDO, 0, 1)};
             create->getDefinition(0) = Definition(vtmp);
             if (last_top_level_block_idx == block->index) {
                it = block->instructions.insert(it, std::move(create));
@@ -134,7 +134,7 @@ void setup_reduce_temp(Program* program)
          Temp val = reduceTmp;
          if (val.size() != instr->getOperand(0).size()) {
             val = Temp{program->allocateId(), linearClass(instr->getOperand(0).regClass())};
-            aco_ptr<Instruction> split{create_instruction<Instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, 2)};
+            aco_ptr<Pseudo_instruction> split{create_instruction<Pseudo_instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, 2)};
             split->getOperand(0) = Operand(reduceTmp);
             split->getDefinition(0) = Definition(val);
             it = block->instructions.insert(it, std::move(split));
