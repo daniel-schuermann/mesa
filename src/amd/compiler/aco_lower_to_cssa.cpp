@@ -216,7 +216,7 @@ void emit_parallelcopies(cssa_ctx& ctx)
          if (info.merged == -1)
             num++;
 
-      aco_ptr<Instruction> copy{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, num, num)};
+      aco_ptr<Pseudo_instruction> copy{create_instruction<Pseudo_instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, num, num)};
       unsigned idx = 0;
       for (phi_info& info : ctx.phi_infos[block_idx]) {
          if (info.merged != -1) {
