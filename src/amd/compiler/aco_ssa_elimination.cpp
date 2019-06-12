@@ -78,7 +78,7 @@ void insert_parallelcopies(ssa_elimination_ctx& ctx)
       }
 
       std::vector<aco_ptr<Instruction>>::iterator it = std::next(block->instructions.begin(), idx);
-      aco_ptr<Instruction> pc{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, entry.second.size(), entry.second.size())};
+      aco_ptr<Pseudo_instruction> pc{create_instruction<Pseudo_instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, entry.second.size(), entry.second.size())};
       unsigned i = 0;
       for (std::pair<Definition, Operand>& pair : entry.second)
       {
@@ -95,7 +95,7 @@ void insert_parallelcopies(ssa_elimination_ctx& ctx)
       std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.end();
       --it;
       assert((*it)->format == Format::PSEUDO_BRANCH);
-      aco_ptr<Instruction> pc{create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, entry.second.size(), entry.second.size())};
+      aco_ptr<Pseudo_instruction> pc{create_instruction<Pseudo_instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, entry.second.size(), entry.second.size())};
       unsigned i = 0;
       for (std::pair<Definition, Operand>& pair : entry.second)
       {

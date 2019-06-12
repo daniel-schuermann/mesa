@@ -539,7 +539,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          ctx.info[instr->getDefinition(0).tempId()].set_undefined();
       } else if (num_ops != instr->num_operands) {
          aco_ptr<Instruction> old_vec = std::move(instr);
-         instr.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, num_ops, 1));
+         instr.reset(create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, num_ops, 1));
          instr->getDefinition(0) = old_vec->getDefinition(0);
          unsigned k = 0;
          for (unsigned i = 0; i < old_vec->num_operands; i++) {
@@ -1126,7 +1126,7 @@ void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          }
       }
       if (num_used == 1) {
-         aco_ptr<Instruction> extract{create_instruction<Instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1)};
+         aco_ptr<Pseudo_instruction> extract{create_instruction<Pseudo_instruction>(aco_opcode::p_extract_vector, Format::PSEUDO, 2, 1)};
          extract->getOperand(0) = instr->getOperand(0);
          extract->getOperand(1) = Operand((uint32_t) idx);
          extract->getDefinition(0) = instr->getDefinition(idx);
