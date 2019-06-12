@@ -323,9 +323,9 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
 
       /* create ssa names for outer exec masks */
       if (info.has_discard) {
-         aco_ptr<Instruction> phi;
+         aco_ptr<Pseudo_instruction> phi;
          for (int i = 0; i < info.num_exec_masks - 1; i++) {
-            phi.reset(create_instruction<Instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, preds.size(), 1));
+            phi.reset(create_instruction<Pseudo_instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, preds.size(), 1));
             phi->getDefinition(0) = bld.def(s2);
             phi->getOperand(0) = Operand(ctx.info[preds[0]->index].exec[i].first);
             ctx.info[idx].exec[i].first = bld.insert(std::move(phi));
@@ -335,14 +335,14 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
       /* create ssa name for restore mask */
       if (info.has_divergent_break) {
          /* this phi might be trivial but ensures a parallelcopy on the loop header */
-         aco_ptr<Instruction> phi{create_instruction<Instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, preds.size(), 1)};
+         aco_ptr<Pseudo_instruction> phi{create_instruction<Pseudo_instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, preds.size(), 1)};
          phi->getDefinition(0) = bld.def(s2);
          phi->getOperand(0) = Operand(ctx.info[preds[0]->index].exec.back().first);
          ctx.info[idx].exec.back().first = bld.insert(std::move(phi));
       }
 
       /* create ssa name for loop active mask */
-      aco_ptr<Instruction> phi{create_instruction<Instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, preds.size(), 1)};
+      aco_ptr<Pseudo_instruction> phi{create_instruction<Pseudo_instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, preds.size(), 1)};
       if (info.has_divergent_continue)
          phi->getDefinition(0) = bld.def(s2);
       else
@@ -421,7 +421,7 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
             ctx.info[idx].exec.emplace_back(same, type);
          } else {
             /* create phi for loop footer */
-            aco_ptr<Instruction> phi{create_instruction<Instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, preds.size(), 1)};
+            aco_ptr<Pseudo_instruction> phi{create_instruction<Pseudo_instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, preds.size(), 1)};
             phi->getDefinition(0) = bld.def(s2);
             for (unsigned i = 0; i < phi->num_operands; i++)
                phi->getOperand(i) = Operand(ctx.info[preds[i]->index].exec[k].first);
@@ -592,7 +592,7 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
          unsigned num = ctx.info[block->index].exec.size();
          assert(num);
          Operand cond = instr->getOperand(0);
-         instr.reset(create_instruction<Instruction>(aco_opcode::p_discard_if, Format::PSEUDO, num + 1, num + 1));
+         instr.reset(create_instruction<Pseudo_instruction>(aco_opcode::p_discard_if, Format::PSEUDO, num + 1, num + 1));
          for (unsigned i = 0; i < num; i++) {
             instr->getOperand(i) = Operand(ctx.info[block->index].exec[i].first);
             if (i == num - 1)
@@ -752,7 +752,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
       }
 
       Temp cond = ctx.info[idx].exec.back().first;
-      aco_ptr<Instruction> discard{create_instruction<Instruction>(aco_opcode::p_discard_if, Format::PSEUDO, num + 1, num + 1)};
+      aco_ptr<Pseudo_instruction> discard{create_instruction<Pseudo_instruction>(aco_opcode::p_discard_if, Format::PSEUDO, num + 1, num + 1)};
       for (unsigned i = 0; i < num; i++) {
          discard->getOperand(i) = Operand(ctx.info[block->index].exec[i].first);
          Temp new_mask = bld.tmp(s2);
