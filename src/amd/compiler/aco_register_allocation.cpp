@@ -845,7 +845,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          /* if the block is not sealed yet, we create an incomplete phi (which might later get removed again) */
          new_val = Temp{program->allocateId(), val.regClass()};
          aco_opcode opcode = val.is_linear() ? aco_opcode::p_linear_phi : aco_opcode::p_phi;
-         aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
+         aco_ptr<Instruction> phi{create_instruction<Pseudo_instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
          phi->getDefinition(0) = Definition(new_val);
          for (unsigned i = 0; i < preds.size(); i++)
             phi->getOperand(i) = Operand(val);
@@ -879,7 +879,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          if (needs_phi) {
             /* the variable has been renamed differently in the predecessors: we need to insert a phi */
             aco_opcode opcode = val.is_linear() ? aco_opcode::p_linear_phi : aco_opcode::p_phi;
-            aco_ptr<Instruction> phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
+            aco_ptr<Instruction> phi{create_instruction<Pseudo_instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
             new_val = Temp{program->allocateId(), val.regClass()};
             phi->getDefinition(0) = Definition(new_val);
             for (unsigned i = 0; i < preds.size(); i++) {
@@ -1148,7 +1148,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                 * to move it in this block's predecessors */
                aco_opcode opcode = pc.first.getTemp().is_linear() ? aco_opcode::p_linear_phi : aco_opcode::p_phi;
                std::vector<Block*>& preds = pc.first.getTemp().is_linear() ? block->linear_predecessors : block->logical_predecessors;
-               aco_ptr<Instruction> new_phi{create_instruction<Instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
+               aco_ptr<Instruction> new_phi{create_instruction<Pseudo_instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
                new_phi->getDefinition(0) = pc.second;
                for (unsigned i = 0; i < preds.size(); i++)
                   new_phi->getOperand(i) = Operand(pc.first);
@@ -1427,7 +1427,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          /* emit parallelcopy */
          if (!parallelcopy.empty()) {
             aco_ptr<Instruction> pc;
-            pc.reset(create_instruction<Instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, parallelcopy.size(), parallelcopy.size()));
+            pc.reset(create_instruction<Pseudo_instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, parallelcopy.size(), parallelcopy.size()));
             for (unsigned i = 0; i < parallelcopy.size(); i++) {
                pc->getOperand(i) = parallelcopy[i].first;
                pc->getDefinition(i) = parallelcopy[i].second;
