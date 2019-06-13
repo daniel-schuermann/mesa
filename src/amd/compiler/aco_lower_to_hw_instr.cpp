@@ -315,8 +315,7 @@ struct copy_operation {
 
 void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context* ctx, chip_class chip_class)
 {
-std::vector<aco_ptr<Instruction>> new_instructions;
-   Builder bld(ctx->program, &new_instructions);
+   Builder bld(ctx->program, &ctx->instructions);
    aco_ptr<Instruction> mov;
    std::map<PhysReg, copy_operation>::iterator it = copy_map.begin();
    std::map<PhysReg, copy_operation>::iterator target;
@@ -342,17 +341,11 @@ std::vector<aco_ptr<Instruction>> new_instructions;
    }
 
    /* first, handle paths in the location transfer graph */
-   unsigned first_sgpr = 0xFFFF;
-   unsigned first_vgpr = 0xFFFF;
    it = copy_map.begin();
    while (it != copy_map.end()) {
 
       /* the target reg is not used as operand for any other copy */
       if (it->second.uses == 0) {
-         if (it->second.def.getTemp().type() == RegType::vgpr && first_vgpr == 0xFFFF)
-            first_vgpr = it->second.def.physReg().reg;
-         else if (it->second.def.physReg().reg != scc.reg && first_sgpr == 0xFFFF)
-            first_sgpr = it->second.def.physReg().reg;
 
          /* try to coalesce 32-bit sgpr copies to 64-bit copies */
          if (it->second.def.getTemp().type() == RegType::sgpr && it->second.size == 1 &&
@@ -376,63 +369,30 @@ std::vector<aco_ptr<Instruction>> new_instructions;
          else if (it->second.size == 2 && it->second.def.getTemp().type() == RegType::sgpr)
             bld.sop1(aco_opcode::s_mov_b64, it->second.def, it->second.op);
          else if (it->second.def.getTemp().type() == RegType::sgpr)
-            bld.insert(create_s_mov(it->second.def, it->second.op));
+            ctx->instructions.emplace_back(std::move(create_s_mov(it->second.def, it->second.op)));
          else
             bld.vop1(aco_opcode::v_mov_b32, it->second.def, it->second.op);
 
-         copy_operation cp = it->second;
-         copy_map.erase(it);
-         it = copy_map.begin();
-
          /* reduce the number of uses of the operand reg by one */
-         if (!cp.op.isConstant()) {
-            for (std::pair<const PhysReg, copy_operation>& copy : copy_map) {
-               for (unsigned i = 0; i < cp.size; i++) {
-                  if (copy.second.op.physReg().reg == cp.op.physReg().reg + i)
-                     copy.second.op.setFixed(PhysReg{cp.def.physReg().reg + i});
-               }
-            }
-            for (unsigned i = 0; i < cp.size; i++) {
-               target = copy_map.find(PhysReg{cp.op.physReg().reg + i});
+         if (!it->second.op.isConstant()) {
+            for (unsigned i = 0; i < it->second.size; i++) {
+               target = copy_map.find(PhysReg{it->second.op.physReg().reg + i});
                if (target != copy_map.end())
-                  target->second.uses = 0;
+                  target->second.uses--;
             }
          }
 
+         copy_map.erase(it);
+         it = copy_map.begin();
+         continue;
       } else {
          /* the target reg is used as operand, check the next entry */
          ++it;
       }
-
-      if (it == copy_map.end() && !copy_map.empty()) {
-         for (std::pair<const PhysReg, copy_operation>& copy : copy_map) {
-            if (chip_class <= GFX8 && copy.second.size == 1 && copy.second.def.getTemp().type() == RegType::vgpr && first_vgpr != 0xFFFF) {
-               copy_operation new_copy = {copy.second.op, bld.def(v1, PhysReg{first_vgpr}), 0, 1};
-               it = copy_map.insert(std::pair<PhysReg, copy_operation>(PhysReg{first_vgpr}, new_copy)).first;
-               bld.use_iterator = true;
-               bld.it = new_instructions.begin();
-               break;
-            } else if (copy.second.size == 1 && copy.second.def.getTemp().type() == RegType::sgpr && first_sgpr != 0xFFFF) {
-               copy_operation new_copy = {copy.second.op, bld.def(s1, PhysReg{first_sgpr}), 0, 1};
-               it = copy_map.insert(std::pair<PhysReg, copy_operation>(PhysReg{first_sgpr}, new_copy)).first;
-               bld.use_iterator = true;
-               bld.it = new_instructions.begin();
-               break;
-            }
-         }
-
-      }
-      //IDEE: if it == copy_map.end() && !copy_map.empty() && !instructions.empty
-      // - check if any remaining entry fulfills the conditions (sgpr swap + instructions contain sgpr, <= VI + vgpr swap + instructions contain vgpr)
-      //
    }
 
-   if (copy_map.empty()) {
-      ctx->instructions.insert(ctx->instructions.end(),
-                               std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(new_instructions.begin()),
-                               std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(new_instructions.end()));
+   if (copy_map.empty())
       return;
-   }
 
    /* all target regs are needed as operand somewhere which means, all entries are part of a cycle */
    bool constants = false;
@@ -480,15 +440,12 @@ std::vector<aco_ptr<Instruction>> new_instructions;
          if (!it->second.op.isConstant())
             continue;
          if (it->second.def.getTemp().type() == RegType::sgpr) {
-            bld.insert(std::move(create_s_mov(it->second.def, it->second.op)));
+            ctx->instructions.emplace_back(std::move(create_s_mov(it->second.def, it->second.op)));
          } else {
             bld.vop1(aco_opcode::v_mov_b32, it->second.def, it->second.op);
          }
       }
    }
-   ctx->instructions.insert(ctx->instructions.end(),
-                            std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(new_instructions.begin()),
-                            std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(new_instructions.end()));
 }
 
 void lower_to_hw_instr(Program* program)
