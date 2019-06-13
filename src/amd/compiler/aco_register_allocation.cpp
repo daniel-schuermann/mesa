@@ -797,6 +797,45 @@ bool get_reg_specified(ra_ctx& ctx,
    return true;
 }
 
+void handle_pseudo(ra_ctx& ctx,
+                   const std::array<uint32_t, 512>& reg_file,
+                   Instruction* instr)
+{
+   if (instr->format != Format::PSEUDO)
+      return;
+
+   /* all instructions which use handle_operands() need this information */
+   switch (instr->opcode) {
+   case aco_opcode::p_extract_vector:
+   case aco_opcode::p_create_vector:
+   case aco_opcode::p_split_vector:
+   case aco_opcode::p_parallelcopy:
+      break;
+   default:
+      return;
+   }
+
+   Pseudo_instruction *pi = (Pseudo_instruction *)instr;
+   if (reg_file[scc.reg]) {
+      pi->tmp_in_scc = true;
+
+      int reg = ctx.max_used_sgpr;
+      for (; reg >= 0 && reg_file[reg]; reg--)
+         ;
+      if (reg < 0) {
+         reg = ctx.max_used_sgpr + 1;
+         for (; reg < ctx.program->max_sgpr && reg_file[reg]; reg++)
+            ;
+         assert(reg < ctx.program->max_sgpr);
+      }
+
+      adjust_max_used_regs(ctx, s1, reg);
+      pi->scratch_sgpr = PhysReg{(unsigned)reg};
+   } else {
+      pi->tmp_in_scc = false;
+   }
+}
+
 } /* end namespace */
 
 
@@ -1011,6 +1050,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          if (vec[i].id() != vec[0].id())
             affinities[vec[i].id()] = vec[0].id();
    }
+
+   std::vector<std::bitset<128>> sgpr_live_out(program->blocks.size());
 
    for (std::unique_ptr<Block>& block : program->blocks) {
       std::set<Temp>& live = live_out_per_block[block->index];
@@ -1418,6 +1459,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             renames[block->index][definition.tempId()] = definition.getTemp();
          }
 
+         handle_pseudo(ctx, register_file, instr.get());
+
          /* kill definitions */
          for (unsigned i = 0; i < instr->num_definitions; i++)
              if (instr->getDefinition(i).isTemp() && instr->getDefinition(i).isKill())
@@ -1426,9 +1469,25 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
          /* emit parallelcopy */
          if (!parallelcopy.empty()) {
-            aco_ptr<Instruction> pc;
+            aco_ptr<Pseudo_instruction> pc;
             pc.reset(create_instruction<Pseudo_instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, parallelcopy.size(), parallelcopy.size()));
+            bool temp_in_scc = register_file[scc.reg];
+            bool sgpr_operands_alias_defs = false;
+            uint64_t sgpr_operands[4] = {0, 0, 0, 0};
             for (unsigned i = 0; i < parallelcopy.size(); i++) {
+               if (temp_in_scc && parallelcopy[i].first.isTemp() && parallelcopy[i].first.getTemp().type() == sgpr) {
+                  if (!sgpr_operands_alias_defs) {
+                     unsigned reg = parallelcopy[i].first.physReg().reg;
+                     unsigned size = parallelcopy[i].first.getTemp().size();
+                     sgpr_operands[reg / 64u] |= ((1u << size) - 1) << (reg % 64u);
+
+                     reg = parallelcopy[i].second.physReg().reg;
+                     size = parallelcopy[i].second.getTemp().size();
+                     if (sgpr_operands[reg / 64u] & ((1u << size) - 1) << (reg % 64u))
+                        sgpr_operands_alias_defs = true;
+                  }
+               }
+
                pc->getOperand(i) = parallelcopy[i].first;
                pc->getDefinition(i) = parallelcopy[i].second;
 
@@ -1446,6 +1505,38 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                if (phi != phi_map.end())
                   phi->second.uses.emplace(pc.get());
             }
+
+            if (temp_in_scc && sgpr_operands_alias_defs) {
+               /* disable definitions and re-enable operands */
+               for (unsigned i = 0; i < instr->num_definitions; i++) {
+                  if (instr->getDefinition(i).isTemp() && !instr->getDefinition(i).isKill())
+                     for (unsigned j = 0; j < instr->getDefinition(i).size(); j++)
+                        register_file[instr->getDefinition(i).physReg().reg + j] = 0x0;
+               }
+               for (unsigned i = 0; i < instr->num_operands; i++) {
+                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill()) {
+                     for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
+                        register_file[instr->getOperand(i).physReg().reg + j] = 0xFFFF;
+                  }
+               }
+
+               handle_pseudo(ctx, register_file, pc.get());
+
+               /* re-enable live vars */
+               for (unsigned i = 0; i < instr->num_operands; i++) {
+                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill())
+                     for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
+                        register_file[instr->getOperand(i).physReg().reg + j] = 0x0;
+               }
+               for (unsigned i = 0; i < instr->num_definitions; i++) {
+                  if (instr->getDefinition(i).isTemp() && !instr->getDefinition(i).isKill())
+                     for (unsigned j = 0; j < instr->getDefinition(i).size(); j++)
+                        register_file[instr->getDefinition(i).physReg().reg + j] = instr->getDefinition(i).tempId();
+               }
+            } else {
+               pc->tmp_in_scc = false;
+            }
+
             instructions.emplace_back(std::move(pc));
          }
 
@@ -1577,7 +1668,68 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             sealed[succ->index] = true;
          }
       }
+
+      /* fill in sgpr_live_out */
+      for (unsigned i = 0; i < ctx.max_used_sgpr; i++) {
+         if (register_file[i])
+            sgpr_live_out[block->index].set(i);
+      }
    } /* end for BB */
+
+   /* find scc spill registers which may be needed for parallelcopies created by phis */
+   for (std::unique_ptr<Block>& block : program->blocks) {
+      if (block->linear_successors.size() != 1)
+         continue;
+      Block *succ = block->linear_successors[0];
+      unsigned pred_index = 0;
+      for (; pred_index < succ->linear_predecessors.size() &&
+             succ->linear_predecessors[pred_index] != block.get(); pred_index++)
+         ;
+      assert(pred_index < succ->linear_predecessors.size());
+
+      std::bitset<128> regs = sgpr_live_out[block->index];
+      if (!regs[scc.reg]) {
+         /* early exit */
+         block->scc_live_out = false;
+         continue;
+      }
+
+      bool has_phi = false;
+
+      /* remove phi operands and add phi definitions */
+      for (aco_ptr<Instruction>& instr : succ->instructions) {
+         if (!is_phi(instr))
+            break;
+         if (instr->opcode == aco_opcode::p_linear_phi) {
+            has_phi = true;
+
+            Definition& def = instr->getDefinition(0);
+            assert(def.getTemp().type() == sgpr);
+            for (unsigned i = 0; i < def.size(); i++)
+               regs[def.physReg().reg + i] = 1;
+            if (instr->getOperand(pred_index).isTemp()) {
+               Operand& op = instr->getOperand(pred_index);
+               assert(op.isFixed());
+               for (unsigned i = 0; i < op.size(); i++)
+                  regs[op.physReg().reg + i] = 0;
+            }
+         }
+      }
+
+      if (!has_phi || !regs[scc.reg]) {
+         block->scc_live_out = false;
+         continue;
+      }
+      block->scc_live_out = true;
+
+      /* choose a register */
+      unsigned reg = 0;
+      for (; reg < ctx.program->max_sgpr && regs[reg]; reg++)
+         ;
+      assert(reg < ctx.program->max_sgpr);
+      adjust_max_used_regs(ctx, s1, reg);
+      block->scratch_sgpr = PhysReg{reg};
+   }
 
    /* remove trivial phis */
    for (std::unique_ptr<Block>& block : program->blocks) {
