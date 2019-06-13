@@ -685,8 +685,8 @@ vectorize_loads(nir_builder *b,
    first->intrin->dest.ssa.num_components = new_num_components;
    first->intrin->dest.ssa.bit_size = new_bit_size;
 
-   nir_ssa_def *low_def = nir_imov(b, extract_subvector(b, &first->intrin->dest.ssa, 0, low->intrin->num_components, low_bit_size));
-   nir_ssa_def *high_def = nir_imov(b, extract_subvector(b, &first->intrin->dest.ssa, high_start, high->intrin->num_components, high_bit_size));
+   nir_ssa_def *low_def = nir_mov(b, extract_subvector(b, &first->intrin->dest.ssa, 0, low->intrin->num_components, low_bit_size));
+   nir_ssa_def *high_def = nir_mov(b, extract_subvector(b, &first->intrin->dest.ssa, high_start, high->intrin->num_components, high_bit_size));
    if (first == low) {
       nir_ssa_def_rewrite_uses_after(&low->intrin->dest.ssa, nir_src_for_ssa(low_def), high_def->parent_instr);
       nir_ssa_def_rewrite_uses(&high->intrin->dest.ssa, nir_src_for_ssa(high_def));
