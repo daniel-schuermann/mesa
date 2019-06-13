@@ -458,8 +458,10 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
       for (it = copy_map.begin(); it != copy_map.end(); ++it) {
          if (!it->second.op.isConstant())
             continue;
-         if (it->second.def.getTemp().type() == RegType::sgpr) {
-            ctx->instructions.emplace_back(std::move(create_s_mov(it->second.def, it->second.op)));
+         if (it->second.def.physReg() == scc) {
+            bld.sopc(aco_opcode::s_cmp_lg_i32, Definition(scc, s1), Operand(0u), Operand(it->second.op.constantValue() ? 1u : 0u));
+         } else if (it->second.def.getTemp().type() == RegType::sgpr) {
+            bld.insert(std::move(create_s_mov(it->second.def, it->second.op)));
          } else {
             bld.vop1(aco_opcode::v_mov_b32, it->second.def, it->second.op);
          }
