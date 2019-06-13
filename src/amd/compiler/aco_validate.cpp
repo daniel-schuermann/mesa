@@ -269,7 +269,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
             if (assignments.count(op.tempId()) && assignments[op.tempId()].reg.reg != op.physReg().reg)
                err |= ra_fail(output, loc, assignments.at(op.tempId()).firstloc, "Operand %d has an inconsistent register assignment with instruction", i);
             if ((op.getTemp().type() == vgpr && op.physReg().reg + op.size() > 256 + program->config->num_vgprs) ||
-                (op.getTemp().type() == sgpr && op.physReg().reg + op.size() > program->config->num_sgprs && op.physReg().reg < (program->chip_class >= VI ? 102 : 104)))
+                (op.getTemp().type() == sgpr && op.physReg().reg + op.size() > program->config->num_sgprs && op.physReg().reg < (program->chip_class >= GFX8 ? 102 : 104)))
                err |= ra_fail(output, loc, assignments.at(op.tempId()).firstloc, "Operand %d has an out-of-bounds register assignment", i);
             if (!assignments[op.tempId()].firstloc.block)
                assignments[op.tempId()].firstloc = loc;
@@ -286,7 +286,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
             if (assignments[def.tempId()].defloc.block)
                err |= ra_fail(output, loc, assignments.at(def.tempId()).defloc, "Temporary %%%d also defined by instruction", def.tempId());
             if ((def.getTemp().type() == vgpr && def.physReg().reg + def.size() > 256 + program->config->num_vgprs) ||
-                (def.getTemp().type() == sgpr && def.physReg().reg + def.size() > program->config->num_sgprs && def.physReg().reg < (program->chip_class >= VI ? 102 : 104)))
+                (def.getTemp().type() == sgpr && def.physReg().reg + def.size() > program->config->num_sgprs && def.physReg().reg < (program->chip_class >= GFX8 ? 102 : 104)))
                err |= ra_fail(output, loc, assignments.at(def.tempId()).firstloc, "Definition %d has an out-of-bounds register assignment", i);
             if (!assignments[def.tempId()].firstloc.block)
                assignments[def.tempId()].firstloc = loc;
