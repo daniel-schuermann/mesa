@@ -86,6 +86,8 @@ void insert_parallelcopies(ssa_elimination_ctx& ctx)
          pc->getOperand(i) = pair.second;
          i++;
       }
+      /* this shouldn't be needed since we're only copying vgprs */
+      pc->tmp_in_scc = false;
       block->instructions.insert(it, std::move(pc));
    }
 
@@ -103,6 +105,8 @@ void insert_parallelcopies(ssa_elimination_ctx& ctx)
          pc->getOperand(i) = pair.second;
          i++;
       }
+      pc->tmp_in_scc = block->scc_live_out;
+      pc->scratch_sgpr = block->scratch_sgpr;
       block->instructions.insert(it, std::move(pc));
    }
 }
