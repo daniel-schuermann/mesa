@@ -426,6 +426,15 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
       Definition op_as_def = Definition(swap.op.physReg(), swap.op.regClass());
       if (chip_class >= GFX9 && swap.def.getTemp().type() == RegType::vgpr) {
          bld.vop1(aco_opcode::v_swap_b32, swap.def, op_as_def, swap.op, def_as_op);
+      } else if (swap.op.physReg() == scc || swap.def.physReg() == scc) {
+         /* we need to swap scc and another sgpr */
+         assert(!preserve_scc);
+
+         PhysReg other = swap.op.physReg() == scc ? swap.def.physReg() : swap.op.physReg();
+
+         bld.sop1(aco_opcode::s_mov_b32, Definition(pi->scratch_sgpr, s1), Operand(scc, s1));
+         bld.sopc(aco_opcode::s_cmp_lg_i32, Definition(scc, s1), Operand(other, s1), Operand(0u));
+         bld.sop1(aco_opcode::s_mov_b32, Definition(other, s1), Operand(pi->scratch_sgpr, s1));
       } else if (swap.def.getTemp().type() == RegType::sgpr) {
          if (preserve_scc) {
             bld.sop1(aco_opcode::s_mov_b32, Definition(pi->scratch_sgpr, s1), swap.op);
