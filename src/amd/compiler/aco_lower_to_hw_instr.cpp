@@ -406,7 +406,7 @@ std::vector<aco_ptr<Instruction>> new_instructions;
 
       if (it == copy_map.end() && !copy_map.empty()) {
          for (std::pair<const PhysReg, copy_operation>& copy : copy_map) {
-            if (chip_class <= VI && copy.second.size == 1 && copy.second.def.getTemp().type() == RegType::vgpr && first_vgpr != 0xFFFF) {
+            if (chip_class <= GFX8 && copy.second.size == 1 && copy.second.def.getTemp().type() == RegType::vgpr && first_vgpr != 0xFFFF) {
                copy_operation new_copy = {copy.second.op, bld.def(v1, PhysReg{first_vgpr}), 0, 1};
                it = copy_map.insert(std::pair<PhysReg, copy_operation>(PhysReg{first_vgpr}, new_copy)).first;
                bld.use_iterator = true;

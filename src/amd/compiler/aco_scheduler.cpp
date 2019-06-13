@@ -721,8 +721,8 @@ void schedule_program(Program *program, live& live_vars)
    //TODO: maybe use some sort of heuristic instead
    ctx.num_waves = std::min<uint16_t>(program->num_waves, 5);
    assert(ctx.num_waves);
-   uint16_t total_sgpr_regs = program->chip_class >= VI ? 800 : 512;
-   uint16_t max_addressible_sgpr = program->chip_class >= VI ? 102 : 104;
+   uint16_t total_sgpr_regs = program->chip_class >= GFX8 ? 800 : 512;
+   uint16_t max_addressible_sgpr = program->chip_class >= GFX8 ? 102 : 104;
    ctx.max_sgpr = std::min<uint16_t>(((total_sgpr_regs / ctx.num_waves) & ~7) - 2, max_addressible_sgpr);
    ctx.max_vgpr = (256 / ctx.num_waves) & ~3;
 
