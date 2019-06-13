@@ -122,7 +122,7 @@ void print_regs(ra_ctx& ctx, bool vgprs, std::array<uint32_t, 512>& reg_file)
 
 void adjust_max_used_regs(ra_ctx& ctx, RegClass rc, unsigned reg)
 {
-   unsigned max_addressible_sgpr = ctx.program->chip_class >= VI ? 102 : 104;
+   unsigned max_addressible_sgpr = ctx.program->chip_class >= GFX8 ? 102 : 104;
    unsigned size = sizeOf(rc);
    if (typeOf(rc) == vgpr) {
       assert(reg >= 256);
@@ -620,7 +620,7 @@ PhysReg get_reg(ra_ctx& ctx,
    assert(regs_free >= size);
 
    /* try using more registers */
-   uint16_t max_addressible_sgpr = ctx.program->chip_class >= VI ? 102 : 104;
+   uint16_t max_addressible_sgpr = ctx.program->chip_class >= GFX8 ? 102 : 104;
    if (typeOf(rc) == vgpr && ctx.program->max_vgpr < 256) {
       update_vgpr_sgpr_demand(ctx.program, ctx.program->max_vgpr + 1, ctx.program->max_sgpr);
       return get_reg(ctx, reg_file, rc, parallelcopies, instr);

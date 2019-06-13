@@ -68,7 +68,7 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
    // TODO: try to schedule the NOP-causing instruction up to reduce the number of stall cycles
 
    /* break off from prevous SMEM clause if needed */
-   if (instr->format == Format::SMEM && ctx.chip_class >= VI) {
+   if (instr->format == Format::SMEM && ctx.chip_class >= GFX8) {
       bool is_store = instr->num_definitions == 0;
       for (int pred_idx = new_idx - 1; pred_idx >= 0; pred_idx--) {
          aco_ptr<Instruction>& pred = new_instructions[pred_idx];
