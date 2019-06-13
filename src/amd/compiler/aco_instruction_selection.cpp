@@ -645,7 +645,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       ctx->allocated_vec.emplace(dst.id(), elems);
       break;
    }
-   case nir_op_imov: {
+   case nir_op_mov: {
       Temp src = get_alu_src(ctx, instr->src[0]);
       aco_ptr<Instruction> mov;
       if (dst.regClass() == s1) {
@@ -664,18 +664,6 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       } else {
          nir_print_instr(&instr->instr, stderr);
          unreachable("Should have been lowered to scalar.");
-      }
-      break;
-   }
-   case nir_op_fmov: {
-      if (dst.regClass() == s1) {
-         bld.sop1(aco_opcode::s_mov_b32, Definition(dst), get_alu_src(ctx, instr->src[0]));
-      } else if (dst.regClass() == v1) {
-         bld.vop1(aco_opcode::v_mov_b32, Definition(dst), get_alu_src(ctx, instr->src[0]));
-      } else {
-         fprintf(stderr, "Unimplemented NIR instr bit size: ");
-         nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
       }
       break;
    }
