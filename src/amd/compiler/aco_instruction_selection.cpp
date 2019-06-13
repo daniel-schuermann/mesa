@@ -5450,7 +5450,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          nfmt = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), nfmt, Operand(26u));
 
          desc[1] = bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), desc[1],
-                            Operand((uint32_t)C_008F14_NUM_FORMAT_GFX6));
+                            Operand((uint32_t)C_008F14_NUM_FORMAT));
          desc[1] = bld.sop2(aco_opcode::s_or_b32, bld.def(s1), bld.def(s1, scc), desc[1], nfmt);
 
          aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector,
