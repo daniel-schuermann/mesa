@@ -313,12 +313,13 @@ struct copy_operation {
    unsigned size;
 };
 
-void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context* ctx, chip_class chip_class)
+void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context* ctx, chip_class chip_class, Pseudo_instruction *pi)
 {
    Builder bld(ctx->program, &ctx->instructions);
    aco_ptr<Instruction> mov;
    std::map<PhysReg, copy_operation>::iterator it = copy_map.begin();
    std::map<PhysReg, copy_operation>::iterator target;
+   bool writes_scc = false;
 
    /* count the number of uses for each dst reg */
    while (it != copy_map.end()) {
@@ -326,6 +327,12 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
          ++it;
          continue;
       }
+
+      if (it->second.def.physReg() == scc)
+         writes_scc = true;
+
+      assert(!pi->tmp_in_scc || !(it->second.def.physReg() == pi->scratch_sgpr));
+
       /* if src and dst reg are the same, remove operation */
       if (it->first == it->second.op.physReg()) {
          it = copy_map.erase(it);
@@ -341,6 +348,7 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
    }
 
    /* first, handle paths in the location transfer graph */
+   bool preserve_scc = pi->tmp_in_scc && !writes_scc;
    it = copy_map.begin();
    while (it != copy_map.end()) {
 
@@ -364,14 +372,16 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
             }
          }
 
-         if (it->second.def.physReg().reg == scc.reg)
+         if (it->second.def.physReg().reg == scc.reg) {
             bld.sopc(aco_opcode::s_cmp_lg_i32, it->second.def, it->second.op, Operand(0u));
-         else if (it->second.size == 2 && it->second.def.getTemp().type() == RegType::sgpr)
+            preserve_scc = true;
+         } else if (it->second.size == 2 && it->second.def.getTemp().type() == RegType::sgpr) {
             bld.sop1(aco_opcode::s_mov_b64, it->second.def, Operand(it->second.op.physReg(), s2));
-         else if (it->second.def.getTemp().type() == RegType::sgpr)
-            ctx->instructions.emplace_back(std::move(create_s_mov(it->second.def, it->second.op)));
-         else
+         } else if (it->second.def.getTemp().type() == RegType::sgpr) {
+            bld.insert(create_s_mov(it->second.def, it->second.op));
+         } else {
             bld.vop1(aco_opcode::v_mov_b32, it->second.def, it->second.op);
+         }
 
          /* reduce the number of uses of the operand reg by one */
          if (!it->second.op.isConstant()) {
@@ -406,6 +416,9 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
          continue;
       }
 
+      if (preserve_scc && it->second.def.getTemp().type() == sgpr)
+         assert(!(it->second.def.physReg() == pi->scratch_sgpr));
+
       /* to resolve the cycle, we have to swap the src reg with the dst reg */
       copy_operation swap = it->second;
       assert(swap.op.regClass() == swap.def.regClass());
@@ -414,9 +427,15 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
       if (chip_class >= GFX9 && swap.def.getTemp().type() == RegType::vgpr) {
          bld.vop1(aco_opcode::v_swap_b32, swap.def, op_as_def, swap.op, def_as_op);
       } else if (swap.def.getTemp().type() == RegType::sgpr) {
-         bld.sop2(aco_opcode::s_xor_b32, op_as_def, Definition(scc, s1), swap.op, def_as_op);
-         bld.sop2(aco_opcode::s_xor_b32, swap.def, Definition(scc, s1), swap.op, def_as_op);
-         bld.sop2(aco_opcode::s_xor_b32, op_as_def, Definition(scc, s1), swap.op, def_as_op);
+         if (preserve_scc) {
+            bld.sop1(aco_opcode::s_mov_b32, Definition(pi->scratch_sgpr, s1), swap.op);
+            bld.sop1(aco_opcode::s_mov_b32, op_as_def, def_as_op);
+            bld.sop1(aco_opcode::s_mov_b32, swap.def, Operand(pi->scratch_sgpr, s1));
+         } else {
+            bld.sop2(aco_opcode::s_xor_b32, op_as_def, Definition(scc, s1), swap.op, def_as_op);
+            bld.sop2(aco_opcode::s_xor_b32, swap.def, Definition(scc, s1), swap.op, def_as_op);
+            bld.sop2(aco_opcode::s_xor_b32, op_as_def, Definition(scc, s1), swap.op, def_as_op);
+         }
       } else {
          bld.vop2(aco_opcode::v_xor_b32, op_as_def, swap.op, def_as_op);
          bld.vop2(aco_opcode::v_xor_b32, swap.def, swap.op, def_as_op);
@@ -461,6 +480,8 @@ void lower_to_hw_instr(Program* program)
       {
          aco_ptr<Instruction> mov;
          if (instr->format == Format::PSEUDO) {
+            Pseudo_instruction *pi = (Pseudo_instruction*)instr.get();
+
             switch (instr->opcode)
             {
             case aco_opcode::p_extract_vector:
@@ -479,7 +500,7 @@ void lower_to_hw_instr(Program* program)
                   Definition def = Definition(PhysReg{instr->getDefinition(0).physReg().reg + i}, rc_def);
                   copy_operations[def.physReg()] = {Operand(PhysReg{reg + i}, rc), def, 0, 1};
                }
-               handle_operands(copy_operations, &ctx, program->chip_class);
+               handle_operands(copy_operations, &ctx, program->chip_class, pi);
                break;
             }
             case aco_opcode::p_create_vector:
@@ -509,7 +530,7 @@ void lower_to_hw_instr(Program* program)
                      reg_idx++;
                   }
                }
-               handle_operands(copy_operations, &ctx, program->chip_class);
+               handle_operands(copy_operations, &ctx, program->chip_class, pi);
                break;
             }
             case aco_opcode::p_split_vector:
@@ -528,7 +549,7 @@ void lower_to_hw_instr(Program* program)
                      copy_operations[def.physReg()] = {op, def, 0, 1};
                   }
                }
-               handle_operands(copy_operations, &ctx, program->chip_class);
+               handle_operands(copy_operations, &ctx, program->chip_class, pi);
                break;
             }
             case aco_opcode::p_parallelcopy:
@@ -551,7 +572,7 @@ void lower_to_hw_instr(Program* program)
                      }
                   }
                }
-               handle_operands(copy_operations, &ctx, program->chip_class);
+               handle_operands(copy_operations, &ctx, program->chip_class, pi);
                break;
             }
             case aco_opcode::p_discard_if:
