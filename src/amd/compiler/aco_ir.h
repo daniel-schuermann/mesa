@@ -794,6 +794,8 @@ struct Export_instruction : public Instruction {
 };
 
 struct Pseudo_instruction : public Instruction {
+   bool tmp_in_scc;
+   PhysReg scratch_sgpr; /* might not be valid if it's not needed */
 };
 
 struct Pseudo_branch_instruction : public Instruction {
@@ -908,6 +910,11 @@ struct Block {
    int logical_idom = -1;
    int linear_idom = -1;
    Temp live_out_exec = Temp();
+
+   /* this information is needed for predecessors to blocks with phis when
+    * moving out of ssa */
+   bool scc_live_out;
+   PhysReg scratch_sgpr; /* only needs to be valid if scc_live_out != false */
 };
 
 
