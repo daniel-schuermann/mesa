@@ -262,7 +262,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                         }
                      }
                      break;
-                  case nir_op_imov:
+                  case nir_op_mov:
                      if (alu_instr->dest.dest.ssa.bit_size == 1) {
                         size = sizeOf(reg_class[alu_instr->src[0].src.ssa->index]);
                      } else {
