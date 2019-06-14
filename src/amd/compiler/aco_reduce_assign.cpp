@@ -58,10 +58,28 @@ void setup_reduce_temp(Program* program)
    Temp vtmp(0, v1_linear);
    int inserted_at = -1;
    int vtmp_inserted_at = -1;
+   bool reduceTmp_in_loop = false;
+   bool vtmp_in_loop = false;
 
    for (std::unique_ptr<Block>& block : program->blocks) {
       if (block->kind & block_kind_top_level)
          last_top_level_block_idx = block->index;
+
+      /* insert p_end_linear_vgpr after the outermost loop */
+      if (reduceTmp_in_loop && block->loop_nest_depth == 0) {
+         assert(inserted_at == last_top_level_block_idx);
+
+         aco_ptr<Instruction> end{create_instruction<Instruction>(aco_opcode::p_end_linear_vgpr, Format::PSEUDO, vtmp_in_loop ? 2 : 1, 0)};
+         end->getOperand(0) = Operand(reduceTmp);
+         if (vtmp_in_loop)
+            end->getOperand(1) = Operand(vtmp);
+         /* insert after the phis of the loop exit block */
+         std::vector<aco_ptr<Instruction>>::iterator it;
+         while ((*it)->opcode == aco_opcode::p_linear_phi || (*it)->opcode == aco_opcode::p_phi)
+            ++it;
+         block->instructions.insert(it, std::move(end));
+         reduceTmp_in_loop = false;
+      }
       if (!hasReductions[block->index])
          continue;
 
@@ -72,6 +90,7 @@ void setup_reduce_temp(Program* program)
             continue;
 
          ReduceOp op = static_cast<Pseudo_reduction_instruction *>(instr)->reduce_op;
+         reduceTmp_in_loop |= block->loop_nest_depth > 0;
 
          if ((int)last_top_level_block_idx != inserted_at) {
             reduceTmp = {program->allocateId(), reduceTmp.regClass()};
@@ -96,6 +115,7 @@ void setup_reduce_temp(Program* program)
          /* same as before, except for the vector temporary instead of the reduce temporary */
          bool need_vtmp = op == imul32;
          need_vtmp |= static_cast<Pseudo_reduction_instruction *>(instr)->cluster_size == 32;
+         vtmp_in_loop |= need_vtmp && block->loop_nest_depth > 0;
          if (need_vtmp && (int)last_top_level_block_idx != vtmp_inserted_at) {
             vtmp = {program->allocateId(), vtmp.regClass()};
             aco_ptr<Instruction> create{create_instruction<Instruction>(aco_opcode::p_start_linear_vgpr, Format::PSEUDO, 0, 1)};
