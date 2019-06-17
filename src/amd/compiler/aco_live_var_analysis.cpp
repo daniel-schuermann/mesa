@@ -49,9 +49,13 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
    std::set<Temp> live_sgprs;
    std::set<Temp> live_vgprs;
 
-   /* add the live_out_exec to live, so that it doesn't add to the register demand */
-   if (block->live_out_exec != Temp())
+   /* add the live_out_exec to live */
+   bool exec_live = false;
+   if (block->live_out_exec != Temp()) {
       live_sgprs.insert(block->live_out_exec);
+      sgpr_demand += 2;
+      exec_live = true;
+   }
 
    /* insert the live-outs from this block into our temporary sets */
    std::vector<std::set<Temp>>& live_temps = lives.live_out;
@@ -73,8 +77,14 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
    /* traverse the instructions backwards */
    for (int idx = block->instructions.size() -1; idx >= 0; idx--)
    {
-      if (reg_demand_cond)
-         register_demand[idx] = {sgpr_demand, vgpr_demand};
+      if (reg_demand_cond) {
+         /* substract the 2 sgprs from exec */
+         if (exec_live)
+            assert(sgpr_demand >= 2);
+         register_demand[idx] = {sgpr_demand - (exec_live ? 2 : 0), vgpr_demand};
+         block->vgpr_demand = std::max(block->vgpr_demand, register_demand[idx].second);
+         block->sgpr_demand = std::max(block->sgpr_demand, register_demand[idx].first);
+      }
 
       Instruction *insn = block->instructions[idx].get();
       /* KILL */
@@ -102,6 +112,8 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
                   definition.setKill(true);
                }
             }
+            if (definition.isFixed() && definition.physReg() == exec)
+               exec_live = false;
          }
       }
 
@@ -151,12 +163,10 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
                      operand.setKill(false);
                   }
                }
+               if (operand.isFixed() && operand.physReg() == exec)
+                  exec_live = true;
             }
          }
-      }
-      if (reg_demand_cond) {
-         block->vgpr_demand = std::max(block->vgpr_demand, register_demand[idx].second);
-         block->sgpr_demand = std::max(block->sgpr_demand, register_demand[idx].first);
       }
    }
 
@@ -187,7 +197,7 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
       abort();
    }
 
-   assert(!reg_demand_cond || block->index != 0 || (vgpr_demand == 0 && (sgpr_demand == 0 || sgpr_demand == (uint16_t) -2)));
+   assert(!reg_demand_cond || block->index != 0 || (vgpr_demand == 0 && (sgpr_demand == 0)));
 }
 
 void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr)
