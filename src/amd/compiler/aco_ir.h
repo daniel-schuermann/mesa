@@ -143,10 +143,10 @@ enum class Format : std::uint16_t {
 
 enum barrier_interaction {
    barrier_none = 0,
-   barrier_buffer,
-   barrier_image,
-   barrier_atomic,
-   barrier_shared
+   barrier_buffer = 0x1,
+   barrier_image = 0x2,
+   barrier_atomic = 0x4,
+   barrier_shared = 0x8
 };
 
 static inline Format asVOP3(Format format) {
