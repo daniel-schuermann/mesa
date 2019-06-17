@@ -2719,6 +2719,9 @@ enum aco_descriptor_type {
    ACO_DESC_FMASK,
    ACO_DESC_SAMPLER,
    ACO_DESC_BUFFER,
+   ACO_DESC_PLANE_0,
+   ACO_DESC_PLANE_1,
+   ACO_DESC_PLANE_2,
 };
 
 enum aco_image_dim {
@@ -2852,6 +2855,17 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
       type = s4;
       opcode = aco_opcode::s_load_dwordx4;
       break;
+   case ACO_DESC_PLANE_0:
+   case ACO_DESC_PLANE_1:
+      type = s8;
+      opcode = aco_opcode::s_load_dwordx8;
+      offset += 32 * (desc_type - ACO_DESC_PLANE_0);
+      break;
+   case ACO_DESC_PLANE_2:
+      type = s4;
+      opcode = aco_opcode::s_load_dwordx4;
+      offset += 64;
+      break;
    default:
       unreachable("invalid desc_type\n");
    }
@@ -2879,7 +2893,34 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
                                    bld.sop2(aco_opcode::s_mul_i32, bld.def(s1), Operand(stride), index)));
    }
 
-   return bld.smem(opcode, bld.def(type), list, off);
+   Temp res = bld.smem(opcode, bld.def(type), list, off);
+
+   if (desc_type == ACO_DESC_PLANE_2) {
+      Temp components[8];
+      for (unsigned i = 0; i < 8; i++)
+         components[i] = bld.tmp(s1);
+      bld.pseudo(aco_opcode::p_split_vector,
+                 Definition(components[0]),
+                 Definition(components[1]),
+                 Definition(components[2]),
+                 Definition(components[3]),
+                 res);
+
+      Temp desc2 = get_sampler_desc(ctx, deref_instr, ACO_DESC_PLANE_1, tex_instr, image, write);
+      bld.pseudo(aco_opcode::p_split_vector,
+                 bld.def(s1), bld.def(s1), bld.def(s1), bld.def(s1),
+                 Definition(components[4]),
+                 Definition(components[5]),
+                 Definition(components[6]),
+                 Definition(components[7]),
+                 desc2);
+
+      res = bld.pseudo(aco_opcode::p_create_vector, bld.def(s8),
+                       components[0], components[1], components[2], components[3],
+                       components[4], components[5], components[6], components[7]);
+   }
+
+   return res;
 }
 
 static int image_type_to_components_count(enum glsl_sampler_dim dim, bool array)
@@ -4956,6 +4997,7 @@ void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
 {
    nir_deref_instr *texture_deref_instr = NULL;
    nir_deref_instr *sampler_deref_instr = NULL;
+   int plane = -1;
 
    for (unsigned i = 0; i < instr->num_srcs; i++) {
       switch (instr->src[i].src_type) {
@@ -4964,6 +5006,9 @@ void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
          break;
       case nir_tex_src_sampler_deref:
          sampler_deref_instr = nir_src_as_deref(instr->src[i].src);
+         break;
+      case nir_tex_src_plane:
+         plane = nir_src_as_int(instr->src[i].src);
          break;
       default:
          break;
@@ -4975,10 +5020,16 @@ void tex_fetch_ptrs(isel_context *ctx, nir_tex_instr *instr,
    if (!sampler_deref_instr)
       sampler_deref_instr = texture_deref_instr;
 
-   if (instr->sampler_dim  == GLSL_SAMPLER_DIM_BUF)
+   if (plane >= 0) {
+      assert(instr->op != nir_texop_txf_ms &&
+             instr->op != nir_texop_samples_identical);
+      assert(instr->sampler_dim  != GLSL_SAMPLER_DIM_BUF);
+      *res_ptr = get_sampler_desc(ctx, texture_deref_instr, (aco_descriptor_type)(ACO_DESC_PLANE_0 + plane), instr, false, false);
+   } else if (instr->sampler_dim  == GLSL_SAMPLER_DIM_BUF) {
       *res_ptr = get_sampler_desc(ctx, texture_deref_instr, ACO_DESC_BUFFER, instr, false, false);
-   else
+   } else {
       *res_ptr = get_sampler_desc(ctx, texture_deref_instr, ACO_DESC_IMAGE, instr, false, false);
+   }
    if (samp_ptr) {
       *samp_ptr = get_sampler_desc(ctx, sampler_deref_instr, ACO_DESC_SAMPLER, instr, false, false);
       if (instr->sampler_dim < GLSL_SAMPLER_DIM_RECT && ctx->options->chip_class < GFX8) {
