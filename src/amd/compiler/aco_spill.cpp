@@ -1356,7 +1356,32 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
 
    /* replace pseudo instructions with actual hardware instructions */
    unsigned last_top_level_block_idx = 0;
+   std::vector<bool> reload_in_loop(vgpr_spill_temps.size());
    for (std::unique_ptr<Block>& block : ctx.program->blocks) {
+
+      /* after loops, we insert a user if there was a reload inside the loop */
+      if (block->loop_nest_depth == 0) {
+         int end_vgprs = 0;
+         for (unsigned i = 0; i < vgpr_spill_temps.size(); i++) {
+            if (reload_in_loop[i])
+               end_vgprs++;
+         }
+
+         if (end_vgprs > 0) {
+            aco_ptr<Instruction> destr{create_instruction<Instruction>(aco_opcode::p_end_linear_vgpr, Format::PSEUDO, end_vgprs, 0)};
+            int k = 0;
+            for (unsigned i = 0; i < vgpr_spill_temps.size(); i++) {
+               if (reload_in_loop[i])
+                  destr->getOperand(k++) = Operand(vgpr_spill_temps[i]);
+               reload_in_loop[i] = false;
+            }
+            /* find insertion point */
+            std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
+            while ((*it)->opcode == aco_opcode::p_linear_phi || (*it)->opcode == aco_opcode::p_phi)
+               ++it;
+            block->instructions.insert(it, std::move(destr));
+         }
+      }
 
       if (block->kind & block_kind_top_level) {
          last_top_level_block_idx = block->index;
@@ -1375,19 +1400,9 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
                   break;
                }
             }
-            if (can_destroy) {
-               aco_ptr<Instruction> destr{create_instruction<Instruction>(aco_opcode::p_end_linear_vgpr, Format::PSEUDO, 1, 0)};
-               destr->getOperand(0) = Operand(vgpr_spill_temps[i]);
-               /* find insertion point */
-               std::vector<aco_ptr<Instruction>>::iterator after_phi = block->instructions.begin();
-               while ((*after_phi)->opcode == aco_opcode::p_linear_phi || (*after_phi)->opcode == aco_opcode::p_phi)
-                  after_phi++;
-               block->instructions.insert(after_phi, std::move(destr));
+            if (can_destroy)
                vgpr_spill_temps[i] = Temp();
-            }
          }
-
-
       }
 
       std::vector<aco_ptr<Instruction>>::iterator it;
@@ -1448,6 +1463,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
 
             } else if (sgpr_slot.find(spill_id) != sgpr_slot.end()) {
                uint32_t spill_slot = sgpr_slot[spill_id];
+               reload_in_loop[spill_slot / 64] = block->loop_nest_depth > 0;
 
                /* check if the linear vgpr already exists */
                if (vgpr_spill_temps[spill_slot / 64] == Temp()) {
