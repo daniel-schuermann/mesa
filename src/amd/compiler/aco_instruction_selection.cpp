@@ -5340,11 +5340,6 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          dmask = 1 << instr->component;
    } else if (instr->op == nir_texop_query_levels) {
       dmask = 1 << 3;
-   } else if (ctx->options->chip_class >= GFX9 &&
-              instr->op == nir_texop_txs &&
-              instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
-              instr->is_array) {
-      dmask = (dmask & 0x1) | ((dmask & 0x2) << 1);
    }
 
    aco_ptr<MIMG_instruction> tex;
@@ -5362,7 +5357,14 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       tex.reset(create_instruction<MIMG_instruction>(aco_opcode::image_get_resinfo, Format::MIMG, 2, 1));
       tex->getOperand(0) = Operand(as_vgpr(ctx,lod));
       tex->getOperand(1) = Operand(resource);
-      tex->dmask = dmask;
+      if (ctx->options->chip_class >= GFX9 &&
+          instr->op == nir_texop_txs &&
+          instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
+          instr->is_array) {
+         tex->dmask = (dmask & 0x1) | ((dmask & 0x2) << 1);
+      } else {
+         tex->dmask = dmask;
+      }
       tex->da = da;
       tex->getDefinition(0) = Definition(tmp_dst);
       tex->can_reorder = true;
