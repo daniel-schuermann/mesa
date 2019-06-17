@@ -59,11 +59,6 @@ enum wait_type : uint8_t {
    lgkm_type = 1 << 5,
 };
 
-/* TODO: replace this by architecture dependant hardware limits */
-uint16_t max_vm_cnt = 0xFF;
-uint16_t max_exp_cnt = 0xFF;
-uint16_t max_lgkm_cnt = 0xFF;
-
 struct wait_entry {
    uint16_t type; /* use wait_type notion */
    uint16_t vm_cnt;
@@ -83,6 +78,10 @@ struct wait_entry {
 };
 
 struct wait_ctx {
+   uint16_t max_vm_cnt = 63;
+   uint16_t max_exp_cnt = 7;
+   uint16_t max_lgkm_cnt = 15;
+
    uint16_t vm_cnt = 0;
    uint16_t exp_cnt = 0;
    uint16_t lgkm_cnt = 0;
@@ -90,6 +89,10 @@ struct wait_ctx {
 
    std::unordered_map<uint8_t,wait_entry> vgpr_map;
    std::unordered_map<uint8_t,wait_entry> sgpr_map;
+
+   wait_ctx() {}
+   wait_ctx(Program *program)
+           : max_vm_cnt(program->chip_class >= GFX9 ? 63 : 15) {}
 
    void join(wait_ctx* other)
    {
@@ -145,9 +148,11 @@ uint16_t create_waitcnt_imm(uint16_t vm, uint16_t exp, uint16_t lgkm)
    return ((vm & 0x30) << 10) | ((lgkm & 0xF) << 8) | ((exp & 0x7) << 4) | (vm & 0xF);
 }
 
-SOPP_instruction* create_waitcnt(uint16_t imm)
+SOPP_instruction* create_waitcnt(wait_ctx& ctx, uint16_t imm)
 {
    SOPP_instruction* waitcnt = create_instruction<SOPP_instruction>(aco_opcode::s_waitcnt, Format::SOPP, 0, 0);
+   if (ctx.max_vm_cnt < 63)
+      imm |= 0xc000; /* should have no effect on Polaris and now we won't have to worry about the architecture when interpreting the immediate */
    waitcnt->imm = imm;
    return waitcnt;
 }
@@ -169,15 +174,15 @@ void reset_counters(wait_ctx& ctx, uint16_t types)
          }
 
          if ((types & exp_type) && (it->second.type & exp_type)) {
-            it->second.exp_cnt = max_exp_cnt;
+            it->second.exp_cnt = ctx.max_exp_cnt;
             it->second.type &= ~exp_type;
          }
          if ((types & vm_type) && (it->second.type & vm_type)) {
-            it->second.vm_cnt = max_vm_cnt;
+            it->second.vm_cnt = ctx.max_vm_cnt;
             it->second.type &= ~vm_type;
          }
          if ((types & lgkm_type) && (it->second.type & lgkm_type)) {
-            it->second.lgkm_cnt = max_lgkm_cnt;
+            it->second.lgkm_cnt = ctx.max_lgkm_cnt;
             it->second.type &= ~lgkm_type;
          }
          it++;
@@ -243,9 +248,9 @@ bool writes_exec(Instruction* instr, wait_ctx& ctx)
 uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
 {
    bool writes_vgpr = false;
-   uint16_t new_exp_cnt = max_exp_cnt;
-   uint16_t new_vm_cnt = max_vm_cnt;
-   uint16_t new_lgkm_cnt = max_lgkm_cnt;
+   uint16_t new_exp_cnt = ctx.max_exp_cnt;
+   uint16_t new_vm_cnt = ctx.max_vm_cnt;
+   uint16_t new_lgkm_cnt = ctx.max_lgkm_cnt;
 
    for (unsigned i = 0; i < instr->definitionCount(); i++)
    {
@@ -264,7 +269,7 @@ uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
 
          /* Vector Memory reads and writes return in the order they were issued */
          if (instr->isVMEM() && (it->second.type & vm_type) && !it->second.flat) {
-            it->second.vm_cnt = max_vm_cnt;
+            it->second.vm_cnt = ctx.max_vm_cnt;
             it->second.type = it->second.type &= ~vm_type;
             if (it->second.type == done)
                it = ctx.vgpr_map.erase(it);
@@ -280,17 +285,17 @@ uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
             if (entry.type & it->second.type) {
                if ((entry.type & exp_type) && entry.exp_cnt <= it->second.exp_cnt)
                {
-                  it->second.exp_cnt = max_exp_cnt;
+                  it->second.exp_cnt = ctx.max_exp_cnt;
                   it->second.type = it->second.type &= ~exp_type;
                }
                if ((entry.type & vm_type) && entry.vm_cnt <= it->second.vm_cnt)
                {
-                  it->second.vm_cnt = max_vm_cnt;
+                  it->second.vm_cnt = ctx.max_vm_cnt;
                   it->second.type = it->second.type &= ~vm_type;
                }
                if ((entry.type & lgkm_type) && entry.lgkm_cnt <= it->second.lgkm_cnt)
                {
-                  it->second.lgkm_cnt = max_lgkm_cnt;
+                  it->second.lgkm_cnt = ctx.max_lgkm_cnt;
                   it->second.type = it->second.type &= ~lgkm_type;
                }
                if (it->second.type == done) {
@@ -323,7 +328,7 @@ uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
 uint16_t writes_sgpr(Instruction* instr, wait_ctx& ctx)
 {
    bool needs_waitcnt = false;
-   uint16_t new_lgkm_cnt = max_lgkm_cnt;
+   uint16_t new_lgkm_cnt = ctx.max_lgkm_cnt;
    for (unsigned i = 0; i < instr->definitionCount(); i++)
    {
       if (instr->getDefinition(i).getTemp().type() != RegType::sgpr)
@@ -349,7 +354,7 @@ uint16_t writes_sgpr(Instruction* instr, wait_ctx& ctx)
             if (entry.type & it->second.type) {
                if ((entry.type & lgkm_type) && entry.lgkm_cnt <= it->second.lgkm_cnt)
                {
-                  it->second.lgkm_cnt = max_lgkm_cnt;
+                  it->second.lgkm_cnt = ctx.max_lgkm_cnt;
                   it->second.type = it->second.type &= ~lgkm_type;
                }
                if (it->second.type == done)
@@ -366,7 +371,7 @@ uint16_t writes_sgpr(Instruction* instr, wait_ctx& ctx)
    if (needs_waitcnt) {
       /* reset counter */
       ctx.lgkm_cnt = std::min(ctx.lgkm_cnt, new_lgkm_cnt);
-      return create_waitcnt_imm(max_vm_cnt, max_exp_cnt, new_lgkm_cnt);
+      return create_waitcnt_imm(ctx.max_vm_cnt, ctx.max_exp_cnt, new_lgkm_cnt);
    } else {
       return -1;
    }
@@ -375,8 +380,8 @@ uint16_t writes_sgpr(Instruction* instr, wait_ctx& ctx)
 uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
 {
    bool needs_waitcnt = false;
-   uint16_t new_lgkm_cnt = max_lgkm_cnt;
-   uint16_t new_vm_cnt = max_vm_cnt;
+   uint16_t new_lgkm_cnt = ctx.max_lgkm_cnt;
+   uint16_t new_vm_cnt = ctx.max_vm_cnt;
    for (unsigned i = 0; i < instr->num_operands; i++)
    {
       if (instr->getOperand(i).isConstant() || instr->getOperand(i).isUndefined())
@@ -403,7 +408,7 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
                if (entry.type & it->second.type) {
                   if ((entry.type & lgkm_type) && entry.lgkm_cnt <= it->second.lgkm_cnt)
                   {
-                     it->second.lgkm_cnt = max_lgkm_cnt;
+                     it->second.lgkm_cnt = ctx.max_lgkm_cnt;
                      it->second.type = it->second.type &= ~lgkm_type;
                   }
                   if (it->second.type == done)
@@ -437,12 +442,12 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
                if (entry.type & it->second.type) {
                   if ((entry.type & vm_type) && entry.vm_cnt <= it->second.vm_cnt)
                   {
-                     it->second.vm_cnt = max_vm_cnt;
+                     it->second.vm_cnt = ctx.max_vm_cnt;
                      it->second.type = it->second.type &= ~vm_type;
                   }
                   if ((entry.type & lgkm_type) && entry.lgkm_cnt <= it->second.lgkm_cnt)
                   {
-                     it->second.lgkm_cnt = max_lgkm_cnt;
+                     it->second.lgkm_cnt = ctx.max_lgkm_cnt;
                      it->second.type = it->second.type &= ~lgkm_type;
                   }
                   if (it->second.type == done) {
@@ -465,7 +470,7 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
       /* reset counter */
       ctx.vm_cnt = std::min(ctx.vm_cnt, new_vm_cnt);
       ctx.lgkm_cnt = std::min(ctx.lgkm_cnt, new_lgkm_cnt);
-      return create_waitcnt_imm(new_vm_cnt, max_exp_cnt, new_lgkm_cnt);
+      return create_waitcnt_imm(new_vm_cnt, ctx.max_exp_cnt, new_lgkm_cnt);
    } else {
       return -1;
    }
@@ -526,7 +531,7 @@ Instruction* kill(Instruction* instr, wait_ctx& ctx)
       }
    }
    if (imm != 0xFFFF)
-      return create_waitcnt(imm);
+      return create_waitcnt(ctx, imm);
    else
       return nullptr;
 }
@@ -565,7 +570,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
             unsigned idx = exp_instr->compressed ? i >> 1 : i;
             assert(idx < exp_instr->num_operands);
             auto it = ctx.vgpr_map.emplace(exp_instr->getOperand(idx).physReg().reg,
-                                           wait_entry(t, max_vm_cnt, 0, max_lgkm_cnt)).first;
+                                           wait_entry(t, ctx.max_vm_cnt, 0, ctx.max_lgkm_cnt)).first;
             it->second.exp_cnt = 0;
 
          }
@@ -587,7 +592,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
          {
             ctx.pending_flat++;
             ctx.vgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
-            wait_entry((wait_type)((int)lgkm_type | (int)vm_type), 0, max_exp_cnt, 0, true));
+            wait_entry((wait_type)((int)lgkm_type | (int)vm_type), 0, ctx.max_exp_cnt, 0, true));
          }
          return true;
       }
@@ -599,7 +604,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
          for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
          {
             ctx.sgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
-            wait_entry(lgkm_type, max_vm_cnt, max_exp_cnt, 0, false));
+            wait_entry(lgkm_type, ctx.max_vm_cnt, ctx.max_exp_cnt, 0, false));
          }
          return true;
       }
@@ -613,7 +618,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
          for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
          {
             ctx.vgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
-            wait_entry(lgkm_type, max_vm_cnt, max_exp_cnt, 0));
+            wait_entry(lgkm_type, ctx.max_vm_cnt, ctx.max_exp_cnt, 0));
          }
          return true;
       }
@@ -633,13 +638,13 @@ bool gen(Instruction* instr, wait_ctx& ctx)
          for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
          {
             ctx.vgpr_map.emplace(instr->getDefinition(0).physReg().reg + i,
-            wait_entry(vm_type, 0, max_exp_cnt, max_lgkm_cnt));
+            wait_entry(vm_type, 0, ctx.max_exp_cnt, ctx.max_lgkm_cnt));
          }
       } else if (instr->num_operands == 4) {
          for (unsigned i = 0; i < instr->getOperand(3).size(); i++)
          {
             ctx.vgpr_map.emplace(instr->getOperand(3).physReg().reg + i,
-            wait_entry(vm_type, 0, max_exp_cnt, max_lgkm_cnt));
+            wait_entry(vm_type, 0, ctx.max_exp_cnt, ctx.max_lgkm_cnt));
          }
       }
       return true;
@@ -650,7 +655,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
    return false;
 }
 
-bool handle_block(Block* block, wait_ctx& ctx)
+bool handle_block(Program *program, Block* block, wait_ctx& ctx)
 {
    bool has_gen = false;
    std::vector<aco_ptr<Instruction>> new_instructions;
@@ -671,8 +676,8 @@ bool handle_block(Block* block, wait_ctx& ctx)
          // TODO: we could do better if we only wait if the regs between the block and other predecessors differ
          uint16_t imm = create_waitcnt_imm(ctx.vm_cnt ? 0 : -1, ctx.exp_cnt ? 0 : -1, ctx.lgkm_cnt ? 0 : -1);
          auto it = std::prev(new_instructions.end());
-         new_instructions.insert(it, aco_ptr<Instruction>{create_waitcnt(imm)});
-         ctx = wait_ctx();
+         new_instructions.insert(it, aco_ptr<Instruction>{create_waitcnt(ctx, imm)});
+         ctx = wait_ctx(program);
          break;
       }
    }
@@ -684,7 +689,7 @@ void insert_wait_states(Program* program)
 {
    wait_ctx out_ctx[program->blocks.size()]; /* per BB ctx */
    for (unsigned i = 0; i < program->blocks.size(); i++)
-      out_ctx[i] = wait_ctx();
+      out_ctx[i] = wait_ctx(program);
 
    for (unsigned i = 0; i < program->blocks.size(); i++)
    {
@@ -696,7 +701,7 @@ void insert_wait_states(Program* program)
       if (current->instructions.empty())
          continue;
 
-      handle_block(current, in);
+      handle_block(program, current, in);
    }
 }
 
