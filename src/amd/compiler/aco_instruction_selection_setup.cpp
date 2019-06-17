@@ -685,7 +685,7 @@ static void allocate_user_sgprs(isel_context *ctx,
    allocate_inline_push_consts(ctx, user_sgpr_info);
 }
 
-#define MAX_ARGS 23
+#define MAX_ARGS 64
 struct arg_info {
    RegClass types[MAX_ARGS];
    Temp *assign[MAX_ARGS];
