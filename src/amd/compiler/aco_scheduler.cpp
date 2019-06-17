@@ -110,7 +110,26 @@ static std::pair<uint16_t, uint16_t> getTempRegisters(aco_ptr<Instruction>& inst
    return temp_registers;
 }
 
-bool can_move_instr(aco_ptr<Instruction>& instr, Instruction* current, bool moving_ds)
+barrier_interaction get_barrier_interaction(Instruction* instr)
+{
+   switch (instr->format) {
+   case Format::SMEM:
+      return static_cast<SMEM_instruction*>(instr)->barrier;
+   case Format::MUBUF:
+      return static_cast<MUBUF_instruction*>(instr)->barrier;
+   case Format::MIMG:
+      return static_cast<MIMG_instruction*>(instr)->barrier;
+   case Format::FLAT:
+   case Format::GLOBAL:
+      return barrier_buffer;
+   case Format::DS:
+      return barrier_shared;
+   default:
+      return barrier_none;
+   }
+}
+
+bool can_move_instr(aco_ptr<Instruction>& instr, Instruction* current, int moving_interaction)
 {
    /* don't move exports so that they stay closer together */
    if (instr->format == Format::EXP)
@@ -136,42 +155,26 @@ bool can_move_instr(aco_ptr<Instruction>& instr, Instruction* current, bool movi
          default:
             break;
          }
-         return can_reorder && !moving_ds;
+         return can_reorder && !(moving_interaction & barrier_shared);
       } else {
          return true;
       }
    }
 
-   barrier_interaction interaction = barrier_none;
-   switch (current->format) {
-   case Format::SMEM:
-      interaction = static_cast<SMEM_instruction*>(current)->barrier;
-      break;
-   case Format::MUBUF:
-      interaction = static_cast<MUBUF_instruction*>(current)->barrier;
-      break;
-   case Format::MIMG:
-      interaction = static_cast<MIMG_instruction*>(current)->barrier;
-      break;
-   case Format::FLAT:
-   case Format::GLOBAL:
-      interaction = barrier_buffer;
-      break;
-   default:
-      return false;
-   }
+   int interaction = get_barrier_interaction(current);
+   interaction |= moving_interaction;
 
    switch (instr->opcode) {
    case aco_opcode::p_memory_barrier_atomic:
-      return interaction != barrier_atomic;
+      return !(interaction & barrier_atomic);
    case aco_opcode::p_memory_barrier_buffer:
-      return interaction != barrier_buffer;
+      return !(interaction & barrier_buffer);
    case aco_opcode::p_memory_barrier_image:
-      return interaction != barrier_image;
+      return !(interaction & barrier_image);
    case aco_opcode::p_memory_barrier_shared:
-      return interaction != barrier_shared && !moving_ds;
+      return !(interaction & barrier_shared);
    case aco_opcode::p_memory_barrier_all:
-      return interaction == barrier_none && !moving_ds;
+      return interaction == barrier_none;
    default:
       return false;
    }
@@ -219,7 +222,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
    /* first, check if we have instructions before current to move down */
    int insert_idx = idx + 1;
-   bool moving_ds = false;
+   int moving_interaction = barrier_none;
 
    for (int candidate_idx = idx - 1; k < max_moves && candidate_idx > (int) idx - window_size; candidate_idx--) {
       assert(candidate_idx >= 0);
@@ -235,7 +238,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          break;
       if (candidate->opcode == aco_opcode::p_logical_start)
          break;
-      if (!can_move_instr(candidate, current, moving_ds))
+      if (!can_move_instr(candidate, current, moving_interaction))
          break;
 
       sgpr_pressure = std::max(sgpr_pressure, (int) register_demand[candidate_idx].first);
@@ -253,9 +256,9 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       if (writes_exec)
          break;
 
-      if (moving_ds && candidate->format == Format::DS)
+      if ((moving_interaction & barrier_shared) && candidate->format == Format::DS)
          can_move_down = false;
-      moving_ds = moving_ds || candidate->format == Format::DS;
+      moving_interaction |= get_barrier_interaction(candidate.get());
       if (!can_move_down) {
          for (unsigned i = 0; i < candidate->num_operands; i++) {
             if (candidate->getOperand(i).isTemp())
@@ -326,7 +329,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
    /* find the first instruction depending on current or find another MEM */
    insert_idx = idx + 1;
-   moving_ds = false;
+   moving_interaction = barrier_none;
 
    bool found_dependency = false;
    /* second, check if we have instructions after current to move up */
@@ -336,7 +339,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
       if (candidate->opcode == aco_opcode::p_logical_end)
          break;
-      if (!can_move_instr(candidate, current, moving_ds))
+      if (!can_move_instr(candidate, current, moving_interaction))
          break;
 
       bool writes_exec = false;
@@ -353,9 +356,9 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()])
             is_dependency = true;
       }
-      if (moving_ds && candidate->format == Format::DS)
+      if ((moving_interaction & barrier_shared) && candidate->format == Format::DS)
          is_dependency = true;
-      moving_ds = moving_ds || candidate->format == Format::DS;
+      moving_interaction |= get_barrier_interaction(candidate.get());
       if (is_dependency) {
          for (unsigned j = 0; j < candidate->num_definitions; j++) {
             if (candidate->getDefinition(j).isTemp())
@@ -468,7 +471,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
    /* first, check if we have instructions before current to move down */
    int insert_idx = idx + 1;
-   bool moving_ds = false;
+   int moving_interaction = barrier_none;
 
    for (int candidate_idx = idx - 1; k < max_moves && candidate_idx > (int) idx - window_size; candidate_idx--) {
       assert(candidate_idx >= 0);
@@ -479,7 +482,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          break;
       if (candidate->opcode == aco_opcode::p_logical_start)
          break;
-      if (!can_move_instr(candidate, current, moving_ds))
+      if (!can_move_instr(candidate, current, moving_interaction))
          break;
 
       /* break if we'd make the previous SMEM instruction stall */
@@ -502,9 +505,9 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
       if (writes_exec)
          break;
 
-      if (moving_ds && candidate->format == Format::DS)
+      if ((moving_interaction & barrier_shared) && candidate->format == Format::DS)
          can_move_down = false;
-      moving_ds = moving_ds || candidate->format == Format::DS;
+      moving_interaction |= get_barrier_interaction(candidate.get());
       if (!can_move_down) {
          for (unsigned i = 0; i < candidate->num_operands; i++) {
             if (candidate->getOperand(i).isTemp())
@@ -574,7 +577,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
    /* find the first instruction depending on current or find another VMEM */
    insert_idx = idx;
-   moving_ds = false;
+   moving_interaction = barrier_none;
 
    bool found_dependency = false;
    /* second, check if we have instructions after current to move up */
@@ -584,7 +587,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
 
       if (candidate->opcode == aco_opcode::p_logical_end)
          break;
-      if (!can_move_instr(candidate, current, moving_ds))
+      if (!can_move_instr(candidate, current, moving_interaction))
          break;
 
       bool writes_exec = false;
@@ -601,9 +604,9 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
          if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()])
             is_dependency = true;
       }
-      if (moving_ds && candidate->format == Format::DS)
+      if ((moving_interaction & barrier_shared) && candidate->format == Format::DS)
          is_dependency = true;
-      moving_ds = moving_ds || candidate->format == Format::DS;
+      moving_interaction |= get_barrier_interaction(candidate.get());
       if (is_dependency) {
          for (unsigned j = 0; j < candidate->num_definitions; j++) {
             if (candidate->getDefinition(j).isTemp())
