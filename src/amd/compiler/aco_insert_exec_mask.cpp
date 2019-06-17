@@ -255,7 +255,7 @@ void transition_to_WQM(exec_ctx& ctx, Builder bld, unsigned idx)
       return;
    if (ctx.info[idx].exec.back().second & mask_type_global) {
       Temp exec_mask = ctx.info[idx].exec.back().first;
-      exec_mask = bld.sop1(aco_opcode::s_wqm_b64, bld.def(s2, exec), bld.def(s1, scc), exec_mask);
+      exec_mask = bld.sop1(aco_opcode::s_wqm_b64, bld.def(s2, exec), bld.def(s1, scc), bld.exec(exec_mask));
       ctx.info[idx].exec.emplace_back(exec_mask, mask_type_global | mask_type_wqm);
       return;
    }
@@ -307,7 +307,7 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
             transition_to_WQM(ctx, bld, 0);
       } else {
          if (ctx.program->needs_wqm)
-            exec_mask = bld.sop1(aco_opcode::s_wqm_b64, bld.def(s2, exec), bld.def(s1, scc), exec_mask);
+            exec_mask = bld.sop1(aco_opcode::s_wqm_b64, bld.def(s2, exec), bld.def(s1, scc), bld.exec(exec_mask));
          ctx.info[0].exec.emplace_back(exec_mask, mask_type_global);
       }
 
@@ -595,6 +595,8 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
          instr.reset(create_instruction<Instruction>(aco_opcode::p_discard_if, Format::PSEUDO, num + 1, num + 1));
          for (unsigned i = 0; i < num; i++) {
             instr->getOperand(i) = Operand(ctx.info[block->index].exec[i].first);
+            if (i == num - 1)
+               instr->getOperand(i).setFixed(exec);
             Temp new_mask = bld.tmp(s2);
             instr->getDefinition(i) = Definition(new_mask);
             ctx.info[block->index].exec[i].first = new_mask;
