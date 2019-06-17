@@ -155,7 +155,7 @@ bool can_move_instr(aco_ptr<Instruction>& instr, Instruction* current, int movin
          default:
             break;
          }
-         return can_reorder && !(moving_interaction & barrier_shared);
+         return can_reorder && moving_interaction == barrier_none;
       } else {
          return true;
       }
