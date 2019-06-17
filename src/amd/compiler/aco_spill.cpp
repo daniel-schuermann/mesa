@@ -205,8 +205,11 @@ void compute_global_next_uses(spill_ctx& ctx, std::vector<std::set<Temp>>& live_
 
 bool should_rematerialize(aco_ptr<Instruction>& instr)
 {
-   /* TODO: rematerialization is only supported for VOP1 and SOP1 */
-   if (instr->format != Format::VOP1 && instr->format != Format::SOP1)
+   /* TODO: rematerialization is only supported for VOP1, SOP1 and PSEUDO */
+   if (instr->format != Format::VOP1 && instr->format != Format::SOP1 && instr->format != Format::PSEUDO)
+      return false;
+   /* TODO: pseudo-instruction rematerialization is only supported for p_create_vector */
+   if (instr->format == Format::PSEUDO && instr->opcode != aco_opcode::p_create_vector)
       return false;
 
    for (unsigned i = 0; i < instr->num_operands; i++) {
@@ -227,7 +230,8 @@ aco_ptr<Instruction> do_reload(spill_ctx& ctx, Temp tmp, Temp new_name, uint32_t
    std::map<Temp, remat_info>::iterator remat = ctx.remat.find(tmp);
    if (remat != ctx.remat.end()) {
       Instruction *instr = remat->second.instr;
-      assert((instr->format == Format::VOP1 || instr->format == Format::SOP1) && "unsupported");
+      assert((instr->format == Format::VOP1 || instr->format == Format::SOP1 || instr->format == Format::PSEUDO) && "unsupported");
+      assert((instr->format != Format::PSEUDO || instr->opcode == aco_opcode::p_create_vector) && "unsupported");
       assert(instr->num_definitions == 1 && "unsupported");
 
       aco_ptr<Instruction> res;
@@ -235,6 +239,8 @@ aco_ptr<Instruction> do_reload(spill_ctx& ctx, Temp tmp, Temp new_name, uint32_t
          res.reset(create_instruction<VOP1_instruction>(instr->opcode, instr->format, instr->num_operands, instr->num_definitions));
       } else if (instr->format == Format::SOP1) {
          res.reset(create_instruction<SOP1_instruction>(instr->opcode, instr->format, instr->num_operands, instr->num_definitions));
+      } else if (instr->format == Format::PSEUDO) {
+         res.reset(create_instruction<Instruction>(instr->opcode, instr->format, instr->num_operands, instr->num_definitions));
       }
       for (unsigned i = 0; i < instr->num_operands; i++) {
          res->getOperand(i) = instr->getOperand(i);
