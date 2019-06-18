@@ -503,7 +503,6 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
    }
 
    /* else: merge block */
-   assert(block->linear_predecessors.size() == 2);
    std::set<Temp> partial_spills;
 
    /* keep variables spilled on all incoming paths */
