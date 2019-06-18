@@ -367,7 +367,7 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
          if (it->second.def.physReg().reg == scc.reg)
             bld.sopc(aco_opcode::s_cmp_lg_i32, it->second.def, it->second.op, Operand(0u));
          else if (it->second.size == 2 && it->second.def.getTemp().type() == RegType::sgpr)
-            bld.sop1(aco_opcode::s_mov_b64, it->second.def, it->second.op);
+            bld.sop1(aco_opcode::s_mov_b64, it->second.def, Operand(it->second.op.physReg(), s2));
          else if (it->second.def.getTemp().type() == RegType::sgpr)
             ctx->instructions.emplace_back(std::move(create_s_mov(it->second.def, it->second.op)));
          else
