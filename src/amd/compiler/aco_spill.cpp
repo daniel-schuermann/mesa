@@ -1078,7 +1078,8 @@ void process_block(spill_ctx& ctx, unsigned block_idx, std::unique_ptr<Block>& b
                for (std::pair<Temp, uint32_t> pair : local_next_use_distance[idx]) {
                   bool can_rematerialize = ctx.remat.count(pair.first);
                   if (pair.first.type() == vgpr &&
-                      (pair.second > distance || (can_rematerialize && !do_rematerialize)) &&
+                      ((pair.second > distance && can_rematerialize == do_rematerialize) ||
+                       (can_rematerialize && !do_rematerialize && pair.second > idx)) &&
                       current_spills.find(pair.first) == current_spills.end() &&
                       ctx.spills_exit[block_idx].find(pair.first) == ctx.spills_exit[block_idx].end()) {
                      to_spill = pair.first;
@@ -1090,7 +1091,8 @@ void process_block(spill_ctx& ctx, unsigned block_idx, std::unique_ptr<Block>& b
                for (std::pair<Temp, uint32_t> pair : local_next_use_distance[idx]) {
                   bool can_rematerialize = ctx.remat.count(pair.first);
                   if (pair.first.type() == sgpr &&
-                      (pair.second > distance || (can_rematerialize && !do_rematerialize)) &&
+                      ((pair.second > distance && can_rematerialize == do_rematerialize) ||
+                       (can_rematerialize && !do_rematerialize && pair.second > idx)) &&
                       current_spills.find(pair.first) == current_spills.end() &&
                       ctx.spills_exit[block_idx].find(pair.first) == ctx.spills_exit[block_idx].end()) {
                      to_spill = pair.first;
@@ -1100,7 +1102,7 @@ void process_block(spill_ctx& ctx, unsigned block_idx, std::unique_ptr<Block>& b
                }
             }
 
-            assert(distance != 0);
+            assert(distance != 0 && distance > idx);
             uint32_t spill_id = ctx.allocate_spill_id(to_spill.regClass());
 
             /* add interferences with currently spilled variables */
