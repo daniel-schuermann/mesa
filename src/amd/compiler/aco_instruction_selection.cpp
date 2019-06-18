@@ -5980,19 +5980,27 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    append_logical_start(ctx->block);
    visit_cf_list(ctx, &loop->body);
 
-   if (!ctx->cf_info.has_branch && !ctx->cf_info.parent_loop.has_divergent_branch) {
+   if (!ctx->cf_info.has_branch) {
       append_logical_end(ctx->block);
-      add_edge(ctx->block, loop_entry);
+      if (!ctx->cf_info.parent_loop.has_divergent_branch)
+         add_edge(ctx->block, loop_entry);
+      else
+         add_linear_edge(ctx->block, loop_entry);
       ctx->block->kind |= (block_kind_continue | block_kind_uniform);
       bld.reset(ctx->block);
       bld.branch(aco_opcode::p_branch, loop_entry);
-   } else {
+   }
+
+   if (ctx->cf_info.has_branch || ctx->cf_info.parent_loop.has_divergent_branch) {
       /* fixup phis in loop header */
+      bool linear = ctx->cf_info.has_branch;
+      bool logical = ctx->cf_info.has_branch || ctx->cf_info.parent_loop.has_divergent_branch;
       for (auto&& instr : loop_entry->instructions) {
-         if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi) {
+         if ((logical && instr->opcode == aco_opcode::p_phi) ||
+             (linear && instr->opcode == aco_opcode::p_linear_phi)) {
             /* the last operand should be the one that needs to be removed */
             instr->num_operands--;
-         } else {
+         } else if (!is_phi(instr)) {
             break;
          }
       }
