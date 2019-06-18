@@ -1172,25 +1172,21 @@ void spill_block(spill_ctx& ctx, unsigned block_idx)
 
    std::map<Temp, uint32_t> current_spills = ctx.spills_entry[block_idx];
 
-   /* remove spills which are not needed in this block */
-   std::map<Temp, uint32_t>::iterator spill = current_spills.begin();
-   while (spill != current_spills.end()) {
-      if (ctx.next_use_distances_start[block_idx][spill->first].first > block_idx) {
-         ctx.spills_exit[block_idx].insert(*spill);
-         spill = current_spills.erase(spill);
-      } else {
-         ++spill;
-      }
+   /* check conditions to process this block */
+   bool process = block->vgpr_demand - spilled_vgprs > ctx.target_vgpr ||
+                  block->sgpr_demand - spilled_sgprs > ctx.target_sgpr ||
+                  !ctx.renames[block_idx].empty() ||
+                  ctx.remat_use_count.size();
+
+   std::map<Temp, uint32_t>::iterator it = current_spills.begin();
+   while (!process && it != current_spills.end()) {
+      if (ctx.next_use_distances_start[block_idx][it->first].first == block_idx)
+         process = true;
+      ++it;
    }
 
-   /* conditions to process this block */
-   if (!current_spills.empty() ||
-       block->vgpr_demand - spilled_vgprs > ctx.target_vgpr ||
-       block->sgpr_demand - spilled_sgprs > ctx.target_sgpr ||
-       !ctx.renames[block_idx].empty() ||
-       ctx.remat_use_count.size()) {
+   if (process)
       process_block(ctx, block_idx, block, current_spills, spilled_sgprs, spilled_vgprs);
-   }
 
    /* check if the next block leaves the current loop */
    if (block->loop_nest_depth == 0 || ctx.program->blocks[block_idx + 1]->loop_nest_depth >= block->loop_nest_depth)
@@ -1272,6 +1268,10 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
    /* first, handle affinities: just merge all interferences into both spill ids */
    for (std::pair<uint32_t, uint32_t> pair : ctx.affinities) {
       assert(pair.first != pair.second);
+      for (uint32_t id : ctx.interferences[pair.first].second)
+         ctx.interferences[id].second.insert(pair.second);
+      for (uint32_t id : ctx.interferences[pair.second].second)
+         ctx.interferences[id].second.insert(pair.first);
       ctx.interferences[pair.first].second.insert(ctx.interferences[pair.second].second.begin(), ctx.interferences[pair.second].second.end());
       ctx.interferences[pair.second].second.insert(ctx.interferences[pair.first].second.begin(), ctx.interferences[pair.first].second.end());
    }
@@ -1298,7 +1298,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
          for (unsigned i = slot_idx; i < slot_idx + sizeOf(ctx.interferences[id].first); i++) {
             if (i == spill_slot_interferences.size())
                spill_slot_interferences.emplace_back(std::set<uint32_t>());
-            if (spill_slot_interferences[i].find(id) != spill_slot_interferences[i].end()) {
+            if (spill_slot_interferences[i].find(id) != spill_slot_interferences[i].end() || i / 64 != slot_idx / 64) {
                interferes = true;
                break;
             }
@@ -1356,6 +1356,14 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
 
    for (unsigned id = 0; id < is_assigned.size(); id++)
       assert(is_assigned[id] || !ctx.reload_count[id]);
+
+   for (std::pair<uint32_t, uint32_t> pair : ctx.affinities) {
+      assert(typeOf(ctx.interferences[pair.first].first) == typeOf(ctx.interferences[pair.second].first));
+      if (typeOf(ctx.interferences[pair.first].first) == sgpr)
+         assert(sgpr_slot[pair.first] == sgpr_slot[pair.second]);
+      else
+         assert(vgpr_slot[pair.first] == vgpr_slot[pair.second]);
+   }
 
    /* hope, we didn't mess up */
    std::vector<Temp> vgpr_spill_temps((spill_slot_interferences.size() + 63) / 64);
