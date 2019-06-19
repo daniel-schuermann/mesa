@@ -346,6 +346,29 @@ void to_VOP3(opt_ctx& ctx, aco_ptr<Instruction>& instr)
       instr->getDefinition(i) = tmp->getDefinition(i);
 }
 
+/* only covers special cases */
+bool can_accept_constant(aco_ptr<Instruction>& instr, unsigned operand)
+{
+   switch (instr->opcode) {
+   case aco_opcode::v_interp_p2_f32:
+   case aco_opcode::v_mac_f32:
+   case aco_opcode::v_writelane_b32:
+      return operand != 2;
+   case aco_opcode::s_addk_i32:
+   case aco_opcode::s_mulk_i32:
+   case aco_opcode::p_wqm:
+      return operand != 0;
+   default:
+      if ((instr->format == Format::MUBUF ||
+           instr->format == Format::MIMG) &&
+          instr->num_definitions == 1 &&
+          instr->num_operands == 4) {
+         return operand != 3;
+      }
+      return true;
+   }
+}
+
 void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 {
 
@@ -392,7 +415,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
                break;
             }
          }
-         if ((info.is_constant() || (info.is_literal() && instr->format == Format::PSEUDO)) && !instr->getOperand(i).isFixed()) {
+         if ((info.is_constant() || (info.is_literal() && instr->format == Format::PSEUDO)) && !instr->getOperand(i).isFixed() && can_accept_constant(instr, i)) {
             instr->getOperand(i) = Operand(info.val);
             continue;
          }
@@ -420,7 +443,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             static_cast<VOP3A_instruction*>(instr.get())->neg[i] = true;
             continue;
          }
-         if (info.is_constant()) {
+         if (info.is_constant() && can_accept_constant(instr, i)) {
             assert(i != 2 || instr->opcode != aco_opcode::v_cndmask_b32);
             if (i == 0) {
                instr->getOperand(i) = Operand(info.val);
