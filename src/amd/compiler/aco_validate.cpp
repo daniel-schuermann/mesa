@@ -266,7 +266,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
    #else
    static int should_validate_ra = -1;
    if (should_validate_ra < 0)
-      should_validate_ra = env_var_as_boolean("ACO_VALIDATE_RA", true);
+      should_validate_ra = env_var_as_boolean("ACO_VALIDATE_RA", false);
    if (!should_validate_ra)
       return false;
    #endif
