@@ -1274,6 +1274,9 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
          ctx.interferences[id].second.insert(pair.first);
       ctx.interferences[pair.first].second.insert(ctx.interferences[pair.second].second.begin(), ctx.interferences[pair.second].second.end());
       ctx.interferences[pair.second].second.insert(ctx.interferences[pair.first].second.begin(), ctx.interferences[pair.first].second.end());
+
+      ctx.reload_count[pair.first] += ctx.reload_count[pair.second];
+      ctx.reload_count[pair.second] = ctx.reload_count[pair.first];
    }
    for (uint32_t i = 0; i < ctx.interferences.size(); i++)
       for (uint32_t id : ctx.interferences[i].second)
@@ -1358,6 +1361,10 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
       assert(is_assigned[id] || !ctx.reload_count[id]);
 
    for (std::pair<uint32_t, uint32_t> pair : ctx.affinities) {
+      assert(is_assigned[pair.first] == is_assigned[pair.second]);
+      if (!is_assigned[pair.first])
+         continue;
+      assert(ctx.reload_count[pair.first] == ctx.reload_count[pair.second]);
       assert(typeOf(ctx.interferences[pair.first].first) == typeOf(ctx.interferences[pair.second].first));
       if (typeOf(ctx.interferences[pair.first].first) == sgpr)
          assert(sgpr_slot[pair.first] == sgpr_slot[pair.second]);
