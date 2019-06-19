@@ -636,7 +636,8 @@ void lower_to_hw_instr(Program* program)
             }
             case aco_opcode::p_wqm:
             {
-               assert(instr->getOperand(0).physReg() == instr->getDefinition(0).physReg());
+               if (!instr->getOperand(0).isUndefined())
+                  assert(instr->getOperand(0).physReg() == instr->getDefinition(0).physReg());
                break;
             }
             case aco_opcode::p_as_uniform:
