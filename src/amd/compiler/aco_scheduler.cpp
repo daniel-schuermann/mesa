@@ -167,10 +167,16 @@ bool can_move_instr(aco_ptr<Instruction>& instr, Instruction* current, int movin
    switch (instr->opcode) {
    case aco_opcode::p_memory_barrier_atomic:
       return !(interaction & barrier_atomic);
+   /* For now, buffer and image barriers are treated the same. this is because of
+    * dEQP-VK.memory_model.message_passing.core11.u32.coherent.fence_fence.atomicwrite.device.payload_nonlocal.buffer.guard_nonlocal.image.comp
+    * which seems to use an image load to determine if the result of a buffer load is valid. So the ordering of the two loads is important.
+    * I /think/ we should probably eventually expand the meaning of a buffer barrier so that all buffer operations before it, must stay before it
+    * and that both image and buffer operations after it, must stay after it. We should also do the same for image barriers.
+    * Or perhaps the problem is that we don't have a combined barrier instruction for both buffers and images, but the CTS test expects us to?
+    * Either way, this solution should work. */
    case aco_opcode::p_memory_barrier_buffer:
-      return !(interaction & barrier_buffer);
    case aco_opcode::p_memory_barrier_image:
-      return !(interaction & barrier_image);
+      return !(interaction & (barrier_image | barrier_buffer));
    case aco_opcode::p_memory_barrier_shared:
       return !(interaction & barrier_shared);
    case aco_opcode::p_memory_barrier_all:
