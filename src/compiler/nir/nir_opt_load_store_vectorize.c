@@ -729,7 +729,7 @@ vectorize_stores(nir_builder *b,
                  unsigned new_bit_size, unsigned new_num_components,
                  unsigned high_start)
 {
-   unsigned low_size = low->intrin->num_components * get_bit_size(low);
+   MAYBE_UNUSED unsigned low_size = low->intrin->num_components * get_bit_size(low);
 
    b->cursor = nir_before_instr(second->instr);
 
