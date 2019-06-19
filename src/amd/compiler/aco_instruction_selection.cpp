@@ -2118,8 +2118,8 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
       target = V_008DFC_SQ_EXP_MRT + index;
       col_format = (ctx->options->key.fs.col_format >> (4 * index)) & 0xf;
    }
-   bool is_int8 = (ctx->options->key.fs.is_int8 >> index) & 1;
-   bool is_int10 = (ctx->options->key.fs.is_int10 >> index) & 1;
+   MAYBE_UNUSED bool is_int8 = (ctx->options->key.fs.is_int8 >> index) & 1;
+   MAYBE_UNUSED bool is_int10 = (ctx->options->key.fs.is_int10 >> index) & 1;
    assert(!is_int8 && !is_int10);
 
    switch (col_format)
@@ -3016,7 +3016,7 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
    Temp src0 = get_ssa_temp(ctx, instr->src[1].ssa);
    enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
    bool is_array = glsl_sampler_type_is_array(type);
-   bool add_frag_pos = (dim == GLSL_SAMPLER_DIM_SUBPASS || dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
+   MAYBE_UNUSED bool add_frag_pos = (dim == GLSL_SAMPLER_DIM_SUBPASS || dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
    assert(!add_frag_pos && "Input attachments should be lowered.");
    bool is_ms = (dim == GLSL_SAMPLER_DIM_MS || dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
    bool gfx9_1d = ctx->options->chip_class >= GFX9 && dim == GLSL_SAMPLER_DIM_1D;
@@ -3926,7 +3926,7 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
       bool aligned8 = bytes_read % 8 == 0 && align % 8 == 0;
       bool aligned16 = bytes_read % 16 == 0 && align % 16 == 0;
 
-      aco_opcode op;
+      aco_opcode op = aco_opcode::last_opcode;
       unsigned size = 0;
       if (todo >= 16 && aligned16) {
          op = aco_opcode::ds_read_b128;
@@ -3989,7 +3989,7 @@ void ds_write_helper(isel_context *ctx, Operand m, Temp address, Temp data, unsi
       bool aligned8 = bytes_written % 8 == 0 && align % 8 == 0;
       bool aligned16 = bytes_written % 16 == 0 && align % 16 == 0;
 
-      aco_opcode op;
+      aco_opcode op = aco_opcode::last_opcode;
       unsigned size = 0;
       if (todo >= 16 && aligned16) {
          op = aco_opcode::ds_write_b128;

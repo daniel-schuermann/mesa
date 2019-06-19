@@ -379,7 +379,7 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
       loop_info& info = ctx.loop.back();
       unsigned num_exec_masks = ctx.loop.back().num_exec_masks;
 
-      for (Block* pred : preds)
+      for (MAYBE_UNUSED Block* pred : preds)
          assert(ctx.info[pred->index].exec.size() >= num_exec_masks);
 
       /* fill the loop header phis */
