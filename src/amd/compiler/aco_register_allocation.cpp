@@ -712,7 +712,7 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
       }
 
       /* count operands in wrong positions */
-      for (unsigned j = 0, offset = 0; j < instr->num_operands; j++, offset += instr->getOperand(j).size()) {
+      for (unsigned j = 0, offset = 0; j < instr->num_operands; offset += instr->getOperand(j).size(), j++) {
          if (j == i ||
              !instr->getOperand(j).isTemp() ||
              instr->getOperand(j).getTemp().type() != rc.type())
