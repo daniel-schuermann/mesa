@@ -67,14 +67,14 @@ void setup_reduce_temp(Program* program)
 
       /* insert p_end_linear_vgpr after the outermost loop */
       if (reduceTmp_in_loop && block->loop_nest_depth == 0) {
-         assert(inserted_at == last_top_level_block_idx);
+         assert(inserted_at == (int)last_top_level_block_idx);
 
          aco_ptr<Instruction> end{create_instruction<Instruction>(aco_opcode::p_end_linear_vgpr, Format::PSEUDO, vtmp_in_loop ? 2 : 1, 0)};
          end->getOperand(0) = Operand(reduceTmp);
          if (vtmp_in_loop)
             end->getOperand(1) = Operand(vtmp);
          /* insert after the phis of the loop exit block */
-         std::vector<aco_ptr<Instruction>>::iterator it;
+         std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
          while ((*it)->opcode == aco_opcode::p_linear_phi || (*it)->opcode == aco_opcode::p_phi)
             ++it;
          block->instructions.insert(it, std::move(end));
