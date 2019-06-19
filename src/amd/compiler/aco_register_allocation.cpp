@@ -1314,18 +1314,21 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          /* handle definitions which must have the same register as an operand */
          if (instr->opcode == aco_opcode::v_interp_p2_f32 ||
              instr->opcode == aco_opcode::v_mac_f32 ||
-             instr->opcode == aco_opcode::v_writelane_b32)
-            instr->getDefinition(0).setFixed(instr->getOperand(2).physReg());
-         else if (instr->opcode == aco_opcode::s_addk_i32 ||
-                  instr->opcode == aco_opcode::s_mulk_i32)
-            instr->getDefinition(0).setFixed(instr->getOperand(0).physReg());
-         else if (instr->opcode == aco_opcode::p_wqm)
-            instr->getDefinition(0).setFixed(instr->getOperand(0).physReg());
-         else if ((instr->format == Format::MUBUF ||
+             instr->opcode == aco_opcode::v_writelane_b32) {
+            if (!instr->getOperand(2).isUndefined())
+               instr->getDefinition(0).setFixed(instr->getOperand(2).physReg());
+         } else if (instr->opcode == aco_opcode::s_addk_i32 ||
+                  instr->opcode == aco_opcode::s_mulk_i32 ||
+                  instr->opcode == aco_opcode::p_wqm) {
+            if (!instr->getOperand(0).isUndefined())
+               instr->getDefinition(0).setFixed(instr->getOperand(0).physReg());
+         } else if ((instr->format == Format::MUBUF ||
                    instr->format == Format::MIMG) &&
                   instr->num_definitions == 1 &&
-                  instr->num_operands == 4)
-            instr->getDefinition(0).setFixed(instr->getOperand(3).physReg());
+                  instr->num_operands == 4) {
+            if (!instr->getOperand(3).isUndefined())
+               instr->getDefinition(0).setFixed(instr->getOperand(3).physReg());
+         }
 
          /* handle definitions */
          for (unsigned i = 0; i < instr->num_definitions; ++i) {
