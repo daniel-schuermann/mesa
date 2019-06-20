@@ -136,9 +136,9 @@ Temp get_ssa_temp(struct isel_context *ctx, nir_ssa_def *def)
 
 Temp emit_v_add32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_out=false)
 {
-   if (!b.isTemp() || typeOf(b.regClass()) != RegType::vgpr)
+   if (!b.isTemp() || b.regClass().type() != RegType::vgpr)
       std::swap(a, b);
-   assert(b.isTemp() && typeOf(b.regClass()) == RegType::vgpr); // in case two SGPRs are given
+   assert(b.isTemp() && b.regClass().type() == RegType::vgpr); // in case two SGPRs are given
 
    Builder bld(ctx->program, ctx->block);
    if (ctx->options->chip_class < GFX9 || carry_out) {
@@ -155,10 +155,10 @@ Temp emit_v_sub32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_
    if (!borrow.isUndefined() || ctx->options->chip_class < GFX9)
       carry_out = true;
 
-   bool reverse = !b.isTemp() || typeOf(b.regClass()) != RegType::vgpr;
+   bool reverse = !b.isTemp() || b.regClass().type() != RegType::vgpr;
    if (reverse)
       std::swap(a, b);
-   assert(b.isTemp() && typeOf(b.regClass()) == RegType::vgpr);
+   assert(b.isTemp() && b.regClass().type() == RegType::vgpr);
 
    aco_opcode op;
    Temp carry;
@@ -226,7 +226,7 @@ Temp emit_wqm(isel_context *ctx, Temp src, Temp dst=Temp(0, s1))
 Temp as_vgpr(isel_context *ctx, Temp val)
 {
    if (val.type() == RegType::sgpr) {
-      Temp tmp = {ctx->program->allocateId(), getRegClass(vgpr, val.size())};
+      Temp tmp = {ctx->program->allocateId(), RegClass(vgpr, val.size())};
       emit_v_mov(ctx, val, tmp);
       return tmp;
    }
@@ -253,8 +253,8 @@ Temp emit_extract_vector(isel_context* ctx, Temp src, uint32_t idx, RegClass dst
    if (it != ctx->allocated_vec.end()) {
       if (it->second[idx].regClass() == dst_rc) {
          return it->second[idx];
-      } else if (sizeOf(dst_rc) == sizeOf(it->second[idx].regClass())) {
-         assert(typeOf(dst_rc) == vgpr && it->second[idx].type() == sgpr);
+      } else if (dst_rc.size() == it->second[idx].regClass().size()) {
+         assert(dst_rc.type() == vgpr && it->second[idx].type() == sgpr);
          Temp dst = {ctx->program->allocateId(), dst_rc};
          emit_v_mov(ctx, it->second[idx], dst);
          return dst;
@@ -262,7 +262,7 @@ Temp emit_extract_vector(isel_context* ctx, Temp src, uint32_t idx, RegClass dst
    }
 
    Temp dst = {ctx->program->allocateId(), dst_rc};
-   if (src.size() == sizeOf(dst_rc)) {
+   if (src.size() == dst_rc.size()) {
       assert(idx == 0);
       emit_v_mov(ctx, src, dst);
    } else {
@@ -281,7 +281,7 @@ void emit_split_vector(isel_context* ctx, Temp vec_src, unsigned num_components)
    split->getOperand(0) = Operand(vec_src);
    std::array<Temp,4> elems;
    for (unsigned i = 0; i < num_components; i++) {
-      elems[i] = {ctx->program->allocateId(), getRegClass(vec_src.type(), vec_src.size() / num_components)};
+      elems[i] = {ctx->program->allocateId(), RegClass(vec_src.type(), vec_src.size() / num_components)};
       split->getDefinition(i) = Definition(elems[i]);
    }
    ctx->block->instructions.emplace_back(std::move(split));
@@ -314,12 +314,12 @@ void expand_vector(isel_context* ctx, Temp vec_src, Temp dst, unsigned num_compo
    unsigned k = 0;
    for (unsigned i = 0; i < num_components; i++) {
       if (mask & (1 << i)) {
-         Temp src = emit_extract_vector(ctx, vec_src, k++, getRegClass(vec_src.type(), component_size));
+         Temp src = emit_extract_vector(ctx, vec_src, k++, RegClass(vec_src.type(), component_size));
          if (dst.type() == sgpr)
             src = bld.as_uniform(src);
          vec->getOperand(i) = Operand(src);
       } else {
-         vec->getOperand(i) = Operand(getRegClass(dst.type(), 1));
+         vec->getOperand(i) = Operand(RegClass(dst.type(), 1));
       }
       elems[i] = vec->getOperand(i).getTemp();
    }
@@ -360,7 +360,7 @@ Temp get_alu_src(struct isel_context *ctx, nir_alu_src src)
 
    Temp vec = get_ssa_temp(ctx, src.src.ssa);
    assert(vec.size() % src.src.ssa->num_components == 0);
-   return emit_extract_vector(ctx, vec, src.swizzle[0], getRegClass(vec.type(), vec.size() / src.src.ssa->num_components));
+   return emit_extract_vector(ctx, vec, src.swizzle[0], RegClass(vec.type(), vec.size() / src.src.ssa->num_components));
 }
 
 Temp convert_pointer_to_64_bit(isel_context *ctx, Temp ptr)
@@ -402,7 +402,7 @@ void emit_vop2_instruction(isel_context *ctx, nir_alu_instr *instr, aco_opcode o
          bld.vop2_e64(op, Definition(dst), src0, src1);
          return;
       } else {
-         Temp mov_dst = Temp(ctx->program->allocateId(), getRegClass(vgpr, src1.size()));
+         Temp mov_dst = Temp(ctx->program->allocateId(), RegClass(vgpr, src1.size()));
          emit_v_mov(ctx, src1, mov_dst);
          src1 = mov_dst;
       }
@@ -991,8 +991,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          assert(src0.size() == 2 && src1.size() == 2);
          emit_split_vector(ctx, src0, 2);
          emit_split_vector(ctx, src1, 2);
-         Temp src00 = emit_extract_vector(ctx, src0, 0, getRegClass(src0.type(), 1));
-         Temp src10 = emit_extract_vector(ctx, src1, 0, getRegClass(src1.type(), 1));
+         Temp src00 = emit_extract_vector(ctx, src0, 0, RegClass(src0.type(), 1));
+         Temp src10 = emit_extract_vector(ctx, src1, 0, RegClass(src1.type(), 1));
 
          Temp dst0 = bld.tmp(v1), dst1 = bld.tmp(v1);
          Temp carry = emit_v_add32(ctx, dst0, Operand(src00), Operand(src10), true);
@@ -3063,7 +3063,7 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
    aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, coords.size(), 1)};
    for (unsigned i = 0; i < coords.size(); i++)
       vec->getOperand(i) = coords[i];
-   Temp res = {ctx->program->allocateId(), getRegClass(vgpr, coords.size())};
+   Temp res = {ctx->program->allocateId(), RegClass(vgpr, coords.size())};
    vec->getDefinition(0) = Definition(res);
    ctx->block->instructions.emplace_back(std::move(vec));
    return res;
@@ -3109,7 +3109,7 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
       if (num_channels == instr->dest.ssa.num_components && dst.type() == vgpr)
          tmp = dst;
       else
-         tmp = {ctx->program->allocateId(), getRegClass(RegType::vgpr, num_channels)};
+         tmp = {ctx->program->allocateId(), RegClass(RegType::vgpr, num_channels)};
       load->getDefinition(0) = Definition(tmp);
       load->idxen = true;
       load->barrier = barrier_image;
@@ -3129,7 +3129,7 @@ void visit_image_load(isel_context *ctx, nir_intrinsic_instr *instr)
    if (num_components == instr->dest.ssa.num_components && dst.type() == vgpr)
       tmp = dst;
    else
-      tmp = {ctx->program->allocateId(), getRegClass(RegType::vgpr, num_components)};
+      tmp = {ctx->program->allocateId(), RegClass(RegType::vgpr, num_components)};
 
    aco_ptr<MIMG_instruction> load{create_instruction<MIMG_instruction>(aco_opcode::image_load, Format::MIMG, 2, 1)};
    load->getOperand(0) = Operand(coords);
@@ -3544,15 +3544,15 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
       if (count != instr->num_components) {
          aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, count, 1)};
          for (int i = 0; i < count; i++) {
-            Temp elem = emit_extract_vector(ctx, data, start + i, getRegClass(data.type(), 1));
+            Temp elem = emit_extract_vector(ctx, data, start + i, RegClass(data.type(), 1));
             vec->getOperand(i) = Operand(smem_nonfs ? bld.as_uniform(elem) : elem);
          }
-         write_data = {ctx->program->allocateId(), getRegClass(smem_nonfs ? sgpr : data.type(), count)};
+         write_data = {ctx->program->allocateId(), RegClass(smem_nonfs ? sgpr : data.type(), count)};
          vec->getDefinition(0) = Definition(write_data);
          ctx->block->instructions.emplace_back(std::move(vec));
       } else if (!smem && data.type() != vgpr) {
          assert(num_bytes % 4 == 0);
-         write_data = {ctx->program->allocateId(), getRegClass(vgpr, num_bytes / 4)};
+         write_data = {ctx->program->allocateId(), RegClass(vgpr, num_bytes / 4)};
          emit_v_mov(ctx, data, write_data);
       } else if (smem_nonfs && data.type() == vgpr) {
          assert(num_bytes % 4 == 0);
@@ -3820,7 +3820,7 @@ void visit_store_global(isel_context *ctx, nir_intrinsic_instr *instr)
          aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, count, 1)};
          for (int i = 0; i < count; i++)
             vec->getOperand(i) = Operand(emit_extract_vector(ctx, data, start + i, v1));
-         write_data = {ctx->program->allocateId(), getRegClass(vgpr, count)};
+         write_data = {ctx->program->allocateId(), RegClass(vgpr, count)};
          vec->getDefinition(0) = Definition(write_data);
          ctx->block->instructions.emplace_back(std::move(vec));
       }
@@ -3956,9 +3956,9 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
       assert(offset <= max_offset); /* bytes_read shouldn't be large enough for this to happen */
 
       if (op == aco_opcode::ds_read2_b32)
-         result[result_size++] = bld.ds(op, bld.def(getRegClass(vgpr, size)), address_offset, m, offset >> 2, (offset >> 2) + 1);
+         result[result_size++] = bld.ds(op, bld.def(RegClass(vgpr, size)), address_offset, m, offset >> 2, (offset >> 2) + 1);
       else
-         result[result_size++] = bld.ds(op, bld.def(getRegClass(vgpr, size)), address_offset, m, offset);
+         result[result_size++] = bld.ds(op, bld.def(RegClass(vgpr, size)), address_offset, m, offset);
       bytes_read += size * 4;
    }
 
@@ -3969,7 +3969,7 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
       vec->getDefinition(0) = Definition(dst);
       ctx->block->instructions.emplace_back(std::move(vec));
    } else {
-      Temp tmp{ctx->program->allocateId(), getRegClass(vgpr, dst.size())};
+      Temp tmp{ctx->program->allocateId(), RegClass(vgpr, dst.size())};
       vec->getDefinition(0) = Definition(tmp);
       ctx->block->instructions.emplace_back(std::move(vec));
 
@@ -4024,7 +4024,7 @@ void ds_write_helper(isel_context *ctx, Operand m, Temp address, Temp data, unsi
          Temp val1 = emit_extract_vector(ctx, data, (bytes_written >> 2) + 1, v1);
          bld.ds(op, address_offset, val0, val1, m, offset >> 2, (offset >> 2) + 1);
       } else {
-         Temp val = emit_extract_vector(ctx, data, bytes_written >> 2, getRegClass(vgpr, size));
+         Temp val = emit_extract_vector(ctx, data, bytes_written >> 2, RegClass(vgpr, size));
          bld.ds(op, address_offset, val, m, offset);
       }
 
@@ -4072,7 +4072,7 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
       if (count[i] == 0)
          continue;
 
-      Temp write_data = emit_extract_vector(ctx, data, start[i], getRegClass(vgpr, count[i]));
+      Temp write_data = emit_extract_vector(ctx, data, start[i], RegClass(vgpr, count[i]));
       ds_write_helper(ctx, m, address, write_data, offset, start[i] * elem_size_bytes, align);
    }
    return;
@@ -4345,7 +4345,7 @@ void emit_uniform_subgroup(isel_context *ctx, nir_intrinsic_instr *instr, Temp s
 {
    Builder bld(ctx->program, ctx->block);
    Definition dst(get_ssa_temp(ctx, &instr->dest.ssa));
-   if (typeOf(src.regClass()) == vgpr) {
+   if (src.regClass().type() == vgpr) {
       bld.pseudo(aco_opcode::p_as_uniform, dst, src);
    } else if (instr->dest.ssa.bit_size == 1 && src.regClass() == s2) {
       bld.sopc(aco_opcode::s_cmp_lg_u64, bld.scc(dst), Operand(0u), Operand(src));
@@ -4457,8 +4457,8 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       }
 
       /* sample_pos -= 0.5 */
-      Temp pos1 = bld.tmp(getRegClass(sample_pos.type(), 1));
-      Temp pos2 = bld.tmp(getRegClass(sample_pos.type(), 1));
+      Temp pos1 = bld.tmp(RegClass(sample_pos.type(), 1));
+      Temp pos2 = bld.tmp(RegClass(sample_pos.type(), 1));
       bld.pseudo(aco_opcode::p_split_vector, Definition(pos1), Definition(pos2), sample_pos);
       pos1 = bld.vop2_e64(aco_opcode::v_sub_f32, bld.def(v1), pos1, Operand(0x3f000000u));
       pos2 = bld.vop2_e64(aco_opcode::v_sub_f32, bld.def(v1), pos2, Operand(0x3f000000u));
@@ -4469,7 +4469,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_load_barycentric_at_offset: {
       Temp offset = get_ssa_temp(ctx, instr->src[0].ssa);
       emit_split_vector(ctx, offset, 2);
-      RegClass rc = getRegClass(offset.type(), 1);
+      RegClass rc = RegClass(offset.type(), 1);
       Temp pos1 = emit_extract_vector(ctx, offset, 0, rc);
       Temp pos2 = emit_extract_vector(ctx, offset, 1, rc);
       emit_interp_center(ctx, get_ssa_temp(ctx, &instr->dest.ssa), pos1, pos2);
@@ -4831,8 +4831,9 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
          reduce->getOperand(0) = Operand(src);
          // filled in by aco_reduce_assign.cpp, used internally as part of the
          // reduce sequence
-         reduce->getOperand(1) = Operand(dst.size() == 2 ? v2_linear : v1_linear);
-         reduce->getOperand(2) = Operand(v1_linear);
+         assert(dst.regClass() == v1 || dst.regClass() == v2);
+         reduce->getOperand(1) = Operand(dst.regClass().as_linear());
+         reduce->getOperand(2) = Operand(v1.as_linear());
 
          Temp tmp_dst = bld.tmp(dst.regClass());
          reduce->getDefinition(0) = Definition(tmp_dst);
@@ -4956,7 +4957,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_mbcnt_amd: {
       Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
       emit_split_vector(ctx, src, 2);
-      RegClass rc = getRegClass(src.type(), 1);
+      RegClass rc = RegClass(src.type(), 1);
       Temp mask_lo = bld.as_uniform(emit_extract_vector(ctx, src, 0, rc));
       Temp tmp = bld.vop3(aco_opcode::v_mbcnt_lo_u32_b32, bld.def(v1), mask_lo, Operand(0u));
       Temp mask_hi = bld.as_uniform(emit_extract_vector(ctx, src, 1, rc));
@@ -5169,7 +5170,7 @@ Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
    aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, coords.size(), 1)};
    for (unsigned i = 0; i < coords.size(); i++)
       vec->getOperand(i) = Operand(coord_vec[i]);
-   Temp res = {ctx->program->allocateId(), getRegClass(vgpr, coords.size())};
+   Temp res = {ctx->program->allocateId(), RegClass(vgpr, coords.size())};
    vec->getDefinition(0) = Definition(res);
    ctx->block->instructions.emplace_back(std::move(vec));
    return res;
@@ -5330,7 +5331,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       vec->getOperand(1) = instr->op == nir_texop_txf ? Operand((uint32_t) 0) : Operand((uint32_t) 0x3f000000);
       if (coords.size() > 1)
          vec->getOperand(2) = Operand(emit_extract_vector(ctx, coords, 1, v1));
-      coords = {ctx->program->allocateId(), getRegClass(RegType::vgpr, coords.size() + 1)};
+      coords = {ctx->program->allocateId(), RegClass(RegType::vgpr, coords.size() + 1)};
       vec->getDefinition(0) = Definition(coords);
       ctx->block->instructions.emplace_back(std::move(vec));
    }
@@ -5380,7 +5381,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    Temp tmp_dst = dst;
    if ((util_bitcount(dmask) != instr->dest.ssa.num_components && instr->op != nir_texop_tg4) ||
        tg4_integer_cube_workaround || dst.type() == sgpr || instr->op == nir_texop_samples_identical)
-      tmp_dst = Temp{ctx->program->allocateId(), getRegClass(vgpr, util_bitcount(dmask))};
+      tmp_dst = Temp{ctx->program->allocateId(), RegClass(vgpr, util_bitcount(dmask))};
 
    /* gather4 selects the component by dmask and always returns vec4 */
    if (instr->op == nir_texop_tg4) {
@@ -5559,7 +5560,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          size += args[i].size();
          vec->getOperand(i) = args[i];
       }
-      RegClass rc = getRegClass(vgpr, size);
+      RegClass rc = RegClass(vgpr, size);
       Temp tmp = Temp{ctx->program->allocateId(), rc};
       vec->getDefinition(0) = Definition(tmp);
       ctx->block->instructions.emplace_back(std::move(vec));
@@ -5592,7 +5593,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       if (last_bit == instr->dest.ssa.num_components && dst.type() == vgpr)
          tmp_dst = dst;
       else
-         tmp_dst = {ctx->program->allocateId(), getRegClass(vgpr, last_bit)};
+         tmp_dst = {ctx->program->allocateId(), RegClass(vgpr, last_bit)};
 
       aco_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 3, 1)};
       mubuf->getOperand(0) = Operand(coords);
@@ -5780,7 +5781,7 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
       if (can_scalarize) {
          unsigned num_components = instr->dest.ssa.num_components;
          assert(dst.size() % num_components == 0);
-         RegClass rc = getRegClass(dst.type(), dst.size() / num_components);
+         RegClass rc = RegClass(dst.type(), dst.size() / num_components);
 
          aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, num_components, 1)};
          for (unsigned k = 0; k < num_components; k++) {
