@@ -21,9 +21,9 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    case Format::SOP2: {
       uint32_t encoding = (0b10 << 30);
       encoding |= opcode_infos[(int)instr->opcode].opcode << 23;
-      encoding |= instr->definitionCount() ? instr->getDefinition(0).physReg().reg << 16 : 0;
-      encoding |= instr->operandCount() >= 2 ? instr->getOperand(1).physReg().reg << 8 : 0;
-      encoding |= instr->operandCount() ? instr->getOperand(0).physReg().reg : 0;
+      encoding |= instr->definitionCount() ? instr->getDefinition(0).physReg() << 16 : 0;
+      encoding |= instr->operandCount() >= 2 ? instr->getOperand(1).physReg() << 8 : 0;
+      encoding |= instr->operandCount() ? instr->getOperand(0).physReg() : 0;
       out.push_back(encoding);
       break;
    }
@@ -32,26 +32,26 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       encoding |= opcode_infos[(int)instr->opcode].opcode << 23;
       encoding |=
          instr->definitionCount() && !(instr->getDefinition(0).physReg() == scc) ?
-         instr->getDefinition(0).physReg().reg << 16 :
+         instr->getDefinition(0).physReg() << 16 :
          instr->operandCount() && !(instr->getOperand(0).physReg() == scc) ?
-         instr->getOperand(0).physReg().reg << 16 : 0;
+         instr->getOperand(0).physReg() << 16 : 0;
       encoding |= static_cast<SOPK_instruction*>(instr)->imm;
       out.push_back(encoding);
       break;
    }
    case Format::SOP1: {
       uint32_t encoding = (0b101111101 << 23);
-      encoding |= instr->definitionCount() ? instr->getDefinition(0).physReg().reg << 16 : 0;
+      encoding |= instr->definitionCount() ? instr->getDefinition(0).physReg() << 16 : 0;
       encoding |= opcode_infos[(int)instr->opcode].opcode << 8;
-      encoding |= instr->operandCount() ? instr->getOperand(0).physReg().reg : 0;
+      encoding |= instr->operandCount() ? instr->getOperand(0).physReg() : 0;
       out.push_back(encoding);
       break;
    }
    case Format::SOPC: {
       uint32_t encoding = (0b101111110 << 23);
       encoding |= opcode_infos[(int)instr->opcode].opcode << 16;
-      encoding |= instr->operandCount() == 2 ? instr->getOperand(1).physReg().reg << 8 : 0;
-      encoding |= instr->operandCount() ? instr->getOperand(0).physReg().reg : 0;
+      encoding |= instr->operandCount() == 2 ? instr->getOperand(1).physReg() << 8 : 0;
+      encoding |= instr->operandCount() ? instr->getOperand(0).physReg() : 0;
       out.push_back(encoding);
       break;
    }
@@ -76,14 +76,14 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       encoding |= soe ? 1 << 14 : 0;
       encoding |= smem->glc ? 1 << 16 : 0;
       if (instr->num_definitions || instr->num_operands >= 3)
-         encoding |= (instr->num_definitions ? instr->getDefinition(0).physReg().reg : instr->getOperand(2).physReg().reg) << 6;
+         encoding |= (instr->num_definitions ? instr->getDefinition(0).physReg() : instr->getOperand(2).physReg().reg) << 6;
       if (instr->num_operands >= 1)
-         encoding |= instr->getOperand(0).physReg().reg >> 1;
+         encoding |= instr->getOperand(0).physReg() >> 1;
       out.push_back(encoding);
       encoding = 0;
       if (instr->num_operands >= 2)
          encoding |= instr->getOperand(1).isConstant() ? instr->getOperand(1).constantValue() : instr->getOperand(1).physReg().reg;
-      encoding |= soe ? instr->getOperand(instr->num_operands - 1).physReg().reg << 25 : 0;
+      encoding |= soe ? instr->getOperand(instr->num_operands - 1).physReg() << 25 : 0;
       out.push_back(encoding);
       return;
    }
@@ -132,11 +132,11 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       encoding |= (0xFFFF & ds->offset0);
       out.push_back(encoding);
       encoding = 0;
-      unsigned reg = instr->num_definitions ? instr->getDefinition(0).physReg().reg : 0;
+      unsigned reg = instr->num_definitions ? instr->getDefinition(0).physReg() : 0;
       encoding |= (0xFF & reg) << 24;
-      reg = instr->num_operands >= 3 && !(instr->getOperand(2).physReg() == m0)  ? instr->getOperand(2).physReg().reg : 0;
+      reg = instr->num_operands >= 3 && !(instr->getOperand(2).physReg() == m0)  ? instr->getOperand(2).physReg() : 0;
       encoding |= (0xFF & reg) << 16;
-      reg = instr->num_operands >= 2 && !(instr->getOperand(1).physReg() == m0) ? instr->getOperand(1).physReg().reg : 0;
+      reg = instr->num_operands >= 2 && !(instr->getOperand(1).physReg() == m0) ? instr->getOperand(1).physReg() : 0;
       encoding |= (0xFF & reg) << 8;
       encoding |= (0xFF & instr->getOperand(0).physReg().reg);
       out.push_back(encoding);
@@ -154,10 +154,10 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       encoding |= 0x0FFF & mubuf->offset;
       out.push_back(encoding);
       encoding = 0;
-      encoding |= instr->getOperand(2).physReg().reg << 24;
+      encoding |= instr->getOperand(2).physReg() << 24;
       encoding |= (mubuf->tfe ? 1 : 0) << 23;
-      encoding |= (instr->getOperand(1).physReg().reg >> 2) << 16;
-      unsigned reg = instr->num_operands > 3 ? instr->getOperand(3).physReg().reg : instr->getDefinition(0).physReg().reg;
+      encoding |= (instr->getOperand(1).physReg() >> 2) << 16;
+      unsigned reg = instr->num_operands > 3 ? instr->getOperand(3).physReg() : instr->getDefinition(0).physReg().reg;
       encoding |= (0xFF & reg) << 8;
       encoding |= (0xFF & instr->getOperand(0).physReg().reg);
       out.push_back(encoding);
@@ -182,9 +182,9 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       } else if (instr->num_operands == 4) {
          encoding |= (0xFF & instr->getOperand(3).physReg().reg) << 8; /* VDATA */
       }
-      encoding |= (0x1F & (instr->getOperand(1).physReg().reg >> 2)) << 16; /* T# (resource) */
+      encoding |= (0x1F & (instr->getOperand(1).physReg() >> 2)) << 16; /* T# (resource) */
       if (instr->num_operands > 2)
-         encoding |= (0x1F & (instr->getOperand(2).physReg().reg >> 2)) << 21; /* sampler */
+         encoding |= (0x1F & (instr->getOperand(2).physReg() >> 2)) << 21; /* sampler */
       // TODO VEGA: D16
       out.push_back(encoding);
       break;
@@ -210,9 +210,9 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       else
          encoding |= (0xFF & instr->getOperand(2).physReg().reg) << 8;
       if (!instr->getOperand(1).isUndefined()) {
-         assert(instr->getOperand(1).physReg().reg != 0x7f);
+         assert(instr->getOperand(1).physReg() != 0x7f);
          assert(instr->format != Format::FLAT);
-         encoding |= instr->getOperand(1).physReg().reg << 16;
+         encoding |= instr->getOperand(1).physReg() << 16;
       } else if (instr->format != Format::FLAT) {
          encoding |= 0x7F << 16;
       }
@@ -262,12 +262,12 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
          for (unsigned i = 0; i < 3; i++)
             encoding |= vop3->abs[i] << (8+i);
          if (instr->num_definitions == 2)
-            encoding |= instr->getDefinition(1).physReg().reg << 8;
+            encoding |= instr->getDefinition(1).physReg() << 8;
          encoding |= (0xFF & instr->getDefinition(0).physReg().reg);
          out.push_back(encoding);
          encoding = 0;
          for (unsigned i = 0; i < instr->operandCount(); i++)
-            encoding |= instr->getOperand(i).physReg().reg << (i * 9);
+            encoding |= instr->getOperand(i).physReg() << (i * 9);
          encoding |= vop3->omod << 27;
          for (unsigned i = 0; i < 3; i++)
             encoding |= vop3->neg[i] << (29+i);

@@ -216,32 +216,25 @@ private:
    RegClass reg_class;
 };
 
-struct PhysReg
-{
-   unsigned reg;
-   bool operator==(const PhysReg& rhs) const
-   {
-      return reg == rhs.reg;
-   }
-   bool operator<(const PhysReg& rhs) const
-   {
-      return reg < rhs.reg;
-   }
+/**
+ * PhysReg
+ * Represents the physical register for each
+ * Operand and Definition.
+ */
+struct PhysReg {
+   PhysReg() = default;
+   explicit constexpr PhysReg(unsigned r) : reg(r) {}
+   operator unsigned() const { return reg; }
+
+   uint16_t reg;
 };
 
-static inline PhysReg fixed_vgpr(unsigned idx)
-{
-   return PhysReg{idx + 256};
-}
-
-static inline PhysReg fixed_sgpr(unsigned idx)
-{
-   return PhysReg{idx};
-}
-
+/* helper expressions for special registers */
 static constexpr PhysReg m0{124};
 static constexpr PhysReg vcc{106};
 static constexpr PhysReg exec{126};
+static constexpr PhysReg exec_lo{126};
+static constexpr PhysReg exec_hi{127};
 static constexpr PhysReg scc{253};
 
 /**
@@ -383,7 +376,7 @@ public:
 
    void setFixed(PhysReg reg) noexcept
    {
-      control_[1] = reg.reg != (unsigned)-1;
+      control_[1] = reg != (unsigned)-1;
       reg_ = reg;
    }
 
@@ -394,7 +387,7 @@ public:
 
    bool isLiteral() const noexcept
    {
-      return isConstant() && reg_.reg == 255;
+      return isConstant() && reg_ == 255;
    }
 
    bool isUndefined() const noexcept
