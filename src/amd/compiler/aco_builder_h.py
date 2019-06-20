@@ -176,7 +176,7 @@ public:
    }
 
    Temp tmp(RegType type, unsigned size) {
-      return (Temp){program->allocateId(), getRegClass(type, size)};
+      return (Temp){program->allocateId(), RegClass(type, size)};
    }
 
    Definition def(RegClass rc) {
@@ -184,7 +184,7 @@ public:
    }
 
    Definition def(RegType type, unsigned size) {
-      return Definition((Temp){program->allocateId(), getRegClass(type, size)});
+      return Definition((Temp){program->allocateId(), RegClass(type, size)});
    }
 
    Definition def(RegClass rc, PhysReg reg) {
@@ -214,7 +214,7 @@ public:
    {
       assert(op.op.isTemp());
       if (op.op.getTemp().type() == vgpr)
-         return pseudo(aco_opcode::p_as_uniform, def(getRegClass(sgpr, op.op.size())), op);
+         return pseudo(aco_opcode::p_as_uniform, def(RegClass(sgpr, op.op.size())), op);
       else
          return op.op.getTemp();
    }

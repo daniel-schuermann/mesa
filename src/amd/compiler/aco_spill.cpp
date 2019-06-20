@@ -1293,12 +1293,12 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
       for (unsigned id = 0; id < ctx.interferences.size(); id++) {
          if (is_assigned[id] || !ctx.reload_count[id])
             continue;
-         if (typeOf(ctx.interferences[id].first) != sgpr)
+         if (ctx.interferences[id].first.type() != sgpr)
             continue;
 
          /* check interferences */
          bool interferes = false;
-         for (unsigned i = slot_idx; i < slot_idx + sizeOf(ctx.interferences[id].first); i++) {
+         for (unsigned i = slot_idx; i < slot_idx + ctx.interferences[id].first.size(); i++) {
             if (i == spill_slot_interferences.size())
                spill_slot_interferences.emplace_back(std::set<uint32_t>());
             if (spill_slot_interferences[i].find(id) != spill_slot_interferences[i].end() || i / 64 != slot_idx / 64) {
@@ -1314,7 +1314,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
          /* we found a spill id which can be assigned to current spill slot */
          sgpr_slot[id] = slot_idx;
          is_assigned[id] = true;
-         for (unsigned i = slot_idx; i < slot_idx + sizeOf(ctx.interferences[id].first); i++)
+         for (unsigned i = slot_idx; i < slot_idx + ctx.interferences[id].first.size(); i++)
             spill_slot_interferences[i].insert(ctx.interferences[id].second.begin(), ctx.interferences[id].second.end());
       }
       slot_idx++;
@@ -1329,12 +1329,12 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
       for (unsigned id = 0; id < ctx.interferences.size(); id++) {
          if (is_assigned[id] || !ctx.reload_count[id])
             continue;
-         if (typeOf(ctx.interferences[id].first) != vgpr)
+         if (ctx.interferences[id].first.type() != vgpr)
             continue;
 
          /* check interferences */
          bool interferes = false;
-         for (unsigned i = slot_idx; i < slot_idx + sizeOf(ctx.interferences[id].first); i++) {
+         for (unsigned i = slot_idx; i < slot_idx + ctx.interferences[id].first.size(); i++) {
             if (i == spill_slot_interferences.size())
                spill_slot_interferences.emplace_back(std::set<uint32_t>());
             /* check for interference and ensure that vector regs are stored next to each other */
@@ -1351,7 +1351,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
          /* we found a spill id which can be assigned to current spill slot */
          vgpr_slot[id] = slot_idx;
          is_assigned[id] = true;
-         for (unsigned i = slot_idx; i < slot_idx + sizeOf(ctx.interferences[id].first); i++)
+         for (unsigned i = slot_idx; i < slot_idx + ctx.interferences[id].first.size(); i++)
             spill_slot_interferences[i].insert(ctx.interferences[id].second.begin(), ctx.interferences[id].second.end());
       }
       slot_idx++;
@@ -1365,8 +1365,8 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
       if (!is_assigned[pair.first])
          continue;
       assert(ctx.reload_count[pair.first] == ctx.reload_count[pair.second]);
-      assert(typeOf(ctx.interferences[pair.first].first) == typeOf(ctx.interferences[pair.second].first));
-      if (typeOf(ctx.interferences[pair.first].first) == sgpr)
+      assert(ctx.interferences[pair.first].first.type() == ctx.interferences[pair.second].first.type());
+      if (ctx.interferences[pair.first].first.type() == sgpr)
          assert(sgpr_slot[pair.first] == sgpr_slot[pair.second]);
       else
          assert(vgpr_slot[pair.first] == vgpr_slot[pair.second]);
@@ -1449,7 +1449,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
 
                /* check if the linear vgpr already exists */
                if (vgpr_spill_temps[spill_slot / 64] == Temp()) {
-                  Temp linear_vgpr = {ctx.program->allocateId(), v1_linear};
+                  Temp linear_vgpr = {ctx.program->allocateId(), v1.as_linear()};
                   vgpr_spill_temps[spill_slot / 64] = linear_vgpr;
                   aco_ptr<Pseudo_instruction> create{create_instruction<Pseudo_instruction>(aco_opcode::p_start_linear_vgpr, Format::PSEUDO, 0, 1)};
                   create->getDefinition(0) = Definition(linear_vgpr);
@@ -1489,7 +1489,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
 
                /* check if the linear vgpr already exists */
                if (vgpr_spill_temps[spill_slot / 64] == Temp()) {
-                  Temp linear_vgpr = {ctx.program->allocateId(), v1_linear};
+                  Temp linear_vgpr = {ctx.program->allocateId(), v1.as_linear()};
                   vgpr_spill_temps[spill_slot / 64] = linear_vgpr;
                   aco_ptr<Pseudo_instruction> create{create_instruction<Pseudo_instruction>(aco_opcode::p_start_linear_vgpr, Format::PSEUDO, 0, 1)};
                   create->getDefinition(0) = Definition(linear_vgpr);
