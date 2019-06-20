@@ -34,18 +34,18 @@
 #include "../vulkan/radv_shader.h"
 
 namespace aco {
+namespace {
 
-template<bool reg_demand_cond>
 void process_live_temps_per_block(Program *program, live& lives, Block* block, std::set<unsigned>& worklist)
 {
    std::vector<std::pair<uint16_t,uint16_t>>& register_demand = lives.register_demand[block->index];
    uint16_t vgpr_demand = 0;
    uint16_t sgpr_demand = 0;
-   if (reg_demand_cond) {
-      register_demand.resize(block->instructions.size());
-      block->vgpr_demand = 0;
-      block->sgpr_demand = 0;
-   }
+
+   register_demand.resize(block->instructions.size());
+   block->vgpr_demand = 0;
+   block->sgpr_demand = 0;
+
    std::set<Temp> live_sgprs;
    std::set<Temp> live_vgprs;
 
@@ -66,7 +66,7 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
          inserted = live_sgprs.insert(*it).second;
       else
          inserted = live_vgprs.insert(*it).second;
-      if (reg_demand_cond && inserted) {
+      if (inserted) {
          if (it->type() == vgpr)
             vgpr_demand += it->size();
          else
@@ -77,14 +77,12 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
    /* traverse the instructions backwards */
    for (int idx = block->instructions.size() -1; idx >= 0; idx--)
    {
-      if (reg_demand_cond) {
-         /* substract the 2 sgprs from exec */
-         if (exec_live)
-            assert(sgpr_demand >= 2);
-         register_demand[idx] = {sgpr_demand - (exec_live ? 2 : 0), vgpr_demand};
-         block->vgpr_demand = std::max(block->vgpr_demand, register_demand[idx].second);
-         block->sgpr_demand = std::max(block->sgpr_demand, register_demand[idx].first);
-      }
+      /* substract the 2 sgprs from exec */
+      if (exec_live)
+         assert(sgpr_demand >= 2);
+      register_demand[idx] = {sgpr_demand - (exec_live ? 2 : 0), vgpr_demand};
+      block->vgpr_demand = std::max(block->vgpr_demand, register_demand[idx].second);
+      block->sgpr_demand = std::max(block->sgpr_demand, register_demand[idx].first);
 
       Instruction *insn = block->instructions[idx].get();
       /* KILL */
@@ -97,21 +95,21 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
                n = live_sgprs.erase(definition.getTemp());
             else
                n = live_vgprs.erase(definition.getTemp());
-            if (reg_demand_cond) {
-               if (n) {
-                  if (definition.getTemp().type() == vgpr)
-                     vgpr_demand -= definition.size();
-                  else
-                     sgpr_demand -= definition.size();
-                  definition.setKill(false);
-               } else {
-                  if (definition.getTemp().type() == vgpr)
-                     register_demand[idx].second += definition.size();
-                  else
-                     register_demand[idx].first += definition.size();
-                  definition.setKill(true);
-               }
+
+            if (n) {
+               if (definition.getTemp().type() == vgpr)
+                  vgpr_demand -= definition.size();
+               else
+                  sgpr_demand -= definition.size();
+               definition.setKill(false);
+            } else {
+               if (definition.getTemp().type() == vgpr)
+                  register_demand[idx].second += definition.size();
+               else
+                  register_demand[idx].first += definition.size();
+               definition.setKill(true);
             }
+
             if (definition.isFixed() && definition.physReg() == exec)
                exec_live = false;
          }
@@ -129,8 +127,7 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
                auto it = live_temps[preds[i]->index].insert(operand.getTemp());
                /* check if we changed an already processed block */
                if (it.second) {
-                  if (reg_demand_cond)
-                     operand.setFirstKill(true);
+                  operand.setFirstKill(true);
                   worklist.insert(preds[i]->index);
                }
             }
@@ -145,24 +142,24 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
                   inserted = live_sgprs.insert(operand.getTemp()).second;
                else
                   inserted = live_vgprs.insert(operand.getTemp()).second;
-               if (reg_demand_cond) {
-                  if (inserted) {
-                     operand.setFirstKill(true);
-                     for (unsigned j = i + 1; j < insn->operandCount(); ++j) {
-                        if (insn->getOperand(j).isTemp() && insn->getOperand(j).tempId() == operand.tempId()) {
-                           insn->getOperand(j).setFirstKill(false);
-                           insn->getOperand(j).setKill(true);
-                        }
-                     }
 
-                     if (operand.getTemp().type() == vgpr)
-                        vgpr_demand += operand.size();
-                     else
-                        sgpr_demand += operand.size();
-                  } else {
-                     operand.setKill(false);
+               if (inserted) {
+                  operand.setFirstKill(true);
+                  for (unsigned j = i + 1; j < insn->operandCount(); ++j) {
+                     if (insn->getOperand(j).isTemp() && insn->getOperand(j).tempId() == operand.tempId()) {
+                        insn->getOperand(j).setFirstKill(false);
+                        insn->getOperand(j).setKill(true);
+                     }
                   }
+
+                  if (operand.getTemp().type() == vgpr)
+                     vgpr_demand += operand.size();
+                  else
+                     sgpr_demand += operand.size();
+               } else {
+                  operand.setKill(false);
                }
+
                if (operand.isFixed() && operand.physReg() == exec)
                   exec_live = true;
             }
@@ -197,8 +194,9 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
       abort();
    }
 
-   assert(!reg_demand_cond || block->index != 0 || (vgpr_demand == 0 && (sgpr_demand == 0)));
+   assert(block->index != 0 || (vgpr_demand == 0 && (sgpr_demand == 0)));
 }
+} /* end namespace */
 
 void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr)
 {
@@ -224,18 +222,16 @@ void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr)
    }
 }
 
-// TODO: still setKill() when reg_demand_cond = false and then call this with reg_demand_cond = false where possible
-template<bool register_demand>
 live live_var_analysis(Program* program,
                        const struct radv_nir_compiler_options *options)
 {
    live result;
    result.live_out.resize(program->blocks.size());
-   if (register_demand)
-      result.register_demand.resize(program->blocks.size());
+   result.register_demand.resize(program->blocks.size());
    std::set<unsigned> worklist;
    uint16_t vgpr_demand = 0;
    uint16_t sgpr_demand = 0;
+
    /* this implementation assumes that the block idx corresponds to the block's position in program->blocks vector */
    for (auto& block : program->blocks)
       worklist.insert(block->index);
@@ -243,21 +239,16 @@ live live_var_analysis(Program* program,
       std::set<unsigned>::reverse_iterator b_it = worklist.rbegin();
       unsigned block_idx = *b_it;
       worklist.erase(block_idx);
-      process_live_temps_per_block<register_demand>(program, result, program->blocks[block_idx].get(), worklist);
+      process_live_temps_per_block(program, result, program->blocks[block_idx].get(), worklist);
       vgpr_demand = std::max(vgpr_demand, program->blocks[block_idx]->vgpr_demand);
       sgpr_demand = std::max(sgpr_demand, program->blocks[block_idx]->sgpr_demand);
    }
 
    /* calculate the program's register demand and number of waves */
-   if (register_demand)
-      update_vgpr_sgpr_demand(program, vgpr_demand, sgpr_demand);
+   update_vgpr_sgpr_demand(program, vgpr_demand, sgpr_demand);
 
    return result;
 }
-template live live_var_analysis<false>(Program* program,
-                                       const struct radv_nir_compiler_options *options);
-template live live_var_analysis<true>(Program* program,
-                                      const struct radv_nir_compiler_options *options);
 
 }
 
