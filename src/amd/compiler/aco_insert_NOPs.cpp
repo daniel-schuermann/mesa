@@ -52,9 +52,9 @@ bool VALU_writes_sgpr(aco_ptr<Instruction>& instr)
 
 bool regs_intersect(PhysReg a_reg, unsigned a_size, PhysReg b_reg, unsigned b_size)
 {
-   return a_reg.reg > b_reg.reg ?
-          (a_reg.reg - b_reg.reg < b_size) :
-          (b_reg.reg - a_reg.reg < a_size);
+   return a_reg > b_reg ?
+          (a_reg - b_reg < b_size) :
+          (b_reg - a_reg < a_size);
 }
 
 int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
@@ -135,7 +135,7 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
          /* VALU which reads VCC as a constant */
          if (ctx.VALU_wrvcc + 1 >= new_idx) {
             for (unsigned k = 0; k < instr->getOperand(i).size(); k++) {
-               unsigned reg = instr->getOperand(i).physReg().reg + k;
+               unsigned reg = instr->getOperand(i).physReg() + k;
                if (reg == ctx.vcc_physical || reg == ctx.vcc_physical + 1)
                   NOPs = std::max(NOPs, 1);
             }
@@ -176,7 +176,7 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
              pred->num_operands == 3 &&
              pred->getOperand(2).size() > 2 &&
              pred->getOperand(1).size() != 8 &&
-             (pred->format != Format::MUBUF || pred->getOperand(2).physReg().reg >= 102)) {
+             (pred->format != Format::MUBUF || pred->getOperand(2).physReg() >= 102)) {
             /* Ops that use a 256-bit T# do not need a wait state.
              * BUFFER_STORE_* operations that use an SGPR for "offset"
              * do not require any wait states. */
@@ -190,7 +190,7 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
                ctx.VALU_wrvcc = NOPs ? new_idx : new_idx + 1;
             else if (instr->getDefinition(i).physReg() == exec)
                ctx.VALU_wrexec = NOPs ? new_idx : new_idx + 1;
-            else if (instr->getDefinition(i).physReg().reg <= 102)
+            else if (instr->getDefinition(i).physReg() <= 102)
                ctx.VALU_wrsgpr = NOPs ? new_idx : new_idx + 1;
          }
       }
@@ -205,7 +205,7 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
             continue;
 
          for (unsigned i = 0; i < pred->num_definitions; i++) {
-            if (pred->getDefinition(i).physReg().reg > 102)
+            if (pred->getDefinition(i).physReg() > 102)
                continue;
 
             if (instr->num_operands > 1 &&

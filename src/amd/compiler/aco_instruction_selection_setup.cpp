@@ -708,11 +708,11 @@ add_arg(arg_info *info, RegClass rc, Temp *param_ptr, unsigned reg)
    if (rc.type() == sgpr) {
       info->num_sgprs_used += rc.size();
       info->sgpr_count++;
-      info->reg[info->count] = fixed_sgpr(reg);
+      info->reg[info->count] = PhysReg{reg};
    } else {
       assert(rc.type() == vgpr);
       info->num_vgprs_used += rc.size();
-      info->reg[info->count] = fixed_vgpr(reg);
+      info->reg[info->count] = PhysReg{reg + 256};
    }
    info->count++;
 }
