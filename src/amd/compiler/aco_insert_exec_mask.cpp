@@ -838,7 +838,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
       block->instructions.pop_back();
 
       Temp current_exec = ctx.info[idx].exec.back().first;
-      Temp cond;
+      Temp cond = Temp();
       for (int exec_idx = ctx.info[idx].exec.size() - 2; exec_idx >= 0; exec_idx--) {
          cond = bld.tmp(s1);
          Temp exec_mask = ctx.info[idx].exec[exec_idx].first;
