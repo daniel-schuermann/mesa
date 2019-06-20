@@ -70,7 +70,7 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
    aco::insert_exec_mask(program.get());
    aco::validate(program.get(), stderr);
 
-   aco::live live_vars = aco::live_var_analysis<true>(program.get(), options);
+   aco::live live_vars = aco::live_var_analysis(program.get(), options);
    aco::spill(program.get(), live_vars, options);
 
    //std::cerr << "Before Schedule:\n";

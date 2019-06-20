@@ -951,9 +951,7 @@ void lower_wqm(Program* program, live& live_vars,
                const struct radv_nir_compiler_options *options);
 void lower_bool_phis(Program* program);
 void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr);
-template<bool condition>
-live live_var_analysis(Program* program,
-                       const struct radv_nir_compiler_options *options);
+live live_var_analysis(Program* program, const struct radv_nir_compiler_options *options);
 std::vector<uint16_t> dead_code_analysis(Program *program);
 void dominator_tree(Program* program);
 void insert_exec_mask(Program *program);
