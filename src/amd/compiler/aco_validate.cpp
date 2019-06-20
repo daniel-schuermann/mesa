@@ -272,7 +272,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
    #endif
 
    bool err = false;
-   aco::live live_vars = aco::live_var_analysis<true>(program, options);
+   aco::live live_vars = aco::live_var_analysis(program, options);
 
    std::map<unsigned, Assignment> assignments;
    for (auto& block : program->blocks) {
