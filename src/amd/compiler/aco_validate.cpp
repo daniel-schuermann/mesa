@@ -286,15 +286,15 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
                continue;
             if (!op.isFixed())
                err |= ra_fail(output, loc, Location(), "Operand %d is not assigned a register", i);
-            if (assignments.count(op.tempId()) && assignments[op.tempId()].reg.reg != op.physReg().reg)
+            if (assignments.count(op.tempId()) && assignments[op.tempId()].reg != op.physReg())
                err |= ra_fail(output, loc, assignments.at(op.tempId()).firstloc, "Operand %d has an inconsistent register assignment with instruction", i);
-            if ((op.getTemp().type() == vgpr && op.physReg().reg + op.size() > 256 + program->config->num_vgprs) ||
-                (op.getTemp().type() == sgpr && op.physReg().reg + op.size() > program->config->num_sgprs && op.physReg().reg < (program->chip_class >= GFX8 ? 102 : 104)))
+            if ((op.getTemp().type() == vgpr && op.physReg() + op.size() > 256 + program->config->num_vgprs) ||
+                (op.getTemp().type() == sgpr && op.physReg() + op.size() > program->config->num_sgprs && op.physReg() < (program->chip_class >= GFX8 ? 102 : 104)))
                err |= ra_fail(output, loc, assignments.at(op.tempId()).firstloc, "Operand %d has an out-of-bounds register assignment", i);
             if (!assignments[op.tempId()].firstloc.block)
                assignments[op.tempId()].firstloc = loc;
             if (!assignments[op.tempId()].defloc.block)
-               assignments[op.tempId()].reg.reg = op.physReg().reg;
+               assignments[op.tempId()].reg = op.physReg();
          }
 
          for (unsigned i = 0; i < instr->num_definitions; i++) {
@@ -305,13 +305,13 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
                err |= ra_fail(output, loc, Location(), "Definition %d is not assigned a register", i);
             if (assignments[def.tempId()].defloc.block)
                err |= ra_fail(output, loc, assignments.at(def.tempId()).defloc, "Temporary %%%d also defined by instruction", def.tempId());
-            if ((def.getTemp().type() == vgpr && def.physReg().reg + def.size() > 256 + program->config->num_vgprs) ||
-                (def.getTemp().type() == sgpr && def.physReg().reg + def.size() > program->config->num_sgprs && def.physReg().reg < (program->chip_class >= GFX8 ? 102 : 104)))
+            if ((def.getTemp().type() == vgpr && def.physReg() + def.size() > 256 + program->config->num_vgprs) ||
+                (def.getTemp().type() == sgpr && def.physReg() + def.size() > program->config->num_sgprs && def.physReg() < (program->chip_class >= GFX8 ? 102 : 104)))
                err |= ra_fail(output, loc, assignments.at(def.tempId()).firstloc, "Definition %d has an out-of-bounds register assignment", i);
             if (!assignments[def.tempId()].firstloc.block)
                assignments[def.tempId()].firstloc = loc;
             assignments[def.tempId()].defloc = loc;
-            assignments[def.tempId()].reg.reg = def.physReg().reg;
+            assignments[def.tempId()].reg = def.physReg();
          }
       }
    }
@@ -330,10 +330,10 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
       for (Temp tmp : live) {
          PhysReg reg = assignments.at(tmp.id()).reg;
          for (unsigned i = 0; i < tmp.size(); i++) {
-            if (regs[reg.reg + i]) {
-               err |= ra_fail(output, loc, Location(), "Assignment of element %d of %%%d already taken by %%%d in live-out", i, tmp.id(), regs[reg.reg + i]);
+            if (regs[reg + i]) {
+               err |= ra_fail(output, loc, Location(), "Assignment of element %d of %%%d already taken by %%%d in live-out", i, tmp.id(), regs[reg + i]);
             }
-            regs[reg.reg + i] = tmp.id();
+            regs[reg + i] = tmp.id();
          }
       }
       regs.fill(0);
@@ -363,7 +363,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
       for (Temp tmp : live) {
          PhysReg reg = assignments.at(tmp.id()).reg;
          for (unsigned i = 0; i < tmp.size(); i++)
-            regs[reg.reg + i] = tmp.id();
+            regs[reg + i] = tmp.id();
       }
 
       for (auto& instr : block->instructions) {
@@ -375,7 +375,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
                   continue;
                if (op.isFirstKill()) {
                   for (unsigned j = 0; j < op.getTemp().size(); j++)
-                     regs[op.physReg().reg + j] = 0;
+                     regs[op.physReg() + j] = 0;
                }
             }
          }
@@ -387,9 +387,9 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
             Temp tmp = def.getTemp();
             PhysReg reg = assignments.at(tmp.id()).reg;
             for (unsigned i = 0; i < tmp.size(); i++) {
-               if (regs[reg.reg + i])
-                  err |= ra_fail(output, loc, assignments.at(regs[reg.reg + i]).defloc, "Assignment of element %d of %%%d already taken by %%%d from instruction", i, tmp.id(), regs[reg.reg + i]);
-               regs[reg.reg + i] = tmp.id();
+               if (regs[reg + i])
+                  err |= ra_fail(output, loc, assignments.at(regs[reg + i]).defloc, "Assignment of element %d of %%%d already taken by %%%d from instruction", i, tmp.id(), regs[reg + i]);
+               regs[reg + i] = tmp.id();
             }
          }
 
@@ -399,7 +399,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
                continue;
             if (def.isKill()) {
                for (unsigned j = 0; j < def.getTemp().size(); j++)
-                  regs[def.physReg().reg + j] = 0;
+                  regs[def.physReg() + j] = 0;
             }
          }
       }

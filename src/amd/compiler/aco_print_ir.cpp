@@ -91,7 +91,7 @@ void aco_print_operand(const Operand *operand, FILE *output)
    fprintf(output, "%%%d", operand->tempId());
 
    if (operand->isFixed())
-      aco_print_physReg(operand->physReg().reg, operand->size(), output);
+      aco_print_physReg(operand->physReg(), operand->size(), output);
 }
 
 static
@@ -101,7 +101,7 @@ void aco_print_definition(const Definition *definition, FILE *output)
    fprintf(output, "%%%d", definition->tempId());
 
    if (definition->isFixed())
-      aco_print_physReg(definition->physReg().reg, definition->size(), output);
+      aco_print_physReg(definition->physReg(), definition->size(), output);
 }
 
 static
