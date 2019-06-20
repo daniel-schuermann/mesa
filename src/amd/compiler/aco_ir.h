@@ -41,30 +41,6 @@
 struct radv_shader_variant_info;
 struct radv_nir_compiler_options;
 
-typedef enum {
-   s1 = 1,
-   s2 = 2,
-   s3 = 3,
-   s4 = 4,
-   s8 = 8,
-   s16 = 16,
-   v1 = s1 | (1 << 5),
-   v2 = s2 | (1 << 5),
-   v3 = s3 | (1 << 5),
-   v4 = s4 | (1 << 5),
-   v6 = 6  | (1 << 5),
-   v7 = 7  | (1 << 5),
-   /* these are used for WWM and spills to vgpr */
-   v1_linear = v1 | (1 << 6),
-   v2_linear = v2 | (1 << 6),
-} RegClass;
-
-static inline RegClass linearClass(RegClass reg)
-{
-   assert(reg == v1 || reg == v2);
-   return (RegClass)((unsigned)reg | (1 << 6));
-}
-
 namespace aco {
 enum class Format : std::uint16_t;
 }
@@ -160,21 +136,58 @@ enum RegType {
    linear_vgpr,
 };
 
-static inline RegType typeOf(RegClass rc)
-{
-   if (rc <= RegClass::s16) return RegType::sgpr;
-   else return RegType::vgpr;
-}
+struct RegClass {
 
-static inline unsigned sizeOf(RegClass rc)
-{
-   return (unsigned) rc & 0x1F;
-}
+   enum RC : uint8_t {
+      s1 = 1,
+      s2 = 2,
+      s3 = 3,
+      s4 = 4,
+      s8 = 8,
+      s16 = 16,
+      v1 = s1 | (1 << 5),
+      v2 = s2 | (1 << 5),
+      v3 = s3 | (1 << 5),
+      v4 = s4 | (1 << 5),
+      v5 = 5  | (1 << 5),
+      v6 = 6  | (1 << 5),
+      v7 = 7  | (1 << 5),
+      /* these are used for WWM and spills to vgpr */
+      v1_linear = v1 | (1 << 6),
+      v2_linear = v2 | (1 << 6),
+   };
 
-static inline RegClass getRegClass(RegType type, unsigned size)
-{
-   return (RegClass) ((type == vgpr ? 1 << 5 : 0) | size);
-}
+   RegClass() = default;
+   constexpr RegClass(RC rc) : rc(rc) {}
+   constexpr RegClass(RegType type, unsigned size) :
+      rc((RC) ((type == RegType::vgpr ? 1 << 5 : 0) | size)) {}
+
+   operator RC() const { return rc; }
+   explicit operator bool() = delete;
+
+   RegType type() const { return rc <= RC::s16 ? sgpr : vgpr; }
+   unsigned size() const { return (unsigned) rc & 0x1F; }
+   bool is_linear() const { return rc <= RC::s16 || rc & (1 << 6); }
+   RegClass as_linear() const { return RegClass((RC) (rc | (1 << 6))); }
+
+private:
+   RC rc;
+};
+
+/* transitional helper expressions */
+static constexpr RegClass s1{RegClass::s1};
+static constexpr RegClass s2{RegClass::s2};
+static constexpr RegClass s3{RegClass::s3};
+static constexpr RegClass s4{RegClass::s4};
+static constexpr RegClass s8{RegClass::s8};
+static constexpr RegClass s16{RegClass::s16};
+static constexpr RegClass v1{RegClass::v1};
+static constexpr RegClass v2{RegClass::v2};
+static constexpr RegClass v3{RegClass::v3};
+static constexpr RegClass v4{RegClass::v4};
+static constexpr RegClass v5{RegClass::v5};
+static constexpr RegClass v6{RegClass::v6};
+static constexpr RegClass v7{RegClass::v7};
 
 /**
  * Temp Class
@@ -195,12 +208,12 @@ public:
 
    unsigned size() const noexcept
    {
-      return sizeOf(reg_class);
+      return reg_class.size();
    }
 
    RegType type() const noexcept
    {
-      return typeOf(reg_class);
+      return reg_class.type();
    }
 
    bool is_linear() const noexcept
