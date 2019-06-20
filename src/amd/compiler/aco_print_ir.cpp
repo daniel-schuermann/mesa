@@ -37,20 +37,21 @@ static
 void aco_print_reg_class(const RegClass rc, FILE *output)
 {
    switch (rc) {
-      case s1: fprintf(output, " s1: "); return;
-      case s2: fprintf(output, " s2: "); return;
-      case s3: fprintf(output, " s3: "); return;
-      case s4: fprintf(output, " s4: "); return;
-      case s8: fprintf(output, " s8: "); return;
-      case s16: fprintf(output, "s16: "); return;
-      case v1: fprintf(output, " v1: "); return;
-      case v2: fprintf(output, " v2: "); return;
-      case v3: fprintf(output, " v3: "); return;
-      case v4: fprintf(output, " v4: "); return;
-      case v6: fprintf(output, " v6: "); return;
-      case v7: fprintf(output, " v7: "); return;
-      case v1_linear: fprintf(output, " v1: "); return;
-      case v2_linear: fprintf(output, " v2: "); return;
+      case RegClass::s1: fprintf(output, " s1: "); return;
+      case RegClass::s2: fprintf(output, " s2: "); return;
+      case RegClass::s3: fprintf(output, " s3: "); return;
+      case RegClass::s4: fprintf(output, " s4: "); return;
+      case RegClass::s8: fprintf(output, " s8: "); return;
+      case RegClass::s16: fprintf(output, "s16: "); return;
+      case RegClass::v1: fprintf(output, " v1: "); return;
+      case RegClass::v2: fprintf(output, " v2: "); return;
+      case RegClass::v3: fprintf(output, " v3: "); return;
+      case RegClass::v4: fprintf(output, " v4: "); return;
+      case RegClass::v5: fprintf(output, " v5: "); return;
+      case RegClass::v6: fprintf(output, " v6: "); return;
+      case RegClass::v7: fprintf(output, " v7: "); return;
+      case RegClass::v1_linear: fprintf(output, " v1: "); return;
+      case RegClass::v2_linear: fprintf(output, " v2: "); return;
    }
 }
 

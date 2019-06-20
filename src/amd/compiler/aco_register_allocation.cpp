@@ -123,12 +123,12 @@ void print_regs(ra_ctx& ctx, bool vgprs, std::array<uint32_t, 512>& reg_file)
 void adjust_max_used_regs(ra_ctx& ctx, RegClass rc, unsigned reg)
 {
    unsigned max_addressible_sgpr = ctx.program->chip_class >= GFX8 ? 102 : 104;
-   unsigned size = sizeOf(rc);
-   if (typeOf(rc) == vgpr) {
+   unsigned size = rc.size();
+   if (rc.type() == vgpr) {
       assert(reg >= 256);
       unsigned hi = reg - 256 + size - 1;
       ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, hi);
-   } else if (reg + sizeOf(rc) <= max_addressible_sgpr) {
+   } else if (reg + rc.size() <= max_addressible_sgpr) {
       unsigned hi = reg + size - 1;
       ctx.max_used_sgpr = std::max(ctx.max_used_sgpr, std::min(hi, max_addressible_sgpr));
    }
@@ -262,7 +262,7 @@ bool get_regs_for_copies(ra_ctx& ctx,
       std::pair<PhysReg, RegClass> var = ctx.assignments[id];
       uint32_t size = it->first;
       uint32_t stride = 1;
-      if (typeOf(var.second) == sgpr) {
+      if (var.second.type() == sgpr) {
          if (size == 2)
             stride = 2;
          if (size > 3)
@@ -348,12 +348,12 @@ bool get_regs_for_copies(ra_ctx& ctx,
                if (instr->getOperand(i).isTemp() && instr->getOperand(i).isKill() && instr->getOperand(i).tempId() == reg_file[j])
                   is_kill = true;
             }
-            if (!is_kill && sizeOf(ctx.assignments[reg_file[j]].second) >= size) {
+            if (!is_kill && ctx.assignments[reg_file[j]].second.size() >= size) {
                found = false;
                break;
             }
 
-            k += sizeOf(ctx.assignments[reg_file[j]].second);
+            k += ctx.assignments[reg_file[j]].second.size();
             last_var = reg_file[j];
             n++;
             if (k > num_moves || (k == num_moves && n <= num_vars)) {
@@ -377,7 +377,7 @@ bool get_regs_for_copies(ra_ctx& ctx,
       std::set<std::pair<unsigned, unsigned>> new_vars;
       for (unsigned j = reg_lo; j <= reg_hi; j++) {
          if (reg_file[j] != 0) {
-            unsigned size = sizeOf(ctx.assignments[reg_file[j]].second);
+            unsigned size = ctx.assignments[reg_file[j]].second.size();
             unsigned id = reg_file[j];
             new_vars.emplace(size, id);
             for (unsigned k = 0; k < size; k++)
@@ -424,7 +424,7 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
    for (unsigned j = 0; !is_phi(instr) && j < instr->num_operands; j++) {
       if (instr->getOperand(j).isTemp() &&
           instr->getOperand(j).isFirstKill() &&
-          instr->getOperand(j).getTemp().type() == typeOf(rc)) {
+          instr->getOperand(j).getTemp().type() == rc.type()) {
          assert(instr->getOperand(j).isFixed());
          assert(reg_file[instr->getOperand(j).physReg().reg] == 0);
          for (unsigned k = 0; k < instr->getOperand(j).size(); k++)
@@ -474,7 +474,7 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
             continue;
          }
 
-         if (sizeOf(ctx.assignments[reg_file[j]].second) >= size) {
+         if (ctx.assignments[reg_file[j]].second.size() >= size) {
             found = false;
             break;
          }
@@ -486,7 +486,7 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
             break;
          }
 
-         k += sizeOf(ctx.assignments[reg_file[j]].second);
+         k += ctx.assignments[reg_file[j]].second.size();
          n++;
          last_var = reg_file[j];
       }
@@ -520,7 +520,7 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
    std::set<std::pair<unsigned, unsigned>> vars;
    for (unsigned j = best_pos; j < best_pos + size; j++) {
       if (reg_file[j] != 0xFFFFFFFF && reg_file[j] != 0)
-         vars.emplace(sizeOf(ctx.assignments[reg_file[j]].second), reg_file[j]);
+         vars.emplace(ctx.assignments[reg_file[j]].second.size(), reg_file[j]);
       reg_file[j] = 0;
    }
 
@@ -528,7 +528,7 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
       /* move killed operands which aren't yet at the correct position */
       for (unsigned i = 0, offset = 0; i < instr->num_operands; offset += instr->getOperand(i).size(), i++) {
          if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill() &&
-             instr->getOperand(i).getTemp().type() == typeOf(rc)) {
+             instr->getOperand(i).getTemp().type() == rc.type()) {
 
             if (instr->getOperand(i).physReg().reg != best_pos + offset) {
                vars.emplace(instr->getOperand(i).size(), instr->getOperand(i).tempId());
@@ -579,10 +579,10 @@ PhysReg get_reg(ra_ctx& ctx,
                 std::vector<std::pair<Operand, Definition>>& parallelcopies,
                 aco_ptr<Instruction>& instr)
 {
-   uint32_t size = sizeOf(rc);
+   uint32_t size = rc.size();
    uint32_t stride = 1;
    uint32_t lb, ub;
-   if (typeOf(rc) == vgpr) {
+   if (rc.type() == vgpr) {
       lb = 256;
       ub = 256 + ctx.program->max_vgpr;
    } else {
@@ -596,7 +596,7 @@ PhysReg get_reg(ra_ctx& ctx,
 
    std::pair<PhysReg, bool> res = {{}, false};
    /* try to find space without live-range splits */
-   if (typeOf(rc) == vgpr && (size == 4 || size == 8))
+   if (rc.type() == vgpr && (size == 4 || size == 8))
       res = get_reg_simple(ctx, reg_file, lb, ub, size, 4, rc);
    if (!res.second)
       res = get_reg_simple(ctx, reg_file, lb, ub, size, stride, rc);
@@ -621,10 +621,10 @@ PhysReg get_reg(ra_ctx& ctx,
 
    /* try using more registers */
    uint16_t max_addressible_sgpr = ctx.program->chip_class >= GFX8 ? 102 : 104;
-   if (typeOf(rc) == vgpr && ctx.program->max_vgpr < 256) {
+   if (rc.type() == vgpr && ctx.program->max_vgpr < 256) {
       update_vgpr_sgpr_demand(ctx.program, ctx.program->max_vgpr + 1, ctx.program->max_sgpr);
       return get_reg(ctx, reg_file, rc, parallelcopies, instr);
-   } else if (typeOf(rc) == sgpr && ctx.program->max_sgpr < max_addressible_sgpr) {
+   } else if (rc.type() == sgpr && ctx.program->max_sgpr < max_addressible_sgpr) {
       update_vgpr_sgpr_demand(ctx.program, ctx.program->max_vgpr, ctx.program->max_sgpr + 1);
       return get_reg(ctx, reg_file, rc, parallelcopies, instr);
    }
@@ -639,10 +639,10 @@ std::pair<PhysReg, bool> get_reg_vec(ra_ctx& ctx,
                                      std::array<uint32_t, 512>& reg_file,
                                      RegClass rc)
 {
-   uint32_t size = sizeOf(rc);
+   uint32_t size = rc.size();
    uint32_t stride = 1;
    uint32_t lb, ub;
-   if (typeOf(rc) == vgpr) {
+   if (rc.type() == vgpr) {
       lb = 256;
       ub = 256 + ctx.program->max_vgpr;
    } else {
@@ -664,10 +664,10 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
                               aco_ptr<Instruction>& instr)
 {
    /* create_vector instructions have different costs w.r.t. register coalescing */
-   uint32_t size = sizeOf(rc);
+   uint32_t size = rc.size();
    uint32_t stride = 1;
    uint32_t lb, ub;
-   if (typeOf(rc) == vgpr) {
+   if (rc.type() == vgpr) {
       lb = 256;
       ub = 256 + ctx.program->max_vgpr;
    } else {
@@ -685,7 +685,7 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
    /* test for each operand which definition placement causes the least shuffle instructions */
    for (unsigned i = 0, offset = 0; i < instr->num_operands; offset += instr->getOperand(i).size(), i++) {
       // TODO: think about, if we can alias live operands on the same register
-      if (!instr->getOperand(i).isTemp() || !instr->getOperand(i).isKill() || instr->getOperand(i).getTemp().type() != typeOf(rc))
+      if (!instr->getOperand(i).isTemp() || !instr->getOperand(i).isKill() || instr->getOperand(i).getTemp().type() != rc.type())
          continue;
 
       unsigned reg_lo = instr->getOperand(i).physReg().reg - offset;
@@ -715,7 +715,7 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
       for (unsigned j = 0, offset = 0; j < instr->num_operands; j++, offset += instr->getOperand(j).size()) {
          if (j == i ||
              !instr->getOperand(j).isTemp() ||
-             instr->getOperand(j).getTemp().type() != typeOf(rc))
+             instr->getOperand(j).getTemp().type() != rc.type())
             continue;
          if (instr->getOperand(j).physReg().reg != reg_lo + offset)
             k += instr->getOperand(j).size();
@@ -735,13 +735,13 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
    std::set<std::pair<unsigned, unsigned>> vars;
    for (unsigned i = best_pos; i < best_pos + size; i++) {
       if (reg_file[i] != 0)
-         vars.emplace(sizeOf(ctx.assignments[reg_file[i]].second), reg_file[i]);
+         vars.emplace(ctx.assignments[reg_file[i]].second.size(), reg_file[i]);
       reg_file[i] = 0;
    }
 
    /* move killed operands which aren't yet at the correct position */
    for (unsigned i = 0, offset = 0; i < instr->num_operands; offset += instr->getOperand(i).size(), i++) {
-      if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill() && instr->getOperand(i).getTemp().type() == typeOf(rc)) {
+      if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill() && instr->getOperand(i).getTemp().type() == rc.type()) {
          if (instr->getOperand(i).physReg().reg != best_pos + offset) {
             vars.emplace(instr->getOperand(i).size(), instr->getOperand(i).tempId());
          } else {
@@ -765,11 +765,11 @@ bool get_reg_specified(ra_ctx& ctx,
                        aco_ptr<Instruction>& instr,
                        PhysReg reg)
 {
-   uint32_t size = sizeOf(rc);
+   uint32_t size = rc.size();
    uint32_t stride = 1;
    uint32_t lb, ub;
 
-   if (typeOf(rc) == vgpr) {
+   if (rc.type() == vgpr) {
       lb = 256;
       ub = 256 + ctx.program->max_vgpr;
    } else {
