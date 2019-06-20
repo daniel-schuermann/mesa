@@ -2782,7 +2782,7 @@ Temp get_sampler_desc(isel_context *ctx, nir_deref_instr *deref_instr,
    if (it != ctx->tex_desc.end())
       return it->second;
 */
-   Temp index;
+   Temp index = Temp();
    bool index_set = false;
    unsigned constant_index = 0;
    unsigned descriptor_set;
