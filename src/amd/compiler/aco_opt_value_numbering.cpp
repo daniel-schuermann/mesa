@@ -41,7 +41,7 @@ struct InstrHash {
       uint64_t hash = (uint64_t) instr->opcode + (uint64_t) instr->format;
       for (unsigned i = 0; i < instr->num_operands; i++) {
          Operand op = instr->getOperand(i);
-         uint64_t val = op.isTemp() ? op.tempId() : op.isFixed() ? op.physReg().reg : op.constantValue();
+         uint64_t val = op.isTemp() ? op.tempId() : op.isFixed() ? op.physReg() : op.constantValue();
          hash |= val << (i+1) * 8;
       }
       if (instr->isVOP3()) {
