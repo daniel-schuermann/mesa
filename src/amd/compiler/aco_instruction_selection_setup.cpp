@@ -227,7 +227,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                         size = 2;
                      } else {
                         for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
-                           if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr)
+                           if (reg_class[alu_instr->src[i].src.ssa->index].type() == vgpr)
                               size = 2;
                         }
                      }
@@ -251,20 +251,20 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                         if (ctx->divergent_vals[alu_instr->dest.dest.ssa.index]) {
                            type = vgpr;
                         } else {
-                           if (typeOf(reg_class[alu_instr->src[1].src.ssa->index]) == vgpr ||
-                               typeOf(reg_class[alu_instr->src[2].src.ssa->index]) == vgpr) {
+                           if (reg_class[alu_instr->src[1].src.ssa->index].type() == vgpr ||
+                               reg_class[alu_instr->src[2].src.ssa->index].type() == vgpr) {
                               type = vgpr;
                            }
                         }
                         if (alu_instr->src[1].src.ssa->num_components == 1 && alu_instr->src[2].src.ssa->num_components == 1) {
-                           assert(sizeOf(reg_class[alu_instr->src[1].src.ssa->index]) == sizeOf(reg_class[alu_instr->src[2].src.ssa->index]));
-                           size = sizeOf(reg_class[alu_instr->src[1].src.ssa->index]);
+                           assert(reg_class[alu_instr->src[1].src.ssa->index].size() == reg_class[alu_instr->src[2].src.ssa->index].size());
+                           size = reg_class[alu_instr->src[1].src.ssa->index].size();
                         }
                      }
                      break;
                   case nir_op_mov:
                      if (alu_instr->dest.dest.ssa.bit_size == 1) {
-                        size = sizeOf(reg_class[alu_instr->src[0].src.ssa->index]);
+                        size = reg_class[alu_instr->src[0].src.ssa->index].size();
                      } else {
                         type = ctx->divergent_vals[alu_instr->dest.dest.ssa.index] ? vgpr : sgpr;
                      }
@@ -292,20 +292,20 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                         }
                      } else {
                         for (unsigned i = 0; i < nir_op_infos[alu_instr->op].num_inputs; i++) {
-                           if (typeOf(reg_class[alu_instr->src[i].src.ssa->index]) == vgpr)
+                           if (reg_class[alu_instr->src[i].src.ssa->index].type() == vgpr)
                               type = vgpr;
                         }
                      }
                      break;
                }
-               reg_class[alu_instr->dest.dest.ssa.index] = getRegClass(type, size);
+               reg_class[alu_instr->dest.dest.ssa.index] = RegClass(type, size);
                break;
             }
             case nir_instr_type_load_const: {
                unsigned size = nir_instr_as_load_const(instr)->def.num_components;
                if (nir_instr_as_load_const(instr)->def.bit_size == 64)
                   size *= 2;
-               reg_class[nir_instr_as_load_const(instr)->def.index] = getRegClass(sgpr, size);
+               reg_class[nir_instr_as_load_const(instr)->def.index] = RegClass(sgpr, size);
                break;
             }
             case nir_instr_type_intrinsic: {
@@ -434,12 +434,12 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      break;
                   default:
                      for (unsigned i = 0; i < nir_intrinsic_infos[intrinsic->intrinsic].num_srcs; i++) {
-                        if (typeOf(reg_class[intrinsic->src[i].ssa->index]) == vgpr)
+                        if (reg_class[intrinsic->src[i].ssa->index].type() == vgpr)
                            type = vgpr;
                      }
                      break;
                }
-               reg_class[intrinsic->dest.ssa.index] = getRegClass(type, size);
+               reg_class[intrinsic->dest.ssa.index] = RegClass(type, size);
 
                switch(intrinsic->intrinsic) {
                   case nir_intrinsic_load_barycentric_sample:
@@ -499,9 +499,9 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                if (tex->op == nir_texop_texture_samples)
                   assert(!ctx->divergent_vals[tex->dest.ssa.index]);
                if (ctx->divergent_vals[tex->dest.ssa.index])
-                  reg_class[tex->dest.ssa.index] = getRegClass(vgpr, size);
+                  reg_class[tex->dest.ssa.index] = RegClass(vgpr, size);
                else
-                  reg_class[tex->dest.ssa.index] = getRegClass(sgpr, size);
+                  reg_class[tex->dest.ssa.index] = RegClass(sgpr, size);
                break;
             }
             case nir_instr_type_parallel_copy: {
@@ -514,7 +514,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                unsigned size = nir_instr_as_ssa_undef(instr)->def.num_components;
                if (nir_instr_as_ssa_undef(instr)->def.bit_size == 64)
                   size *= 2;
-               reg_class[nir_instr_as_ssa_undef(instr)->def.index] = getRegClass(sgpr, size);
+               reg_class[nir_instr_as_ssa_undef(instr)->def.index] = RegClass(sgpr, size);
                break;
             }
             case nir_instr_type_phi: {
@@ -526,7 +526,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   assert(size == 1 && "multiple components not yet supported on boolean phis.");
                   type = sgpr;
                   size *= ctx->divergent_vals[phi->dest.ssa.index] ? 2 : 1;
-                  reg_class[phi->dest.ssa.index] = getRegClass(type, size);
+                  reg_class[phi->dest.ssa.index] = RegClass(type, size);
                   break;
                }
 
@@ -535,20 +535,20 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                } else {
                   type = sgpr;
                   nir_foreach_phi_src (src, phi) {
-                     if (typeOf(reg_class[src->src.ssa->index]) == RegType::vgpr)
+                     if (reg_class[src->src.ssa->index].type() == RegType::vgpr)
                         type = vgpr;
-                     if (typeOf(reg_class[src->src.ssa->index]) == 0)
+                     if (reg_class[src->src.ssa->index].type() == 0)
                         done = false;
                   }
                }
 
                size *= phi->dest.ssa.bit_size == 64 ? 2 : 1;
-               RegClass rc = getRegClass(type, size);
+               RegClass rc = RegClass(type, size);
                if (rc != reg_class[phi->dest.ssa.index]) {
                   done = false;
                } else {
                   nir_foreach_phi_src(src, phi)
-                     assert(sizeOf(reg_class[src->src.ssa->index]) == sizeOf(rc));
+                     assert(reg_class[src->src.ssa->index].size() == rc.size());
                }
                reg_class[phi->dest.ssa.index] = rc;
                break;
@@ -698,20 +698,20 @@ struct arg_info {
 };
 
 static void
-add_arg(arg_info *info, RegClass type, Temp *param_ptr, unsigned reg)
+add_arg(arg_info *info, RegClass rc, Temp *param_ptr, unsigned reg)
 {
    assert(info->count < MAX_ARGS);
 
    info->assign[info->count] = param_ptr;
-   info->types[info->count] = type;
+   info->types[info->count] = rc;
 
-   if (typeOf(type) == sgpr) {
-      info->num_sgprs_used += sizeOf(type);
+   if (rc.type() == sgpr) {
+      info->num_sgprs_used += rc.size();
       info->sgpr_count++;
       info->reg[info->count] = fixed_sgpr(reg);
    } else {
-      assert(typeOf(type) == vgpr);
-      info->num_vgprs_used += sizeOf(type);
+      assert(rc.type() == vgpr);
+      info->num_vgprs_used += rc.size();
       info->reg[info->count] = fixed_vgpr(reg);
    }
    info->count++;

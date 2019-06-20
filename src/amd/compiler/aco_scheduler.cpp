@@ -75,7 +75,7 @@ static std::pair<int16_t, int16_t> getLiveChanges(aco_ptr<Instruction>& instr)
       Definition& def = instr->getDefinition(i);
       if (!def.isTemp() || def.isKill())
          continue;
-      if (typeOf(def.regClass()) == vgpr)
+      if (def.regClass().type() == vgpr)
          changes.second += def.size();
       else
          changes.first += def.size();
@@ -85,7 +85,7 @@ static std::pair<int16_t, int16_t> getLiveChanges(aco_ptr<Instruction>& instr)
       Operand& op = instr->getOperand(i);
       if (!op.isTemp() || !op.isFirstKill())
          continue;
-      if (typeOf(op.regClass()) == vgpr)
+      if (op.regClass().type() == vgpr)
          changes.second -= op.size();
       else
          changes.first -= op.size();
@@ -101,7 +101,7 @@ static std::pair<uint16_t, uint16_t> getTempRegisters(aco_ptr<Instruction>& inst
       Definition& def = instr->getDefinition(i);
       if (!def.isTemp() || !def.isKill())
          continue;
-      if (typeOf(def.regClass()) == vgpr)
+      if (def.regClass().type() == vgpr)
          temp_registers.second += def.size();
       else
          temp_registers.first += def.size();

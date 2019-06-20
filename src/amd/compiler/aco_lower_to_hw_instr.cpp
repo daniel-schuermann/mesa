@@ -501,8 +501,8 @@ void lower_to_hw_instr(Program* program)
                   break;
 
                unsigned reg = instr->getOperand(0).physReg().reg + instr->getOperand(1).constantValue();
-               RegClass rc = getRegClass(instr->getOperand(0).getTemp().type(), 1);
-               RegClass rc_def = getRegClass(instr->getDefinition(0).getTemp().type(), 1);
+               RegClass rc = RegClass(instr->getOperand(0).getTemp().type(), 1);
+               RegClass rc_def = RegClass(instr->getDefinition(0).getTemp().type(), 1);
                if (reg == instr->getDefinition(0).physReg().reg)
                   break;
 
@@ -517,7 +517,7 @@ void lower_to_hw_instr(Program* program)
             case aco_opcode::p_create_vector:
             {
                std::map<PhysReg, copy_operation> copy_operations;
-               RegClass rc_def = getRegClass(instr->getDefinition(0).getTemp().type(), 1);
+               RegClass rc_def = RegClass(instr->getDefinition(0).getTemp().type(), 1);
                unsigned reg_idx = 0;
                for (unsigned i = 0; i < instr->num_operands; i++)
                {
@@ -532,7 +532,7 @@ void lower_to_hw_instr(Program* program)
                      continue;
                   }
 
-                  RegClass rc_op = getRegClass(instr->getOperand(i).getTemp().type(), 1);
+                  RegClass rc_op = RegClass(instr->getOperand(i).getTemp().type(), 1);
                   for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
                   {
                      Operand op = Operand(PhysReg{instr->getOperand(i).physReg().reg + j}, rc_op);
@@ -550,10 +550,10 @@ void lower_to_hw_instr(Program* program)
                   break;
 
                std::map<PhysReg, copy_operation> copy_operations;
-               RegClass rc_op = instr->getOperand(0).isConstant() ? s1 : getRegClass(typeOf(instr->getOperand(0).regClass()), 1);
+               RegClass rc_op = instr->getOperand(0).isConstant() ? s1 : RegClass(instr->getOperand(0).regClass().type(), 1);
                for (unsigned i = 0; i < instr->num_definitions; i++) {
                   unsigned k = instr->getDefinition(i).size();
-                  RegClass rc_def = getRegClass(instr->getDefinition(i).getTemp().type(), 1);
+                  RegClass rc_def = RegClass(instr->getDefinition(i).getTemp().type(), 1);
                   for (unsigned j = 0; j < k; j++) {
                      Operand op = Operand(PhysReg{instr->getOperand(0).physReg().reg + (i*k+j)}, rc_op);
                      Definition def = Definition(PhysReg{instr->getDefinition(i).physReg().reg + j}, rc_def);
@@ -573,8 +573,8 @@ void lower_to_hw_instr(Program* program)
                      assert(instr->getDefinition(i).size() == 1);
                      copy_operations[instr->getDefinition(i).physReg()] = {operand, instr->getDefinition(i), 0, 1};
                   } else {
-                     RegClass def_rc = getRegClass(typeOf(instr->getDefinition(i).regClass()), 1);
-                     RegClass op_rc = getRegClass(operand.getTemp().type(), 1);
+                     RegClass def_rc = RegClass(instr->getDefinition(i).regClass().type(), 1);
+                     RegClass op_rc = RegClass(operand.getTemp().type(), 1);
                      for (unsigned j = 0; j < operand.size(); j++)
                      {
                         Operand op = Operand({instr->getOperand(i).physReg().reg + j}, op_rc);
@@ -616,7 +616,7 @@ void lower_to_hw_instr(Program* program)
             }
             case aco_opcode::p_spill:
             {
-               assert(instr->getOperand(0).regClass() == v1_linear);
+               assert(instr->getOperand(0).regClass() == v1.as_linear());
                for (unsigned i = 0; i < instr->getOperand(2).size(); i++) {
                   bld.vop3(aco_opcode::v_writelane_b32, bld.def(v1, instr->getOperand(0).physReg()),
                            Operand(PhysReg{instr->getOperand(2).physReg().reg + i}, s1),
@@ -626,7 +626,7 @@ void lower_to_hw_instr(Program* program)
             }
             case aco_opcode::p_reload:
             {
-               assert(instr->getOperand(0).regClass() == v1_linear);
+               assert(instr->getOperand(0).regClass() == v1.as_linear());
                for (unsigned i = 0; i < instr->getDefinition(0).size(); i++) {
                   bld.vop3(aco_opcode::v_readlane_b32,
                            bld.def(s1, PhysReg{instr->getDefinition(0).physReg().reg + i}),
@@ -641,8 +641,8 @@ void lower_to_hw_instr(Program* program)
             }
             case aco_opcode::p_as_uniform:
             {
-               assert(typeOf(instr->getOperand(0).regClass()) == RegType::vgpr);
-               assert(typeOf(instr->getDefinition(0).regClass()) == RegType::sgpr);
+               assert(instr->getOperand(0).regClass().type() == RegType::vgpr);
+               assert(instr->getDefinition(0).regClass().type() == RegType::sgpr);
                assert(instr->getOperand(0).size() == instr->getDefinition(0).size());
                for (unsigned i = 0; i < instr->getDefinition(0).size(); i++) {
                   bld.vop1(aco_opcode::v_readfirstlane_b32,

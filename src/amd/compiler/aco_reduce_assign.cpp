@@ -54,8 +54,8 @@ void setup_reduce_temp(Program* program)
       return;
 
    assert(maxSize == 1 || maxSize == 2);
-   Temp reduceTmp(0, maxSize == 2 ? v2_linear : v1_linear);
-   Temp vtmp(0, v1_linear);
+   Temp reduceTmp(0, RegClass(vgpr, maxSize).as_linear());
+   Temp vtmp(0, v1.as_linear());
    int inserted_at = -1;
    int vtmp_inserted_at = -1;
    bool reduceTmp_in_loop = false;
@@ -133,7 +133,8 @@ void setup_reduce_temp(Program* program)
 
          Temp val = reduceTmp;
          if (val.size() != instr->getOperand(0).size()) {
-            val = Temp{program->allocateId(), linearClass(instr->getOperand(0).regClass())};
+            assert(instr->getOperand(0).regClass() == v1 || instr->getOperand(0).regClass() == v2);
+            val = Temp{program->allocateId(), instr->getOperand(0).regClass().as_linear()};
             aco_ptr<Pseudo_instruction> split{create_instruction<Pseudo_instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, 2)};
             split->getOperand(0) = Operand(reduceTmp);
             split->getDefinition(0) = Definition(val);
