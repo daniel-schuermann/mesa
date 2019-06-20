@@ -1592,7 +1592,7 @@ void spill(Program* program, live& live_vars, const struct radv_nir_compiler_opt
    assign_spill_slots(ctx, spills_to_vgpr);
 
    /* update live variable information */
-   live_vars = live_var_analysis<true>(program, options);
+   live_vars = live_var_analysis(program, options);
 
    assert(program->num_waves >= num_waves);
 }

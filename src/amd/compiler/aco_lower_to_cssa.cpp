@@ -253,7 +253,7 @@ void lower_to_cssa(Program* program, live& live_vars, const struct radv_nir_comp
    emit_parallelcopies(ctx);
 
    /* update live variable information */
-   live_vars = live_var_analysis<true>(program, options);
+   live_vars = live_var_analysis(program, options);
 
 }
 }
