@@ -195,51 +195,21 @@ static constexpr RegClass v7{RegClass::v7};
  * register class (i.e. size and type)
  * and SSA id.
  */
-class Temp {
-public:
+struct Temp {
    Temp() = default;
    constexpr Temp(uint32_t id, RegClass cls) noexcept
       : id_(id), reg_class(cls) {}
 
-   uint32_t id() const noexcept
-   {
-      return id_;
-   }
+   uint32_t id() const noexcept { return id_; }
+   RegClass regClass() const noexcept { return reg_class; }
 
-   unsigned size() const noexcept
-   {
-      return reg_class.size();
-   }
+   unsigned size() const noexcept { return reg_class.size(); }
+   RegType type() const noexcept { return reg_class.type(); }
+   bool is_linear() const noexcept { return reg_class.is_linear(); }
 
-   RegType type() const noexcept
-   {
-      return reg_class.type();
-   }
-
-   bool is_linear() const noexcept
-   {
-      return reg_class <= RegClass::s16 || reg_class & (1 << 6);
-   }
-
-   RegClass regClass() const noexcept
-   {
-      return reg_class;
-   }
-
-   bool operator<(Temp other) const noexcept
-   {
-      return id() < other.id();
-   }
-
-   bool operator ==(Temp other) const noexcept
-   {
-      return id() == other.id();
-   }
-
-   bool operator !=(Temp other) const noexcept
-   {
-      return id() != other.id();
-   }
+   bool operator <(Temp other) const noexcept { return id() < other.id(); }
+   bool operator==(Temp other) const noexcept { return id() == other.id(); }
+   bool operator!=(Temp other) const noexcept { return id() != other.id(); }
 
 private:
    uint32_t id_;
