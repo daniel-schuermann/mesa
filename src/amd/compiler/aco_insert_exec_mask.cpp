@@ -46,12 +46,14 @@ enum mask_type : uint8_t {
 };
 
 struct wqm_ctx {
+   Program* program;
    /* state for WQM propagation */
    std::set<unsigned> worklist;
    std::vector<uint16_t> defined_in;
    std::vector<bool> needs_wqm;
    std::vector<bool> branch_wqm; /* true if the branch condition in this block should be in wqm */
-   wqm_ctx(Program* program) : defined_in(program->peekAllocationId(), 0xFFFF),
+   wqm_ctx(Program* program) : program(program),
+                               defined_in(program->peekAllocationId(), 0xFFFF),
                                needs_wqm(program->peekAllocationId()),
                                branch_wqm(program->blocks.size())
    {
@@ -128,7 +130,7 @@ bool needs_exact(aco_ptr<Instruction>& instr) {
    }
 }
 
-void set_needs_wqm(wqm_ctx &ctx, Block *block, Temp tmp)
+void set_needs_wqm(wqm_ctx &ctx, Temp tmp)
 {
    if (!ctx.needs_wqm[tmp.id()]) {
       ctx.needs_wqm[tmp.id()] = true;
@@ -137,16 +139,18 @@ void set_needs_wqm(wqm_ctx &ctx, Block *block, Temp tmp)
    }
 }
 
-void mark_block_wqm(wqm_ctx &ctx, Block *block)
+void mark_block_wqm(wqm_ctx &ctx, unsigned block_idx)
 {
-   if (ctx.branch_wqm[block->index])
+   if (ctx.branch_wqm[block_idx])
       return;
-   ctx.branch_wqm[block->index] = true;
 
+   ctx.branch_wqm[block_idx] = true;
+   Block* block = ctx.program->blocks[block_idx].get();
    aco_ptr<Instruction>& branch = *block->instructions.rbegin();
+
    if (branch->opcode != aco_opcode::p_branch) {
       assert(branch->operandCount() && branch->getOperand(0).isTemp());
-      set_needs_wqm(ctx, block, branch->getOperand(0).getTemp());
+      set_needs_wqm(ctx, branch->getOperand(0).getTemp());
    }
 
    /* TODO: this sets more branch conditions to WQM than it needs to
@@ -155,7 +159,7 @@ void mark_block_wqm(wqm_ctx &ctx, Block *block)
       return;
 
    for (Block *pred : block->logical_predecessors)
-      mark_block_wqm(ctx, pred);
+      mark_block_wqm(ctx, pred->index);
 }
 
 void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
@@ -185,7 +189,7 @@ void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
          for (unsigned j = 0; j < instr->operandCount(); j++) {
             if (!instr->getOperand(j).isTemp())
                continue;
-            set_needs_wqm(ctx, block, instr->getOperand(j).getTemp());
+            set_needs_wqm(ctx, instr->getOperand(j).getTemp());
          }
       } else if (preserve_wqm && info.block_needs & WQM) {
          needs = Preserve_WQM;
@@ -194,7 +198,7 @@ void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
       /* ensure the condition controlling the control flow for this phi is in WQM */
       if (needs == WQM && instr->opcode == aco_opcode::p_phi) {
          for (Block *pred : block->logical_predecessors)
-            mark_block_wqm(ctx, pred);
+            mark_block_wqm(ctx, pred->index);
       }
 
       instr_needs[i] = needs;
@@ -204,7 +208,7 @@ void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
     * <cond> should be computed in WQM */
    if (info.block_needs & WQM && !(block->kind & block_kind_top_level)) {
       for (Block* pred : block->logical_predecessors)
-         mark_block_wqm(ctx, pred);
+         mark_block_wqm(ctx, pred->index);
    }
 
    info.instr_needs = instr_needs;
