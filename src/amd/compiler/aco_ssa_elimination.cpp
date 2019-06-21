@@ -183,26 +183,26 @@ void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& b
    Block* succ = block->linear_successors[0];
    Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(pred->instructions.back().get());
    if (branch->opcode == aco_opcode::p_branch) {
-      branch->targets[0] = succ;
-      branch->targets[1] = succ;
-   } else if (branch->targets[0] == block.get()) {
-      branch->targets[0] = succ;
-   } else if (branch->targets[0] == succ) {
-      assert(branch->targets[1] == block.get());
-      branch->targets[1] = succ;
+      branch->target[0] = succ->index;
+      branch->target[1] = succ->index;
+   } else if (branch->target[0] == block->index) {
+      branch->target[0] = succ->index;
+   } else if (branch->target[0] == succ->index) {
+      assert(branch->target[1] == block->index);
+      branch->target[1] = succ->index;
       branch->opcode = aco_opcode::p_branch;
-   } else if (branch->targets[1] == block.get()) {
+   } else if (branch->target[1] == block->index) {
       /* check if there is a fall-through path from block to succ */
       bool falls_through = true;
       for (unsigned j = block->index + 1; falls_through && j < succ->index; j++) {
          assert(ctx.program->blocks[j]->index == j);
          if (!ctx.program->blocks[j]->instructions.empty()) {
-            assert(ctx.program->blocks[j].get() == branch->targets[0]);
+            assert(j == branch->target[0]);
             falls_through = false;
          }
       }
       if (falls_through) {
-         branch->targets[1] = succ;
+         branch->target[1] = succ->index;
       } else {
          /* This is a (uniform) break or continue block. The branch condition has to be inverted. */
          if (branch->opcode == aco_opcode::p_cbranch_z)
@@ -211,14 +211,17 @@ void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& b
             branch->opcode = aco_opcode::p_cbranch_z;
          else
             assert(false);
-         branch->targets[1] = branch->targets[0];
-         branch->targets[0] = succ;
+         /* also invert the linear successors */
+         pred->linear_successors[0] = pred->linear_successors[1];
+         pred->linear_successors[1] = succ;
+         branch->target[1] = branch->target[0];
+         branch->target[0] = succ->index;
       }
    } else {
       assert(false);
    }
 
-   if (branch->targets[0] == branch->targets[1])
+   if (branch->target[0] == branch->target[1])
       branch->opcode = aco_opcode::p_branch;
 
    for (unsigned i = 0; i < pred->linear_successors.size(); i++)
