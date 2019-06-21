@@ -45,30 +45,31 @@ struct phi_use {
 };
 
 struct ssa_state {
-   std::map<Block *, unsigned> latest;
+   std::map<unsigned, unsigned> latest;
    std::map<unsigned, std::map<phi_use, uint64_t>> phis;
 };
 
-Operand get_ssa(Program *program, Block *block, ssa_state *state)
+Operand get_ssa(Program *program, unsigned block_idx, ssa_state *state)
 {
    while (true) {
-      auto pos = state->latest.find(block);
+      auto pos = state->latest.find(block_idx);
       if (pos != state->latest.end())
          return Operand({pos->second, s2});
 
+      Block* block = program->blocks[block_idx].get();
       size_t pred = block->linear_predecessors.size();
       if (pred == 0) {
          return Operand(s2);
       } else if (pred == 1) {
-         block = block->linear_predecessors[0];
+         block_idx = block->linear_predecessors[0]->index;
          continue;
       } else {
          unsigned res = program->allocateId();
-         state->latest[block] = res;
+         state->latest[block_idx] = res;
 
          aco_ptr<Pseudo_instruction> phi{create_instruction<Pseudo_instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, pred, 1)};
          for (unsigned i = 0; i < pred; i++) {
-            phi->getOperand(i) = get_ssa(program, block->linear_predecessors[i], state);
+            phi->getOperand(i) = get_ssa(program, block->linear_predecessors[i]->index, state);
             if (phi->getOperand(i).isTemp()) {
                assert(i < 64);
                state->phis[phi->getOperand(i).tempId()][(phi_use){block, res}] |= (uint64_t)1 << i;
@@ -95,7 +96,7 @@ void update_phi(Program *program, ssa_state *state, Block *block, unsigned phi_d
       uint64_t operands = operand_mask;
       while (operands) {
          unsigned operand = u_bit_scan64(&operands);
-         Operand new_operand = get_ssa(program, block->linear_predecessors[operand], state);
+         Operand new_operand = get_ssa(program, block->linear_predecessors[operand]->index, state);
          phi->getOperand(operand) = new_operand;
          if (!new_operand.isUndefined())
             state->phis[new_operand.tempId()][(phi_use){block, phi_def}] |= (uint64_t)1 << operand;
@@ -107,7 +108,7 @@ void update_phi(Program *program, ssa_state *state, Block *block, unsigned phi_d
 
 Temp write_ssa(Program *program, Block *block, ssa_state *state, unsigned previous) {
    unsigned id = program->allocateId();
-   state->latest[block] = id;
+   state->latest[block->index] = id;
 
    /* update phis */
    if (previous) {
@@ -159,7 +160,7 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
       }
       assert(phi_src.regClass() == s2);
 
-      Operand cur = get_ssa(program, pred, &state);
+      Operand cur = get_ssa(program, pred->index, &state);
       Temp new_cur = write_ssa(program, pred, &state, cur.isTemp() ? cur.tempId() : 0);
 
       if (cur.isUndefined()) {
@@ -178,7 +179,7 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
       }
    }
 
-   return bld.sop1(aco_opcode::s_mov_b64, phi->getDefinition(0), get_ssa(program, block, &state)).get_ptr();
+   return bld.sop1(aco_opcode::s_mov_b64, phi->getDefinition(0), get_ssa(program, block->index, &state)).get_ptr();
 }
 
 void lower_linear_bool_phi(Program *program, Block *block, aco_ptr<Instruction>& phi)
