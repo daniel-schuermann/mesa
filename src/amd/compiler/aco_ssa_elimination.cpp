@@ -46,21 +46,20 @@ void collect_phi_info(ssa_elimination_ctx& ctx)
 {
    for (std::unique_ptr<Block>& block : ctx.program->blocks) {
       for (aco_ptr<Instruction>& phi : block->instructions) {
-         if (phi->opcode == aco_opcode::p_phi || phi->opcode == aco_opcode::p_linear_phi) {
-            for (unsigned i = 0; i < phi->num_operands; i++) {
-               if (phi->getOperand(i).isUndefined())
-                  continue;
-               if (phi->getOperand(i).isTemp() && phi->getOperand(i).physReg() == phi->getDefinition(0).physReg())
-                  continue;
-
-               std::vector<Block*>& preds = phi->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
-               phi_info& info = phi->opcode == aco_opcode::p_phi ? ctx.logical_phi_info : ctx.linear_phi_info;
-               const auto result = info.emplace(preds[i]->index, std::vector<std::pair<Definition, Operand>>());
-               result.first->second.emplace_back(phi->getDefinition(0), phi->getOperand(i));
-               ctx.empty_blocks[preds[i]->index] = false;
-            }
-         } else {
+         if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
             break;
+
+         for (unsigned i = 0; i < phi->num_operands; i++) {
+            if (phi->getOperand(i).isUndefined())
+               continue;
+            if (phi->getOperand(i).isTemp() && phi->getOperand(i).physReg() == phi->getDefinition(0).physReg())
+               continue;
+
+            std::vector<unsigned>& preds = phi->opcode == aco_opcode::p_phi ? block->logical_preds : block->linear_preds;
+            phi_info& info = phi->opcode == aco_opcode::p_phi ? ctx.logical_phi_info : ctx.linear_phi_info;
+            const auto result = info.emplace(preds[i], std::vector<std::pair<Definition, Operand>>());
+            result.first->second.emplace_back(phi->getDefinition(0), phi->getOperand(i));
+            ctx.empty_blocks[preds[i]] = false;
          }
       }
    }
@@ -116,8 +115,8 @@ void try_remove_merge_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& bl
 {
    /* check if the successor is another merge block which restores exec */
    // TODO: divergent loops also restore exec
-   if (block->linear_successors.size() != 1 ||
-       !(block->linear_successors[0]->kind & block_kind_merge))
+   if (block->linear_succs.size() != 1 ||
+       !(ctx.program->blocks[block->linear_succs[0]]->kind & block_kind_merge))
       return;
 
    /* check if this block is empty and the exec mask is not needed */
@@ -145,8 +144,8 @@ void try_remove_merge_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& bl
 
 void try_remove_invert_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
 {
-   assert(block->linear_successors.size() == 2);
-   if (block->linear_successors[0] != block->linear_successors[1])
+   assert(block->linear_succs.size() == 2);
+   if (block->linear_succs[0] != block->linear_succs[1])
       return;
 
    /* check if we can remove this block */
@@ -158,16 +157,16 @@ void try_remove_invert_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& b
          return;
    }
 
-   Block* succ = block->linear_successors[0];
-   assert(block->linear_predecessors.size() == 2);
-   block->linear_predecessors[0]->linear_successors[0] = succ;
-   block->linear_predecessors[1]->linear_successors[0] = succ;
-   succ->linear_predecessors[0] = block->linear_predecessors[0];
-   succ->linear_predecessors[1] = block->linear_predecessors[1];
+   unsigned succ_idx = block->linear_succs[0];
+   assert(block->linear_preds.size() == 2);
+   ctx.program->blocks[block->linear_preds[0]]->linear_succs[0] = succ_idx;
+   ctx.program->blocks[block->linear_preds[1]]->linear_succs[0] = succ_idx;
+   ctx.program->blocks[succ_idx]->linear_preds[0] = block->linear_preds[0];
+   ctx.program->blocks[succ_idx]->linear_preds[1] = block->linear_preds[1];
 
    block->instructions.clear();
-   block->linear_predecessors.clear();
-   block->linear_successors.clear();
+   block->linear_preds.clear();
+   block->linear_succs.clear();
 }
 
 void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
@@ -179,8 +178,8 @@ void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& b
          return;
    }
 
-   Block* pred = block->linear_predecessors[0];
-   Block* succ = block->linear_successors[0];
+   Block* pred = ctx.program->blocks[block->linear_preds[0]].get();
+   Block* succ = ctx.program->blocks[block->linear_succs[0]].get();
    Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(pred->instructions.back().get());
    if (branch->opcode == aco_opcode::p_branch) {
       branch->target[0] = succ->index;
@@ -212,8 +211,8 @@ void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& b
          else
             assert(false);
          /* also invert the linear successors */
-         pred->linear_successors[0] = pred->linear_successors[1];
-         pred->linear_successors[1] = succ;
+         pred->linear_succs[0] = pred->linear_succs[1];
+         pred->linear_succs[1] = succ->index;
          branch->target[1] = branch->target[0];
          branch->target[0] = succ->index;
       }
@@ -224,15 +223,17 @@ void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& b
    if (branch->target[0] == branch->target[1])
       branch->opcode = aco_opcode::p_branch;
 
-   for (unsigned i = 0; i < pred->linear_successors.size(); i++)
-      if (pred->linear_successors[i] == block.get())
-         pred->linear_successors[i] = succ;
-   for (unsigned i = 0; i < succ->linear_predecessors.size(); i++)
-      if (succ->linear_predecessors[i] == block.get())
-         succ->linear_predecessors[i] = pred;
+   for (unsigned i = 0; i < pred->linear_succs.size(); i++)
+      if (pred->linear_succs[i] == block->index)
+         pred->linear_succs[i] = succ->index;
+
+   for (unsigned i = 0; i < succ->linear_preds.size(); i++)
+      if (succ->linear_preds[i] == block->index)
+         succ->linear_preds[i] = pred->index;
+
    block->instructions.clear();
-   block->linear_predecessors.clear();
-   block->linear_successors.clear();
+   block->linear_preds.clear();
+   block->linear_succs.clear();
 }
 
 void jump_threading(ssa_elimination_ctx& ctx)
@@ -248,14 +249,14 @@ void jump_threading(ssa_elimination_ctx& ctx)
          continue;
       }
 
-      if (block->linear_successors.size() > 1)
+      if (block->linear_succs.size() > 1)
          continue;
 
       if (block->kind & block_kind_merge ||
           block->kind & block_kind_loop_exit)
          try_remove_merge_block(ctx, block);
 
-      if (block->linear_predecessors.size() == 1)
+      if (block->linear_preds.size() == 1)
          try_remove_simple_block(ctx, block);
    }
 }

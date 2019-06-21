@@ -153,8 +153,8 @@ void next_uses_per_block(spill_ctx& ctx, unsigned block_idx, std::set<uint32_t>&
 
       for (unsigned i = 0; i < instr->num_operands; i++) {
          unsigned pred_idx = instr->opcode == aco_opcode::p_phi ?
-                             block->logical_predecessors[i]->index :
-                             block->linear_predecessors[i]->index;
+                             block->logical_preds[i] :
+                             block->linear_preds[i];
          if (instr->getOperand(i).isTemp()) {
             if (ctx.next_use_distances_end[pred_idx].find(instr->getOperand(i).getTemp()) == ctx.next_use_distances_end[pred_idx].end() ||
                 ctx.next_use_distances_end[pred_idx][instr->getOperand(i).getTemp()] != std::pair<uint32_t, uint32_t>{block_idx, 0})
@@ -171,17 +171,17 @@ void next_uses_per_block(spill_ctx& ctx, unsigned block_idx, std::set<uint32_t>&
       Temp temp = pair.first;
       uint32_t distance = pair.second.second;
       uint32_t dom = pair.second.first;
-      std::vector<Block*>& preds = temp.is_linear() ? block->linear_predecessors : block->logical_predecessors;
-      for (Block* pred : preds) {
-         if (pred->loop_nest_depth > block->loop_nest_depth)
+      std::vector<unsigned>& preds = temp.is_linear() ? block->linear_preds : block->logical_preds;
+      for (unsigned pred_idx : preds) {
+         if (ctx.program->blocks[pred_idx]->loop_nest_depth > block->loop_nest_depth)
             distance += 0xFFFF;
-         if (ctx.next_use_distances_end[pred->index].find(temp) != ctx.next_use_distances_end[pred->index].end()) {
-            dom = get_dominator(dom, ctx.next_use_distances_end[pred->index][temp].first, ctx.program, temp.is_linear());
-            distance = std::min(ctx.next_use_distances_end[pred->index][temp].second, distance);
+         if (ctx.next_use_distances_end[pred_idx].find(temp) != ctx.next_use_distances_end[pred_idx].end()) {
+            dom = get_dominator(dom, ctx.next_use_distances_end[pred_idx][temp].first, ctx.program, temp.is_linear());
+            distance = std::min(ctx.next_use_distances_end[pred_idx][temp].second, distance);
          }
-         if (ctx.next_use_distances_end[pred->index][temp] != std::pair<uint32_t, uint32_t>{dom, distance})
-            worklist.insert(pred->index);
-         ctx.next_use_distances_end[pred->index][temp] = {dom, distance};
+         if (ctx.next_use_distances_end[pred_idx][temp] != std::pair<uint32_t, uint32_t>{dom, distance})
+            worklist.insert(pred_idx);
+         ctx.next_use_distances_end[pred_idx][temp] = {dom, distance};
       }
    }
 
@@ -329,8 +329,8 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
 
    /* loop header block */
    if (block->loop_nest_depth > ctx.program->blocks[block_idx - 1]->loop_nest_depth) {
-      assert(block->linear_predecessors[0]->index == block_idx - 1);
-      assert(block->logical_predecessors[0]->index == block_idx - 1);
+      assert(block->linear_preds[0] == block_idx - 1);
+      assert(block->logical_preds[0] == block_idx - 1);
 
       /* create new loop_info */
       ctx.loop_header.emplace(block);
@@ -454,9 +454,9 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
    }
 
    /* branch block */
-   if (block->linear_predecessors.size() == 1) {
+   if (block->linear_preds.size() == 1) {
       /* keep variables spilled if they are alive and not used in the current block */
-      unsigned pred_idx = block->linear_predecessors[0]->index;
+      unsigned pred_idx = block->linear_preds[0];
       for (std::pair<Temp, uint32_t> pair : ctx.spills_exit[pred_idx]) {
          if (pair.first.type() == sgpr &&
              ctx.next_use_distances_start[block_idx].find(pair.first) != ctx.next_use_distances_start[block_idx].end() &&
@@ -465,8 +465,8 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
             spilled_sgprs += pair.first.size();
          }
       }
-      if (block->logical_predecessors.size() == 1) {
-         pred_idx = block->logical_predecessors[0]->index;
+      if (block->logical_preds.size() == 1) {
+         pred_idx = block->logical_preds[0];
          for (std::pair<Temp, uint32_t> pair : ctx.spills_exit[pred_idx]) {
             if (pair.first.type() == vgpr &&
                 ctx.next_use_distances_start[block_idx].find(pair.first) != ctx.next_use_distances_start[block_idx].end() &&
@@ -479,7 +479,7 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
 
       /* if register demand is still too high, we just keep all spilled live vars and process the block */
       if (block->sgpr_demand - spilled_sgprs > ctx.target_sgpr) {
-         pred_idx = block->linear_predecessors[0]->index;
+         pred_idx = block->linear_preds[0];
          for (std::pair<Temp, uint32_t> pair : ctx.spills_exit[pred_idx]) {
             if (pair.first.type() == sgpr &&
                 ctx.next_use_distances_start[block_idx].find(pair.first) != ctx.next_use_distances_start[block_idx].end() &&
@@ -488,8 +488,8 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
             }
          }
       }
-      if (block->vgpr_demand - spilled_vgprs > ctx.target_vgpr && block->logical_predecessors.size() == 1) {
-         pred_idx = block->logical_predecessors[0]->index;
+      if (block->vgpr_demand - spilled_vgprs > ctx.target_vgpr && block->logical_preds.size() == 1) {
+         pred_idx = block->logical_preds[0];
          for (std::pair<Temp, uint32_t> pair : ctx.spills_exit[pred_idx]) {
             if (pair.first.type() == vgpr &&
                 ctx.next_use_distances_start[block_idx].find(pair.first) != ctx.next_use_distances_start[block_idx].end() &&
@@ -507,7 +507,7 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
 
    /* keep variables spilled on all incoming paths */
    for (std::pair<Temp, std::pair<uint32_t, uint32_t>> pair : ctx.next_use_distances_start[block_idx]) {
-      std::vector<Block*>& preds = pair.first.type() == vgpr ? block->logical_predecessors : block->linear_predecessors;
+      std::vector<unsigned>& preds = pair.first.type() == vgpr ? block->logical_preds : block->linear_preds;
       /* If it can be rematerialized, keep the variable spilled if all predecessors do not reload it.
        * Otherwise, if any predecessor reloads it, ensure it's reloaded on all other predecessors.
        * The idea is that it's better in practice to rematerialize redundantly than to create lots of phis. */
@@ -515,19 +515,19 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
       bool remat = ctx.remat.count(pair.first);
       bool spill = !remat;
       uint32_t spill_id = 0;
-      for (Block* pred : preds) {
+      for (unsigned pred_idx : preds) {
          /* variable is not even live at the predecessor: probably from a phi */
-         if (ctx.next_use_distances_end[pred->index].find(pair.first) == ctx.next_use_distances_end[pred->index].end()) {
+         if (ctx.next_use_distances_end[pred_idx].find(pair.first) == ctx.next_use_distances_end[pred_idx].end()) {
             spill = false;
             break;
          }
-         if (ctx.spills_exit[pred->index].find(pair.first) == ctx.spills_exit[pred->index].end()) {
+         if (ctx.spills_exit[pred_idx].find(pair.first) == ctx.spills_exit[pred_idx].end()) {
             if (!remat)
                spill = false;
          } else {
             partial_spills.insert(pair.first);
             /* it might be that on one incoming path, the variable has a different spill_id, but add_couple_code() will take care of that. */
-            spill_id = ctx.spills_exit[pred->index][pair.first];
+            spill_id = ctx.spills_exit[pred_idx][pair.first];
             if (remat)
                spill = true;
          }
@@ -547,13 +547,13 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
    while (block->instructions[idx]->opcode == aco_opcode::p_linear_phi ||
           block->instructions[idx]->opcode == aco_opcode::p_phi) {
       aco_ptr<Instruction>& phi = block->instructions[idx];
-      std::vector<Block*>& preds = phi->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
+      std::vector<unsigned>& preds = phi->opcode == aco_opcode::p_phi ? block->logical_preds : block->linear_preds;
       bool spill = true;
 
       for (unsigned i = 0; i < phi->num_operands; i++) {
          if (!phi->getOperand(i).isTemp())
             spill = false;
-         else if (ctx.spills_exit[preds[i]->index].find(phi->getOperand(i).getTemp()) == ctx.spills_exit[preds[i]->index].end())
+         else if (ctx.spills_exit[preds[i]].find(phi->getOperand(i).getTemp()) == ctx.spills_exit[preds[i]].end())
             spill = false;
          else
             partial_spills.insert(phi->getDefinition(0).getTemp());
@@ -647,16 +647,16 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
 void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
 {
    /* no coupling code necessary */
-   if (block->linear_predecessors.size() == 0)
+   if (block->linear_preds.size() == 0)
       return;
 
    std::vector<aco_ptr<Instruction>> instructions;
    /* branch block: TODO take other branch into consideration */
-   if (block->linear_predecessors.size() == 1) {
-      assert(ctx.processed[block->linear_predecessors[0]->index]);
+   if (block->linear_preds.size() == 1) {
+      assert(ctx.processed[block->linear_preds[0]]);
 
-      if (block->logical_predecessors.size() == 1) {
-         unsigned pred_idx = block->logical_predecessors[0]->index;
+      if (block->logical_preds.size() == 1) {
+         unsigned pred_idx = block->logical_preds[0];
          for (std::pair<Temp, std::pair<uint32_t, uint32_t>> live : ctx.next_use_distances_start[block_idx]) {
             if (live.first.type() == sgpr)
                continue;
@@ -680,7 +680,7 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
          }
       }
 
-      unsigned pred_idx = block->linear_predecessors[0]->index;
+      unsigned pred_idx = block->linear_preds[0];
       for (std::pair<Temp, std::pair<uint32_t, uint32_t>> live : ctx.next_use_distances_start[block_idx]) {
          if (live.first.type() == vgpr)
             continue;
@@ -720,8 +720,8 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
    }
 
    /* loop header and merge blocks: check if all (linear) predecessors have been processed */
-   for (MAYBE_UNUSED Block* pred : block->linear_predecessors)
-      assert(ctx.processed[pred->index]);
+   for (MAYBE_UNUSED unsigned pred : block->linear_preds)
+      assert(ctx.processed[pred]);
 
    /* iterate the phi nodes for which operands to spill at the predecessor */
    for (aco_ptr<Instruction>& phi : block->instructions) {
@@ -735,11 +735,11 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
          continue;
       }
 
-      std::vector<Block*>& preds = phi->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
+      std::vector<unsigned>& preds = phi->opcode == aco_opcode::p_phi ? block->logical_preds : block->linear_preds;
       uint32_t def_spill_id = ctx.spills_entry[block_idx][phi->getDefinition(0).getTemp()];
 
       for (unsigned i = 0; i < phi->num_operands; i++) {
-         unsigned pred_idx = preds[i]->index;
+         unsigned pred_idx = preds[i];
 
          /* we have to spill constants to the same memory address */
          if (phi->getOperand(i).isConstant()) {
@@ -753,13 +753,14 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
             aco_ptr<Pseudo_instruction> spill{create_instruction<Pseudo_instruction>(aco_opcode::p_spill, Format::PSEUDO, 2, 0)};
             spill->getOperand(0) = phi->getOperand(i);
             spill->getOperand(1) = Operand(spill_id);
-            unsigned idx = preds[i]->instructions.size();
+            Block* pred = ctx.program->blocks[pred_idx].get();
+            unsigned idx = pred->instructions.size();
             do {
                assert(idx != 0);
                idx--;
-            } while (phi->opcode == aco_opcode::p_phi && preds[i]->instructions[idx]->opcode != aco_opcode::p_logical_end);
-            std::vector<aco_ptr<Instruction>>::iterator it = std::next(preds[i]->instructions.begin(), idx);
-            preds[i]->instructions.insert(it, std::move(spill));
+            } while (phi->opcode == aco_opcode::p_phi && pred->instructions[idx]->opcode != aco_opcode::p_logical_end);
+            std::vector<aco_ptr<Instruction>>::iterator it = std::next(pred->instructions.begin(), idx);
+            pred->instructions.insert(it, std::move(spill));
             continue;
          }
          if (!phi->getOperand(i).isTemp())
@@ -794,13 +795,14 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
          aco_ptr<Pseudo_instruction> spill{create_instruction<Pseudo_instruction>(aco_opcode::p_spill, Format::PSEUDO, 2, 0)};
          spill->getOperand(0) = Operand(var);
          spill->getOperand(1) = Operand(spill_id);
-         unsigned idx = preds[i]->instructions.size();
+         Block* pred = ctx.program->blocks[pred_idx].get();
+         unsigned idx = pred->instructions.size();
          do {
             assert(idx != 0);
             idx--;
-         } while (phi->opcode == aco_opcode::p_phi && preds[i]->instructions[idx]->opcode != aco_opcode::p_logical_end);
-         std::vector<aco_ptr<Instruction>>::iterator it = std::next(preds[i]->instructions.begin(), idx);
-         preds[i]->instructions.insert(it, std::move(spill));
+         } while (phi->opcode == aco_opcode::p_phi && pred->instructions[idx]->opcode != aco_opcode::p_logical_end);
+         std::vector<aco_ptr<Instruction>>::iterator it = std::next(pred->instructions.begin(), idx);
+         pred->instructions.insert(it, std::move(spill));
          ctx.spills_exit[pred_idx][phi->getOperand(i).getTemp()] = spill_id;
       }
 
@@ -811,11 +813,11 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
    /* iterate all (other) spilled variables for which to spill at the predecessor */
    // TODO: would be better to have them sorted: first vgprs and first with longest distance
    for (std::pair<Temp, uint32_t> pair : ctx.spills_entry[block_idx]) {
-      std::vector<Block*> preds = pair.first.type() == vgpr ? block->logical_predecessors : block->linear_predecessors;
+      std::vector<unsigned> preds = pair.first.type() == vgpr ? block->logical_preds : block->linear_preds;
 
-      for (Block* pred : preds) {
+      for (unsigned pred_idx : preds) {
          /* add interferences between spilled variable and predecessors exit spills */
-         for (std::pair<Temp, uint32_t> exit_spill : ctx.spills_exit[pred->index]) {
+         for (std::pair<Temp, uint32_t> exit_spill : ctx.spills_exit[pred_idx]) {
             if (exit_spill.first == pair.first)
                continue;
             ctx.interferences[exit_spill.second].second.emplace(pair.second);
@@ -823,29 +825,30 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
          }
 
          /* variable is already spilled at predecessor */
-         std::map<Temp, uint32_t>::iterator spilled = ctx.spills_exit[pred->index].find(pair.first);
-         if (spilled != ctx.spills_exit[pred->index].end()) {
+         std::map<Temp, uint32_t>::iterator spilled = ctx.spills_exit[pred_idx].find(pair.first);
+         if (spilled != ctx.spills_exit[pred_idx].end()) {
             if (spilled->second != pair.second)
                ctx.affinities.emplace_back(std::pair<uint32_t, uint32_t>{pair.second, spilled->second});
             continue;
          }
 
          /* variable is dead at predecessor, it must be from a phi: this works because of CSSA form */ // FIXME: lower_to_cssa()
-         if (ctx.next_use_distances_end[pred->index].find(pair.first) == ctx.next_use_distances_end[pred->index].end())
+         if (ctx.next_use_distances_end[pred_idx].find(pair.first) == ctx.next_use_distances_end[pred_idx].end())
             continue;
 
          /* variable is in register at predecessor and has to be spilled */
          /* rename if necessary */
          Temp var = pair.first;
-         std::map<Temp, Temp>::iterator rename_it = ctx.renames[pred->index].find(var);
-         if (rename_it != ctx.renames[pred->index].end()) {
+         std::map<Temp, Temp>::iterator rename_it = ctx.renames[pred_idx].find(var);
+         if (rename_it != ctx.renames[pred_idx].end()) {
             var = rename_it->second;
-            ctx.renames[pred->index].erase(rename_it);
+            ctx.renames[pred_idx].erase(rename_it);
          }
 
          aco_ptr<Pseudo_instruction> spill{create_instruction<Pseudo_instruction>(aco_opcode::p_spill, Format::PSEUDO, 2, 0)};
          spill->getOperand(0) = Operand(var);
          spill->getOperand(1) = Operand(pair.second);
+         Block* pred = ctx.program->blocks[pred_idx].get();
          unsigned idx = pred->instructions.size();
          do {
             assert(idx != 0);
@@ -862,11 +865,11 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
       assert(phi->opcode == aco_opcode::p_phi || phi->opcode == aco_opcode::p_linear_phi);
       assert(ctx.spills_entry[block_idx].find(phi->getDefinition(0).getTemp()) == ctx.spills_entry[block_idx].end());
 
-      std::vector<Block*>& preds = phi->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
+      std::vector<unsigned>& preds = phi->opcode == aco_opcode::p_phi ? block->logical_preds : block->linear_preds;
       for (unsigned i = 0; i < phi->num_operands; i++) {
          if (!phi->getOperand(i).isTemp())
             continue;
-         unsigned pred_idx = preds[i]->index;
+         unsigned pred_idx = preds[i];
 
          /* rename operand */
          if (ctx.spills_exit[pred_idx].find(phi->getOperand(i).getTemp()) == ctx.spills_exit[pred_idx].end()) {
@@ -880,16 +883,16 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
 
          /* reload phi operand at end of predecessor block */
          Temp new_name = {ctx.program->allocateId(), tmp.regClass()};
-
-         unsigned idx = preds[i]->instructions.size();
+         Block* pred = ctx.program->blocks[pred_idx].get();
+         unsigned idx = pred->instructions.size();
          do {
             assert(idx != 0);
             idx--;
-         } while (phi->opcode == aco_opcode::p_phi && preds[i]->instructions[idx]->opcode != aco_opcode::p_logical_end);
-         std::vector<aco_ptr<Instruction>>::iterator it = std::next(preds[i]->instructions.begin(), idx);
+         } while (phi->opcode == aco_opcode::p_phi && pred->instructions[idx]->opcode != aco_opcode::p_logical_end);
+         std::vector<aco_ptr<Instruction>>::iterator it = std::next(pred->instructions.begin(), idx);
 
          aco_ptr<Instruction> reload = do_reload(ctx, tmp, new_name, ctx.spills_exit[pred_idx][tmp]);
-         preds[i]->instructions.insert(it, std::move(reload));
+         pred->instructions.insert(it, std::move(reload));
 
          ctx.spills_exit[pred_idx].erase(tmp);
          ctx.renames[pred_idx][tmp] = new_name;
@@ -902,24 +905,24 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
       /* skip spilled variables */
       if (ctx.spills_entry[block_idx].find(pair.first) != ctx.spills_entry[block_idx].end())
          continue;
-      std::vector<Block*> preds = pair.first.type() == vgpr ? block->logical_predecessors : block->linear_predecessors;
+      std::vector<unsigned> preds = pair.first.type() == vgpr ? block->logical_preds : block->linear_preds;
 
       /* variable is dead at predecessor, it must be from a phi */
       bool is_dead = false;
-      for (Block* pred : preds) {
-         if (ctx.next_use_distances_end[pred->index].find(pair.first) == ctx.next_use_distances_end[pred->index].end())
+      for (unsigned pred_idx : preds) {
+         if (ctx.next_use_distances_end[pred_idx].find(pair.first) == ctx.next_use_distances_end[pred_idx].end())
             is_dead = true;
       }
       if (is_dead)
          continue;
-      for (Block* pred : preds) {
+      for (unsigned pred_idx : preds) {
          /* the variable is not spilled at the predecessor */
-         if (ctx.spills_exit[pred->index].find(pair.first) == ctx.spills_exit[pred->index].end())
+         if (ctx.spills_exit[pred_idx].find(pair.first) == ctx.spills_exit[pred_idx].end())
             continue;
 
          /* variable is spilled at predecessor and has to be reloaded */
          Temp new_name = {ctx.program->allocateId(), pair.first.regClass()};
-
+         Block* pred = ctx.program->blocks[pred_idx].get();
          unsigned idx = pred->instructions.size();
          do {
             assert(idx != 0);
@@ -937,17 +940,17 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
       /* check if we have to create a new phi for this variable */
       Temp rename = Temp();
       bool is_same = true;
-      for (Block* pred : preds) {
-         if (ctx.renames[pred->index].find(pair.first) == ctx.renames[pred->index].end()) {
+      for (unsigned pred_idx : preds) {
+         if (ctx.renames[pred_idx].find(pair.first) == ctx.renames[pred_idx].end()) {
             if (rename == Temp())
                rename = pair.first;
             else
                is_same = rename == pair.first;
          } else {
             if (rename == Temp())
-               rename = ctx.renames[pred->index][pair.first];
+               rename = ctx.renames[pred_idx][pair.first];
             else
-               is_same = rename == ctx.renames[pred->index][pair.first];
+               is_same = rename == ctx.renames[pred_idx][pair.first];
          }
 
          if (!is_same)
@@ -961,9 +964,9 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
          rename = {ctx.program->allocateId(), pair.first.regClass()};
          for (unsigned i = 0; i < phi->num_operands; i++) {
             Temp tmp;
-            if (ctx.renames[preds[i]->index].find(pair.first) != ctx.renames[preds[i]->index].end())
-               tmp = ctx.renames[preds[i]->index][pair.first];
-            else if (preds[i]->index >= block_idx)
+            if (ctx.renames[preds[i]].find(pair.first) != ctx.renames[preds[i]].end())
+               tmp = ctx.renames[preds[i]][pair.first];
+            else if (preds[i] >= block_idx)
                tmp = rename;
             else
                tmp = pair.first;

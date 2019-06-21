@@ -158,8 +158,8 @@ void mark_block_wqm(wqm_ctx &ctx, unsigned block_idx)
    if (block->kind & block_kind_top_level)
       return;
 
-   for (Block *pred : block->logical_predecessors)
-      mark_block_wqm(ctx, pred->index);
+   for (unsigned pred_idx : block->logical_preds)
+      mark_block_wqm(ctx, pred_idx);
 }
 
 void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
@@ -197,8 +197,8 @@ void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
 
       /* ensure the condition controlling the control flow for this phi is in WQM */
       if (needs == WQM && instr->opcode == aco_opcode::p_phi) {
-         for (Block *pred : block->logical_predecessors)
-            mark_block_wqm(ctx, pred->index);
+         for (unsigned pred_idx : block->logical_preds)
+            mark_block_wqm(ctx, pred_idx);
       }
 
       instr_needs[i] = needs;
@@ -207,8 +207,8 @@ void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
    /* for "if (<cond>) <wqm code>" or "while (<cond>) <wqm code>",
     * <cond> should be computed in WQM */
    if (info.block_needs & WQM && !(block->kind & block_kind_top_level)) {
-      for (Block* pred : block->logical_predecessors)
-         mark_block_wqm(ctx, pred->index);
+      for (unsigned pred_idx : block->logical_preds)
+         mark_block_wqm(ctx, pred_idx);
    }
 
    info.instr_needs = instr_needs;
@@ -295,7 +295,7 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
 {
    unsigned idx = block->index;
    Builder bld(ctx.program, &instructions);
-   std::vector<Block*>& preds = block->linear_predecessors;
+   std::vector<unsigned>& preds = block->linear_preds;
 
    /* start block */
    if (idx == 0) {
@@ -320,7 +320,7 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
 
    /* loop entry block */
    if (block->kind & block_kind_loop_header) {
-      assert(preds[0]->index == idx - 1);
+      assert(preds[0] == idx - 1);
       ctx.info[idx].exec = ctx.info[idx - 1].exec;
       loop_info& info = ctx.loop.back();
       assert(ctx.info[idx].exec.size() == info.num_exec_masks);
@@ -331,7 +331,7 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
          for (int i = 0; i < info.num_exec_masks - 1; i++) {
             phi.reset(create_instruction<Pseudo_instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, preds.size(), 1));
             phi->getDefinition(0) = bld.def(s2);
-            phi->getOperand(0) = Operand(ctx.info[preds[0]->index].exec[i].first);
+            phi->getOperand(0) = Operand(ctx.info[preds[0]].exec[i].first);
             ctx.info[idx].exec[i].first = bld.insert(std::move(phi));
          }
       }
@@ -341,7 +341,7 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
          /* this phi might be trivial but ensures a parallelcopy on the loop header */
          aco_ptr<Pseudo_instruction> phi{create_instruction<Pseudo_instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, preds.size(), 1)};
          phi->getDefinition(0) = bld.def(s2);
-         phi->getOperand(0) = Operand(ctx.info[preds[0]->index].exec.back().first);
+         phi->getOperand(0) = Operand(ctx.info[preds[0]].exec.back().first);
          ctx.info[idx].exec.back().first = bld.insert(std::move(phi));
       }
 
@@ -351,7 +351,7 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
          phi->getDefinition(0) = bld.def(s2);
       else
          phi->getDefinition(0) = bld.def(s2, exec);
-      phi->getOperand(0) = Operand(ctx.info[preds[0]->index].exec.back().first);
+      phi->getOperand(0) = Operand(ctx.info[preds[0]].exec.back().first);
       Temp loop_active = bld.insert(std::move(phi));
 
       if (info.has_divergent_break) {
@@ -383,41 +383,41 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
       loop_info& info = ctx.loop.back();
       unsigned num_exec_masks = ctx.loop.back().num_exec_masks;
 
-      for (MAYBE_UNUSED Block* pred : preds)
-         assert(ctx.info[pred->index].exec.size() >= num_exec_masks);
+      for (MAYBE_UNUSED unsigned pred : preds)
+         assert(ctx.info[pred].exec.size() >= num_exec_masks);
 
       /* fill the loop header phis */
-      std::vector<Block*>& header_preds = header->linear_predecessors;
+      std::vector<unsigned>& header_preds = header->linear_preds;
       int k = 0;
       if (info.has_discard) {
          while (k < info.num_exec_masks - 1) {
             aco_ptr<Instruction>& phi = header->instructions[k];
             assert(phi->opcode == aco_opcode::p_linear_phi);
             for (unsigned i = 1; i < phi->num_operands; i++)
-               phi->getOperand(i) = Operand(ctx.info[header_preds[i]->index].exec[k].first);
+               phi->getOperand(i) = Operand(ctx.info[header_preds[i]].exec[k].first);
             k++;
          }
       }
       aco_ptr<Instruction>& phi = header->instructions[k++];
       assert(phi->opcode == aco_opcode::p_linear_phi);
       for (unsigned i = 1; i < phi->num_operands; i++)
-         phi->getOperand(i) = Operand(ctx.info[header_preds[i]->index].exec[info.num_exec_masks - 1].first);
+         phi->getOperand(i) = Operand(ctx.info[header_preds[i]].exec[info.num_exec_masks - 1].first);
 
       if (info.has_divergent_break) {
          aco_ptr<Instruction>& phi = header->instructions[k];
          assert(phi->opcode == aco_opcode::p_linear_phi);
          for (unsigned i = 1; i < phi->num_operands; i++)
-            phi->getOperand(i) = Operand(ctx.info[header_preds[i]->index].exec[info.num_exec_masks].first);
+            phi->getOperand(i) = Operand(ctx.info[header_preds[i]].exec[info.num_exec_masks].first);
       }
 
       /* create the loop exit phis if not trivial */
       for (unsigned k = 0; k < num_exec_masks; k++) {
-         Temp same = ctx.info[preds[0]->index].exec[k].first;
-         uint8_t type = ctx.info[header_preds[0]->index].exec[k].second;
+         Temp same = ctx.info[preds[0]].exec[k].first;
+         uint8_t type = ctx.info[header_preds[0]].exec[k].second;
          bool trivial = true;
 
          for (unsigned i = 1; i < preds.size() && trivial; i++) {
-            if (ctx.info[preds[i]->index].exec[k].first != same)
+            if (ctx.info[preds[i]].exec[k].first != same)
                trivial = false;
          }
 
@@ -428,7 +428,7 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
             aco_ptr<Pseudo_instruction> phi{create_instruction<Pseudo_instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, preds.size(), 1)};
             phi->getDefinition(0) = bld.def(s2);
             for (unsigned i = 0; i < phi->num_operands; i++)
-               phi->getOperand(i) = Operand(ctx.info[preds[i]->index].exec[k].first);
+               phi->getOperand(i) = Operand(ctx.info[preds[i]].exec[k].first);
             ctx.info[idx].exec.emplace_back(bld.insert(std::move(phi)), type);
          }
       }
@@ -463,25 +463,25 @@ unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
    }
 
    if (preds.size() == 1) {
-      ctx.info[idx].exec = ctx.info[preds[0]->index].exec;
+      ctx.info[idx].exec = ctx.info[preds[0]].exec;
    } else {
       assert(preds.size() == 2);
       /* if one of the predecessors ends in exact mask, we pop it from stack */
-      unsigned num_exec_masks = std::min(ctx.info[preds[0]->index].exec.size(),
-                                         ctx.info[preds[1]->index].exec.size());
+      unsigned num_exec_masks = std::min(ctx.info[preds[0]].exec.size(),
+                                         ctx.info[preds[1]].exec.size());
 
       /* create phis for diverged exec masks */
       for (unsigned i = 0; i < num_exec_masks; i++) {
-         if (ctx.info[preds[0]->index].exec[i].first == ctx.info[preds[1]->index].exec[i].first) {
-            assert(ctx.info[preds[0]->index].exec[i].second == ctx.info[preds[1]->index].exec[i].second);
-            ctx.info[idx].exec.emplace_back(ctx.info[preds[0]->index].exec[i]);
+         if (ctx.info[preds[0]].exec[i].first == ctx.info[preds[1]].exec[i].first) {
+            assert(ctx.info[preds[0]].exec[i].second == ctx.info[preds[1]].exec[i].second);
+            ctx.info[idx].exec.emplace_back(ctx.info[preds[0]].exec[i]);
             continue;
          }
          bool in_exec = i == num_exec_masks - 1 && !(block->kind & block_kind_merge);
          Temp phi = bld.pseudo(aco_opcode::p_linear_phi, in_exec ? bld.def(s2, exec) : bld.def(s2),
-                               ctx.info[preds[0]->index].exec[i].first,
-                               ctx.info[preds[1]->index].exec[i].first);
-         uint8_t mask_type = ctx.info[preds[0]->index].exec[i].second & ctx.info[preds[1]->index].exec[i].second;
+                               ctx.info[preds[0]].exec[i].first,
+                               ctx.info[preds[1]].exec[i].first);
+         uint8_t mask_type = ctx.info[preds[0]].exec[i].second & ctx.info[preds[1]].exec[i].second;
          ctx.info[idx].exec.emplace_back(phi, mask_type);
       }
    }
@@ -737,7 +737,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
          }
       }
 
-      ctx.loop.emplace_back(block->linear_successors[0],
+      ctx.loop.emplace_back(ctx.program->blocks[block->linear_succs[0]].get(),
                             ctx.info[idx].exec.size(),
                             needs,
                             has_divergent_break,
@@ -775,7 +775,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
       if (!ctx.loop.size()) {
          /* check if the successor is the merge block, otherwise set exec to 0 */
          // TODO: this could be done better by directly branching to the merge block
-         Block* succ = block->linear_successors[0];
+         Block* succ = ctx.program->blocks[block->linear_succs[0]].get();
          if (!(succ->kind & block_kind_invert || succ->kind & block_kind_merge)) {
             ctx.info[idx].exec.back().first = bld.sop1(aco_opcode::s_mov_b64, bld.def(s2, exec), Operand(0u));
          }
@@ -788,10 +788,10 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
    if (block->kind & block_kind_uniform) {
       Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(block->instructions.back().get());
       if (branch->opcode == aco_opcode::p_branch) {
-         branch->target[0] = block->linear_successors[0]->index;
+         branch->target[0] = block->linear_succs[0];
       } else {
-         branch->target[0] = block->linear_successors[1]->index;
-         branch->target[1] = block->linear_successors[0]->index;
+         branch->target[0] = block->linear_succs[1];
+         branch->target[1] = block->linear_succs[0];
       }
       return;
    }
@@ -806,7 +806,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
       }
 
       // orig = s_and_saveexec_b64
-      assert(block->linear_successors.size() == 2);
+      assert(block->linear_succs.size() == 2);
       assert(block->instructions.back()->opcode == aco_opcode::p_cbranch_z);
       Temp cond = block->instructions.back()->getOperand(0).getTemp();
       block->instructions.pop_back();
@@ -822,7 +822,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
       /* add next current exec to the stack */
       ctx.info[idx].exec.emplace_back(then_mask, mask_type);
 
-      bld.branch(aco_opcode::p_cbranch_z, bld.exec(then_mask), block->linear_successors[1]->index, block->linear_successors[0]->index);
+      bld.branch(aco_opcode::p_cbranch_z, bld.exec(then_mask), block->linear_succs[1], block->linear_succs[0]);
       return;
    }
 
@@ -840,7 +840,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
       /* add next current exec to the stack */
       ctx.info[idx].exec.emplace_back(else_mask, mask_type);
 
-      bld.branch(aco_opcode::p_cbranch_z, bld.exec(else_mask), block->linear_successors[1]->index, block->linear_successors[0]->index);
+      bld.branch(aco_opcode::p_cbranch_z, bld.exec(else_mask), block->linear_succs[1], block->linear_succs[0]);
       return;
    }
 
@@ -863,12 +863,13 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
 
       /* check if the successor is the merge block, otherwise set exec to 0 */
       // TODO: this could be done better by directly branching to the merge block
-      Block* succ = block->linear_successors[1]->linear_successors[0];
+      unsigned succ_idx = ctx.program->blocks[block->linear_succs[1]]->linear_succs[0];
+      Block* succ = ctx.program->blocks[succ_idx].get();
       if (!(succ->kind & block_kind_invert || succ->kind & block_kind_merge)) {
          ctx.info[idx].exec.back().first = bld.sop1(aco_opcode::s_mov_b64, bld.def(s2, exec), Operand(0u));
       }
 
-      bld.branch(aco_opcode::p_cbranch_nz, bld.scc(cond), block->linear_successors[1]->index, block->linear_successors[0]->index);
+      bld.branch(aco_opcode::p_cbranch_nz, bld.scc(cond), block->linear_succs[1], block->linear_succs[0]);
       return;
    }
 
@@ -891,12 +892,13 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
 
       /* check if the successor is the merge block, otherwise set exec to 0 */
       // TODO: this could be done better by directly branching to the merge block
-      Block* succ = block->linear_successors[1]->linear_successors[0];
+      unsigned succ_idx = ctx.program->blocks[block->linear_succs[1]]->linear_succs[0];
+      Block* succ = ctx.program->blocks[succ_idx].get();
       if (!(succ->kind & block_kind_invert || succ->kind & block_kind_merge)) {
          ctx.info[idx].exec.back().first = bld.sop1(aco_opcode::s_mov_b64, bld.def(s2, exec), Operand(0u));
       }
 
-      bld.branch(aco_opcode::p_cbranch_nz, bld.scc(cond), block->linear_successors[1]->index, block->linear_successors[0]->index);
+      bld.branch(aco_opcode::p_cbranch_nz, bld.scc(cond), block->linear_succs[1], block->linear_succs[0]);
       return;
    }
 }

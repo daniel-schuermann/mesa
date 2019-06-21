@@ -669,29 +669,29 @@ void lower_to_hw_instr(Program* program)
             aco_ptr<SOPP_instruction> sopp;
             switch (instr->opcode) {
                case aco_opcode::p_branch:
-                  assert(block->linear_successors[0]->index == branch->target[0]);
-                  bld.sopp(aco_opcode::s_branch, block->linear_successors[0]);
+                  assert(block->linear_succs[0] == branch->target[0]);
+                  bld.sopp(aco_opcode::s_branch, program->blocks[branch->target[0]].get());
                   break;
                case aco_opcode::p_cbranch_nz:
-                  assert(block->linear_successors[1]->index == branch->target[0]);
+                  assert(block->linear_succs[1] == branch->target[0]);
                   if (branch->getOperand(0).physReg() == exec)
-                     bld.sopp(aco_opcode::s_cbranch_execnz, block->linear_successors[1]);
+                     bld.sopp(aco_opcode::s_cbranch_execnz, program->blocks[branch->target[0]].get());
                   else if (branch->getOperand(0).physReg() == vcc)
-                     bld.sopp(aco_opcode::s_cbranch_vccnz, block->linear_successors[1]);
+                     bld.sopp(aco_opcode::s_cbranch_vccnz, program->blocks[branch->target[0]].get());
                   else {
                      assert(branch->getOperand(0).physReg() == scc);
-                     bld.sopp(aco_opcode::s_cbranch_scc1, block->linear_successors[1]);
+                     bld.sopp(aco_opcode::s_cbranch_scc1, program->blocks[branch->target[0]].get());
                   }
                   break;
                case aco_opcode::p_cbranch_z:
-                  assert(block->linear_successors[1]->index == branch->target[0]);
+                  assert(block->linear_succs[1] == branch->target[0]);
                   if (branch->getOperand(0).physReg() == exec)
-                     bld.sopp(aco_opcode::s_cbranch_execz, block->linear_successors[1]);
+                     bld.sopp(aco_opcode::s_cbranch_execz, program->blocks[branch->target[0]].get());
                   else if (branch->getOperand(0).physReg() == vcc)
-                     bld.sopp(aco_opcode::s_cbranch_vccz, block->linear_successors[1]);
+                     bld.sopp(aco_opcode::s_cbranch_vccz, program->blocks[branch->target[0]].get());
                   else {
                      assert(branch->getOperand(0).physReg() == scc);
-                     bld.sopp(aco_opcode::s_cbranch_scc0, block->linear_successors[1]);
+                     bld.sopp(aco_opcode::s_cbranch_scc0, program->blocks[branch->target[0]].get());
                   }
                   break;
                default:
