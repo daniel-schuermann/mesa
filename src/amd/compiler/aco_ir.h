@@ -879,10 +879,10 @@ struct Block {
    unsigned index;
    unsigned offset;
    std::vector<aco_ptr<Instruction>> instructions;
-   std::vector<Block*> logical_predecessors;
-   std::vector<Block*> linear_predecessors;
-   std::vector<Block*> logical_successors;
-   std::vector<Block*> linear_successors;
+   std::vector<unsigned> logical_preds;
+   std::vector<unsigned> linear_preds;
+   std::vector<unsigned> logical_succs;
+   std::vector<unsigned> linear_succs;
    uint16_t vgpr_demand;
    uint16_t sgpr_demand;
    uint16_t loop_nest_depth;
