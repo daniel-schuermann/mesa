@@ -276,9 +276,11 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
    }
    case Format::PSEUDO_BRANCH: {
       Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(instr);
-      fprintf(output, " BB%d", branch->targets[0]->index);
-      if (branch->targets[1])
-         fprintf(output, ", BB%d", branch->targets[1]->index);
+      /* Note: BB0 cannot be a branch target */
+      if (branch->target[0] != 0)
+         fprintf(output, " BB%d", branch->target[0]);
+      if (branch->target[1] != 0)
+         fprintf(output, ", BB%d", branch->target[1]);
       break;
    }
    case Format::PSEUDO_REDUCTION: {
