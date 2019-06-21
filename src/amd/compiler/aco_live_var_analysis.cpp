@@ -119,16 +119,16 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
       if (insn->opcode == aco_opcode::p_phi ||
           insn->opcode == aco_opcode::p_linear_phi) {
          /* directly insert into the predecessors live-out set */
-         std::vector<Block*>& preds = insn->opcode == aco_opcode::p_phi ? block->logical_predecessors : block->linear_predecessors;
+         std::vector<unsigned>& preds = insn->opcode == aco_opcode::p_phi ? block->logical_preds : block->linear_preds;
          for (unsigned i = 0; i < preds.size(); ++i)
          {
             auto& operand = insn->getOperand(i);
             if (operand.isTemp()) {
-               auto it = live_temps[preds[i]->index].insert(operand.getTemp());
+               auto it = live_temps[preds[i]].insert(operand.getTemp());
                /* check if we changed an already processed block */
                if (it.second) {
                   operand.setFirstKill(true);
-                  worklist.insert(preds[i]->index);
+                  worklist.insert(preds[i]);
                }
             }
          }
@@ -168,19 +168,19 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
    }
 
    /* now, we have the live-in sets and need to merge them into the live-out sets */
-   for (Block* predecessor : block->logical_predecessors) {
+   for (unsigned pred_idx : block->logical_preds) {
       for (Temp vgpr : live_vgprs) {
-         auto it = live_temps[predecessor->index].insert(vgpr);
+         auto it = live_temps[pred_idx].insert(vgpr);
          if (it.second)
-            worklist.insert(predecessor->index);
+            worklist.insert(pred_idx);
       }
    }
 
-   for (Block* predecessor : block->linear_predecessors) {
+   for (unsigned pred_idx : block->linear_preds) {
       for (Temp sgpr : live_sgprs) {
-         auto it = live_temps[predecessor->index].insert(sgpr);
+         auto it = live_temps[pred_idx].insert(sgpr);
          if (it.second)
-            worklist.insert(predecessor->index);
+            worklist.insert(pred_idx);
       }
    }
 

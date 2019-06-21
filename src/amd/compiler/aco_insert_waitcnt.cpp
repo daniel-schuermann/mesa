@@ -670,9 +670,9 @@ bool handle_block(Program *program, Block* block, wait_ctx& ctx)
    }
 
    /* check if this block is at the end of a loop */
-   for (Block* succ : block->linear_successors) {
+   for (unsigned succ_idx : block->linear_succs) {
       /* eliminate any remaining counters */
-      if (succ->index <= block->index && (ctx.vm_cnt || ctx.exp_cnt || ctx.lgkm_cnt)) {
+      if (succ_idx <= block->index && (ctx.vm_cnt || ctx.exp_cnt || ctx.lgkm_cnt)) {
          // TODO: we could do better if we only wait if the regs between the block and other predecessors differ
          uint16_t imm = create_waitcnt_imm(ctx.vm_cnt ? 0 : -1, ctx.exp_cnt ? 0 : -1, ctx.lgkm_cnt ? 0 : -1);
          auto it = std::prev(new_instructions.end());
@@ -695,8 +695,8 @@ void insert_wait_states(Program* program)
    {
       Block* current = program->blocks[i].get();
       wait_ctx& in = out_ctx[current->index];
-      for (Block* b : current->linear_predecessors)
-         in.join(&out_ctx[b->index]);
+      for (unsigned b : current->linear_preds)
+         in.join(&out_ctx[b]);
 
       if (current->instructions.empty())
          continue;

@@ -14,8 +14,8 @@ void print_asm(Program *program, std::vector<uint32_t>& binary, enum radeon_fami
    std::vector<bool> referenced_blocks(program->blocks.size());
    referenced_blocks[0] = true;
    for (std::unique_ptr<Block>& block : program->blocks) {
-      for (Block *succ : block->linear_successors)
-         referenced_blocks[succ->index] = true;
+      for (unsigned succ : block->linear_succs)
+         referenced_blocks[succ] = true;
    }
 
    std::vector<std::tuple<uint64_t, llvm::StringRef, uint8_t>> symbols;
