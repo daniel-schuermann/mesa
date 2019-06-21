@@ -76,8 +76,8 @@ void process_block(dce_ctx& ctx, std::unique_ptr<Block>& block)
    }
 
    if (process_predecessors) {
-      for (Block* pred : block->linear_predecessors)
-         ctx.current_block = std::max(ctx.current_block, (int) pred->index);
+      for (unsigned pred_idx : block->linear_preds)
+         ctx.current_block = std::max(ctx.current_block, (int) pred_idx);
    }
 }
 

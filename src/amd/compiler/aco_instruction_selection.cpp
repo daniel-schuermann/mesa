@@ -97,14 +97,13 @@ static void visit_cf_list(struct isel_context *ctx,
 
 static void add_logical_edge(Block *pred, Block *succ)
 {
-   pred->logical_successors.push_back(succ);
-   succ->logical_predecessors.push_back(pred);
+   succ->logical_preds.emplace_back(pred->index);
 }
+
 
 static void add_linear_edge(Block *pred, Block *succ)
 {
-   pred->linear_successors.push_back(succ);
-   succ->linear_predecessors.push_back(pred);
+   succ->linear_preds.emplace_back(pred->index);
 }
 
 static void add_edge(Block *pred, Block *succ)
@@ -5813,7 +5812,8 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
       /* we place the phi either in the between-block or in the current block */
       if (phi_src.begin()->second->parent_instr->type != nir_instr_type_ssa_undef) {
          assert((++phi_src.begin())->second->parent_instr->type == nir_instr_type_ssa_undef);
-         block = ctx->block->linear_predecessors[1]->linear_predecessors[0];
+         Block* linear_else = ctx->program->blocks[ctx->block->linear_preds[1]].get();
+         block = ctx->program->blocks[linear_else->linear_preds[0]].get();
          assert(block->kind & block_kind_invert);
          phi->getOperand(0) = Operand(get_ssa_temp(ctx, phi_src.begin()->second));
       } else {
@@ -6372,6 +6372,14 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
    if (ctx.program->wb_smem_l1_on_end)
       bld.smem(aco_opcode::s_dcache_wb, false);
    bld.sopp(aco_opcode::s_endpgm);
+
+   /* cleanup CFG */
+   for (std::unique_ptr<Block>& BB : program->blocks) {
+      for (unsigned idx : BB->linear_preds)
+         program->blocks[idx]->linear_succs.emplace_back(BB->index);
+      for (unsigned idx : BB->logical_preds)
+         program->blocks[idx]->logical_succs.emplace_back(BB->index);
+   }
 
    return program;
 }
