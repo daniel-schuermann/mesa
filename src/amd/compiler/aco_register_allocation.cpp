@@ -858,13 +858,13 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
    std::vector<std::vector<Instruction*>> incomplete_phis(program->blocks.size());
    std::map<unsigned, phi_info> phi_map;
    std::map<unsigned, unsigned> affinities;
-   std::function<Temp(Temp,Block*)> read_variable;
+   std::function<Temp(Temp,unsigned)> read_variable;
    std::function<Temp(Temp,Block*)> handle_live_in;
    std::function<Temp(std::map<unsigned, phi_info>::iterator)> try_remove_trivial_phi;
 
-   read_variable = [&](Temp val, Block* block) -> Temp {
-      std::unordered_map<unsigned, Temp>::iterator it = renames[block->index].find(val.id());
-      assert(it != renames[block->index].end());
+   read_variable = [&](Temp val, unsigned block_idx) -> Temp {
+      std::unordered_map<unsigned, Temp>::iterator it = renames[block_idx].find(val.id());
+      assert(it != renames[block_idx].end());
       return it->second;
    };
 
@@ -879,7 +879,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       Temp new_val;
       if (!sealed[block->index]) {
          /* consider rename from already processed predecessor */
-         Temp tmp = read_variable(val, preds[0]);
+         Temp tmp = read_variable(val, preds[0]->index);
 
          /* if the block is not sealed yet, we create an incomplete phi (which might later get removed again) */
          new_val = Temp{program->allocateId(), val.regClass()};
@@ -897,7 +897,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
       } else if (preds.size() == 1) {
          /* if the block has only one predecessor, just look there for the name */
-         new_val = read_variable(val, preds[0]);
+         new_val = read_variable(val, preds[0]->index);
       } else {
          /* there are multiple predecessors and the block is sealed */
          Temp ops[preds.size()];
@@ -908,7 +908,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
          /* get the rename from each predecessor and check if they are the same */
          for (unsigned i = 0; i < preds.size(); i++) {
-            ops[i] = read_variable(val, preds[i]);
+            ops[i] = read_variable(val, preds[i]->index);
             if (i == 0)
                new_val = ops[i];
             else
@@ -1225,7 +1225,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                continue;
 
             /* rename operands */
-            operand.setTemp(read_variable(operand.getTemp(), block.get()));
+            operand.setTemp(read_variable(operand.getTemp(), block->index));
 
             /* check if the operand is fixed */
             if (operand.isFixed()) {
@@ -1501,7 +1501,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                unsigned orig_id = pc->getOperand(i).tempId();
                ctx.orig_names[pc->getDefinition(i).tempId()] = pc->getOperand(i).getTemp();
 
-               pc->getOperand(i).setTemp(read_variable(pc->getOperand(i).getTemp(), block.get()));
+               pc->getOperand(i).setTemp(read_variable(pc->getOperand(i).getTemp(), block->index));
                renames[block->index][orig_id] = pc->getDefinition(i).getTemp();
                renames[block->index][pc->getDefinition(i).tempId()] = pc->getDefinition(i).getTemp();
                std::map<unsigned, phi_info>::iterator phi = phi_map.find(pc->getOperand(i).tempId());
@@ -1646,7 +1646,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             for (Instruction* phi : incomplete_phis[succ->index]) {
                std::vector<Block*> preds = phi->getDefinition(0).getTemp().is_linear() ? succ->linear_predecessors : succ->logical_predecessors;
                for (unsigned i = 0; i < phi->num_operands; i++) {
-                  phi->getOperand(i).setTemp(read_variable(phi->getOperand(i).getTemp(), preds[i]));
+                  phi->getOperand(i).setTemp(read_variable(phi->getOperand(i).getTemp(), preds[i]->index));
                   phi->getOperand(i).setFixed(ctx.assignments[phi->getOperand(i).tempId()].first);
                }
                try_remove_trivial_phi(phi_map.find(phi->getDefinition(0).tempId()));
@@ -1661,7 +1661,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   auto& operand = instr->getOperand(i);
                   if (!operand.isTemp())
                      continue;
-                  operand.setTemp(read_variable(operand.getTemp(), preds[i]));
+                  operand.setTemp(read_variable(operand.getTemp(), preds[i]->index));
                   operand.setFixed(ctx.assignments[operand.tempId()].first);
                   std::map<unsigned, phi_info>::iterator phi = phi_map.find(operand.getTemp().id());
                   if (phi != phi_map.end())
