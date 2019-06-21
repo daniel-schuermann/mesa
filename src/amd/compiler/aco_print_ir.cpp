@@ -457,11 +457,11 @@ void aco_print_block(const struct Block* block, FILE *output)
 {
    fprintf(output, "BB%d\n", block->index);
    fprintf(output, "/* logical preds: ");
-   for (auto const& pred : block->logical_predecessors)
-      fprintf(output, "BB%d, ", pred->index);
+   for (unsigned pred : block->logical_preds)
+      fprintf(output, "BB%d, ", pred);
    fprintf(output, "/ linear preds: ");
-   for (auto const& pred : block->linear_predecessors)
-      fprintf(output, "BB%d, ", pred->index);
+   for (unsigned pred : block->linear_preds)
+      fprintf(output, "BB%d, ", pred);
    fprintf(output, "/ kind: ");
    aco_print_block_kind(block->kind, output);
    fprintf(output, "*/\n");

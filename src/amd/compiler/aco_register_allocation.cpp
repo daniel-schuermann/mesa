@@ -869,7 +869,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
    };
 
    handle_live_in = [&](Temp val, Block *block) -> Temp {
-      std::vector<Block*>& preds = val.is_linear() ? block->linear_predecessors : block->logical_predecessors;
+      std::vector<unsigned>& preds = val.is_linear() ? block->linear_preds : block->logical_preds;
       if (preds.size() == 0 && block->index != 0) {
          renames[block->index][val.id()] = val;
          return val;
@@ -879,7 +879,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       Temp new_val;
       if (!sealed[block->index]) {
          /* consider rename from already processed predecessor */
-         Temp tmp = read_variable(val, preds[0]->index);
+         Temp tmp = read_variable(val, preds[0]);
 
          /* if the block is not sealed yet, we create an incomplete phi (which might later get removed again) */
          new_val = Temp{program->allocateId(), val.regClass()};
@@ -897,7 +897,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
       } else if (preds.size() == 1) {
          /* if the block has only one predecessor, just look there for the name */
-         new_val = read_variable(val, preds[0]->index);
+         new_val = read_variable(val, preds[0]);
       } else {
          /* there are multiple predecessors and the block is sealed */
          Temp ops[preds.size()];
@@ -908,7 +908,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
          /* get the rename from each predecessor and check if they are the same */
          for (unsigned i = 0; i < preds.size(); i++) {
-            ops[i] = read_variable(val, preds[i]->index);
+            ops[i] = read_variable(val, preds[i]);
             if (i == 0)
                new_val = ops[i];
             else
@@ -1188,7 +1188,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                /* otherwise, this is a live-in and we need to create a new phi
                 * to move it in this block's predecessors */
                aco_opcode opcode = pc.first.getTemp().is_linear() ? aco_opcode::p_linear_phi : aco_opcode::p_phi;
-               std::vector<Block*>& preds = pc.first.getTemp().is_linear() ? block->linear_predecessors : block->logical_predecessors;
+               std::vector<unsigned>& preds = pc.first.getTemp().is_linear() ? block->linear_preds : block->logical_preds;
                aco_ptr<Instruction> new_phi{create_instruction<Pseudo_instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
                new_phi->getDefinition(0) = pc.second;
                for (unsigned i = 0; i < preds.size(); i++)
@@ -1632,21 +1632,22 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       block->instructions = std::move(instructions);
 
       filled[block->index] = true;
-      for (Block* succ : block->linear_successors) {
+      for (unsigned succ_idx : block->linear_succs) {
+         Block* succ = program->blocks[succ_idx].get();
          /* seal block if all predecessors are filled */
          bool all_filled = true;
-         for (Block* pred : succ->linear_predecessors) {
-            if (!filled[pred->index]) {
+         for (unsigned pred_idx : succ->linear_preds) {
+            if (!filled[pred_idx]) {
                all_filled = false;
                break;
             }
          }
          if (all_filled) {
             /* finish incomplete phis and check if they became trivial */
-            for (Instruction* phi : incomplete_phis[succ->index]) {
-               std::vector<Block*> preds = phi->getDefinition(0).getTemp().is_linear() ? succ->linear_predecessors : succ->logical_predecessors;
+            for (Instruction* phi : incomplete_phis[succ_idx]) {
+               std::vector<unsigned> preds = phi->getDefinition(0).getTemp().is_linear() ? succ->linear_preds : succ->logical_preds;
                for (unsigned i = 0; i < phi->num_operands; i++) {
-                  phi->getOperand(i).setTemp(read_variable(phi->getOperand(i).getTemp(), preds[i]->index));
+                  phi->getOperand(i).setTemp(read_variable(phi->getOperand(i).getTemp(), preds[i]));
                   phi->getOperand(i).setFixed(ctx.assignments[phi->getOperand(i).tempId()].first);
                }
                try_remove_trivial_phi(phi_map.find(phi->getDefinition(0).tempId()));
@@ -1655,20 +1656,20 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             for (aco_ptr<Instruction>& instr : succ->instructions) {
                if (!is_phi(instr))
                   break;
-               std::vector<Block*> preds = instr->opcode == aco_opcode::p_phi ? succ->logical_predecessors : succ->linear_predecessors;
+               std::vector<unsigned> preds = instr->opcode == aco_opcode::p_phi ? succ->logical_preds : succ->linear_preds;
 
                for (unsigned i = 0; i < instr->num_operands; i++) {
                   auto& operand = instr->getOperand(i);
                   if (!operand.isTemp())
                      continue;
-                  operand.setTemp(read_variable(operand.getTemp(), preds[i]->index));
+                  operand.setTemp(read_variable(operand.getTemp(), preds[i]));
                   operand.setFixed(ctx.assignments[operand.tempId()].first);
                   std::map<unsigned, phi_info>::iterator phi = phi_map.find(operand.getTemp().id());
                   if (phi != phi_map.end())
                      phi->second.uses.emplace(instr.get());
                }
             }
-            sealed[succ->index] = true;
+            sealed[succ_idx] = true;
          }
       }
 
@@ -1681,14 +1682,14 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
    /* find scc spill registers which may be needed for parallelcopies created by phis */
    for (std::unique_ptr<Block>& block : program->blocks) {
-      if (block->linear_successors.size() != 1)
+      if (block->linear_succs.size() != 1)
          continue;
-      Block *succ = block->linear_successors[0];
+      Block *succ = program->blocks[block->linear_succs[0]].get();
       unsigned pred_index = 0;
-      for (; pred_index < succ->linear_predecessors.size() &&
-             succ->linear_predecessors[pred_index] != block.get(); pred_index++)
+      for (; pred_index < succ->linear_preds.size() &&
+             succ->linear_preds[pred_index] != block->index; pred_index++)
          ;
-      assert(pred_index < succ->linear_predecessors.size());
+      assert(pred_index < succ->linear_preds.size());
 
       std::bitset<128> regs = sgpr_live_out[block->index];
       if (!regs[scc.reg]) {

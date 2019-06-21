@@ -94,18 +94,18 @@ bool collect_phi_info(cssa_ctx& ctx)
    bool progress = false;
    for (std::unique_ptr<Block>& block : ctx.program->blocks) {
       for (aco_ptr<Instruction>& phi : block->instructions) {
-         std::vector<Block*> preds;
+         std::vector<unsigned> preds;
          if (phi->opcode == aco_opcode::p_phi)
-            preds = block->logical_predecessors;
+            preds = block->logical_preds;
          else if (phi->opcode == aco_opcode::p_linear_phi)
-            preds = block->linear_predecessors;
+            preds = block->linear_preds;
          else
             break;
 
          for (unsigned i = 0; i < phi->num_operands; i++) {
             if (!phi->getOperand(i).isUndefined() && (phi->getOperand(i).isConstant() || !phi->getOperand(i).isKill())) {
                progress = true;
-               ctx.phi_infos[preds[i]->index].emplace_back(phi->getOperand(i), i, phi);
+               ctx.phi_infos[preds[i]].emplace_back(phi->getOperand(i), i, phi);
             }
          }
       }
@@ -136,8 +136,8 @@ void hoist_copies(cssa_ctx& ctx)
          unsigned idom_idx = is_linear ? block->linear_idom : block->logical_idom;
          /* if the block is empty and idom is the only predecessor */
          if (empty &&
-             ((is_linear && block->linear_predecessors.size() == 1) ||
-              (!is_linear && block->logical_predecessors.size() == 1))) {
+             ((is_linear && block->linear_preds.size() == 1) ||
+              (!is_linear && block->logical_preds.size() == 1))) {
             /* check if register pressure is low enough at idom */
             std::unique_ptr<Block>& idom = ctx.program->blocks[idom_idx];
             std::pair<uint16_t, uint16_t>& reg_pressure = ctx.live_vars.register_demand[idom_idx][idom->instructions.size() -1];
