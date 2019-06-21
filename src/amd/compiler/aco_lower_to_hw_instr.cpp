@@ -658,8 +658,8 @@ void lower_to_hw_instr(Program* program)
          } else if (instr->format == Format::PSEUDO_BRANCH) {
             Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(instr.get());
             /* check if all blocks from current to target are empty */
-            bool can_remove = block->index < branch->targets[0]->index;
-            for (unsigned i = block->index + 1; can_remove && i < branch->targets[0]->index; i++) {
+            bool can_remove = block->index < branch->target[0];
+            for (unsigned i = block->index + 1; can_remove && i < branch->target[0]; i++) {
                if (program->blocks[i]->instructions.size())
                   can_remove = false;
             }
@@ -669,26 +669,29 @@ void lower_to_hw_instr(Program* program)
             aco_ptr<SOPP_instruction> sopp;
             switch (instr->opcode) {
                case aco_opcode::p_branch:
-                  bld.sopp(aco_opcode::s_branch, branch->targets[0]);
+                  assert(block->linear_successors[0]->index == branch->target[0]);
+                  bld.sopp(aco_opcode::s_branch, block->linear_successors[0]);
                   break;
                case aco_opcode::p_cbranch_nz:
+                  assert(block->linear_successors[1]->index == branch->target[0]);
                   if (branch->getOperand(0).physReg() == exec)
-                     bld.sopp(aco_opcode::s_cbranch_execnz, branch->targets[0]);
+                     bld.sopp(aco_opcode::s_cbranch_execnz, block->linear_successors[1]);
                   else if (branch->getOperand(0).physReg() == vcc)
-                     bld.sopp(aco_opcode::s_cbranch_vccnz, branch->targets[0]);
+                     bld.sopp(aco_opcode::s_cbranch_vccnz, block->linear_successors[1]);
                   else {
                      assert(branch->getOperand(0).physReg() == scc);
-                     bld.sopp(aco_opcode::s_cbranch_scc1, branch->targets[0]);
+                     bld.sopp(aco_opcode::s_cbranch_scc1, block->linear_successors[1]);
                   }
                   break;
                case aco_opcode::p_cbranch_z:
+                  assert(block->linear_successors[1]->index == branch->target[0]);
                   if (branch->getOperand(0).physReg() == exec)
-                     bld.sopp(aco_opcode::s_cbranch_execz, branch->targets[0]);
+                     bld.sopp(aco_opcode::s_cbranch_execz, block->linear_successors[1]);
                   else if (branch->getOperand(0).physReg() == vcc)
-                     bld.sopp(aco_opcode::s_cbranch_vccz, branch->targets[0]);
+                     bld.sopp(aco_opcode::s_cbranch_vccz, block->linear_successors[1]);
                   else {
                      assert(branch->getOperand(0).physReg() == scc);
-                     bld.sopp(aco_opcode::s_cbranch_scc0, branch->targets[0]);
+                     bld.sopp(aco_opcode::s_cbranch_scc0, block->linear_successors[1]);
                   }
                   break;
                default:
