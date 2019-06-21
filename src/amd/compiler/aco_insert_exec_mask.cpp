@@ -785,8 +785,16 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
       /* no return here as it can be followed by a divergent break */
    }
 
-   if (block->kind & block_kind_uniform)
+   if (block->kind & block_kind_uniform) {
+      Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(block->instructions.back().get());
+      if (branch->opcode == aco_opcode::p_branch) {
+         branch->target[0] = block->linear_successors[0]->index;
+      } else {
+         branch->target[0] = block->linear_successors[1]->index;
+         branch->target[1] = block->linear_successors[0]->index;
+      }
       return;
+   }
 
    if (block->kind & block_kind_branch) {
 
@@ -814,7 +822,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
       /* add next current exec to the stack */
       ctx.info[idx].exec.emplace_back(then_mask, mask_type);
 
-      bld.branch(aco_opcode::p_cbranch_z, bld.exec(then_mask), block->linear_successors[1], block->linear_successors[0]);
+      bld.branch(aco_opcode::p_cbranch_z, bld.exec(then_mask), block->linear_successors[1]->index, block->linear_successors[0]->index);
       return;
    }
 
@@ -832,7 +840,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
       /* add next current exec to the stack */
       ctx.info[idx].exec.emplace_back(else_mask, mask_type);
 
-      bld.branch(aco_opcode::p_cbranch_z, bld.exec(else_mask), block->linear_successors[1], block->linear_successors[0]);
+      bld.branch(aco_opcode::p_cbranch_z, bld.exec(else_mask), block->linear_successors[1]->index, block->linear_successors[0]->index);
       return;
    }
 
@@ -860,7 +868,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
          ctx.info[idx].exec.back().first = bld.sop1(aco_opcode::s_mov_b64, bld.def(s2, exec), Operand(0u));
       }
 
-      bld.branch(aco_opcode::p_cbranch_nz, bld.scc(cond), block->linear_successors[1], block->linear_successors[0]);
+      bld.branch(aco_opcode::p_cbranch_nz, bld.scc(cond), block->linear_successors[1]->index, block->linear_successors[0]->index);
       return;
    }
 
@@ -888,7 +896,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
          ctx.info[idx].exec.back().first = bld.sop1(aco_opcode::s_mov_b64, bld.def(s2, exec), Operand(0u));
       }
 
-      bld.branch(aco_opcode::p_cbranch_nz, bld.scc(cond), block->linear_successors[1], block->linear_successors[0]);
+      bld.branch(aco_opcode::p_cbranch_nz, bld.scc(cond), block->linear_successors[1]->index, block->linear_successors[0]->index);
       return;
    }
 }

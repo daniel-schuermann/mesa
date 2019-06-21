@@ -775,7 +775,11 @@ struct Pseudo_instruction : public Instruction {
 };
 
 struct Pseudo_branch_instruction : public Instruction {
-   Block *targets[2];
+   /* target[0] is the block index of the branch target.
+    * For conditional branches, target[1] contains the fall-through alternative.
+    * A value of 0 means the target has not been initialized (BB0 cannot be a branch target).
+    */
+   uint32_t target[2];
 };
 
 struct Pseudo_barrier_instruction : public Instruction {

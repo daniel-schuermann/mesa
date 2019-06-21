@@ -117,8 +117,8 @@ class Format(Enum):
                  ('bool', 'vm', 'false', 'valid_mask'),
                  ('bool', 'waitcnt_ignore', 'false')]
       elif self == Format.PSEUDO_BRANCH:
-         return [('Block*', 'target0', None, 'targets[0]'),
-                 ('Block*', 'target1', 'NULL', 'targets[1]')]
+         return [('uint32_t', 'target0', '0', 'target[0]'),
+                 ('uint32_t', 'target1', '0', 'target[1]')]
       elif self == Format.PSEUDO_REDUCTION:
          return [('ReduceOp', 'op', None, 'reduce_op'),
                  ('unsigned', 'cluster_size', '0')]
