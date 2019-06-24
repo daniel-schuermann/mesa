@@ -935,6 +935,12 @@ public:
       return b;
    }
 
+   Block* insert_block(Block* block) {
+      block->index = blocks.size();
+      blocks.emplace_back(block);
+      return blocks.back().get();
+   }
+
 private:
    uint32_t allocationID = 1;
 };
