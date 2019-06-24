@@ -78,8 +78,8 @@ struct cssa_ctx {
 };
 
 bool block_is_dominated_by(cssa_ctx& ctx, unsigned block_idx, unsigned idom_idx, bool is_linear) {
-   std::unique_ptr<Block>& block = ctx.program->blocks[block_idx];
-   unsigned next_idom = is_linear ? block->linear_idom : block->logical_idom;
+   Block& block = ctx.program->blocks[block_idx];
+   unsigned next_idom = is_linear ? block.linear_idom : block.logical_idom;
    if (next_idom == idom_idx)
       return true;
    else if (next_idom > idom_idx)
@@ -92,13 +92,13 @@ bool block_is_dominated_by(cssa_ctx& ctx, unsigned block_idx, unsigned idom_idx,
 bool collect_phi_info(cssa_ctx& ctx)
 {
    bool progress = false;
-   for (std::unique_ptr<Block>& block : ctx.program->blocks) {
-      for (aco_ptr<Instruction>& phi : block->instructions) {
+   for (Block& block : ctx.program->blocks) {
+      for (aco_ptr<Instruction>& phi : block.instructions) {
          std::vector<unsigned> preds;
          if (phi->opcode == aco_opcode::p_phi)
-            preds = block->logical_preds;
+            preds = block.logical_preds;
          else if (phi->opcode == aco_opcode::p_linear_phi)
-            preds = block->linear_preds;
+            preds = block.linear_preds;
          else
             break;
 
@@ -126,7 +126,7 @@ void hoist_copies(cssa_ctx& ctx)
          unsigned target_block = block_idx;
 
          /* check if the current block is empty */
-         std::unique_ptr<Block>& block = ctx.program->blocks[block_idx];
+         Block* block = &ctx.program->blocks[block_idx];
          std::vector<aco_ptr<Instruction>>::iterator instr_it = block->instructions.begin();
          while ((*instr_it)->opcode != aco_opcode::p_logical_start)
             ++instr_it;
@@ -139,8 +139,8 @@ void hoist_copies(cssa_ctx& ctx)
              ((is_linear && block->linear_preds.size() == 1) ||
               (!is_linear && block->logical_preds.size() == 1))) {
             /* check if register pressure is low enough at idom */
-            std::unique_ptr<Block>& idom = ctx.program->blocks[idom_idx];
-            std::pair<uint16_t, uint16_t>& reg_pressure = ctx.live_vars.register_demand[idom_idx][idom->instructions.size() -1];
+            Block& idom = ctx.program->blocks[idom_idx];
+            std::pair<uint16_t, uint16_t>& reg_pressure = ctx.live_vars.register_demand[idom_idx][idom.instructions.size() -1];
 
             if (info.phi->getDefinition(0).getTemp().type() == vgpr &&
                 reg_pressure.second + info.phi->getDefinition(0).size() <= ctx.program->max_vgpr) {
@@ -167,8 +167,8 @@ void hoist_copies(cssa_ctx& ctx)
                uint16_t size = info.phi->getDefinition(0).size();
                bool is_vgpr = info.phi->getDefinition(0).getTemp().type() == vgpr;
                for (unsigned i = it->second.last_live_block; i < target_block; i++) {
-                  if ((is_vgpr && ctx.program->blocks[i]->vgpr_demand + size > ctx.program->max_vgpr) ||
-                      (!is_vgpr && ctx.program->blocks[i]->sgpr_demand + size > ctx.program->max_sgpr)) {
+                  if ((is_vgpr && ctx.program->blocks[i].vgpr_demand + size > ctx.program->max_vgpr) ||
+                      (!is_vgpr && ctx.program->blocks[i].sgpr_demand + size > ctx.program->max_sgpr)) {
                      can_reuse = false;
                      break;
                   }
@@ -178,9 +178,9 @@ void hoist_copies(cssa_ctx& ctx)
                   /* update register demand */
                   for (unsigned i = it->second.last_live_block; i < target_block; i++) {
                      if (is_vgpr)
-                        ctx.program->blocks[i]->vgpr_demand += size;
+                        ctx.program->blocks[i].vgpr_demand += size;
                      else
-                        ctx.program->blocks[i]->sgpr_demand += size;
+                        ctx.program->blocks[i].sgpr_demand += size;
                   }
 
                   /* update map and info */
@@ -204,9 +204,9 @@ void emit_parallelcopies(cssa_ctx& ctx)
       if (ctx.phi_infos[block_idx].empty())
          continue;
 
-      std::unique_ptr<Block>& block = ctx.program->blocks[block_idx];
+      Block& block = ctx.program->blocks[block_idx];
       /* find insertion point */
-      std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.end();
+      std::vector<aco_ptr<Instruction>>::iterator it = block.instructions.end();
       --it;
       while ((*it)->opcode != aco_opcode::p_logical_end)
          --it;
@@ -231,7 +231,7 @@ void emit_parallelcopies(cssa_ctx& ctx)
          idx++;
       }
 
-      block->instructions.insert(it, std::move(copy));
+      block.instructions.insert(it, std::move(copy));
    }
 }
 

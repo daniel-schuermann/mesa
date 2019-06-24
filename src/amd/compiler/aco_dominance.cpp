@@ -44,38 +44,38 @@ namespace aco {
 
 void dominator_tree(Program* program)
 {
-   program->blocks[0]->logical_idom = 0;
-   program->blocks[0]->linear_idom = 0;
+   program->blocks[0].logical_idom = 0;
+   program->blocks[0].linear_idom = 0;
 
    for (unsigned i = 1; i < program->blocks.size(); i++) {
-      Block& block = *(program->blocks[i].get());
+      Block& block = program->blocks[i];
       int new_logical_idom = -1;
       int new_linear_idom = -1;
       for (unsigned pred_idx : block.logical_preds) {
-         if ((int) program->blocks[pred_idx]->logical_idom != -1) {
+         if ((int) program->blocks[pred_idx].logical_idom != -1) {
             if (new_logical_idom == -1) {
                new_logical_idom = pred_idx;
             } else {
                while ((int) pred_idx != new_logical_idom) {
                   if ((int) pred_idx > new_logical_idom)
-                     pred_idx = program->blocks[pred_idx]->logical_idom;
+                     pred_idx = program->blocks[pred_idx].logical_idom;
                   if ((int) pred_idx < new_logical_idom)
-                     new_logical_idom = program->blocks[new_logical_idom]->logical_idom;
+                     new_logical_idom = program->blocks[new_logical_idom].logical_idom;
                }
             }
          }
       }
 
       for (unsigned pred_idx : block.linear_preds) {
-         if ((int) program->blocks[pred_idx]->linear_idom != -1) {
+         if ((int) program->blocks[pred_idx].linear_idom != -1) {
             if (new_linear_idom == -1) {
                new_linear_idom = pred_idx;
             } else {
                while ((int) pred_idx != new_linear_idom) {
                   if ((int) pred_idx > new_linear_idom)
-                     pred_idx = program->blocks[pred_idx]->linear_idom;
+                     pred_idx = program->blocks[pred_idx].linear_idom;
                   if ((int) pred_idx < new_linear_idom)
-                     new_linear_idom = program->blocks[new_linear_idom]->linear_idom;
+                     new_linear_idom = program->blocks[new_linear_idom].linear_idom;
                }
             }
          }

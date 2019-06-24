@@ -877,15 +877,15 @@ enum block_kind {
 /* CFG */
 struct Block {
    unsigned index;
-   unsigned offset;
+   unsigned offset = 0;
    std::vector<aco_ptr<Instruction>> instructions;
    std::vector<unsigned> logical_preds;
    std::vector<unsigned> linear_preds;
    std::vector<unsigned> logical_succs;
    std::vector<unsigned> linear_succs;
-   uint16_t vgpr_demand;
-   uint16_t sgpr_demand;
-   uint16_t loop_nest_depth;
+   uint16_t vgpr_demand = 0;
+   uint16_t sgpr_demand = 0;
+   uint16_t loop_nest_depth = 0;
    uint16_t kind = 0;
    int logical_idom = -1;
    int linear_idom = -1;
@@ -893,14 +893,17 @@ struct Block {
 
    /* this information is needed for predecessors to blocks with phis when
     * moving out of ssa */
-   bool scc_live_out;
-   PhysReg scratch_sgpr; /* only needs to be valid if scc_live_out != false */
+   bool scc_live_out = false;
+   PhysReg scratch_sgpr = PhysReg(); /* only needs to be valid if scc_live_out != false */
+
+   Block(unsigned idx) : index(idx) {}
+   Block() : index(0) {}
 };
 
 
 class Program final {
 public:
-   std::vector<std::unique_ptr<Block>> blocks;
+   std::vector<Block> blocks;
    uint16_t max_vgpr = 0;
    uint16_t max_sgpr = 0;
    uint16_t num_waves = 0;
@@ -927,18 +930,15 @@ public:
       allocationID = id;
    }
 
-   Block* createAndInsertBlock()
-   {
-      Block* b = new Block;
-      b->index = (unsigned) blocks.size();
-      blocks.push_back(std::unique_ptr<Block>(b));
-      return b;
+   Block* create_and_insert_block() {
+      blocks.emplace_back(blocks.size());
+      return &blocks.back();
    }
 
-   Block* insert_block(Block* block) {
-      block->index = blocks.size();
-      blocks.emplace_back(block);
-      return blocks.back().get();
+   Block* insert_block(Block&& block) {
+      block.index = blocks.size();
+      blocks.emplace_back(std::move(block));
+      return &blocks.back();
    }
 
 private:

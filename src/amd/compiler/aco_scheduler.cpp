@@ -205,7 +205,7 @@ bool can_reorder(Instruction* candidate, bool allow_smem)
    }
 }
 
-void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
+void schedule_SMEM(sched_ctx& ctx, Block* block,
                    std::vector<std::pair<uint16_t,uint16_t>>& register_demand,
                    Instruction* current, int idx)
 {
@@ -454,7 +454,7 @@ void schedule_SMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
    ctx.last_SMEM_stall = 10 - ctx.num_waves - k;
 }
 
-void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
+void schedule_VMEM(sched_ctx& ctx, Block* block,
                    std::vector<std::pair<uint16_t,uint16_t>>& register_demand,
                    Instruction* current, int idx)
 {
@@ -691,7 +691,7 @@ void schedule_VMEM(sched_ctx& ctx, std::unique_ptr<Block>& block,
    }
 }
 
-void schedule_block(sched_ctx& ctx, Program *program, std::unique_ptr<Block>& block, live& live_vars)
+void schedule_block(sched_ctx& ctx, Program *program, Block* block, live& live_vars)
 {
    ctx.last_SMEM_dep_idx = 0;
    ctx.last_SMEM_stall = INT16_MIN;
@@ -735,15 +735,15 @@ void schedule_program(Program *program, live& live_vars)
    ctx.max_sgpr = std::min<uint16_t>(((total_sgpr_regs / ctx.num_waves) & ~7) - 2, max_addressible_sgpr);
    ctx.max_vgpr = (256 / ctx.num_waves) & ~3;
 
-   for (std::unique_ptr<Block>& block : program->blocks)
-      schedule_block(ctx, program, block, live_vars);
+   for (Block& block : program->blocks)
+      schedule_block(ctx, program, &block, live_vars);
 
    /* update max_vgpr, max_sgpr and num_waves */
    uint16_t sgpr_demand = 0;
    uint16_t vgpr_demand = 0;
-   for (std::unique_ptr<Block>& block : program->blocks) {
-      sgpr_demand = std::max(block->sgpr_demand, sgpr_demand);
-      vgpr_demand = std::max(block->vgpr_demand, vgpr_demand);
+   for (Block& block : program->blocks) {
+      sgpr_demand = std::max(block.sgpr_demand, sgpr_demand);
+      vgpr_demand = std::max(block.vgpr_demand, vgpr_demand);
    }
    update_vgpr_sgpr_demand(program, vgpr_demand, sgpr_demand);
 

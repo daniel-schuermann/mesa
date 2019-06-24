@@ -309,9 +309,9 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    }
 }
 
-void emit_block(asm_context& ctx, std::vector<uint32_t>& out, Block* block)
+void emit_block(asm_context& ctx, std::vector<uint32_t>& out, Block& block)
 {
-   for (auto const& instr : block->instructions) {
+   for (aco_ptr<Instruction>& instr : block.instructions) {
 #if 0
       int start_idx = out.size();
       std::cerr << "Encoding:\t" << std::endl;
@@ -328,14 +328,12 @@ void emit_block(asm_context& ctx, std::vector<uint32_t>& out, Block* block)
 
 void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
 {
-   // TODO
-   for (std::vector<std::unique_ptr<Block>>::reverse_iterator block_it = program->blocks.rbegin(); block_it != program->blocks.rend(); ++block_it)
-   {
-      Block* block = block_it->get();
-      std::vector<aco_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin();
+   for (int idx = program->blocks.size() - 1; idx >= 0; idx--) {
+      Block& block = program->blocks[idx];
+      std::vector<aco_ptr<Instruction>>::reverse_iterator it = block.instructions.rbegin();
       bool endBlock = false;
       bool exported = false;
-      while ( it != block->instructions.rend())
+      while ( it != block.instructions.rend())
       {
          if ((*it)->format == Format::EXP && endBlock) {
             Export_instruction* exp = static_cast<Export_instruction*>((*it).get());
@@ -364,7 +362,7 @@ void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
       exp->valid_mask = true;
       exp->dest = 9; /* NULL */
       /* insert the null export 1 instruction before endpgm */
-      block->instructions.insert(block->instructions.end() - 1, std::move(exp));
+      block.instructions.insert(block.instructions.end() - 1, std::move(exp));
    }
 }
 
@@ -384,10 +382,10 @@ std::vector<uint32_t> emit_program(Program* program)
    std::vector<uint32_t> out;
    if (program->stage == MESA_SHADER_FRAGMENT)
       fix_exports(ctx, out, program);
-   for (auto const& block : program->blocks)
+   for (Block& block : program->blocks)
    {
-      block->offset = out.size();
-      emit_block(ctx, out, block.get());
+      block.offset = out.size();
+      emit_block(ctx, out, block);
    }
    fix_branches(ctx, out);
 

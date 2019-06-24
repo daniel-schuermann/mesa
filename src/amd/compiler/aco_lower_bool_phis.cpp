@@ -56,12 +56,12 @@ Operand get_ssa(Program *program, unsigned block_idx, ssa_state *state)
       if (pos != state->latest.end())
          return Operand({pos->second, s2});
 
-      Block* block = program->blocks[block_idx].get();
-      size_t pred = block->linear_preds.size();
+      Block& block = program->blocks[block_idx];
+      size_t pred = block.linear_preds.size();
       if (pred == 0) {
          return Operand(s2);
       } else if (pred == 1) {
-         block_idx = block->linear_preds[0];
+         block_idx = block.linear_preds[0];
          continue;
       } else {
          unsigned res = program->allocateId();
@@ -69,14 +69,14 @@ Operand get_ssa(Program *program, unsigned block_idx, ssa_state *state)
 
          aco_ptr<Pseudo_instruction> phi{create_instruction<Pseudo_instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, pred, 1)};
          for (unsigned i = 0; i < pred; i++) {
-            phi->getOperand(i) = get_ssa(program, block->linear_preds[i], state);
+            phi->getOperand(i) = get_ssa(program, block.linear_preds[i], state);
             if (phi->getOperand(i).isTemp()) {
                assert(i < 64);
-               state->phis[phi->getOperand(i).tempId()][(phi_use){block, res}] |= (uint64_t)1 << i;
+               state->phis[phi->getOperand(i).tempId()][(phi_use){&block, res}] |= (uint64_t)1 << i;
             }
          }
          phi->getDefinition(0) = Definition(Temp{res, s2});
-         block->instructions.emplace(block->instructions.begin(), std::move(phi));
+         block.instructions.emplace(block.instructions.begin(), std::move(phi));
 
          return Operand({res, s2});
       }
@@ -147,7 +147,7 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
 
    ssa_state state;
    for (unsigned i = 0; i < phi->operandCount(); i++) {
-      Block *pred = program->blocks[block->logical_preds[i]].get();
+      Block *pred = &program->blocks[block->logical_preds[i]];
 
       assert(phi->getOperand(i).isTemp());
       Temp phi_src = phi->getOperand(i).getTemp();
@@ -193,7 +193,7 @@ void lower_linear_bool_phi(Program *program, Block *block, aco_ptr<Instruction>&
       Temp phi_src = phi->getOperand(i).getTemp();
       if (phi_src.regClass() == s2) {
          Temp new_phi_src = bld.tmp(s1);
-         insert_before_logical_end(program->blocks[block->linear_preds[i]].get(),
+         insert_before_logical_end(&program->blocks[block->linear_preds[i]],
             bld.sopc(aco_opcode::s_cmp_lg_u64, bld.scc(Definition(new_phi_src)),
                      Operand(0u), phi_src).get_ptr());
          phi->getOperand(i).setTemp(new_phi_src);
@@ -203,13 +203,11 @@ void lower_linear_bool_phi(Program *program, Block *block, aco_ptr<Instruction>&
 
 void lower_bool_phis(Program* program)
 {
-   for (std::vector<std::unique_ptr<Block>>::iterator it = program->blocks.begin(); it != program->blocks.end(); ++it)
-   {
-      Block* block = it->get();
+   for (Block& block : program->blocks) {
       std::vector<aco_ptr<Instruction>> instructions;
       std::vector<aco_ptr<Instruction>> non_phi;
-      instructions.swap(block->instructions);
-      block->instructions.reserve(instructions.size());
+      instructions.swap(block.instructions);
+      block.instructions.reserve(instructions.size());
       unsigned i = 0;
       for (; i < instructions.size(); i++)
       {
@@ -217,23 +215,23 @@ void lower_bool_phis(Program* program)
          if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
             break;
          if (phi->opcode == aco_opcode::p_phi && phi->getDefinition(0).regClass() == s2) {
-            non_phi.emplace_back(std::move(lower_divergent_bool_phi(program, block, phi)));
+            non_phi.emplace_back(std::move(lower_divergent_bool_phi(program, &block, phi)));
          } else if (phi->opcode == aco_opcode::p_linear_phi && phi->getDefinition(0).regClass() == s1) {
             /* if it's a valid non-boolean phi, this should be a no-op */
-            lower_linear_bool_phi(program, block, phi);
-            block->instructions.emplace_back(std::move(phi));
+            lower_linear_bool_phi(program, &block, phi);
+            block.instructions.emplace_back(std::move(phi));
          } else {
-            block->instructions.emplace_back(std::move(phi));
+            block.instructions.emplace_back(std::move(phi));
          }
       }
       for (auto&& instr : non_phi) {
          assert(instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi);
-         block->instructions.emplace_back(std::move(instr));
+         block.instructions.emplace_back(std::move(instr));
       }
       for (; i < instructions.size(); i++) {
          aco_ptr<Instruction> instr = std::move(instructions[i]);
          assert(instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi);
-         block->instructions.emplace_back(std::move(instr));
+         block.instructions.emplace_back(std::move(instr));
       }
    }
 }
