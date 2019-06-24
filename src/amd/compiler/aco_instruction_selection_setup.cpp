@@ -1274,9 +1274,7 @@ setup_isel_context(Program* program, nir_shader *nir,
    ctx.divergent_vals = nir_divergence_analysis(nir);
    init_context(&ctx, func);
 
-   ctx.program->blocks.push_back(std::unique_ptr<Block>{new Block});
-   ctx.block = ctx.program->blocks.back().get();
-   ctx.block->index = 0;
+   ctx.block = ctx.program->create_and_insert_block();
    ctx.block->loop_nest_depth = 0;
    ctx.block->kind = block_kind_top_level;
 
