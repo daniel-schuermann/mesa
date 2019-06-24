@@ -2677,19 +2677,18 @@ void visit_discard(isel_context* ctx, nir_intrinsic_instr *instr)
       unsigned idx = ctx->block->index;
 
       /* remove critical edges from linear CFG */
+      bld.branch(aco_opcode::p_branch);
       Block* break_block = ctx->program->createAndInsertBlock();
       break_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       break_block->kind |= block_kind_uniform;
       add_linear_edge(idx, break_block);
+      add_linear_edge(break_block->index, linear_target);
+      bld.reset(break_block);
+      bld.branch(aco_opcode::p_branch);
+
       Block* continue_block = ctx->program->createAndInsertBlock();
       continue_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
       add_linear_edge(idx, continue_block);
-      bld.branch(aco_opcode::p_branch);
-
-      bld.reset(break_block);
-      add_linear_edge(break_block->index, linear_target);
-      bld.branch(aco_opcode::p_branch);
-
       append_logical_start(continue_block);
       ctx->block = continue_block;
 
@@ -2708,10 +2707,8 @@ void visit_discard(isel_context* ctx, nir_intrinsic_instr *instr)
       } else {
          ctx->block->kind |= block_kind_discard;
          /* branch and linear edge is added by visit_if() */
-
       }
    }
-
 }
 
 enum aco_descriptor_type {
@@ -5905,19 +5902,18 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
    }
 
    /* remove critical edges from linear CFG */
+   bld.branch(aco_opcode::p_branch);
    Block* break_block = ctx->program->createAndInsertBlock();
    break_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
    break_block->kind |= block_kind_uniform;
    add_linear_edge(idx, break_block);
+   add_linear_edge(break_block->index, logical_target);
+   bld.reset(break_block);
+   bld.branch(aco_opcode::p_branch);
+
    Block* continue_block = ctx->program->createAndInsertBlock();
    continue_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
    add_linear_edge(idx, continue_block);
-   bld.branch(aco_opcode::p_branch);
-
-   bld.reset(break_block);
-   add_linear_edge(break_block->index, logical_target);
-   bld.branch(aco_opcode::p_branch);
-
    append_logical_start(continue_block);
    ctx->block = continue_block;
    return;
