@@ -34,6 +34,10 @@
 /*
  * Implements the algorithms for computing the dominator tree from
  * "A Simple, Fast Dominance Algorithm" by Cooper, Harvey, and Kennedy.
+ *
+ * Different from the paper, our CFG allows to compute the dominator tree
+ * in a single pass as it is guaranteed that the dominating predecessors
+ * are processed before the current block.
  */
 
 namespace aco {
@@ -43,48 +47,42 @@ void dominator_tree(Program* program)
    program->blocks[0]->logical_idom = 0;
    program->blocks[0]->linear_idom = 0;
 
-   bool changed = true;
-   while (changed)
-   {
-      changed = false;
-      for (std::vector<std::unique_ptr<Block>>::iterator it = ++program->blocks.begin(); it != program->blocks.end(); ++it) {
-         int new_logical_idom = -1;
-         int new_linear_idom = -1;
-         for (unsigned pred_idx : (*it)->logical_preds) {
-            if ((int) program->blocks[pred_idx]->logical_idom != -1) {
-               if (new_logical_idom == -1) {
-                  new_logical_idom = pred_idx;
-               } else {
-                  while ((int) pred_idx != new_logical_idom) {
-                     if ((int) pred_idx > new_logical_idom)
-                        pred_idx = program->blocks[pred_idx]->logical_idom;
-                     if ((int) pred_idx < new_logical_idom)
-                        new_logical_idom = program->blocks[new_logical_idom]->logical_idom;
-                  }
+   for (unsigned i = 1; i < program->blocks.size(); i++) {
+      Block& block = *(program->blocks[i].get());
+      int new_logical_idom = -1;
+      int new_linear_idom = -1;
+      for (unsigned pred_idx : block.logical_preds) {
+         if ((int) program->blocks[pred_idx]->logical_idom != -1) {
+            if (new_logical_idom == -1) {
+               new_logical_idom = pred_idx;
+            } else {
+               while ((int) pred_idx != new_logical_idom) {
+                  if ((int) pred_idx > new_logical_idom)
+                     pred_idx = program->blocks[pred_idx]->logical_idom;
+                  if ((int) pred_idx < new_logical_idom)
+                     new_logical_idom = program->blocks[new_logical_idom]->logical_idom;
                }
             }
          }
-
-         for (unsigned pred_idx : (*it)->linear_preds) {
-            if ((int) program->blocks[pred_idx]->linear_idom != -1) {
-               if (new_linear_idom == -1) {
-                  new_linear_idom = pred_idx;
-               } else {
-                  while ((int) pred_idx != new_linear_idom) {
-                     if ((int) pred_idx > new_linear_idom)
-                        pred_idx = program->blocks[pred_idx]->linear_idom;
-                     if ((int) pred_idx < new_linear_idom)
-                        new_linear_idom = program->blocks[new_linear_idom]->linear_idom;
-                  }
-               }
-            }
-         }
-
-         changed = program->blocks[(*it)->index]->logical_idom != new_logical_idom ||
-                   program->blocks[(*it)->index]->linear_idom != new_linear_idom;
-         program->blocks[(*it)->index]->logical_idom = new_logical_idom;
-         program->blocks[(*it)->index]->linear_idom = new_linear_idom;
       }
+
+      for (unsigned pred_idx : block.linear_preds) {
+         if ((int) program->blocks[pred_idx]->linear_idom != -1) {
+            if (new_linear_idom == -1) {
+               new_linear_idom = pred_idx;
+            } else {
+               while ((int) pred_idx != new_linear_idom) {
+                  if ((int) pred_idx > new_linear_idom)
+                     pred_idx = program->blocks[pred_idx]->linear_idom;
+                  if ((int) pred_idx < new_linear_idom)
+                     new_linear_idom = program->blocks[new_linear_idom]->linear_idom;
+               }
+            }
+         }
+      }
+
+      block.logical_idom = new_logical_idom;
+      block.linear_idom = new_linear_idom;
    }
 }
 
