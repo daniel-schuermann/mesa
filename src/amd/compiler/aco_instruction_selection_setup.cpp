@@ -75,7 +75,7 @@ struct isel_context {
       bool has_branch;
       uint16_t loop_nest_depth = 0;
       struct {
-         Block* entry;
+         unsigned header_idx;
          Block* exit;
          bool has_divergent_continue;
          bool has_divergent_branch;
