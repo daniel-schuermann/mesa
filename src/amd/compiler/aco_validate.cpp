@@ -51,10 +51,8 @@ void validate(Program* program, FILE * output)
       }
    };
 
-   for (auto&& block : program->blocks)
-   {
-      for (auto&& instr : block->instructions)
-      {
+   for (Block& block : program->blocks) {
+      for (aco_ptr<Instruction>& instr : block.instructions) {
          opcode_info op_info = ::opcode_infos[(int)instr->opcode];
 
          /* check base format */
@@ -156,10 +154,10 @@ void validate(Program* program, FILE * output)
                            "Operand and Definition types do not match", instr.get());
                }
             } else if (instr->opcode == aco_opcode::p_phi) {
-               check(instr->num_operands == block->logical_preds.size(), "Number of Operands does not match number of predecessors", instr.get());
+               check(instr->num_operands == block.logical_preds.size(), "Number of Operands does not match number of predecessors", instr.get());
                check(instr->getDefinition(0).getTemp().type() == vgpr || instr->getDefinition(0).getTemp().regClass() == s2, "Logical Phi Definition must be vgpr or divergent boolean", instr.get());
             } else if (instr->opcode == aco_opcode::p_linear_phi) {
-               check(instr->num_operands == block->linear_preds.size(), "Number of Operands does not match number of predecessors", instr.get());
+               check(instr->num_operands == block.linear_preds.size(), "Number of Operands does not match number of predecessors", instr.get());
             }
             break;
          }
@@ -275,10 +273,10 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
    aco::live live_vars = aco::live_var_analysis(program, options);
 
    std::map<unsigned, Assignment> assignments;
-   for (auto& block : program->blocks) {
+   for (Block& block : program->blocks) {
       Location loc;
-      loc.block = block.get();
-      for (auto& instr : block->instructions) {
+      loc.block = &block;
+      for (aco_ptr<Instruction>& instr : block.instructions) {
          loc.instr = instr.get();
          for (unsigned i = 0; i < instr->num_operands; i++) {
             Operand& op = instr->getOperand(i);
@@ -316,15 +314,15 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
       }
    }
 
-   for (auto& block : program->blocks) {
+   for (Block& block : program->blocks) {
       Location loc;
-      loc.block = block.get();
+      loc.block = &block;
 
       std::array<unsigned, 512> regs;
       regs.fill(0);
 
       std::set<Temp> live;
-      live.insert(live_vars.live_out[block->index].begin(), live_vars.live_out[block->index].end());
+      live.insert(live_vars.live_out[block.index].begin(), live_vars.live_out[block.index].end());
 
       /* check live out */
       for (Temp tmp : live) {
@@ -338,7 +336,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
       }
       regs.fill(0);
 
-      for (auto it = block->instructions.rbegin(); it != block->instructions.rend(); ++it) {
+      for (auto it = block.instructions.rbegin(); it != block.instructions.rend(); ++it) {
          aco_ptr<Instruction>& instr = *it;
 
          for (unsigned i = 0; i < instr->num_definitions; i++) {
@@ -366,7 +364,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
             regs[reg + i] = tmp.id();
       }
 
-      for (auto& instr : block->instructions) {
+      for (aco_ptr<Instruction>& instr : block.instructions) {
          loc.instr = instr.get();
          if (instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi) {
             for (unsigned i = 0; i < instr->num_operands; i++) {

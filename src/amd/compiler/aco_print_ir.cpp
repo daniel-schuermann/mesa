@@ -474,8 +474,8 @@ void aco_print_block(const struct Block* block, FILE *output)
 
 void aco_print_program(Program *program, FILE *output)
 {
-   for (auto const& block : program->blocks)
-      aco_print_block(block.get(), output);
+   for (Block const& block : program->blocks)
+      aco_print_block(&block, output);
 
    fprintf(output, "\n");
 }
