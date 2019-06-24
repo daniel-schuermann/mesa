@@ -5809,7 +5809,7 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
    /* if we have a linear phi on a divergent if, we know that one src is undef */
    if (opcode == aco_opcode::p_linear_phi && ctx->block->kind & block_kind_merge) {
       Block* block;
-      /* we place the phi either in the between-block or in the current block */
+      /* we place the phi either in the invert-block or in the current block */
       if (phi_src.begin()->second->parent_instr->type != nir_instr_type_ssa_undef) {
          assert((++phi_src.begin())->second->parent_instr->type == nir_instr_type_ssa_undef);
          Block* linear_else = ctx->program->blocks[ctx->block->linear_preds[1]].get();
@@ -6061,34 +6061,30 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
        *    merge block.
        **/
 
-      Block* BB_if = ctx->block;
-      BB_if->kind |= block_kind_uniform;
-      Block* BB_then = ctx->program->createAndInsertBlock();
-      BB_then->loop_nest_depth = ctx->cf_info.loop_nest_depth;
-      Block* BB_else = new Block();
-      BB_else->loop_nest_depth = ctx->cf_info.loop_nest_depth;
-      Block* BB_endif = new Block();
-      BB_endif->loop_nest_depth = ctx->cf_info.loop_nest_depth;
-      BB_endif->kind |= BB_if->kind & block_kind_top_level;
-      Block* parent_if_merge_block = ctx->cf_info.parent_if.merge_block;
-      ctx->cf_info.parent_if.merge_block = BB_endif;
+      append_logical_end(ctx->block);
+      ctx->block->kind |= block_kind_uniform;
 
-      append_logical_end(BB_if);
-
+      /* emit branch */
       if (cond.regClass() == s2) {
          // TODO: in a post-RA optimizer, we could check if the condition is in VCC and omit this instruction
          cond = as_uniform_bool(ctx, cond);
       }
-
-      /* emit branch */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z, Format::PSEUDO_BRANCH, 1, 0));
       branch->getOperand(0) = Operand(cond);
       branch->getOperand(0).setFixed(scc);
-      BB_if->instructions.emplace_back(std::move(branch));
-      add_edge(BB_if, BB_then);
-      add_edge(BB_if, BB_else);
+      ctx->block->instructions.emplace_back(std::move(branch));
+
+      unsigned BB_if_idx = ctx->block->index;
+      Block* BB_endif = new Block();
+      BB_endif->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      BB_endif->kind |= ctx->block->kind & block_kind_top_level;
+      Block* parent_if_merge_block = ctx->cf_info.parent_if.merge_block;
+      ctx->cf_info.parent_if.merge_block = BB_endif;
 
       /** emit then block */
+      Block* BB_then = ctx->program->createAndInsertBlock();
+      BB_then->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      add_edge(ctx->program->blocks[BB_if_idx].get(), BB_then);
       append_logical_start(BB_then);
       ctx->block = BB_then;
       visit_cf_list(ctx, &if_stmt->then_list);
@@ -6111,8 +6107,9 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       ctx->cf_info.parent_loop.has_divergent_branch = false;
 
       /** emit else block */
-      BB_else->index = ctx->program->blocks.size();
-      ctx->program->blocks.emplace_back(BB_else);
+      Block* BB_else = ctx->program->createAndInsertBlock();
+      BB_else->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      add_edge(ctx->program->blocks[BB_if_idx].get(), BB_else);
       append_logical_start(BB_else);
       ctx->block = BB_else;
       visit_cf_list(ctx, &if_stmt->else_list);
@@ -6134,11 +6131,8 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
 
       /** emit endif merge block */
       if (!ctx->cf_info.has_branch) {
-         BB_endif->index = ctx->program->blocks.size();
-         ctx->program->blocks.emplace_back(BB_endif);
-
-         append_logical_start(BB_endif);
-         ctx->block = BB_endif;
+         ctx->block = ctx->program->insert_block(BB_endif);
+         append_logical_start(ctx->block);
       } else {
          delete BB_endif;
       }
@@ -6154,7 +6148,7 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
        *                        /    \
        *       BB_THEN (logical)      BB_THEN (linear)
        *                        \    /
-       *                        BB_BETWEEN (linear)
+       *                        BB_INVERT (linear)
        *                        /    \
        *       BB_ELSE (logical)      BB_ELSE (linear)
        *                        \    /
@@ -6171,49 +6165,42 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
        **/
 
       Block* BB_if = ctx->block;
-      BB_if->kind |= block_kind_branch;
-      Block* BB_then_logical = ctx->program->createAndInsertBlock();
-      BB_then_logical->loop_nest_depth = ctx->cf_info.loop_nest_depth;
-      Block* BB_then_linear = new Block();
-      BB_then_linear->loop_nest_depth = ctx->cf_info.loop_nest_depth;
-      BB_then_linear->kind |= block_kind_uniform;
-      Block* BB_between = new Block();
-      BB_between->loop_nest_depth = ctx->cf_info.loop_nest_depth;
-      /* Invert blocks are intentionally not marked as top level because they
-       * are not part of the logical cfg. */
-      BB_between->kind |= block_kind_invert;
-      Block* BB_else_logical = new Block();
-      BB_else_logical->loop_nest_depth = ctx->cf_info.loop_nest_depth;
-      Block* BB_else_linear = new Block();
-      BB_else_linear->loop_nest_depth = ctx->cf_info.loop_nest_depth;
-      BB_else_linear->kind |= block_kind_uniform;
-      Block* BB_endif = new Block();
-      BB_endif->loop_nest_depth = ctx->cf_info.loop_nest_depth;
-      BB_endif->kind |= (block_kind_merge | (BB_if->kind & block_kind_top_level));
-
-      append_logical_end(BB_if);
+      append_logical_end(ctx->block);
+      ctx->block->kind |= block_kind_branch;
 
       /* branch to linear then block */
       assert(cond.regClass() == s2);
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_z, Format::PSEUDO_BRANCH, 1, 0));
       branch->getOperand(0) = Operand(cond);
-      BB_if->instructions.push_back(std::move(branch));
-      add_edge(BB_if, BB_then_logical);
-      add_linear_edge(BB_if, BB_then_linear);
-      add_logical_edge(BB_if, BB_else_logical);
-      if_info_RAII if_raii(ctx, BB_between);
+      ctx->block->instructions.push_back(std::move(branch));
+
+      unsigned BB_if_idx = ctx->block->index;
+      Block* BB_invert = new Block();
+      BB_invert->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      /* Invert blocks are intentionally not marked as top level because they
+       * are not part of the logical cfg. */
+      BB_invert->kind |= block_kind_invert;
+      Block* BB_endif = new Block();
+      BB_endif->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      BB_endif->kind |= (block_kind_merge | (BB_if->kind & block_kind_top_level));
+
+      if_info_RAII if_raii(ctx, BB_invert);
+
 
       /** emit logical then block */
+      Block* BB_then_logical = ctx->program->createAndInsertBlock();
+      BB_then_logical->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      add_edge(ctx->program->blocks[BB_if_idx].get(), BB_then_logical);
       ctx->block = BB_then_logical;
       append_logical_start(BB_then_logical);
       visit_cf_list(ctx, &if_stmt->then_list);
       BB_then_logical = ctx->block;
       append_logical_end(BB_then_logical);
 
-      /* branch from logical then block to between block */
+      /* branch from logical then block to invert block */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
       BB_then_logical->instructions.emplace_back(std::move(branch));
-      add_linear_edge(BB_then_logical, BB_between);
+      add_linear_edge(BB_then_logical, BB_invert);
       if (!ctx->cf_info.parent_loop.has_divergent_branch)
          add_logical_edge(BB_then_logical, BB_endif);
       BB_then_logical->kind |= block_kind_uniform;
@@ -6222,30 +6209,36 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       bool then_branch_divergent = ctx->cf_info.parent_loop.has_divergent_branch;
       ctx->cf_info.parent_loop.has_divergent_branch = false;
 
-      /** emit linear then block */
-      BB_then_linear->index = ctx->program->blocks.size();
-      ctx->program->blocks.emplace_back(BB_then_linear);
 
-      /* branch from linear then block to between block */
+      /** emit linear then block */
+      Block* BB_then_linear = ctx->program->createAndInsertBlock();
+      BB_then_linear->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      BB_then_linear->kind |= block_kind_uniform;
+      add_linear_edge(ctx->program->blocks[BB_if_idx].get(), BB_then_linear);
+
+      /* branch from linear then block to invert block */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
       BB_then_linear->instructions.emplace_back(std::move(branch));
-      add_linear_edge(BB_then_linear, BB_between);
+      add_linear_edge(BB_then_linear, BB_invert);
 
-      /** emit in-between merge block */
-      BB_between->index = ctx->program->blocks.size();
-      ctx->program->blocks.emplace_back(BB_between);
+
+      /** emit invert merge block */
+      ctx->block = ctx->program->insert_block(BB_invert);
+      unsigned invert_idx = ctx->block->index;
 
       /* branch to linear else block (skip else) */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0));
       branch->getOperand(0) = Operand(cond);
-      BB_between->instructions.push_back(std::move(branch));
-      add_linear_edge(BB_between, BB_else_logical);
-      add_linear_edge(BB_between, BB_else_linear);
+      ctx->block->instructions.push_back(std::move(branch));
+
+      ctx->cf_info.parent_if.merge_block = BB_endif;
+
 
       /** emit logical else block */
-      BB_else_logical->index = ctx->program->blocks.size();
-      ctx->program->blocks.emplace_back(BB_else_logical);
-      ctx->cf_info.parent_if.merge_block = BB_endif;
+      Block* BB_else_logical = ctx->program->createAndInsertBlock();
+      BB_else_logical->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      add_logical_edge(ctx->program->blocks[BB_if_idx].get(), BB_else_logical);
+      add_linear_edge(ctx->program->blocks[invert_idx].get(), BB_else_logical);
       ctx->block = BB_else_logical;
       append_logical_start(BB_else_logical);
       visit_cf_list(ctx, &if_stmt->else_list);
@@ -6263,21 +6256,22 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       assert(!ctx->cf_info.has_branch);
       ctx->cf_info.parent_loop.has_divergent_branch &= then_branch_divergent;
 
+
       /** emit linear else block */
-      BB_else_linear->index = ctx->program->blocks.size();
-      ctx->program->blocks.emplace_back(BB_else_linear);
+      Block* BB_else_linear = ctx->program->createAndInsertBlock();
+      BB_else_linear->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+      BB_else_linear->kind |= block_kind_uniform;
+      add_linear_edge(ctx->program->blocks[invert_idx].get(), BB_else_linear);
 
       /* branch from linear else block to endif block */
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_branch, Format::PSEUDO_BRANCH, 0, 0));
       BB_else_linear->instructions.emplace_back(std::move(branch));
       add_linear_edge(BB_else_linear, BB_endif);
 
-      /** emit endif merge block */
-      BB_endif->index = ctx->program->blocks.size();
-      ctx->program->blocks.emplace_back(BB_endif);
 
-      append_logical_start(BB_endif);
-      ctx->block = BB_endif;
+      /** emit endif merge block */
+      ctx->block = ctx->program->insert_block(BB_endif);
+      append_logical_start(ctx->block);
    }
 }
 
