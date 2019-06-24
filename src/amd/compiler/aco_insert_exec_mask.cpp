@@ -145,8 +145,8 @@ void mark_block_wqm(wqm_ctx &ctx, unsigned block_idx)
       return;
 
    ctx.branch_wqm[block_idx] = true;
-   Block* block = ctx.program->blocks[block_idx].get();
-   aco_ptr<Instruction>& branch = *block->instructions.rbegin();
+   Block& block = ctx.program->blocks[block_idx];
+   aco_ptr<Instruction>& branch = block.instructions.back();
 
    if (branch->opcode != aco_opcode::p_branch) {
       assert(branch->operandCount() && branch->getOperand(0).isTemp());
@@ -155,10 +155,10 @@ void mark_block_wqm(wqm_ctx &ctx, unsigned block_idx)
 
    /* TODO: this sets more branch conditions to WQM than it needs to
     * it should be enough to stop at the "exec mask top level" */
-   if (block->kind & block_kind_top_level)
+   if (block.kind & block_kind_top_level)
       return;
 
-   for (unsigned pred_idx : block->logical_preds)
+   for (unsigned pred_idx : block.logical_preds)
       mark_block_wqm(ctx, pred_idx);
 }
 
@@ -222,30 +222,31 @@ void calculate_wqm_needs(exec_ctx& exec_ctx)
       unsigned block_index = *std::prev(ctx.worklist.end());
       ctx.worklist.erase(std::prev(ctx.worklist.end()));
 
-      Block *block = exec_ctx.program->blocks[block_index].get();
-      get_block_needs(ctx, exec_ctx.info[block->index], block);
+      Block *block = &exec_ctx.program->blocks[block_index];
+      get_block_needs(ctx, exec_ctx.info[block_index], block);
    }
 
    uint8_t ever_again_needs = 0;
    for (int i = exec_ctx.program->blocks.size() - 1; i >= 0; i--) {
       exec_ctx.info[i].ever_again_needs = ever_again_needs;
+      Block& block = exec_ctx.program->blocks[i];
 
-      if (exec_ctx.program->blocks[i]->kind & block_kind_needs_lowering)
+      if (block.kind & block_kind_needs_lowering)
          exec_ctx.info[i].block_needs |= Exact;
 
       /* if discard is used somewhere in nested CF, we need to preserve the WQM mask */
-      if ((exec_ctx.program->blocks[i]->kind & block_kind_discard ||
-           exec_ctx.program->blocks[i]->kind & block_kind_uses_discard_if) &&
+      if ((block.kind & block_kind_discard ||
+           block.kind & block_kind_uses_discard_if) &&
           ever_again_needs & WQM)
          exec_ctx.info[i].block_needs |= Preserve_WQM;
 
       ever_again_needs |= exec_ctx.info[i].block_needs;
-      if (exec_ctx.program->blocks[i]->kind & block_kind_discard ||
-          exec_ctx.program->blocks[i]->kind & block_kind_uses_discard_if)
+      if (block.kind & block_kind_discard ||
+          block.kind & block_kind_uses_discard_if)
          ever_again_needs |= Exact;
 
       /* don't propagate WQM preservation further than the next top_level block */
-      if (exec_ctx.program->blocks[i]->kind & block_kind_top_level)
+      if (block.kind & block_kind_top_level)
          ever_again_needs &= ~Preserve_WQM;
       else
          exec_ctx.info[i].block_needs &= ~Preserve_WQM;
@@ -290,7 +291,7 @@ void transition_to_Exact(exec_ctx& ctx, Builder bld, unsigned idx)
    ctx.info[idx].exec.emplace_back(exact, mask_type_exact);
 }
 
-unsigned add_coupling_code(exec_ctx& ctx, std::unique_ptr<Block>& block,
+unsigned add_coupling_code(exec_ctx& ctx, Block* block,
                            std::vector<aco_ptr<Instruction>>& instructions)
 {
    unsigned idx = block->index;
@@ -556,7 +557,7 @@ void lower_fs_buffer_store_smem(Builder& bld, bool need_check, aco_ptr<Instructi
    instr->getOperand(2) = Operand(bld.as_uniform(instr->getOperand(2)));
 }
 
-void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
+void process_instructions(exec_ctx& ctx, Block* block,
                           std::vector<aco_ptr<Instruction>>& instructions,
                           unsigned idx)
 {
@@ -642,10 +643,10 @@ void process_instructions(exec_ctx& ctx, std::unique_ptr<Block>& block,
    }
 }
 
-void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
+void add_branch_code(exec_ctx& ctx, Block* block)
 {
    unsigned idx = block->index;
-   Builder bld(ctx.program, block.get());
+   Builder bld(ctx.program, block);
 
    if (idx == ctx.program->blocks.size() - 1)
       return;
@@ -703,23 +704,23 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
       bool has_divergent_continue = false;
       bool has_discard = false;
       uint8_t needs = 0;
-      unsigned loop_nest_depth = ctx.program->blocks[idx + 1]->loop_nest_depth;
+      unsigned loop_nest_depth = ctx.program->blocks[idx + 1].loop_nest_depth;
 
-      for (unsigned i = idx + 1; ctx.program->blocks[i]->loop_nest_depth >= loop_nest_depth; i++) {
-         Block* loop_block = ctx.program->blocks[i].get();
+      for (unsigned i = idx + 1; ctx.program->blocks[i].loop_nest_depth >= loop_nest_depth; i++) {
+         Block& loop_block = ctx.program->blocks[i];
          needs |= ctx.info[i].block_needs;
 
-         if (loop_block->kind & block_kind_uses_discard_if ||
-             loop_block->kind & block_kind_discard)
+         if (loop_block.kind & block_kind_uses_discard_if ||
+             loop_block.kind & block_kind_discard)
             has_discard = true;
-         if (loop_block->loop_nest_depth != loop_nest_depth)
+         if (loop_block.loop_nest_depth != loop_nest_depth)
             continue;
 
-         if (loop_block->kind & block_kind_uniform)
+         if (loop_block.kind & block_kind_uniform)
             continue;
-         else if (loop_block->kind & block_kind_break)
+         else if (loop_block.kind & block_kind_break)
             has_divergent_break = true;
-         else if (loop_block->kind & block_kind_continue)
+         else if (loop_block.kind & block_kind_continue)
             has_divergent_continue = true;
       }
 
@@ -737,7 +738,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
          }
       }
 
-      ctx.loop.emplace_back(ctx.program->blocks[block->linear_succs[0]].get(),
+      ctx.loop.emplace_back(&ctx.program->blocks[block->linear_succs[0]],
                             ctx.info[idx].exec.size(),
                             needs,
                             has_divergent_break,
@@ -775,8 +776,8 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
       if (!ctx.loop.size()) {
          /* check if the successor is the merge block, otherwise set exec to 0 */
          // TODO: this could be done better by directly branching to the merge block
-         Block* succ = ctx.program->blocks[block->linear_succs[0]].get();
-         if (!(succ->kind & block_kind_invert || succ->kind & block_kind_merge)) {
+         Block& succ = ctx.program->blocks[block->linear_succs[0]];
+         if (!(succ.kind & block_kind_invert || succ.kind & block_kind_merge)) {
             ctx.info[idx].exec.back().first = bld.sop1(aco_opcode::s_mov_b64, bld.def(s2, exec), Operand(0u));
          }
       }
@@ -863,9 +864,9 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
 
       /* check if the successor is the merge block, otherwise set exec to 0 */
       // TODO: this could be done better by directly branching to the merge block
-      unsigned succ_idx = ctx.program->blocks[block->linear_succs[1]]->linear_succs[0];
-      Block* succ = ctx.program->blocks[succ_idx].get();
-      if (!(succ->kind & block_kind_invert || succ->kind & block_kind_merge)) {
+      unsigned succ_idx = ctx.program->blocks[block->linear_succs[1]].linear_succs[0];
+      Block& succ = ctx.program->blocks[succ_idx];
+      if (!(succ.kind & block_kind_invert || succ.kind & block_kind_merge)) {
          ctx.info[idx].exec.back().first = bld.sop1(aco_opcode::s_mov_b64, bld.def(s2, exec), Operand(0u));
       }
 
@@ -892,9 +893,9 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
 
       /* check if the successor is the merge block, otherwise set exec to 0 */
       // TODO: this could be done better by directly branching to the merge block
-      unsigned succ_idx = ctx.program->blocks[block->linear_succs[1]]->linear_succs[0];
-      Block* succ = ctx.program->blocks[succ_idx].get();
-      if (!(succ->kind & block_kind_invert || succ->kind & block_kind_merge)) {
+      unsigned succ_idx = ctx.program->blocks[block->linear_succs[1]].linear_succs[0];
+      Block& succ = ctx.program->blocks[succ_idx];
+      if (!(succ.kind & block_kind_invert || succ.kind & block_kind_merge)) {
          ctx.info[idx].exec.back().first = bld.sop1(aco_opcode::s_mov_b64, bld.def(s2, exec), Operand(0u));
       }
 
@@ -903,7 +904,7 @@ void add_branch_code(exec_ctx& ctx, std::unique_ptr<Block>& block)
    }
 }
 
-void process_block(exec_ctx& ctx, std::unique_ptr<Block>& block)
+void process_block(exec_ctx& ctx, Block* block)
 {
    std::vector<aco_ptr<Instruction>> instructions;
    instructions.reserve(block->instructions.size());
@@ -932,8 +933,8 @@ void insert_exec_mask(Program *program)
    if (program->needs_wqm && program->needs_exact)
       calculate_wqm_needs(ctx);
 
-   for (std::unique_ptr<Block>& block : program->blocks)
-      process_block(ctx, block);
+   for (Block& block : program->blocks)
+      process_block(ctx, &block);
 
 }
 

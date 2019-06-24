@@ -233,15 +233,15 @@ live live_var_analysis(Program* program,
    uint16_t sgpr_demand = 0;
 
    /* this implementation assumes that the block idx corresponds to the block's position in program->blocks vector */
-   for (auto& block : program->blocks)
-      worklist.insert(block->index);
+   for (Block& block : program->blocks)
+      worklist.insert(block.index);
    while (!worklist.empty()) {
       std::set<unsigned>::reverse_iterator b_it = worklist.rbegin();
       unsigned block_idx = *b_it;
       worklist.erase(block_idx);
-      process_live_temps_per_block(program, result, program->blocks[block_idx].get(), worklist);
-      vgpr_demand = std::max(vgpr_demand, program->blocks[block_idx]->vgpr_demand);
-      sgpr_demand = std::max(sgpr_demand, program->blocks[block_idx]->sgpr_demand);
+      process_live_temps_per_block(program, result, &program->blocks[block_idx], worklist);
+      vgpr_demand = std::max(vgpr_demand, program->blocks[block_idx].vgpr_demand);
+      sgpr_demand = std::max(sgpr_demand, program->blocks[block_idx].sgpr_demand);
    }
 
    /* calculate the program's register demand and number of waves */
