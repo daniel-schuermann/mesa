@@ -13,21 +13,21 @@ void print_asm(Program *program, std::vector<uint32_t>& binary, enum radeon_fami
 {
    std::vector<bool> referenced_blocks(program->blocks.size());
    referenced_blocks[0] = true;
-   for (std::unique_ptr<Block>& block : program->blocks) {
-      for (unsigned succ : block->linear_succs)
+   for (Block& block : program->blocks) {
+      for (unsigned succ : block.linear_succs)
          referenced_blocks[succ] = true;
    }
 
    std::vector<std::tuple<uint64_t, llvm::StringRef, uint8_t>> symbols;
    std::vector<std::array<char,16>> block_names;
    block_names.reserve(program->blocks.size());
-   for (std::unique_ptr<Block>& block : program->blocks) {
-      if (!referenced_blocks[block->index])
+   for (Block& block : program->blocks) {
+      if (!referenced_blocks[block.index])
          continue;
       std::array<char, 16> name;
-      sprintf(name.data(), "BB%u", block->index);
+      sprintf(name.data(), "BB%u", block.index);
       block_names.push_back(name);
-      symbols.emplace_back(block->offset * 4, llvm::StringRef(block_names[block_names.size() - 1].data()), 0);
+      symbols.emplace_back(block.offset * 4, llvm::StringRef(block_names[block_names.size() - 1].data()), 0);
    }
 
    LLVMDisasmContextRef disasm = LLVMCreateDisasmCPU("amdgcn-mesa-mesa3d",
@@ -39,7 +39,7 @@ void print_asm(Program *program, std::vector<uint32_t>& binary, enum radeon_fami
    bool invalid = false;
    unsigned next_block = 0;
    while (pos < binary.size()) {
-      while (next_block < program->blocks.size() && pos == program->blocks[next_block]->offset) {
+      while (next_block < program->blocks.size() && pos == program->blocks[next_block].offset) {
          if (referenced_blocks[next_block])
             out << "BB" << std::dec << next_block << ":" << std::endl;
          next_block++;

@@ -206,17 +206,17 @@ struct InstrPred {
 
 typedef std::unordered_set<Instruction*, InstrHash, InstrPred> expr_set;
 
-void process_block(std::unique_ptr<Block>& block,
+void process_block(Block& block,
                    expr_set& expr_values,
                    std::map<uint32_t, Temp>& renames)
 {
    bool run = false;
-   std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
+   std::vector<aco_ptr<Instruction>>::iterator it = block.instructions.begin();
    std::vector<aco_ptr<Instruction>> new_instructions;
-   new_instructions.reserve(block->instructions.size());
+   new_instructions.reserve(block.instructions.size());
    expr_set phi_values;
 
-   while (it != block->instructions.end()) {
+   while (it != block.instructions.end()) {
       aco_ptr<Instruction>& instr = *it;
       /* first, rename operands */
       for (unsigned i = 0; i < instr->num_operands; i++) {
@@ -269,12 +269,12 @@ void process_block(std::unique_ptr<Block>& block,
       ++it;
    }
 
-   block->instructions.swap(new_instructions);
+   block.instructions.swap(new_instructions);
 }
 
-void rename_phi_operands(std::unique_ptr<Block>& block, std::map<uint32_t, Temp>& renames)
+void rename_phi_operands(Block& block, std::map<uint32_t, Temp>& renames)
 {
-   for (aco_ptr<Instruction>& phi : block->instructions) {
+   for (aco_ptr<Instruction>& phi : block.instructions) {
       if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
          break;
 
@@ -295,18 +295,18 @@ void value_numbering(Program* program)
    std::vector<expr_set> expr_values(program->blocks.size());
    std::map<uint32_t, Temp> renames;
 
-   for (std::unique_ptr<Block>& block : program->blocks) {
-      if (block->logical_idom != -1) {
+   for (Block& block : program->blocks) {
+      if (block.logical_idom != -1) {
          /* initialize expr_values from idom */
-         expr_values[block->index] = expr_values[block->logical_idom];
-         process_block(block, expr_values[block->index], renames);
+         expr_values[block.index] = expr_values[block.logical_idom];
+         process_block(block, expr_values[block.index], renames);
       } else {
          expr_set empty;
          process_block(block, empty, renames);
       }
    }
 
-   for (std::unique_ptr<Block>& block : program->blocks)
+   for (Block& block : program->blocks)
       rename_phi_operands(block, renames);
 }
 

@@ -236,13 +236,13 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
 }
 
 
-void handle_block(NOP_ctx& ctx, std::unique_ptr<Block>& block)
+void handle_block(NOP_ctx& ctx, Block& block)
 {
    std::vector<aco_ptr<Instruction>> instructions;
-   instructions.reserve(block->instructions.size());
-   for (unsigned i = 0; i < block->instructions.size(); i++) {
-      aco_ptr<Instruction>& instr = block->instructions[i];
-      unsigned NOPs = handle_instruction(ctx, instr, block->instructions, instructions);
+   instructions.reserve(block.instructions.size());
+   for (unsigned i = 0; i < block.instructions.size(); i++) {
+      aco_ptr<Instruction>& instr = block.instructions[i];
+      unsigned NOPs = handle_instruction(ctx, instr, block.instructions, instructions);
       if (NOPs) {
          // TODO: try to move the instruction down
          /* create NOP */
@@ -257,7 +257,7 @@ void handle_block(NOP_ctx& ctx, std::unique_ptr<Block>& block)
    ctx.VALU_wrvcc -= instructions.size();
    ctx.VALU_wrexec -= instructions.size();
    ctx.VALU_wrsgpr -= instructions.size();
-   block->instructions = std::move(instructions);
+   block.instructions = std::move(instructions);
 }
 
 } /* end namespace */
@@ -266,8 +266,8 @@ void handle_block(NOP_ctx& ctx, std::unique_ptr<Block>& block)
 void insert_NOPs(Program* program)
 {
    NOP_ctx ctx(program);
-   for (std::unique_ptr<Block>& block : program->blocks) {
-      if (block->instructions.empty())
+   for (Block& block : program->blocks) {
+      if (block.instructions.empty())
          continue;
 
       handle_block(ctx, block);

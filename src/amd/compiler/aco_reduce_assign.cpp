@@ -40,13 +40,13 @@ void setup_reduce_temp(Program* program)
    unsigned maxSize = 0;
 
    std::vector<bool> hasReductions(program->blocks.size());
-   for (std::unique_ptr<Block>& block : program->blocks) {
-      for (aco_ptr<Instruction>& instr : block->instructions) {
+   for (Block& block : program->blocks) {
+      for (aco_ptr<Instruction>& instr : block.instructions) {
          if (instr->format != Format::PSEUDO_REDUCTION)
             continue;
 
          maxSize = MAX2(maxSize, instr->getOperand(0).size());
-         hasReductions[block->index] = true;
+         hasReductions[block.index] = true;
       }
    }
 
@@ -61,12 +61,12 @@ void setup_reduce_temp(Program* program)
    bool reduceTmp_in_loop = false;
    bool vtmp_in_loop = false;
 
-   for (std::unique_ptr<Block>& block : program->blocks) {
-      if (block->kind & block_kind_top_level)
-         last_top_level_block_idx = block->index;
+   for (Block& block : program->blocks) {
+      if (block.kind & block_kind_top_level)
+         last_top_level_block_idx = block.index;
 
       /* insert p_end_linear_vgpr after the outermost loop */
-      if (reduceTmp_in_loop && block->loop_nest_depth == 0) {
+      if (reduceTmp_in_loop && block.loop_nest_depth == 0) {
          assert(inserted_at == (int)last_top_level_block_idx);
 
          aco_ptr<Instruction> end{create_instruction<Instruction>(aco_opcode::p_end_linear_vgpr, Format::PSEUDO, vtmp_in_loop ? 2 : 1, 0)};
@@ -74,39 +74,39 @@ void setup_reduce_temp(Program* program)
          if (vtmp_in_loop)
             end->getOperand(1) = Operand(vtmp);
          /* insert after the phis of the loop exit block */
-         std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
+         std::vector<aco_ptr<Instruction>>::iterator it = block.instructions.begin();
          while ((*it)->opcode == aco_opcode::p_linear_phi || (*it)->opcode == aco_opcode::p_phi)
             ++it;
-         block->instructions.insert(it, std::move(end));
+         block.instructions.insert(it, std::move(end));
          reduceTmp_in_loop = false;
       }
-      if (!hasReductions[block->index])
+      if (!hasReductions[block.index])
          continue;
 
       std::vector<aco_ptr<Instruction>>::iterator it;
-      for (it = block->instructions.begin(); it != block->instructions.end(); ++it) {
+      for (it = block.instructions.begin(); it != block.instructions.end(); ++it) {
          Instruction *instr = (*it).get();
          if (instr->format != Format::PSEUDO_REDUCTION)
             continue;
 
          ReduceOp op = static_cast<Pseudo_reduction_instruction *>(instr)->reduce_op;
-         reduceTmp_in_loop |= block->loop_nest_depth > 0;
+         reduceTmp_in_loop |= block.loop_nest_depth > 0;
 
          if ((int)last_top_level_block_idx != inserted_at) {
             reduceTmp = {program->allocateId(), reduceTmp.regClass()};
             aco_ptr<Pseudo_instruction> create{create_instruction<Pseudo_instruction>(aco_opcode::p_start_linear_vgpr, Format::PSEUDO, 0, 1)};
             create->getDefinition(0) = Definition(reduceTmp);
             /* find the right place to insert this definition */
-            if (last_top_level_block_idx == block->index) {
+            if (last_top_level_block_idx == block.index) {
                /* insert right before the current instruction */
-               it = block->instructions.insert(it, std::move(create));
+               it = block.instructions.insert(it, std::move(create));
                it++;
                /* inserted_at is intentionally not updated here, so later blocks
                 * would insert at the end instead of using this one. */
             } else {
-               assert(last_top_level_block_idx < block->index);
+               assert(last_top_level_block_idx < block.index);
                /* insert before the branch at last top level block */
-               std::vector<aco_ptr<Instruction>>& instructions = program->blocks[last_top_level_block_idx]->instructions;
+               std::vector<aco_ptr<Instruction>>& instructions = program->blocks[last_top_level_block_idx].instructions;
                instructions.insert(std::next(instructions.begin(), instructions.size() - 1), std::move(create));
                inserted_at = last_top_level_block_idx;
             }
@@ -115,17 +115,17 @@ void setup_reduce_temp(Program* program)
          /* same as before, except for the vector temporary instead of the reduce temporary */
          bool need_vtmp = op == imul32;
          need_vtmp |= static_cast<Pseudo_reduction_instruction *>(instr)->cluster_size == 32;
-         vtmp_in_loop |= need_vtmp && block->loop_nest_depth > 0;
+         vtmp_in_loop |= need_vtmp && block.loop_nest_depth > 0;
          if (need_vtmp && (int)last_top_level_block_idx != vtmp_inserted_at) {
             vtmp = {program->allocateId(), vtmp.regClass()};
             aco_ptr<Pseudo_instruction> create{create_instruction<Pseudo_instruction>(aco_opcode::p_start_linear_vgpr, Format::PSEUDO, 0, 1)};
             create->getDefinition(0) = Definition(vtmp);
-            if (last_top_level_block_idx == block->index) {
-               it = block->instructions.insert(it, std::move(create));
+            if (last_top_level_block_idx == block.index) {
+               it = block.instructions.insert(it, std::move(create));
                it++;
             } else {
-               assert(last_top_level_block_idx < block->index);
-               std::vector<aco_ptr<Instruction>>& instructions = program->blocks[last_top_level_block_idx]->instructions;
+               assert(last_top_level_block_idx < block.index);
+               std::vector<aco_ptr<Instruction>>& instructions = program->blocks[last_top_level_block_idx].instructions;
                instructions.insert(std::next(instructions.begin(), instructions.size() - 1), std::move(create));
                vtmp_inserted_at = last_top_level_block_idx;
             }
@@ -138,7 +138,7 @@ void setup_reduce_temp(Program* program)
             aco_ptr<Pseudo_instruction> split{create_instruction<Pseudo_instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, 2)};
             split->getOperand(0) = Operand(reduceTmp);
             split->getDefinition(0) = Definition(val);
-            it = block->instructions.insert(it, std::move(split));
+            it = block.instructions.insert(it, std::move(split));
             it++;
          }
 

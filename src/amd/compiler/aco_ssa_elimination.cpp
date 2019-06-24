@@ -44,8 +44,8 @@ struct ssa_elimination_ctx {
 
 void collect_phi_info(ssa_elimination_ctx& ctx)
 {
-   for (std::unique_ptr<Block>& block : ctx.program->blocks) {
-      for (aco_ptr<Instruction>& phi : block->instructions) {
+   for (Block& block : ctx.program->blocks) {
+      for (aco_ptr<Instruction>& phi : block.instructions) {
          if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
             break;
 
@@ -55,7 +55,7 @@ void collect_phi_info(ssa_elimination_ctx& ctx)
             if (phi->getOperand(i).isTemp() && phi->getOperand(i).physReg() == phi->getDefinition(0).physReg())
                continue;
 
-            std::vector<unsigned>& preds = phi->opcode == aco_opcode::p_phi ? block->logical_preds : block->linear_preds;
+            std::vector<unsigned>& preds = phi->opcode == aco_opcode::p_phi ? block.logical_preds : block.linear_preds;
             phi_info& info = phi->opcode == aco_opcode::p_phi ? ctx.logical_phi_info : ctx.linear_phi_info;
             const auto result = info.emplace(preds[i], std::vector<std::pair<Definition, Operand>>());
             result.first->second.emplace_back(phi->getDefinition(0), phi->getOperand(i));
@@ -69,14 +69,14 @@ void insert_parallelcopies(ssa_elimination_ctx& ctx)
 {
    /* insert the parallelcopies from logical phis before p_logical_end */
    for (auto&& entry : ctx.logical_phi_info) {
-      std::unique_ptr<Block>& block = ctx.program->blocks[entry.first];
-      unsigned idx = block->instructions.size() - 1;
-      while (block->instructions[idx]->opcode != aco_opcode::p_logical_end) {
+      Block& block = ctx.program->blocks[entry.first];
+      unsigned idx = block.instructions.size() - 1;
+      while (block.instructions[idx]->opcode != aco_opcode::p_logical_end) {
          assert(idx > 0);
          idx--;
       }
 
-      std::vector<aco_ptr<Instruction>>::iterator it = std::next(block->instructions.begin(), idx);
+      std::vector<aco_ptr<Instruction>>::iterator it = std::next(block.instructions.begin(), idx);
       aco_ptr<Pseudo_instruction> pc{create_instruction<Pseudo_instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, entry.second.size(), entry.second.size())};
       unsigned i = 0;
       for (std::pair<Definition, Operand>& pair : entry.second)
@@ -87,13 +87,13 @@ void insert_parallelcopies(ssa_elimination_ctx& ctx)
       }
       /* this shouldn't be needed since we're only copying vgprs */
       pc->tmp_in_scc = false;
-      block->instructions.insert(it, std::move(pc));
+      block.instructions.insert(it, std::move(pc));
    }
 
    /* insert parallelcopies for the linear phis at the end of blocks just before the branch */
    for (auto&& entry : ctx.linear_phi_info) {
-      std::unique_ptr<Block>& block = ctx.program->blocks[entry.first];
-      std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.end();
+      Block& block = ctx.program->blocks[entry.first];
+      std::vector<aco_ptr<Instruction>>::iterator it = block.instructions.end();
       --it;
       assert((*it)->format == Format::PSEUDO_BRANCH);
       aco_ptr<Pseudo_instruction> pc{create_instruction<Pseudo_instruction>(aco_opcode::p_parallelcopy, Format::PSEUDO, entry.second.size(), entry.second.size())};
@@ -104,19 +104,19 @@ void insert_parallelcopies(ssa_elimination_ctx& ctx)
          pc->getOperand(i) = pair.second;
          i++;
       }
-      pc->tmp_in_scc = block->scc_live_out;
-      pc->scratch_sgpr = block->scratch_sgpr;
-      block->instructions.insert(it, std::move(pc));
+      pc->tmp_in_scc = block.scc_live_out;
+      pc->scratch_sgpr = block.scratch_sgpr;
+      block.instructions.insert(it, std::move(pc));
    }
 }
 
 
-void try_remove_merge_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
+void try_remove_merge_block(ssa_elimination_ctx& ctx, Block* block)
 {
    /* check if the successor is another merge block which restores exec */
    // TODO: divergent loops also restore exec
    if (block->linear_succs.size() != 1 ||
-       !(ctx.program->blocks[block->linear_succs[0]]->kind & block_kind_merge))
+       !(ctx.program->blocks[block->linear_succs[0]].kind & block_kind_merge))
       return;
 
    /* check if this block is empty and the exec mask is not needed */
@@ -142,7 +142,7 @@ void try_remove_merge_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& bl
    block->instructions.emplace_back(std::move(branch));
 }
 
-void try_remove_invert_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
+void try_remove_invert_block(ssa_elimination_ctx& ctx, Block* block)
 {
    assert(block->linear_succs.size() == 2);
    if (block->linear_succs[0] != block->linear_succs[1])
@@ -159,17 +159,17 @@ void try_remove_invert_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& b
 
    unsigned succ_idx = block->linear_succs[0];
    assert(block->linear_preds.size() == 2);
-   ctx.program->blocks[block->linear_preds[0]]->linear_succs[0] = succ_idx;
-   ctx.program->blocks[block->linear_preds[1]]->linear_succs[0] = succ_idx;
-   ctx.program->blocks[succ_idx]->linear_preds[0] = block->linear_preds[0];
-   ctx.program->blocks[succ_idx]->linear_preds[1] = block->linear_preds[1];
+   ctx.program->blocks[block->linear_preds[0]].linear_succs[0] = succ_idx;
+   ctx.program->blocks[block->linear_preds[1]].linear_succs[0] = succ_idx;
+   ctx.program->blocks[succ_idx].linear_preds[0] = block->linear_preds[0];
+   ctx.program->blocks[succ_idx].linear_preds[1] = block->linear_preds[1];
 
    block->instructions.clear();
    block->linear_preds.clear();
    block->linear_succs.clear();
 }
 
-void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& block)
+void try_remove_simple_block(ssa_elimination_ctx& ctx, Block* block)
 {
    for (aco_ptr<Instruction>& instr : block->instructions) {
       if (instr->opcode != aco_opcode::p_logical_start &&
@@ -178,30 +178,30 @@ void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& b
          return;
    }
 
-   Block* pred = ctx.program->blocks[block->linear_preds[0]].get();
-   Block* succ = ctx.program->blocks[block->linear_succs[0]].get();
-   Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(pred->instructions.back().get());
+   Block& pred = ctx.program->blocks[block->linear_preds[0]];
+   Block& succ = ctx.program->blocks[block->linear_succs[0]];
+   Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(pred.instructions.back().get());
    if (branch->opcode == aco_opcode::p_branch) {
-      branch->target[0] = succ->index;
-      branch->target[1] = succ->index;
+      branch->target[0] = succ.index;
+      branch->target[1] = succ.index;
    } else if (branch->target[0] == block->index) {
-      branch->target[0] = succ->index;
-   } else if (branch->target[0] == succ->index) {
+      branch->target[0] = succ.index;
+   } else if (branch->target[0] == succ.index) {
       assert(branch->target[1] == block->index);
-      branch->target[1] = succ->index;
+      branch->target[1] = succ.index;
       branch->opcode = aco_opcode::p_branch;
    } else if (branch->target[1] == block->index) {
       /* check if there is a fall-through path from block to succ */
       bool falls_through = true;
-      for (unsigned j = block->index + 1; falls_through && j < succ->index; j++) {
-         assert(ctx.program->blocks[j]->index == j);
-         if (!ctx.program->blocks[j]->instructions.empty()) {
+      for (unsigned j = block->index + 1; falls_through && j < succ.index; j++) {
+         assert(ctx.program->blocks[j].index == j);
+         if (!ctx.program->blocks[j].instructions.empty()) {
             assert(j == branch->target[0]);
             falls_through = false;
          }
       }
       if (falls_through) {
-         branch->target[1] = succ->index;
+         branch->target[1] = succ.index;
       } else {
          /* This is a (uniform) break or continue block. The branch condition has to be inverted. */
          if (branch->opcode == aco_opcode::p_cbranch_z)
@@ -211,10 +211,10 @@ void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& b
          else
             assert(false);
          /* also invert the linear successors */
-         pred->linear_succs[0] = pred->linear_succs[1];
-         pred->linear_succs[1] = succ->index;
+         pred.linear_succs[0] = pred.linear_succs[1];
+         pred.linear_succs[1] = succ.index;
          branch->target[1] = branch->target[0];
-         branch->target[0] = succ->index;
+         branch->target[0] = succ.index;
       }
    } else {
       assert(false);
@@ -223,13 +223,13 @@ void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& b
    if (branch->target[0] == branch->target[1])
       branch->opcode = aco_opcode::p_branch;
 
-   for (unsigned i = 0; i < pred->linear_succs.size(); i++)
-      if (pred->linear_succs[i] == block->index)
-         pred->linear_succs[i] = succ->index;
+   for (unsigned i = 0; i < pred.linear_succs.size(); i++)
+      if (pred.linear_succs[i] == block->index)
+         pred.linear_succs[i] = succ.index;
 
-   for (unsigned i = 0; i < succ->linear_preds.size(); i++)
-      if (succ->linear_preds[i] == block->index)
-         succ->linear_preds[i] = pred->index;
+   for (unsigned i = 0; i < succ.linear_preds.size(); i++)
+      if (succ.linear_preds[i] == block->index)
+         succ.linear_preds[i] = pred.index;
 
    block->instructions.clear();
    block->linear_preds.clear();
@@ -239,7 +239,7 @@ void try_remove_simple_block(ssa_elimination_ctx& ctx, std::unique_ptr<Block>& b
 void jump_threading(ssa_elimination_ctx& ctx)
 {
    for (int i = ctx.program->blocks.size() - 1; i >= 0; i--) {
-      std::unique_ptr<Block>& block = ctx.program->blocks[i];
+      Block* block = &ctx.program->blocks[i];
 
       if (!ctx.empty_blocks[i])
          continue;

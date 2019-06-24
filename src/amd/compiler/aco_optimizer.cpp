@@ -1295,33 +1295,32 @@ void optimize(Program* program)
    ctx.info = info.data();
 
    /* 1. Bottom-Up DAG pass (forward) to label all ssa-defs */
-   for (auto&& block : program->blocks) {
-      for (aco_ptr<Instruction>& instr : block->instructions)
+   for (Block& block : program->blocks) {
+      for (aco_ptr<Instruction>& instr : block.instructions)
          label_instruction(ctx, instr);
    }
 
    ctx.uses = std::move(dead_code_analysis(program));
 
    /* 2. Combine v_mad, omod, clamp and propagate sgpr on VALU instructions */
-   for (auto&& block : program->blocks) {
-      for (aco_ptr<Instruction>& instr : block->instructions)
+   for (Block& block : program->blocks) {
+      for (aco_ptr<Instruction>& instr : block.instructions)
          combine_instruction(ctx, instr);
    }
 
    /* 3. Top-Down DAG pass (backward) to select instructions (includes DCE) */
-   for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it)
-   {
-      Block* block = it->get();
+   for (std::vector<Block>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); ++it) {
+      Block* block = &(*it);
       for (std::vector<aco_ptr<Instruction>>::reverse_iterator it = block->instructions.rbegin(); it != block->instructions.rend(); ++it)
          select_instruction(ctx, *it);
    }
 
    /* 4. Add literals to instructions */
-   for (auto&& block : program->blocks) {
+   for (Block& block : program->blocks) {
       ctx.instructions.clear();
-      for (aco_ptr<Instruction>& instr : block->instructions)
+      for (aco_ptr<Instruction>& instr : block.instructions)
          apply_literals(ctx, instr);
-      block->instructions.swap(ctx.instructions);
+      block.instructions.swap(ctx.instructions);
    }
 
 }
