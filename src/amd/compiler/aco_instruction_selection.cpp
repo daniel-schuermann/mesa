@@ -38,21 +38,21 @@ namespace {
 
 class loop_info_RAII {
    isel_context* ctx;
-   Block* entry_old;
+   unsigned header_idx_old;
    Block* exit_old;
    bool divergent_cont_old;
    bool divergent_branch_old;
    bool divergent_if_old;
 
 public:
-   loop_info_RAII(isel_context* ctx, Block* loop_entry, Block* loop_exit)
+   loop_info_RAII(isel_context* ctx, unsigned loop_header_idx, Block* loop_exit)
       : ctx(ctx),
-        entry_old(ctx->cf_info.parent_loop.entry), exit_old(ctx->cf_info.parent_loop.exit),
+        header_idx_old(ctx->cf_info.parent_loop.header_idx), exit_old(ctx->cf_info.parent_loop.exit),
         divergent_cont_old(ctx->cf_info.parent_loop.has_divergent_continue),
         divergent_branch_old(ctx->cf_info.parent_loop.has_divergent_branch),
         divergent_if_old(ctx->cf_info.parent_if.is_divergent)
    {
-      ctx->cf_info.parent_loop.entry = loop_entry;
+      ctx->cf_info.parent_loop.header_idx = loop_header_idx;
       ctx->cf_info.parent_loop.exit = loop_exit;
       ctx->cf_info.parent_loop.has_divergent_continue = false;
       ctx->cf_info.parent_loop.has_divergent_branch = false;
@@ -62,7 +62,7 @@ public:
 
    ~loop_info_RAII()
    {
-      ctx->cf_info.parent_loop.entry = entry_old;
+      ctx->cf_info.parent_loop.header_idx = header_idx_old;
       ctx->cf_info.parent_loop.exit = exit_old;
       ctx->cf_info.parent_loop.has_divergent_continue = divergent_cont_old;
       ctx->cf_info.parent_loop.has_divergent_branch = divergent_branch_old;
@@ -5877,7 +5877,7 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
       ctx->cf_info.parent_loop.has_divergent_branch = true;
       break;
    case nir_jump_continue:
-      logical_target = ctx->cf_info.parent_loop.entry;
+      logical_target = ctx->program->blocks[ctx->cf_info.parent_loop.header_idx].get();
       add_logical_edge(ctx->block, logical_target);
       ctx->block->kind |= block_kind_continue;
 
@@ -5963,40 +5963,42 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
 {
    append_logical_end(ctx->block);
    ctx->block->kind |= block_kind_loop_preheader | block_kind_uniform;
+   Builder bld(ctx->program, ctx->block);
+   bld.branch(aco_opcode::p_branch);
+   unsigned loop_preheader_idx = ctx->block->index;
 
-   Block* loop_entry = ctx->program->createAndInsertBlock();
-   loop_entry->loop_nest_depth = ctx->cf_info.loop_nest_depth + 1;
-   loop_entry->kind |= block_kind_loop_header;
    Block* loop_exit = new Block();
    loop_exit->loop_nest_depth = ctx->cf_info.loop_nest_depth;
    loop_exit->kind |= (block_kind_loop_exit | (ctx->block->kind & block_kind_top_level));
 
-   Builder bld(ctx->program, ctx->block);
-   bld.branch(aco_opcode::p_branch);
-   add_edge(ctx->block, loop_entry);
-   ctx->block = loop_entry;
+   Block* loop_header = ctx->program->createAndInsertBlock();
+   loop_header->loop_nest_depth = ctx->cf_info.loop_nest_depth + 1;
+   loop_header->kind |= block_kind_loop_header;
+   add_edge(ctx->program->blocks[loop_preheader_idx].get(), loop_header);
+   ctx->block = loop_header;
 
    /* emit loop body */
-   loop_info_RAII loop_raii(ctx, loop_entry, loop_exit);
+   unsigned loop_header_idx = loop_header->index;
+   loop_info_RAII loop_raii(ctx, loop_header_idx, loop_exit);
    append_logical_start(ctx->block);
    visit_cf_list(ctx, &loop->body);
 
    if (!ctx->cf_info.has_branch) {
       append_logical_end(ctx->block);
       if (!ctx->cf_info.parent_loop.has_divergent_branch)
-         add_edge(ctx->block, loop_entry);
+         add_edge(ctx->block, ctx->program->blocks[loop_header_idx].get());
       else
-         add_linear_edge(ctx->block, loop_entry);
+         add_linear_edge(ctx->block, ctx->program->blocks[loop_header_idx].get());
       ctx->block->kind |= (block_kind_continue | block_kind_uniform);
       bld.reset(ctx->block);
       bld.branch(aco_opcode::p_branch);
    }
 
+   /* fixup phis in loop header from unreachable blocks */
    if (ctx->cf_info.has_branch || ctx->cf_info.parent_loop.has_divergent_branch) {
-      /* fixup phis in loop header */
       bool linear = ctx->cf_info.has_branch;
       bool logical = ctx->cf_info.has_branch || ctx->cf_info.parent_loop.has_divergent_branch;
-      for (auto&& instr : loop_entry->instructions) {
+      for (aco_ptr<Instruction>& instr : ctx->program->blocks[loop_header_idx]->instructions) {
          if ((logical && instr->opcode == aco_opcode::p_phi) ||
              (linear && instr->opcode == aco_opcode::p_linear_phi)) {
             /* the last operand should be the one that needs to be removed */
@@ -6011,9 +6013,7 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
 
    // TODO: if the loop has not a single exit, we must add one °°
    /* emit loop successor block */
-   loop_exit->index = ctx->program->blocks.size();
-   ctx->block = loop_exit;
-   ctx->program->blocks.emplace_back(loop_exit);
+   ctx->block = ctx->program->insert_block(loop_exit);
    append_logical_start(ctx->block);
 
    #if 0
