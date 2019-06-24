@@ -655,11 +655,11 @@ bool gen(Instruction* instr, wait_ctx& ctx)
    return false;
 }
 
-bool handle_block(Program *program, Block* block, wait_ctx& ctx)
+bool handle_block(Program *program, Block& block, wait_ctx& ctx)
 {
    bool has_gen = false;
    std::vector<aco_ptr<Instruction>> new_instructions;
-   for(auto& instr : block->instructions)
+   for(auto& instr : block.instructions)
    {
       Instruction* wait_instr;
       if ((wait_instr = kill(instr.get(), ctx)))
@@ -670,9 +670,9 @@ bool handle_block(Program *program, Block* block, wait_ctx& ctx)
    }
 
    /* check if this block is at the end of a loop */
-   for (unsigned succ_idx : block->linear_succs) {
+   for (unsigned succ_idx : block.linear_succs) {
       /* eliminate any remaining counters */
-      if (succ_idx <= block->index && (ctx.vm_cnt || ctx.exp_cnt || ctx.lgkm_cnt)) {
+      if (succ_idx <= block.index && (ctx.vm_cnt || ctx.exp_cnt || ctx.lgkm_cnt)) {
          // TODO: we could do better if we only wait if the regs between the block and other predecessors differ
          uint16_t imm = create_waitcnt_imm(ctx.vm_cnt ? 0 : -1, ctx.exp_cnt ? 0 : -1, ctx.lgkm_cnt ? 0 : -1);
          auto it = std::prev(new_instructions.end());
@@ -681,7 +681,7 @@ bool handle_block(Program *program, Block* block, wait_ctx& ctx)
          break;
       }
    }
-   block->instructions.swap(new_instructions);
+   block.instructions.swap(new_instructions);
    return has_gen;
 }
 
@@ -691,14 +691,13 @@ void insert_wait_states(Program* program)
    for (unsigned i = 0; i < program->blocks.size(); i++)
       out_ctx[i] = wait_ctx(program);
 
-   for (unsigned i = 0; i < program->blocks.size(); i++)
-   {
-      Block* current = program->blocks[i].get();
-      wait_ctx& in = out_ctx[current->index];
-      for (unsigned b : current->linear_preds)
+   for (unsigned i = 0; i < program->blocks.size(); i++) {
+      Block& current = program->blocks[i];
+      wait_ctx& in = out_ctx[current.index];
+      for (unsigned b : current.linear_preds)
          in.join(&out_ctx[b]);
 
-      if (current->instructions.empty())
+      if (current.instructions.empty())
          continue;
 
       handle_block(program, current, in);

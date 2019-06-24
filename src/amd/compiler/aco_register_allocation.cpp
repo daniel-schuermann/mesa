@@ -997,14 +997,14 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
    std::vector<std::vector<Temp>> phi_ressources;
    std::map<unsigned, unsigned> temp_to_phi_ressources;
 
-   for (std::vector<std::unique_ptr<Block>>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); it++) {
-      std::unique_ptr<Block>& block = *it;
+   for (std::vector<Block>::reverse_iterator it = program->blocks.rbegin(); it != program->blocks.rend(); it++) {
+      Block& block = *it;
 
       /* first, compute the death points of all live vars within the block */
-      std::set<Temp>& live = live_out_per_block[block->index];
+      std::set<Temp>& live = live_out_per_block[block.index];
 
       std::vector<aco_ptr<Instruction>>::reverse_iterator rit;
-      for (rit = block->instructions.rbegin(); rit != block->instructions.rend(); ++rit) {
+      for (rit = block.instructions.rbegin(); rit != block.instructions.rend(); ++rit) {
          aco_ptr<Instruction>& instr = *rit;
          if (!is_phi(instr)) {
             for (unsigned i = 0; i < instr->num_operands; i++) {
@@ -1053,15 +1053,15 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
    std::vector<std::bitset<128>> sgpr_live_out(program->blocks.size());
 
-   for (std::unique_ptr<Block>& block : program->blocks) {
-      std::set<Temp>& live = live_out_per_block[block->index];
+   for (Block& block : program->blocks) {
+      std::set<Temp>& live = live_out_per_block[block.index];
       /* initialize register file */
-      assert(block->index != 0 || live.empty());
+      assert(block.index != 0 || live.empty());
       std::array<uint32_t, 512> register_file = {0};
       ctx.war_hint.reset();
 
       for (Temp t : live) {
-         Temp renamed = handle_live_in(t, block.get());
+         Temp renamed = handle_live_in(t, &block);
          if (ctx.assignments.find(renamed.id()) != ctx.assignments.end()) {
             for (unsigned i = 0; i < t.size(); i++)
                register_file[ctx.assignments[renamed.id()].first + i] = renamed.id();
@@ -1075,7 +1075,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
        * We consider them incomplete phis and only handle the definition. */
 
       /* handle fixed phi definitions */
-      for (it = block->instructions.begin(); it != block->instructions.end(); ++it) {
+      for (it = block.instructions.begin(); it != block.instructions.end(); ++it) {
          aco_ptr<Instruction>& phi = *it;
          if (!is_phi(phi))
             break;
@@ -1091,7 +1091,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       }
 
       /* look up the affinities */
-      for (it = block->instructions.begin(); it != block->instructions.end(); ++it) {
+      for (it = block.instructions.begin(); it != block.instructions.end(); ++it) {
          aco_ptr<Instruction>& phi = *it;
          if (!is_phi(phi))
             break;
@@ -1130,7 +1130,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       }
 
       /* find registers for phis without affinity or where the register was blocked */
-      for (it = block->instructions.begin();it != block->instructions.end(); ++it) {
+      for (it = block.instructions.begin();it != block.instructions.end(); ++it) {
          aco_ptr<Instruction>& phi = *it;
          if (!is_phi(phi))
             break;
@@ -1139,7 +1139,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          if (definition.isKill())
             continue;
 
-         renames[block->index][definition.tempId()] = definition.getTemp();
+         renames[block.index][definition.tempId()] = definition.getTemp();
 
          if (!definition.isFixed()) {
             std::vector<std::pair<Operand, Definition>> parallelcopy;
@@ -1169,13 +1169,13 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   orig = orig_it->second;
                else
                   ctx.orig_names[pc.second.tempId()] = orig;
-               renames[block->index][orig.id()] = pc.second.getTemp();
-               renames[block->index][pc.second.tempId()] = pc.second.getTemp();
+               renames[block.index][orig.id()] = pc.second.getTemp();
+               renames[block.index][pc.second.tempId()] = pc.second.getTemp();
 
                /* see if it's a copy from a previous phi */
                //TODO: prefer moving some previous phis over live-ins
                Instruction *prev_phi = NULL;
-               for (auto it2 = block->instructions.begin(); !prev_phi && (it2 != it); ++it2) {
+               for (auto it2 = block.instructions.begin(); !prev_phi && (it2 != it); ++it2) {
                   if (*it2 && (*it2)->getDefinition(0).tempId() == pc.first.tempId())
                      prev_phi = it2->get();
                }
@@ -1188,7 +1188,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                /* otherwise, this is a live-in and we need to create a new phi
                 * to move it in this block's predecessors */
                aco_opcode opcode = pc.first.getTemp().is_linear() ? aco_opcode::p_linear_phi : aco_opcode::p_phi;
-               std::vector<unsigned>& preds = pc.first.getTemp().is_linear() ? block->linear_preds : block->logical_preds;
+               std::vector<unsigned>& preds = pc.first.getTemp().is_linear() ? block.linear_preds : block.logical_preds;
                aco_ptr<Instruction> new_phi{create_instruction<Pseudo_instruction>(opcode, Format::PSEUDO, preds.size(), 1)};
                new_phi->getDefinition(0) = pc.second;
                for (unsigned i = 0; i < preds.size(); i++)
@@ -1212,7 +1212,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       }
 
       /* Handle all other instructions of the block */
-      for (; it != block->instructions.end(); ++it) {
+      for (; it != block.instructions.end(); ++it) {
          aco_ptr<Instruction>& instr = *it;
          std::vector<std::pair<Operand, Definition>> parallelcopy;
 
@@ -1225,7 +1225,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                continue;
 
             /* rename operands */
-            operand.setTemp(read_variable(operand.getTemp(), block->index));
+            operand.setTemp(read_variable(operand.getTemp(), block.index));
 
             /* check if the operand is fixed */
             if (operand.isFixed()) {
@@ -1459,7 +1459,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                live.emplace(definition.getTemp());
             }
             /* add to renames table */
-            renames[block->index][definition.tempId()] = definition.getTemp();
+            renames[block.index][definition.tempId()] = definition.getTemp();
          }
 
          handle_pseudo(ctx, register_file, instr.get());
@@ -1501,9 +1501,9 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                unsigned orig_id = pc->getOperand(i).tempId();
                ctx.orig_names[pc->getDefinition(i).tempId()] = pc->getOperand(i).getTemp();
 
-               pc->getOperand(i).setTemp(read_variable(pc->getOperand(i).getTemp(), block->index));
-               renames[block->index][orig_id] = pc->getDefinition(i).getTemp();
-               renames[block->index][pc->getDefinition(i).tempId()] = pc->getDefinition(i).getTemp();
+               pc->getOperand(i).setTemp(read_variable(pc->getOperand(i).getTemp(), block.index));
+               renames[block.index][orig_id] = pc->getDefinition(i).getTemp();
+               renames[block.index][pc->getDefinition(i).tempId()] = pc->getDefinition(i).getTemp();
                std::map<unsigned, phi_info>::iterator phi = phi_map.find(pc->getOperand(i).tempId());
                if (phi != phi_map.end())
                   phi->second.uses.emplace(pc.get());
@@ -1629,14 +1629,14 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
       } /* end for Instr */
 
-      block->instructions = std::move(instructions);
+      block.instructions = std::move(instructions);
 
-      filled[block->index] = true;
-      for (unsigned succ_idx : block->linear_succs) {
-         Block* succ = program->blocks[succ_idx].get();
+      filled[block.index] = true;
+      for (unsigned succ_idx : block.linear_succs) {
+         Block& succ = program->blocks[succ_idx];
          /* seal block if all predecessors are filled */
          bool all_filled = true;
-         for (unsigned pred_idx : succ->linear_preds) {
+         for (unsigned pred_idx : succ.linear_preds) {
             if (!filled[pred_idx]) {
                all_filled = false;
                break;
@@ -1645,7 +1645,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          if (all_filled) {
             /* finish incomplete phis and check if they became trivial */
             for (Instruction* phi : incomplete_phis[succ_idx]) {
-               std::vector<unsigned> preds = phi->getDefinition(0).getTemp().is_linear() ? succ->linear_preds : succ->logical_preds;
+               std::vector<unsigned> preds = phi->getDefinition(0).getTemp().is_linear() ? succ.linear_preds : succ.logical_preds;
                for (unsigned i = 0; i < phi->num_operands; i++) {
                   phi->getOperand(i).setTemp(read_variable(phi->getOperand(i).getTemp(), preds[i]));
                   phi->getOperand(i).setFixed(ctx.assignments[phi->getOperand(i).tempId()].first);
@@ -1653,10 +1653,10 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                try_remove_trivial_phi(phi_map.find(phi->getDefinition(0).tempId()));
             }
             /* complete the original phi nodes, but no need to check triviality */
-            for (aco_ptr<Instruction>& instr : succ->instructions) {
+            for (aco_ptr<Instruction>& instr : succ.instructions) {
                if (!is_phi(instr))
                   break;
-               std::vector<unsigned> preds = instr->opcode == aco_opcode::p_phi ? succ->logical_preds : succ->linear_preds;
+               std::vector<unsigned> preds = instr->opcode == aco_opcode::p_phi ? succ.logical_preds : succ.linear_preds;
 
                for (unsigned i = 0; i < instr->num_operands; i++) {
                   auto& operand = instr->getOperand(i);
@@ -1676,32 +1676,32 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       /* fill in sgpr_live_out */
       for (unsigned i = 0; i < ctx.max_used_sgpr; i++) {
          if (register_file[i])
-            sgpr_live_out[block->index].set(i);
+            sgpr_live_out[block.index].set(i);
       }
    } /* end for BB */
 
    /* find scc spill registers which may be needed for parallelcopies created by phis */
-   for (std::unique_ptr<Block>& block : program->blocks) {
-      if (block->linear_succs.size() != 1)
+   for (Block& block : program->blocks) {
+      if (block.linear_succs.size() != 1)
          continue;
-      Block *succ = program->blocks[block->linear_succs[0]].get();
+      Block& succ = program->blocks[block.linear_succs[0]];
       unsigned pred_index = 0;
-      for (; pred_index < succ->linear_preds.size() &&
-             succ->linear_preds[pred_index] != block->index; pred_index++)
+      for (; pred_index < succ.linear_preds.size() &&
+             succ.linear_preds[pred_index] != block.index; pred_index++)
          ;
-      assert(pred_index < succ->linear_preds.size());
+      assert(pred_index < succ.linear_preds.size());
 
-      std::bitset<128> regs = sgpr_live_out[block->index];
+      std::bitset<128> regs = sgpr_live_out[block.index];
       if (!regs[scc.reg]) {
          /* early exit */
-         block->scc_live_out = false;
+         block.scc_live_out = false;
          continue;
       }
 
       bool has_phi = false;
 
       /* remove phi operands and add phi definitions */
-      for (aco_ptr<Instruction>& instr : succ->instructions) {
+      for (aco_ptr<Instruction>& instr : succ.instructions) {
          if (!is_phi(instr))
             break;
          if (instr->opcode == aco_opcode::p_linear_phi) {
@@ -1721,10 +1721,10 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       }
 
       if (!has_phi || !regs[scc.reg]) {
-         block->scc_live_out = false;
+         block.scc_live_out = false;
          continue;
       }
-      block->scc_live_out = true;
+      block.scc_live_out = true;
 
       /* choose a register */
       unsigned reg = 0;
@@ -1732,17 +1732,17 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          ;
       assert(reg < ctx.program->max_sgpr);
       adjust_max_used_regs(ctx, s1, reg);
-      block->scratch_sgpr = PhysReg{reg};
+      block.scratch_sgpr = PhysReg{reg};
    }
 
    /* remove trivial phis */
-   for (std::unique_ptr<Block>& block : program->blocks) {
-      std::vector<aco_ptr<Instruction>>::iterator it = block->instructions.begin();
-      for (; it != block->instructions.end();) {
+   for (Block& block : program->blocks) {
+      std::vector<aco_ptr<Instruction>>::iterator it = block.instructions.begin();
+      for (; it != block.instructions.end();) {
          if (!is_phi(*it))
             break;
          if (!(*it)->num_definitions)
-            it = block->instructions.erase(it);
+            it = block.instructions.erase(it);
          else
             ++it;
       }
