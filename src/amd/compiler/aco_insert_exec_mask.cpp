@@ -879,7 +879,7 @@ void add_branch_code(exec_ctx& ctx, Block* block)
       block->instructions.pop_back();
 
       Temp current_exec = ctx.info[idx].exec.back().first;
-      Temp cond;
+      Temp cond = Temp();
       for (int exec_idx = ctx.info[idx].exec.size() - 2; exec_idx >= 0; exec_idx--) {
          if (ctx.info[idx].exec[exec_idx].second & mask_type_loop)
             break;
