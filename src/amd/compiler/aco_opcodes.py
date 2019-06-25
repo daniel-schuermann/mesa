@@ -575,7 +575,8 @@ for (code, name) in SMEM:
 
 
 # VOP2 instructions: 2 inputs, 1 output (+ optional vcc)
-VOP2_NOVCC = {
+VOP2 = {
+   (0, "v_cndmask_b32", False),
    (1, "v_add_f32", True),
    (2, "v_sub_f32", True),
    (3, "v_subrev_f32", True),
@@ -597,10 +598,22 @@ VOP2_NOVCC = {
    (19, "v_and_b32", False),
    (20, "v_or_b32", False),
    (21, "v_xor_b32", False),
+   (22, "v_mac_f32", True),
+   (23, "v_madmk_f32", False),
+   (24, "v_madak_f32", False),
+   (25, "v_add_co_u32", False),
+   (26, "v_sub_co_u32", False),
+   (27, "v_subrev_co_u32", False),
+   (28, "v_addc_co_u32", False),
+   (29, "v_subb_co_u32", False),
+   (30, "v_subbrev_co_u32", False),
    (31, "v_add_f16", True),
    (32, "v_sub_f16", True),
    (33, "v_subrev_f16", True),
    (34, "v_mul_f16", True),
+   (35, "v_mac_f16", True),
+   (36, "v_madmk_f16", False),
+   (37, "v_madak_f16", False),
    (38, "v_add_u16", False),
    (39, "v_sub_u16", False),
    (40, "v_subrev_u16", False),
@@ -619,49 +632,17 @@ VOP2_NOVCC = {
    (53, "v_sub_u32", False),
    (54, "v_subrev_u32", False)
 }
-for code, name, modifiers in VOP2_NOVCC:
+for (code, name, modifiers) in VOP2:
    opcode(name, code, Format.VOP2, modifiers, modifiers)
-
-VOP2_LITERAL = {
-   (23, "v_madmk_f32"),
-   (24, "v_madak_f32"),
-   (36, "v_madmk_f16"),
-   (37, "v_madak_f16")
-}
-for code, name in VOP2_LITERAL:
-   opcode(name, code, Format.VOP2)
-
-VOP2_VCCOUT = [
-   (25, "v_add_co_u32"),
-   (26, "v_sub_co_u32"),
-   (27, "v_subrev_co_u32")
-]
-for code, name in VOP2_VCCOUT:
-   opcode(name, code, Format.VOP2)
-
-VOP2_VCCINOUT = [
-   (28, "v_addc_co_u32"),
-   (29, "v_subb_co_u32"),
-   (30, "v_subbrev_co_u32")
-]
-for code, name in VOP2_VCCINOUT:
-   opcode(name, code, Format.VOP2)
-   
-VOP2_SPECIAL = [
-   "v_cndmask_b32",
-   "v_mac_f32",
-   "v_mac_f16"
-]
-opcode("v_cndmask_b32", 0, Format.VOP2)
-opcode("v_mac_f32", 22, Format.VOP2, True, True)
-opcode("v_mac_f16", 35, Format.VOP2, True, True)
 
 
 # VOP1 instructions: instructions with 1 input and 1 output
-VOP1_32 = {
+VOP1 = {
+   (0, "v_nop", False, False),
    (1, "v_mov_b32", False, False),
    (2, "v_readfirstlane_b32", False, False),
    (3, "v_cvt_i32_f64", True, False),
+   (4, "v_cvt_f64_i32", False, True),
    (5, "v_cvt_f32_i32", False, True),
    (6, "v_cvt_f32_u32", False, True),
    (7, "v_cvt_u32_f32", True, False),
@@ -672,11 +653,17 @@ VOP1_32 = {
    (13, "v_cvt_flr_i32_f32", True, False),
    (14, "v_cvt_off_f32_i4", False, True),
    (15, "v_cvt_f32_f64", True, True),
+   (16, "v_cvt_f64_f32", True, True),
    (17, "v_cvt_f32_ubyte0", False, True),
    (18, "v_cvt_f32_ubyte1", False, True),
    (19, "v_cvt_f32_ubyte2", False, True),
    (20, "v_cvt_f32_ubyte3", False, True),
    (21, "v_cvt_u32_f64", True, False),
+   (22, "v_cvt_f64_u32", False, True),
+   (23, "v_trunc_f64", True, True),
+   (24, "v_ceil_f64", True, True),
+   (25, "v_rndne_f64", True, True),
+   (26, "v_floor_f64", True, True),
    (27, "v_fract_f32", True, True),
    (28, "v_trunc_f32", True, True),
    (29, "v_ceil_f32", True, True),
@@ -687,7 +674,10 @@ VOP1_32 = {
    (34, "v_rcp_f32", True, True),
    (35, "v_rcp_iflag_f32", True, True),
    (36, "v_rsq_f32", True, True),
+   (37, "v_rcp_f64", True, True),
+   (38, "v_rsq_f64", True, True),
    (39, "v_sqrt_f32", True, True),
+   (40, "v_sqrt_f64", True, True),
    (41, "v_sin_f32", True, True),
    (42, "v_cos_f32", True, True),
    (43, "v_not_b32", False, False),
@@ -696,8 +686,14 @@ VOP1_32 = {
    (46, "v_ffbl_b32", False, False),
    (47, "v_ffbh_i32", False, False),
    (48, "v_frexp_exp_i32_f64", True, False),
+   (49, "v_frexp_mant_f64", True, False),
+   (50, "v_fract_f64", True, True),
    (51, "v_frexp_exp_i32_f32", True, False),
    (52, "v_frexp_mant_f32", True, False),
+   (53, "v_clrexcp", False, False),
+   (54, "v_movreld_b32", False, False),
+   (55, "v_movrels_b32", False, False),
+   (56, "v_movrelsd_b32", False, False),
    (55, "v_screen_partition_4se_b32", False, False),
    (57, "v_cvt_f16_u16", False, True),
    (58, "v_cvt_f16_i16", False, True),
@@ -721,36 +717,11 @@ VOP1_32 = {
    (76, "v_log_legacy_f32", True, True),
    (77, "v_cvt_norm_i16_f16", True, False),
    (78, "v_cvt_norm_u16_f16", True, False),
-   (79, "v_sat_pk_u8_i16", False, False)
+   (79, "v_sat_pk_u8_i16", False, False),
+   (81, "v_swap_b32", False, False),
 }
-for code, name, in_mod, out_mod in VOP1_32:
+for code, name, in_mod, out_mod in VOP1:
    opcode(name, code, Format.VOP1, in_mod, out_mod)
-
-VOP1_64 = [
-   (4, "v_cvt_f64_i32", False, True),
-   (16, "v_cvt_f64_f32", True, True),
-   (22, "v_cvt_f64_u32", False, True),
-   (23, "v_trunc_f64", True, True),
-   (24, "v_ceil_f64", True, True),
-   (25, "v_rndne_f64", True, True),
-   (26, "v_floor_f64", True, True),
-   (37, "v_rcp_f64", True, True),
-   (38, "v_rsq_f64", True, True),
-   (40, "v_sqrt_f64", True, True),
-   (49, "v_frexp_mant_f64", True, False),
-   (50, "v_fract_f64", True, True)
-]
-for code, name, in_mod, out_mod in VOP1_64:
-   opcode(name, code, Format.VOP1, in_mod, out_mod)
-
-VOP1_SPECIAL = [
-   "v_nop",
-   "v_clrexcp",
-   "v_swap_b32"
-]
-opcode("v_nop", 0, Format.VOP1)
-opcode("v_clrexcp", 53, Format.VOP1)
-opcode("v_swap_b32", 81, Format.VOP1)
 
 
 # VOPC instructions:
