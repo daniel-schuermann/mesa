@@ -282,8 +282,8 @@ SOP2 = {
    (41, "s_cbranch_g_fork"),
    (42, "s_absdiff_i32"),
    (43, "s_rfe_restore_b64"),
-   (44, "s_mul_hi_u32"),
-   (45, "s_mul_hi_i32"),
+   (44, "s_mul_hi_u32_gfx9"),
+   (45, "s_mul_hi_i32_gfx9"),
    (46, "s_lshl1_add_u32"),
    (47, "s_lshl2_add_u32"),
    (48, "s_lshl3_add_u32"),
@@ -291,6 +291,8 @@ SOP2 = {
    (50, "s_pack_ll_b32_b16"),
    (51, "s_pack_lh_b32_b16"),
    (52, "s_pack_hh_b32_b16"),
+   (53, "s_mul_hi_u32"),
+   (54, "s_mul_hi_i32"),
 }
 for (code, name) in SOP2:
     opcode(name, code, Format.SOP2)
@@ -299,7 +301,8 @@ for (code, name) in SOP2:
 # SOPK instructions: 0 input (+ imm), 1 output + optional scc
 SOPK = {
    (0, "s_movk_i32"),
-   (1, "s_cmovk_i32"),
+   (1, "s_cmovk_i32"), # GFX8_GFX9
+   (1, "s_version"), # GFX10+
    (2, "s_cmpk_eq_i32"),
    (3, "s_cmpk_lg_i32"),
    (4, "s_cmpk_gt_i32"),
@@ -318,7 +321,14 @@ SOPK = {
    (17, "s_getreg_b32"),
    (18, "s_setreg_b32"),
    (20, "s_setreg_imm32_b32"), # requires 32bit literal
-   (21, "s_call_b64"),
+   (21, "s_call_b64_gfx8"),
+   (22, "s_call_b64"),
+   (23, "s_waitcnt_vscnt"),
+   (24, "s_waitcnt_vmcnt"),
+   (25, "s_waitcnt_expcnt"),
+   (26, "s_waitcnt_lgkmcnt"),
+   (27, "s_subvector_loop_begin"),
+   (28, "s_subvector_loop_end"),
 }
 for (code, name) in SOPK:
    opcode(name, code, Format.SOPK)
@@ -375,11 +385,24 @@ SOP1 = {
    (46, "s_cbranch_join"),
    (48, "s_abs_i32"),
    (50, "s_set_gpr_idx_idx"),
-   (51, "s_andn1_saveexec_b64"),
-   (52, "s_orn1_saveexec_b64"),
-   (53, "s_andn1_wrexec_b64"),
-   (54, "s_andn2_wrexec_b64"),
-   (55, "s_bitreplicate_b64_b32"),
+   (55, "s_andn1_saveexec_b64"),
+   (56, "s_orn1_saveexec_b64"),
+   (57, "s_andn1_wrexec_b64"),
+   (58, "s_andn2_wrexec_b64"),
+   (59, "s_bitreplicate_b64_b32"),
+   (60, "s_and_saveexec_b32"),
+   (61, "s_or_saveexec_b32"),
+   (62, "s_xor_saveexec_b32"),
+   (63, "s_andn2_saveexec_b32"),
+   (64, "s_orn2_saveexec_b32"),
+   (65, "s_nand_saveexec_b32"),
+   (66, "s_nor_saveexec_b32"),
+   (67, "s_xnor_saveexec_b32"),
+   (68, "s_andn1_saveexec_b32"),
+   (69, "s_orn1_saveexec_b32"),
+   (70, "s_andn1_wrexec_b32"),
+   (71, "s_andn2_wrexec_b32"),
+   (73, "s_movrelsd_2_b32"),
 }
 for (code, name) in SOP1:
    opcode(name, code, Format.SOP1)
@@ -445,6 +468,14 @@ SOPP = {
    (28, "s_set_grp_idx_off"),
    (29, "s_set_grp_idx_mode"),
    (30, "s_endpgm_ordered_ps_done"),
+   (31, "s_code_end"),
+   (32, "s_inst_prefetch"),
+   (33, "s_clause"),
+   (34, "s_wait_idle"),
+   (35, "s_waitcnt_depctr"),
+   (36, "s_round_mode"),
+   (37, "s_denorm_mode"),
+   (40, "s_ttracedata_imm"),
 }
 for code, name in SOPP:
    opcode(name, code, Format.SOPP)
