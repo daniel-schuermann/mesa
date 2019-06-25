@@ -53,7 +53,6 @@ void validate(Program* program, FILE * output)
 
    for (Block& block : program->blocks) {
       for (aco_ptr<Instruction>& instr : block.instructions) {
-         opcode_info op_info = ::opcode_infos[(int)instr->opcode];
 
          /* check base format */
          Format base_format = instr->format;
@@ -67,7 +66,7 @@ void validate(Program* program, FILE * output)
             base_format = Format::VOPC;
          else if ((uint32_t)base_format & (uint32_t)Format::VINTRP)
             base_format = Format::VINTRP;
-         check(base_format == op_info.format, "Wrong base format for instruction", instr.get());
+         check(base_format == instr_info.format[(int)instr->opcode], "Wrong base format for instruction", instr.get());
 
          /* check VOP3 modifiers */
          if (((uint32_t)instr->format & (uint32_t)Format::VOP3) && instr->format != Format::VOP3) {

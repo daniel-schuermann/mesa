@@ -20,9 +20,6 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *
- * Authors:
- *    Daniel Schürmann (daniel.schuermann@campus.tu-berlin.de)
- *
  */
 
 #ifndef ACO_IR_H
@@ -31,6 +28,9 @@
 #include <ostream>
 #include <vector>
 #include <set>
+#include <vector>
+#include <bitset>
+#include <memory>
 
 #include "nir/nir.h"
 #include "common/ac_binary.h"
@@ -40,28 +40,6 @@
 
 struct radv_shader_variant_info;
 struct radv_nir_compiler_options;
-
-namespace aco {
-enum class Format : std::uint16_t;
-}
-
-typedef struct {
-   const char *name;
-   unsigned opcode;
-   bool can_use_input_modifiers;
-   bool can_use_output_modifiers;
-   aco::Format format;
-} opcode_info;
-
-extern const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)];
-extern const unsigned VOPC_to_GFX6[256];
-
-#ifdef __cplusplus
-#include <cstdint>
-#include <vector>
-#include <bitset>
-#include <deque>
-#include <memory>
 
 namespace aco {
 
@@ -984,7 +962,17 @@ bool validate_ra(Program* program, const struct radv_nir_compiler_options *optio
 void aco_print_instr(Instruction *instr, FILE *output);
 void aco_print_program(Program *program, FILE *output);
 
+typedef struct {
+   const int16_t opcode[static_cast<int>(aco_opcode::num_opcodes)];
+   const std::bitset<static_cast<int>(aco_opcode::num_opcodes)> can_use_input_modifiers;
+   const std::bitset<static_cast<int>(aco_opcode::num_opcodes)> can_use_output_modifiers;
+   const char *name[static_cast<int>(aco_opcode::num_opcodes)];
+   const aco::Format format[static_cast<int>(aco_opcode::num_opcodes)];
+} Info;
+
+extern const Info instr_info;
+
 }
-#endif /* __cplusplus */
+
 #endif /* ACO_IR_H */
 
