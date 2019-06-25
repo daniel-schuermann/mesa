@@ -235,88 +235,71 @@ opcode("p_as_uniform")
 
 opcode("p_fs_buffer_store_smem", format=Format.SMEM)
 
+
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
-SOP2_SCC = {
-   (0, "s_add_u32"), 
+SOP2 = {
+   (0, "s_add_u32"),
    (1, "s_sub_u32"),
    (2, "s_add_i32"),
    (3, "s_sub_i32"),
+   (4, "s_addc_u32"),
+   (5, "s_subb_u32"),
    (6, "s_min_i32"),
    (7, "s_min_u32"),
    (8, "s_max_i32"),
    (9, "s_max_u32"),
+   (10, "s_cselect_b32"),
+   (11, "s_cselect_b64"),
    (12, "s_and_b32"),
+   (13, "s_and_b64"),
    (14, "s_or_b32"),
+   (15, "s_or_b64"),
    (16, "s_xor_b32"),
+   (17, "s_xor_b64"),
    (18, "s_andn2_b32"),
+   (19, "s_andn2_b64"),
    (20, "s_orn2_b32"),
+   (21, "s_orn2_b64"),
    (22, "s_nand_b32"),
+   (23, "s_nand_b64"),
    (24, "s_nor_b32"),
+   (25, "s_nor_b64"),
    (26, "s_xnor_b32"),
+   (27, "s_xnor_b64"),
    (28, "s_lshl_b32"),
+   (29, "s_lshl_b64"),
    (30, "s_lshr_b32"),
+   (31, "s_lshr_b64"),
    (32, "s_ashr_i32"),
+   (33, "s_ashr_i64"),
+   (34, "s_bfm_b32"),
+   (35, "s_bfm_b64"),
+   (36, "s_mul_i32"),
    (37, "s_bfe_u32"),
    (38, "s_bfe_i32"),
+   (39, "s_bfe_u64"),
+   (40, "s_bfe_i64"),
+   (41, "s_cbranch_g_fork"),
    (42, "s_absdiff_i32"),
+   (43, "s_rfe_restore_b64"),
+   (44, "s_mul_hi_u32"),
+   (45, "s_mul_hi_i32"),
    (46, "s_lshl1_add_u32"),
    (47, "s_lshl2_add_u32"),
    (48, "s_lshl3_add_u32"),
    (49, "s_lshl4_add_u32"),
-}
-for code, name in SOP2_SCC:
-   opcode(name, code, Format.SOP2)
-
-SOP2_NOSCC = {
-   (34, "s_bfm_b32"),
-   (36, "s_mul_i32"),
-   (44, "s_mul_hi_u32"),
-   (45, "s_mul_hi_i32"),
    (50, "s_pack_ll_b32_b16"),
    (51, "s_pack_lh_b32_b16"),
    (52, "s_pack_hh_b32_b16"),
 }
-for code, name in SOP2_NOSCC:
-   opcode(name, code, Format.SOP2)
-
-SOP2_64 = {
-   (13, "s_and_b64"),
-   (15, "s_or_b64"),
-   (17, "s_xor_b64"),
-   (19, "s_andn2_b64"),
-   (21, "s_orn2_b64"),
-   (23, "s_nand_b64"),
-   (25, "s_nor_b64"),
-   (27, "s_xnor_b64"),
-   (29, "s_lshl_b64"),
-   (31, "s_lshr_b64"),
-   (33, "s_ashr_i64"),
-   (39, "s_bfe_u64"),
-   (40, "s_bfe_i64"),
-}
-for code, name in SOP2_64:
-   opcode(name, code, Format.SOP2)
-
-SOP2_SPECIAL = {
-   (4, "s_addc_u32"),
-   (5, "s_subb_u32"),
-   (10, "s_cselect_b32"),
-   (11, "s_cselect_b64"),
-   (35, "s_bfm_b64"),
-   (41, "s_cbranch_g_fork"),
-   (43, "s_rfe_restore_b64"),
-}
-opcode("s_addc_u32", 4, Format.SOP2)
-opcode("s_subb_u32", 5, Format.SOP2)
-opcode("s_cselect_b32", 10, Format.SOP2)
-opcode("s_cselect_b64", 11, Format.SOP2)
-opcode("s_bfm_b64", 35, Format.SOP2)
-opcode("s_cbranch_g_fork", 41, Format.SOP2)
-opcode("s_rfe_restore_b64", 43, Format.SOP2)
+for (code, name) in SOP2:
+    opcode(name, code, Format.SOP2)
 
 
 # SOPK instructions: 0 input (+ imm), 1 output + optional scc
-SOPK_SCC = {
+SOPK = {
+   (0, "s_movk_i32"),
+   (1, "s_cmovk_i32"),
    (2, "s_cmpk_eq_i32"),
    (3, "s_cmpk_lg_i32"),
    (4, "s_cmpk_gt_i32"),
@@ -329,13 +312,6 @@ SOPK_SCC = {
    (11, "s_cmpk_ge_u32"),
    (12, "s_cmpk_lt_u32"),
    (13, "s_cmpk_le_u32"),
-}
-for code, name in SOPK_SCC:
-   opcode(name, code, Format.SOPK)
-
-SOPK_SPECIAL = {
-   (0, "s_movk_i32"),
-   (1, "s_cmovk_i32"),
    (14, "s_addk_i32"),
    (15, "s_mulk_i32"),
    (16, "s_cbranch_i_fork"),
@@ -344,21 +320,26 @@ SOPK_SPECIAL = {
    (20, "s_setreg_imm32_b32"), # requires 32bit literal
    (21, "s_call_b64"),
 }
-opcode("s_movk_i32", 0, Format.SOPK)
-opcode("s_cmovk_i32", 1, Format.SOPK)
-opcode("s_addk_i32", 14, Format.SOPK)
-opcode("s_mulk_i32", 15, Format.SOPK)
-opcode("s_cbranch_i_fork", 16, Format.SOPK)
-opcode("s_getreg_b32", 17, Format.SOPK)
-opcode("s_setreg_b32", 18, Format.SOPK)
-opcode("s_setreg_imm32_b32", 20, Format.SOPK)
-opcode("s_call_b64", 21, Format.SOPK)
+for (code, name) in SOPK:
+   opcode(name, code, Format.SOPK)
 
 
 # SOP1 instructions: 1 input, 1 output (+optional SCC)
-SOP1_NOSCC = {
+SOP1 = {
    (0, "s_mov_b32"),
+   (1, "s_mov_b64"),
+   (2, "s_cmov_b32"),
+   (3, "s_cmov_b64"),
+   (4, "s_not_b32"),
+   (5, "s_not_b64"),
+   (6, "s_wqm_b32"),
+   (7, "s_wqm_b64"),
    (8, "s_brev_b32"),
+   (9, "s_brev_b64"),
+   (10, "s_bcnt0_i32_b32"),
+   (11, "s_bcnt0_i32_b64"),
+   (12, "s_bcnt1_i32_b32"),
+   (13, "s_bcnt1_i32_b64"),
    (14, "s_ff0_i32_b32"),
    (15, "s_ff0_i32_b64"),
    (16, "s_ff1_i32_b32"),
@@ -370,39 +351,13 @@ SOP1_NOSCC = {
    (22, "s_sext_i32_i8"),
    (23, "s_sext_i32_i16"),
    (24, "s_bitset0_b32"),
-   (26, "s_bitset1_b32"),
-   (42, "s_movrels_b32"),
-   (44, "s_movreld_b32"),
-}
-for code, name in SOP1_NOSCC:
-   opcode(name, code, Format.SOP1)
-
-SOP1_NOSCC_64 = {
-   (1, "s_mov_b64"),
-   (9, "s_brev_b64"),
    (25, "s_bitset0_b64"),
+   (26, "s_bitset1_b32"),
    (27, "s_bitset1_b64"),
+   (28, "s_getpc_b64"),
+   (29, "s_setpc_b64"),
    (30, "s_swappc_b64"),
-   (43, "s_movrels_b64"),
-   (45, "s_movreld_b64")
-}
-for code, name in SOP1_NOSCC_64:
-   opcode(name, code, Format.SOP1)
-
-SOP1_SCC = {
-   (4, "s_not_b32"),
-   (6, "s_wqm_b32"),
-   (10, "s_bcnt0_i32_b32"),
-   (12, "s_bcnt1_i32_b32"),
-   (40, "s_quadmask_b32"),
-   (48, "s_abs_i32")
-}
-for code, name in SOP1_SCC:
-   opcode(name, code, Format.SOP1)
-
-SOP1_SCC_64 = {
-   (5, "s_not_b64"),
-   (7, "s_wqm_b64"),
+   (31, "s_rfe_b64"),
    (32, "s_and_saveexec_b64"),
    (33, "s_or_saveexec_b64"),
    (34, "s_xor_saveexec_b64"),
@@ -411,41 +366,27 @@ SOP1_SCC_64 = {
    (37, "s_nand_saveexec_b64"),
    (38, "s_nor_saveexec_b64"),
    (39, "s_xnor_saveexec_b64"),
+   (40, "s_quadmask_b32"),
    (41, "s_quadmask_b64"),
+   (42, "s_movrels_b32"),
+   (43, "s_movrels_b64"),
+   (44, "s_movreld_b32"),
+   (45, "s_movreld_b64"),
+   (46, "s_cbranch_join"),
+   (48, "s_abs_i32"),
+   (50, "s_set_gpr_idx_idx"),
    (51, "s_andn1_saveexec_b64"),
    (52, "s_orn1_saveexec_b64"),
    (53, "s_andn1_wrexec_b64"),
    (54, "s_andn2_wrexec_b64"),
+   (55, "s_bitreplicate_b64_b32"),
 }
-for code, name in SOP1_SCC_64:
+for (code, name) in SOP1:
    opcode(name, code, Format.SOP1)
-
-SOP1_SPECIAL = [
-   "s_cmov_b32",
-   "s_cmov_b64",
-   "s_bcnt0_i32_b64",
-   "s_bcnt1_i32_b64",
-   "s_getpc_b64",
-   "s_setpc_b64",
-   "s_rfe_b64",
-   "s_cbranch_join",
-   "s_set_gpr_idx_idx",
-   "s_bitreplicate_b64_b32"
-]
-opcode("s_cmov_b32", 2, Format.SOP1)
-opcode("s_cmov_b64", 3, Format.SOP1)
-opcode("s_bcnt0_i32_b64", 11, Format.SOP1)
-opcode("s_bcnt1_i32_b64", 13, Format.SOP1)
-opcode("s_getpc_b64", 28, Format.SOP1)
-opcode("s_setpc_b64", 29, Format.SOP1)
-opcode("s_rfe_b64", 31, Format.SOP1)
-opcode("s_cbranch_join", 46, Format.SOP1)
-opcode("s_set_gpr_idx_idx", 50, Format.SOP1)
-opcode("s_bitreplicate_b64_b32", 55, Format.SOP1)
 
 
 # SOPC instructions: 2 inputs and 0 outputs (+SCC)
-SOPC_SCC = {
+SOPC = {
    (0, "s_cmp_eq_i32"),
    (1, "s_cmp_lg_i32"),
    (2, "s_cmp_gt_i32"),
@@ -462,22 +403,17 @@ SOPC_SCC = {
    (13, "s_bitcmp1_b32"),
    (14, "s_bitcmp0_b64"),
    (15, "s_bitcmp1_b64"),
+   (16, "s_setvskip"),
+   (17, "s_set_gpr_idx_on"),
    (18, "s_cmp_eq_u64"),
    (19, "s_cmp_lg_u64")
 }
-for code, name in SOPC_SCC:
+for (code, name) in SOPC:
    opcode(name, code, Format.SOPC)
-
-SOPC_SPECIAL = [
-   "s_setvskip",
-   "s_set_gpr_idx_on"
-]
-opcode("s_setvskip", 2, Format.SOPC)
-opcode("s_set_gpr_idx_on", 1, Format.SOPC)
 
 
 # SOPP instructions: 0 inputs (+optional scc/vcc) , 0 outputs
-SOPP_SPECIAL = {
+SOPP = {
    (0, "s_nop"),
    (1, "s_endpgm"),
    (2, "s_branch"),
@@ -508,9 +444,9 @@ SOPP_SPECIAL = {
    (27, "s_endpgm_saved"),
    (28, "s_set_grp_idx_off"),
    (29, "s_set_grp_idx_mode"),
-   (30, "s_endpgm_ordered_ps_done")
+   (30, "s_endpgm_ordered_ps_done"),
 }
-for code, name in SOPP_SPECIAL:
+for code, name in SOPP:
    opcode(name, code, Format.SOPP)
 
 
