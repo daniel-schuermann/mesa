@@ -22,24 +22,11 @@ template = """\
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *
- * Authors:
- *    Daniel Schuermann (daniel.schuermann@campus.tu-berlin.de)
  */
 
-#include <stdbool.h>
 #include "aco_ir.h"
 
-const opcode_info opcode_infos[static_cast<int>(aco_opcode::num_opcodes)] = {
-% for name, opcode in sorted(opcodes.items()):
-{
-   .name = "${name}",
-   .opcode = ${opcode.opcode},
-   .can_use_input_modifiers = ${opcode.input_mod},
-   .can_use_output_modifiers = ${opcode.output_mod},
-   .format = aco::Format::${str(opcode.format.name)}
-},
-% endfor
-};
+namespace aco {
 
 const unsigned VOPC_to_GFX6[256] = {
 % for code in VOPC_GFX6:
@@ -47,6 +34,33 @@ const unsigned VOPC_to_GFX6[256] = {
 % endfor
 };
 
+<%
+opcode_names = sorted(opcodes.keys())
+can_use_input_modifiers = "".join([opcodes[name].input_mod for name in reversed(opcode_names)])
+can_use_output_modifiers = "".join([opcodes[name].output_mod for name in reversed(opcode_names)])
+%>
+
+extern const aco::Info instr_info = {
+   .opcode = {
+      % for name in opcode_names:
+      ${opcodes[name].opcode},
+      % endfor
+   },
+   .can_use_input_modifiers = std::bitset<${len(opcode_names)}>("${can_use_input_modifiers}"),
+   .can_use_output_modifiers = std::bitset<${len(opcode_names)}>("${can_use_output_modifiers}"),
+   .name = {
+      % for name in opcode_names:
+      "${name}",
+      % endfor
+   },
+   .format = {
+      % for name in opcode_names:
+      aco::Format::${str(opcodes[name].format.name)},
+      % endfor
+   },
+};
+
+}
 """
 
 from aco_opcodes import opcodes, VOPC_GFX6

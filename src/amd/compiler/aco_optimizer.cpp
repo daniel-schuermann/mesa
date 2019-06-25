@@ -428,7 +428,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             instr->getOperand(i).setTemp(info.temp);
             info = ctx.info[info.temp.id()];
          }
-         if (info.is_abs() && can_use_VOP3(instr) && opcode_infos[(int)instr->opcode].can_use_input_modifiers) {
+         if (info.is_abs() && can_use_VOP3(instr) && instr_info.can_use_input_modifiers[(int)instr->opcode]) {
             to_VOP3(ctx, instr);
             instr->getOperand(i) = Operand(info.temp);
             static_cast<VOP3A_instruction*>(instr.get())->abs[i] = true;
@@ -437,7 +437,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             instr->opcode = i ? aco_opcode::v_sub_f32 : aco_opcode::v_subrev_f32;
             instr->getOperand(i).setTemp(info.temp);
             continue;
-         } else if (info.is_neg() && can_use_VOP3(instr) && opcode_infos[(int)instr->opcode].can_use_input_modifiers) {
+         } else if (info.is_neg() && can_use_VOP3(instr) && instr_info.can_use_input_modifiers[(int)instr->opcode]) {
             to_VOP3(ctx, instr);
             instr->getOperand(i) = Operand(info.temp);
             static_cast<VOP3A_instruction*>(instr.get())->neg[i] = true;
@@ -923,7 +923,7 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
    /* apply omod / clamp modifiers if the def is used only once and the instruction can have modifiers */
    if (instr->num_definitions && ctx.uses[instr->getDefinition(0).tempId()] == 1 &&
-       can_use_VOP3(instr) && opcode_infos[(int)instr->opcode].can_use_output_modifiers) {
+       can_use_VOP3(instr) && instr_info.can_use_output_modifiers[(int)instr->opcode]) {
       if(ctx.info[instr->getDefinition(0).tempId()].is_omod2()) {
          to_VOP3(ctx, instr);
          static_cast<VOP3A_instruction*>(instr.get())->omod = 1;
