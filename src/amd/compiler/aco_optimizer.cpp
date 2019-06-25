@@ -56,195 +56,234 @@ struct mad_info {
    : add_instr(std::move(instr)), mul_temp_id(id), needs_vop3(vop3), check_literal(false) {}
 };
 
+enum Label {
+   label_vec = 1 << 0,
+   label_constant = 1 << 1,
+   label_abs = 1 << 2,
+   label_neg = 1 << 3,
+   label_mul = 1 << 4,
+   label_temp = 1 << 5,
+   label_literal = 1 << 6,
+   label_mad = 1 << 7,
+   label_omod2 = 1 << 8,
+   label_omod4 = 1 << 9,
+   label_omod5 = 1 << 10,
+   label_omod_success = 1 << 11,
+   label_clamp = 1 << 12,
+   label_clamp_success = 1 << 13,
+   label_undefined = 1 << 14,
+   label_vcc = 1 << 15,
+   label_base_offset = 1 << 16,
+   label_b2f = 1 << 17,
+};
+
+static constexpr uint32_t instr_labels = label_vec | label_mul | label_mad | label_omod_success | label_clamp_success;
+static constexpr uint32_t temp_labels = label_abs | label_neg | label_temp | label_vcc | label_base_offset | label_b2f;
+static constexpr uint32_t val_labels = label_constant | label_literal | label_mad | label_base_offset;
+
 struct ssa_info {
    uint32_t val;
    union {
       Temp temp;
       Instruction* instr;
    };
-   std::bitset<32> label;
+   uint32_t label;
+
+   void add_label(Label new_label)
+   {
+      /* Since all labels which use "instr" use it for the same thing
+       * (indicating the defining instruction), there is no need to clear
+       * any other instr labels. */
+      if (new_label & instr_labels)
+         label &= ~temp_labels; /* instr and temp alias */
+
+      if (new_label & temp_labels) {
+         label &= ~temp_labels;
+         label &= ~instr_labels; /* instr and temp alias */
+      }
+
+      if (new_label & val_labels)
+         label &= ~val_labels;
+
+      label |= new_label;
+   }
 
    void set_vec(Instruction* vec)
    {
-      label.set(0,1);
+      add_label(label_vec);
       instr = vec;
    }
 
    bool is_vec()
    {
-      return label.test(0);
+      return label & label_vec;
    }
 
    void set_constant(uint32_t constant)
    {
-      label.set(1,1);
+      add_label(label_constant);
       val = constant;
    }
 
    bool is_constant()
    {
-      return label.test(1);
+      return label & label_constant;
    }
 
    void set_abs(Temp abs_temp)
    {
-      label.set(2,1);
+      add_label(label_abs);
       temp = abs_temp;
    }
 
    bool is_abs()
    {
-      return label.test(2);
+      return label & label_abs;
    }
 
    void set_neg(Temp neg_temp)
    {
-      label.set(3,1);
+      add_label(label_neg);
       temp = neg_temp;
    }
 
    bool is_neg()
    {
-      return label.test(3);
+      return label & label_neg;
+   }
+
+   void set_neg_abs(Temp neg_abs_temp)
+   {
+      add_label((Label)((uint32_t)label_abs | (uint32_t)label_neg));
+      temp = neg_abs_temp;
    }
 
    void set_mul(Instruction* mul)
    {
-      label.set(4,1);
+      add_label(label_mul);
       instr = mul;
    }
 
    bool is_mul()
    {
-      return label.test(4);
+      return label & label_mul;
    }
 
    void set_temp(Temp tmp)
    {
-      label.set(5,1);
+      add_label(label_temp);
       temp = tmp;
    }
 
    bool is_temp()
    {
-      return label.test(5);
+      return label & label_temp;
    }
 
    void set_literal(uint32_t lit)
    {
-      label.set(6,1);
+      add_label(label_literal);
       val = lit;
    }
 
    bool is_literal()
    {
-      return label.test(6);
+      return label & label_literal;
    }
 
    void set_mad(Instruction* mad, uint32_t mad_info_idx)
    {
-      label.set(7,1);
+      add_label(label_mad);
       val = mad_info_idx;
       instr = mad;
    }
 
    bool is_mad()
    {
-      return label.test(7);
-   }
-
-   void set_check_literal(uint32_t idx)
-   {
-      label.set(8, 1);
-      val = idx;
-   }
-
-   int is_check_literal()
-   {
-      return label.test(8);
+      return label & label_mad;
    }
 
    void set_omod2()
    {
-      label.set(9,1);
+      add_label(label_omod2);
    }
 
    bool is_omod2()
    {
-      return label.test(9);
+      return label & label_omod2;
    }
 
    void set_omod4()
    {
-      label.set(10);
+      add_label(label_omod4);
    }
 
    bool is_omod4()
    {
-      return label.test(10);
+      return label & label_omod4;
    }
 
    void set_omod5()
    {
-      label.set(11,1);
+      add_label(label_omod5);
    }
 
    bool is_omod5()
    {
-      return label.test(11);
+      return label & label_omod5;
    }
 
    void set_omod_success(Instruction* omod_instr)
    {
+      add_label(label_omod_success);
       instr = omod_instr;
-      label.set(12,1);
    }
 
    bool is_omod_success()
    {
-      return label.test(12);
+      return label & label_omod_success;
    }
 
    void set_clamp()
    {
-      label.set(13,1);
+      add_label(label_clamp);
    }
 
    bool is_clamp()
    {
-      return label.test(13);
+      return label & label_clamp;
    }
 
    void set_clamp_success(Instruction* clamp_instr)
    {
+      add_label(label_clamp_success);
       instr = clamp_instr;
-      label.set(14,1);
    }
 
    bool is_clamp_success()
    {
-      return label.test(14);
+      return label & label_clamp_success;
    }
 
    void set_undefined()
    {
-      label.set(15,1);
+      add_label(label_undefined);
    }
 
    bool is_undefined()
    {
-      return label.test(15);
+      return label & label_undefined;
    }
 
    void set_vcc(Temp vcc)
    {
-      label.set(16,1);
+      add_label(label_vcc);
       temp = vcc;
    }
 
    bool is_vcc()
    {
-      return label.test(16);
+      return label & label_vcc;
    }
 
    bool is_constant_or_literal()
@@ -254,25 +293,25 @@ struct ssa_info {
 
    void set_base_offset(Temp base, uint32_t offset)
    {
-      label.set(17,1);
+      add_label(label_base_offset);
       temp = base;
       val = offset;
    }
 
    bool is_base_offset()
    {
-      return label.test(17);
+      return label & label_base_offset;
    }
 
    void set_b2f(Temp val)
    {
-      label.set(18,1);
+      add_label(label_b2f);
       temp = val;
    }
 
    bool is_b2f()
    {
-      return label.test(18);
+      return label & label_b2f;
    }
 
 };
@@ -697,9 +736,10 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          if (ctx.info[instr->getOperand(1).tempId()].is_neg()) {
             ctx.info[instr->getDefinition(0).tempId()].set_temp(ctx.info[instr->getOperand(1).tempId()].temp);
          } else {
-            ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(1).getTemp());
             if (ctx.info[instr->getOperand(1).tempId()].is_abs()) /* neg(abs(x)) */
-               ctx.info[instr->getDefinition(0).tempId()].set_abs(ctx.info[instr->getOperand(1).tempId()].temp);
+               ctx.info[instr->getDefinition(0).tempId()].set_neg_abs(ctx.info[instr->getOperand(1).tempId()].temp);
+            else
+               ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(1).getTemp());
          }
       }
       break;
@@ -1118,7 +1158,7 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             new_instr->getOperand(2) = Operand(ctx.info[instr->getOperand(i).tempId()].temp);
             new_instr->getDefinition(0) = instr->getDefinition(0);
             instr.reset(new_instr.release());
-            ctx.info[instr->getDefinition(0).tempId()].label.reset();
+            ctx.info[instr->getDefinition(0).tempId()].label = 0;
             return;
          }
       }
