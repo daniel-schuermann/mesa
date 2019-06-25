@@ -42,6 +42,10 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    }
    case Format::SOP1: {
       uint32_t encoding = (0b101111101 << 23);
+      if (opcode >= 55 && ctx.chip_class <= GFX9) {
+         assert(ctx.chip_class == GFX9 && opcode < 60);
+         opcode = opcode - 4;
+      }
       encoding |= instr->definitionCount() ? instr->getDefinition(0).physReg() << 16 : 0;
       encoding |= opcode << 8;
       encoding |= instr->operandCount() ? instr->getOperand(0).physReg() : 0;
@@ -244,7 +248,6 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       if ((uint16_t) instr->format & (uint16_t) Format::VOP3A) {
          VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr);
 
-         uint32_t opcode;
          if ((uint16_t) instr->format & (uint16_t) Format::VOP2)
             opcode = opcode + 0x100;
          else if ((uint16_t) instr->format & (uint16_t) Format::VOP1)
