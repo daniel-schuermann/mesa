@@ -16,9 +16,9 @@ struct asm_context {
 
 void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction* instr)
 {
-   uint32_t opcode = opcode_infos[(int)instr->opcode].opcode;
-   switch (instr->format)
-   {
+   uint32_t opcode = instr_info.opcode[(int)instr->opcode];
+
+   switch (instr->format) {
    case Format::SOP2: {
       uint32_t encoding = (0b10 << 30);
       encoding |= opcode << 23;
