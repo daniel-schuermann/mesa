@@ -172,8 +172,8 @@ class Opcode(object):
 
       self.name = name
       self.opcode = code
-      self.input_mod = "true" if input_mod else "false"
-      self.output_mod = "true" if output_mod else "false"
+      self.input_mod = "1" if input_mod else "0"
+      self.output_mod = "1" if output_mod else "0"
       self.format = format
 
 
