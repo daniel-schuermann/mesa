@@ -16,11 +16,12 @@ struct asm_context {
 
 void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction* instr)
 {
+   uint32_t opcode = opcode_infos[(int)instr->opcode].opcode;
    switch (instr->format)
    {
    case Format::SOP2: {
       uint32_t encoding = (0b10 << 30);
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 23;
+      encoding |= opcode << 23;
       encoding |= instr->definitionCount() ? instr->getDefinition(0).physReg() << 16 : 0;
       encoding |= instr->operandCount() >= 2 ? instr->getOperand(1).physReg() << 8 : 0;
       encoding |= instr->operandCount() ? instr->getOperand(0).physReg() : 0;
@@ -29,7 +30,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    }
    case Format::SOPK: {
       uint32_t encoding = (0b1011 << 28);
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 23;
+      encoding |= opcode << 23;
       encoding |=
          instr->definitionCount() && !(instr->getDefinition(0).physReg() == scc) ?
          instr->getDefinition(0).physReg() << 16 :
@@ -42,14 +43,14 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    case Format::SOP1: {
       uint32_t encoding = (0b101111101 << 23);
       encoding |= instr->definitionCount() ? instr->getDefinition(0).physReg() << 16 : 0;
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 8;
+      encoding |= opcode << 8;
       encoding |= instr->operandCount() ? instr->getOperand(0).physReg() : 0;
       out.push_back(encoding);
       break;
    }
    case Format::SOPC: {
       uint32_t encoding = (0b101111110 << 23);
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 16;
+      encoding |= opcode << 16;
       encoding |= instr->operandCount() == 2 ? instr->getOperand(1).physReg() << 8 : 0;
       encoding |= instr->operandCount() ? instr->getOperand(0).physReg() : 0;
       out.push_back(encoding);
@@ -58,7 +59,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    case Format::SOPP: {
       SOPP_instruction* sopp = static_cast<SOPP_instruction*>(instr);
       uint32_t encoding = (0b101111111 << 23);
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 16;
+      encoding |= opcode << 16;
       encoding |= (uint16_t) sopp->imm;
       if (sopp->block)
          ctx.branches.insert({out.size(), sopp});
@@ -68,7 +69,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    case Format::SMEM: {
       SMEM_instruction* smem = static_cast<SMEM_instruction*>(instr);
       uint32_t encoding = (0b110000 << 26);
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 18;
+      encoding |= opcode << 18;
       if (instr->num_operands >= 2)
          encoding |= instr->getOperand(1).isConstant() ? 1 << 17 : 0;
       bool soe = instr->num_operands >= (instr->num_definitions ? 3 : 4);
@@ -89,7 +90,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    }
    case Format::VOP2: {
       uint32_t encoding = 0;
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 25;
+      encoding |= opcode << 25;
       encoding |= (0xFF & instr->getDefinition(0).physReg().reg) << 17;
       encoding |= (0xFF & instr->getOperand(1).physReg().reg) << 9;
       encoding |= instr->getOperand(0).physReg().reg;
@@ -99,14 +100,14 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    case Format::VOP1: {
       uint32_t encoding = (0b0111111 << 25);
       encoding |= (0xFF & instr->getDefinition(0).physReg().reg) << 17;
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 9;
+      encoding |= opcode << 9;
       encoding |= instr->getOperand(0).physReg().reg;
       out.push_back(encoding);
       break;
    }
    case Format::VOPC: {
       uint32_t encoding = (0b0111110 << 25);
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 17;
+      encoding |= opcode << 17;
       encoding |= (0xFF & instr->getOperand(1).physReg().reg) << 9;
       encoding |= instr->getOperand(0).physReg().reg;
       out.push_back(encoding);
@@ -116,7 +117,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       Interp_instruction* interp = static_cast<Interp_instruction*>(instr);
       uint32_t encoding = (0b110101 << 26);
       encoding |= (0xFF & instr->getDefinition(0).physReg().reg) << 18;
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 16;
+      encoding |= opcode << 16;
       encoding |= interp->attribute << 10;
       encoding |= interp->component << 8;
       encoding |= (0xFF & instr->getOperand(0).physReg().reg);
@@ -126,7 +127,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    case Format::DS: {
       DS_instruction* ds = static_cast<DS_instruction*>(instr);
       uint32_t encoding = (0b110110 << 26);
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 17;
+      encoding |= opcode << 17;
       encoding |= (ds->gds ? 1 : 0) << 16;
       encoding |= ((0xFF & ds->offset1) << 8);
       encoding |= (0xFFFF & ds->offset0);
@@ -145,7 +146,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    case Format::MUBUF: {
       MUBUF_instruction* mubuf = static_cast<MUBUF_instruction*>(instr);
       uint32_t encoding = (0b111000 << 26);
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 18;
+      encoding |= opcode << 18;
       encoding |= (mubuf->slc ? 1 : 0) << 17;
       encoding |= (mubuf->lds ? 1 : 0) << 16;
       encoding |= (mubuf->glc ? 1 : 0) << 14;
@@ -167,7 +168,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       MIMG_instruction* mimg = static_cast<MIMG_instruction*>(instr);
       uint32_t encoding = (0b111100 << 26);
       encoding |= mimg->slc ? 1 << 25 : 0;
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 18;
+      encoding |= opcode << 18;
       encoding |= mimg->lwe ? 1 << 17 : 0;
       encoding |= mimg->tfe ? 1 << 16 : 0;
       encoding |= mimg->r128 ? 1 << 15 : 0;
@@ -194,7 +195,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    case Format::GLOBAL: {
       FLAT_instruction *flat = static_cast<FLAT_instruction*>(instr);
       uint32_t encoding = (0b110111 << 26);
-      encoding |= opcode_infos[(int)instr->opcode].opcode << 18;
+      encoding |= opcode << 18;
       encoding |= flat->offset & 0x1fff;
       if (instr->format == Format::SCRATCH)
          encoding |= 1 << 14;
@@ -245,15 +246,13 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
 
          uint32_t opcode;
          if ((uint16_t) instr->format & (uint16_t) Format::VOP2)
-            opcode = opcode_infos[(int)instr->opcode].opcode + 0x100;
+            opcode = opcode + 0x100;
          else if ((uint16_t) instr->format & (uint16_t) Format::VOP1)
-            opcode = opcode_infos[(int)instr->opcode].opcode + 0x140;
+            opcode = opcode + 0x140;
          else if ((uint16_t) instr->format & (uint16_t) Format::VOPC)
-            opcode = opcode_infos[(int)instr->opcode].opcode + 0x0;
+            opcode = opcode + 0x0;
          else if ((uint16_t) instr->format & (uint16_t) Format::VINTRP)
-            opcode = opcode_infos[(int)instr->opcode].opcode + 0x270;
-         else
-            opcode = opcode_infos[(int)instr->opcode].opcode;
+            opcode = opcode + 0x270;
 
          // TODO: op_sel
          uint32_t encoding = (0b110100 << 26);
