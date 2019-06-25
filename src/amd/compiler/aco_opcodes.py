@@ -482,40 +482,43 @@ for code, name in SOPP:
 
 
 # SMEM instructions: sbase input (2 sgpr), potentially 2 offset inputs, 1 sdata input/output
-SMEM_LOAD = [
-   (0, "s_load_dword", s1),
-   (1, "s_load_dwordx2", s2),
-   (2, "s_load_dwordx4", s4),
-   (3, "s_load_dwordx8", s8),
-   (4, "s_load_dwordx16", s16),
-   (5, "s_scratch_load_dword", s1),
-   (6, "s_scratch_load_dwordx2", s2),
-   (7, "s_scratch_load_dwordx4", s4),
-   (8, "s_buffer_load_dword", s1),
-   (9, "s_buffer_load_dwordx2", s2),
-   (10, "s_buffer_load_dwordx4", s4),
-   (11, "s_buffer_load_dwordx8", s8),
-   (12, "s_buffer_load_dwordx16", s16)
-]
-for (code, name, size) in SMEM_LOAD:
-   opcode(name, code, Format.SMEM)
-
-SMEM_STORE = [
-   (16, "s_store_dword", 1),
-   (17, "s_store_dwordx2", 2),
-   (18, "s_store_dwordx4", 4),
-   (21, "s_scratch_store_dword", 1),
-   (22, "s_scratch_store_dwordx2", 2),
-   (23, "s_scratch_store_dwordx4", 4),
-   (24, "s_buffer_store_dword", 1),
-   (25, "s_buffer_store_dwordx2", 2),
-   (26, "s_buffer_store_dwordx4", 4)
-]
-for (code, name, size) in SMEM_STORE:
-   opcode(name, code, Format.SMEM)
-
-SMEM_ATOMIC = [
+SMEM = {
+   (0, "s_load_dword"),
+   (1, "s_load_dwordx2"),
+   (2, "s_load_dwordx4"),
+   (3, "s_load_dwordx8"),
+   (4, "s_load_dwordx16"),
+   (5, "s_scratch_load_dword"),
+   (6, "s_scratch_load_dwordx2"),
+   (7, "s_scratch_load_dwordx4"),
+   (8, "s_buffer_load_dword"),
+   (9, "s_buffer_load_dwordx2"),
+   (10, "s_buffer_load_dwordx4"),
+   (11, "s_buffer_load_dwordx8"),
+   (12, "s_buffer_load_dwordx16"),
+   (16, "s_store_dword"),
+   (17, "s_store_dwordx2"),
+   (18, "s_store_dwordx4"),
+   (21, "s_scratch_store_dword"),
+   (22, "s_scratch_store_dwordx2"),
+   (23, "s_scratch_store_dwordx4"),
+   (24, "s_buffer_store_dword"),
+   (25, "s_buffer_store_dwordx2"),
+   (26, "s_buffer_store_dwordx4"),
+   (31, "s_gl1_inv"),
+   (32, "s_dcache_inv"),
+   (33, "s_dcache_wb"),
+   (34, "s_dcache_inv_vol"),
+   (35, "s_dcache_wb_vol"),
+   (36, "s_memtime"),
+   (37, "s_memrealtime"),
+   (38, "s_atc_probe"),
+   (39, "s_atc_probe_buffer"),
+   (40, "s_dcache_discard"),
+   (41, "s_dcache_discard_x2"),
+   (42, "s_get_waveid_in_workgroup"),
    (64, "s_buffer_atomic_swap"),
+   (65, "s_buffer_atomic_cmpswap"),
    (66, "s_buffer_atomic_add"),
    (67, "s_buffer_atomic_sub"),
    (68, "s_buffer_atomic_smin"),
@@ -527,24 +530,8 @@ SMEM_ATOMIC = [
    (74, "s_buffer_atomic_xor"),
    (75, "s_buffer_atomic_inc"),
    (76, "s_buffer_atomic_dec"),
-   (128, "s_atomic_swap"),
-   (130, "s_atomic_add"),
-   (131, "s_atomic_sub"),
-   (132, "s_atomic_smin"),
-   (133, "s_atomic_umin"),
-   (134, "s_atomic_smax"),
-   (135, "s_atomic_umax"),
-   (136, "s_atomic_and"),
-   (137, "s_atomic_or"),
-   (138, "s_atomic_xor"),
-   (139, "s_atomic_inc"),
-   (140, "s_atomic_dec"),
-]
-for code, name in SMEM_ATOMIC:
-   opcode(name, code, Format.SMEM)
-
-SMEM_ATOMIC_64 = [
    (96, "s_buffer_atomic_swap_x2"),
+   (97, "s_buffer_atomic_cmpswap_x2"),
    (98, "s_buffer_atomic_add_x2"),
    (99, "s_buffer_atomic_sub_x2"),
    (100, "s_buffer_atomic_smin_x2"),
@@ -556,7 +543,21 @@ SMEM_ATOMIC_64 = [
    (106, "s_buffer_atomic_xor_x2"),
    (107, "s_buffer_atomic_inc_x2"),
    (108, "s_buffer_atomic_dec_x2"),
+   (128, "s_atomic_swap"),
+   (129, "s_atomic_cmpswap"),
+   (130, "s_atomic_add"),
+   (131, "s_atomic_sub"),
+   (132, "s_atomic_smin"),
+   (133, "s_atomic_umin"),
+   (134, "s_atomic_smax"),
+   (135, "s_atomic_umax"),
+   (136, "s_atomic_and"),
+   (137, "s_atomic_or"),
+   (138, "s_atomic_xor"),
+   (139, "s_atomic_inc"),
+   (140, "s_atomic_dec"),
    (160, "s_atomic_swap_x2"),
+   (161, "s_atomic_cmpswap_x2"),
    (162, "s_atomic_add_x2"),
    (163, "s_atomic_sub_x2"),
    (164, "s_atomic_smin_x2"),
@@ -568,43 +569,9 @@ SMEM_ATOMIC_64 = [
    (170, "s_atomic_xor_x2"),
    (171, "s_atomic_inc_x2"),
    (172, "s_atomic_dec_x2"),
-]
-for code, name in SMEM_ATOMIC_64:
+}
+for (code, name) in SMEM:
    opcode(name, code, Format.SMEM)
-
-SMEM_DCACHE = [
-   (32, "s_dcache_inv"),
-   (33, "s_dcache_wb"),
-   (34, "s_dcache_inv_vol"),
-   (35, "s_dcache_wb_vol")
-]
-for code, name in SMEM_DCACHE:
-   opcode(name, code, Format.SMEM)
-
-SMEM_SPECIAL = [
-   (36, "s_memtime"),
-   (37, "s_memrealtime"),
-   (38, "s_atc_probe"),
-   (39, "s_atc_probe_buffer"),
-   (40, "s_dcache_discard"),
-   (41, "s_dcache_discard_x2"),
-   (65, "s_buffer_atomic_cmpswap"),
-   (97, "s_buffer_atomic_cmpswap_x2"),
-   (129, "s_atomic_cmpswap"),
-   (161, "s_atomic_cmpswap_x2"),
-]
-for code, name in SMEM_SPECIAL:
-   opcode(name, code, Format.SMEM)
-#opcode("s_memtime", 0, [s2])
-#opcode("s_memrealtime", 0, [s2])
-#opcode("s_atc_probe", 3, [])
-#opcode("s_atc_probe_buffer", 3, [])
-#opcode("s_dcache_discard", 3, [])
-#opcode("s_dcache_discard_x2", 3, [])
-#opcode("s_buffer_atomic_cmpswap", 4, [s1], kills_input = [0, 0, 0, 1])
-#opcode("s_buffer_atomic_cmpswap_x2", 4, [s2], kills_input = [0, 0, 0, 1])
-#opcode("s_atomic_cmpswap", 4, [s1], kills_input = [0, 0, 0, 1])
-#opcode("s_atomic_cmpswap_x2", 4, [s2], kills_input = [0, 0, 0, 1])
 
 
 # VOP2 instructions: 2 inputs, 1 output (+ optional vcc)
