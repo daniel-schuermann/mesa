@@ -381,7 +381,7 @@ void aco_print_instr(struct Instruction *instr, FILE *output)
       }
       fprintf(output, " = ");
    }
-   fprintf(output, "%s", opcode_infos[(int)instr->opcode].name);
+   fprintf(output, "%s", instr_info.name[(int)instr->opcode]);
    if (instr->operandCount()) {
       bool abs[instr->num_operands];
       bool neg[instr->num_operands];
