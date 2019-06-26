@@ -4828,8 +4828,8 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
          reduce->getOperand(0) = Operand(src);
          // filled in by aco_reduce_assign.cpp, used internally as part of the
          // reduce sequence
-         assert(dst.regClass() == v1 || dst.regClass() == v2);
-         reduce->getOperand(1) = Operand(dst.regClass().as_linear());
+         assert(dst.size() == 1 || dst.size() == 2);
+         reduce->getOperand(1) = Operand(RegClass(vgpr, dst.size()).as_linear());
          reduce->getOperand(2) = Operand(v1.as_linear());
 
          Temp tmp_dst = bld.tmp(dst.regClass());
