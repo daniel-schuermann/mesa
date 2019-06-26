@@ -10,13 +10,19 @@ namespace aco {
 struct asm_context {
    enum chip_class chip_class;
    std::map<int, SOPP_instruction*> branches;
+   const int16_t* opcode;
    // TODO: keep track of branch instructions referring blocks
    // and, when emitting the block, correct the offset in instr
+   asm_context(Program* program) : chip_class(program->chip_class) {
+      if (chip_class <= GFX9)
+         opcode = &instr_info.opcode_gfx9[0];
+   }
 };
 
 void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction* instr)
 {
-   uint32_t opcode = instr_info.opcode[(int)instr->opcode];
+   uint32_t opcode = ctx.opcode[(int)instr->opcode];
+   assert(opcode != (uint32_t)-1);
 
    switch (instr->format) {
    case Format::SOP2: {
@@ -243,7 +249,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    }
    case Format::PSEUDO:
    case Format::PSEUDO_BARRIER:
-      return;
+      unreachable("Pseudo instructions should be lowered before assembly.");
    default:
       if ((uint16_t) instr->format & (uint16_t) Format::VOP3A) {
          VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr);
@@ -379,16 +385,17 @@ void fix_branches(asm_context& ctx, std::vector<uint32_t>& out)
 
 std::vector<uint32_t> emit_program(Program* program)
 {
-   asm_context ctx;
-   ctx.chip_class = program->chip_class;
+   asm_context ctx(program);
    std::vector<uint32_t> out;
+
    if (program->stage == MESA_SHADER_FRAGMENT)
       fix_exports(ctx, out, program);
-   for (Block& block : program->blocks)
-   {
+
+   for (Block& block : program->blocks) {
       block.offset = out.size();
       emit_block(ctx, out, block);
    }
+
    fix_branches(ctx, out);
 
    return out;
