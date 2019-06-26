@@ -5907,6 +5907,9 @@ void visit_jump(isel_context *ctx, nir_jump_instr *instr)
    break_block->loop_nest_depth = ctx->cf_info.loop_nest_depth;
    break_block->kind |= block_kind_uniform;
    add_linear_edge(idx, break_block);
+   /* the loop_header pointer might be invalidated by this point */
+   if (instr->type == nir_jump_continue)
+      logical_target = &ctx->program->blocks[ctx->cf_info.parent_loop.header_idx];
    add_linear_edge(break_block->index, logical_target);
    bld.reset(break_block);
    bld.branch(aco_opcode::p_branch);
