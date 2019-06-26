@@ -41,9 +41,9 @@ can_use_output_modifiers = "".join([opcodes[name].output_mod for name in reverse
 %>
 
 extern const aco::Info instr_info = {
-   .opcode = {
+   .opcode_gfx9 = {
       % for name in opcode_names:
-      ${opcodes[name].opcode},
+      ${opcodes[name].opcode_gfx9},
       % endfor
    },
    .can_use_input_modifiers = std::bitset<${len(opcode_names)}>("${can_use_input_modifiers}"),

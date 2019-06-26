@@ -963,7 +963,7 @@ void aco_print_instr(Instruction *instr, FILE *output);
 void aco_print_program(Program *program, FILE *output);
 
 typedef struct {
-   const int16_t opcode[static_cast<int>(aco_opcode::num_opcodes)];
+   const int16_t opcode_gfx9[static_cast<int>(aco_opcode::num_opcodes)];
    const std::bitset<static_cast<int>(aco_opcode::num_opcodes)> can_use_input_modifiers;
    const std::bitset<static_cast<int>(aco_opcode::num_opcodes)> can_use_output_modifiers;
    const char *name[static_cast<int>(aco_opcode::num_opcodes)];
