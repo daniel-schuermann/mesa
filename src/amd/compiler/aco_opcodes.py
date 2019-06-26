@@ -29,21 +29,6 @@
 
 from enum import Enum
 
-# helper variables
-VCC = "VCC"
-SCC = "SCC"
-b = "b"
-s1 = "s1"
-s2 = "s2"
-s3 = "s3"
-s4 = "s4"
-s8 = "s8"
-s16 = "s16"
-v1 = "v1"
-v2 = "v2"
-v3 = "v3"
-v4 = "v4"
-
 class Format(Enum):
    PSEUDO = 0
    SOP1 = 1
@@ -153,7 +138,7 @@ class Opcode(object):
    """Class that represents all the information we have about the opcode
    NOTE: this must be kept in sync with aco_op_info
    """
-   def __init__(self, name, code, format, input_mod, output_mod):
+   def __init__(self, name, opcode_gfx9, format, input_mod, output_mod):
       """Parameters:
 
       - name is the name of the opcode (prepend nir_op_ for the enum name)
@@ -165,13 +150,13 @@ class Opcode(object):
         constant value of the opcode given the constant values of its inputs.
       """
       assert isinstance(name, str)
-      assert isinstance(code, int)
+      assert isinstance(opcode_gfx9, int)
       assert isinstance(format, Format)
       assert isinstance(input_mod, bool)
       assert isinstance(output_mod, bool)
 
       self.name = name
-      self.opcode = code
+      self.opcode_gfx9 = opcode_gfx9
       self.input_mod = "1" if input_mod else "0"
       self.output_mod = "1" if output_mod else "0"
       self.format = format
@@ -183,11 +168,11 @@ opcodes = {}
 # VOPC to GFX6 opcode translation map
 VOPC_GFX6 = [0] * 256
 
-def opcode(name, code = 0, format = Format.PSEUDO, input_mod = False, output_mod = False):
+def opcode(name, opcode_gfx9 = -1, format = Format.PSEUDO, input_mod = False, output_mod = False):
    assert name not in opcodes
-   opcodes[name] = Opcode(name, code, format, input_mod, output_mod)
+   opcodes[name] = Opcode(name, opcode_gfx9, format, input_mod, output_mod)
 
-opcode("exp", format = Format.EXP)
+opcode("exp", 0, format = Format.EXP)
 opcode("p_parallelcopy")
 opcode("p_startpgm")
 opcode("p_phi")
@@ -224,7 +209,7 @@ opcode("p_memory_barrier_shared", format=Format.PSEUDO_BARRIER)
 opcode("p_spill")
 opcode("p_reload")
 
-# start/end linear vgprs ?
+# start/end linear vgprs
 opcode("p_start_linear_vgpr")
 opcode("p_end_linear_vgpr")
 
@@ -238,247 +223,250 @@ opcode("p_fs_buffer_store_smem", format=Format.SMEM)
 
 # SOP2 instructions: 2 scalar inputs, 1 scalar output (+optional scc)
 SOP2 = {
-   (0, "s_add_u32"),
-   (1, "s_sub_u32"),
-   (2, "s_add_i32"),
-   (3, "s_sub_i32"),
-   (4, "s_addc_u32"),
-   (5, "s_subb_u32"),
-   (6, "s_min_i32"),
-   (7, "s_min_u32"),
-   (8, "s_max_i32"),
-   (9, "s_max_u32"),
-   (10, "s_cselect_b32"),
-   (11, "s_cselect_b64"),
-   (12, "s_and_b32"),
-   (13, "s_and_b64"),
-   (14, "s_or_b32"),
-   (15, "s_or_b64"),
-   (16, "s_xor_b32"),
-   (17, "s_xor_b64"),
-   (18, "s_andn2_b32"),
-   (19, "s_andn2_b64"),
-   (20, "s_orn2_b32"),
-   (21, "s_orn2_b64"),
-   (22, "s_nand_b32"),
-   (23, "s_nand_b64"),
-   (24, "s_nor_b32"),
-   (25, "s_nor_b64"),
-   (26, "s_xnor_b32"),
-   (27, "s_xnor_b64"),
-   (28, "s_lshl_b32"),
-   (29, "s_lshl_b64"),
-   (30, "s_lshr_b32"),
-   (31, "s_lshr_b64"),
-   (32, "s_ashr_i32"),
-   (33, "s_ashr_i64"),
-   (34, "s_bfm_b32"),
-   (35, "s_bfm_b64"),
-   (36, "s_mul_i32"),
-   (37, "s_bfe_u32"),
-   (38, "s_bfe_i32"),
-   (39, "s_bfe_u64"),
-   (40, "s_bfe_i64"),
-   (41, "s_cbranch_g_fork"),
-   (42, "s_absdiff_i32"),
-   (43, "s_rfe_restore_b64"),
-   (44, "s_mul_hi_u32_gfx9"),
-   (45, "s_mul_hi_i32_gfx9"),
-   (46, "s_lshl1_add_u32"),
-   (47, "s_lshl2_add_u32"),
-   (48, "s_lshl3_add_u32"),
-   (49, "s_lshl4_add_u32"),
-   (50, "s_pack_ll_b32_b16"),
-   (51, "s_pack_lh_b32_b16"),
-   (52, "s_pack_hh_b32_b16"),
-   (53, "s_mul_hi_u32"),
-   (54, "s_mul_hi_i32"),
+  # GFX6, GFX7, GFX8, GFX9, GFX10, name
+   (0x00, 0x00, 0x00, 0x00, 0x00, "s_add_u32"),
+   (0x01, 0x01, 0x01, 0x01, 0x01, "s_sub_u32"),
+   (0x02, 0x02, 0x02, 0x02, 0x02, "s_add_i32"),
+   (0x03, 0x03, 0x03, 0x03, 0x03, "s_sub_i32"),
+   (0x04, 0x04, 0x04, 0x04, 0x04, "s_addc_u32"),
+   (0x05, 0x05, 0x05, 0x05, 0x05, "s_subb_u32"),
+   (0x06, 0x06, 0x06, 0x06, 0x06, "s_min_i32"),
+   (0x07, 0x07, 0x07, 0x07, 0x07, "s_min_u32"),
+   (0x08, 0x08, 0x08, 0x08, 0x08, "s_max_i32"),
+   (0x09, 0x09, 0x09, 0x09, 0x09, "s_max_u32"),
+   (0x0a, 0x0a, 0x0a, 0x0a, 0x0a, "s_cselect_b32"),
+   (0x0b, 0x0b, 0x0b, 0x0b, 0x0b, "s_cselect_b64"),
+   (0x0e, 0x0e, 0x0c, 0x0c, 0x0e, "s_and_b32"),
+   (0x0f, 0x0f, 0x0d, 0x0d, 0x0f, "s_and_b64"),
+   (0x10, 0x10, 0x0e, 0x0e, 0x10, "s_or_b32"),
+   (0x11, 0x11, 0x0f, 0x0f, 0x11, "s_or_b64"),
+   (0x12, 0x12, 0x10, 0x10, 0x12, "s_xor_b32"),
+   (0x13, 0x13, 0x11, 0x11, 0x13, "s_xor_b64"),
+   (0x14, 0x14, 0x12, 0x12, 0x14, "s_andn2_b32"),
+   (0x15, 0x15, 0x13, 0x13, 0x15, "s_andn2_b64"),
+   (0x16, 0x16, 0x14, 0x14, 0x16, "s_orn2_b32"),
+   (0x17, 0x17, 0x15, 0x15, 0x17, "s_orn2_b64"),
+   (0x18, 0x18, 0x16, 0x16, 0x18, "s_nand_b32"),
+   (0x19, 0x19, 0x17, 0x17, 0x19, "s_nand_b64"),
+   (0x1a, 0x1a, 0x18, 0x18, 0x1a, "s_nor_b32"),
+   (0x1b, 0x1b, 0x19, 0x19, 0x1b, "s_nor_b64"),
+   (0x1c, 0x1c, 0x1a, 0x1a, 0x1c, "s_xnor_b32"),
+   (0x1d, 0x1d, 0x1b, 0x1b, 0x1d, "s_xnor_b64"),
+   (0x1e, 0x1e, 0x1c, 0x1c, 0x1e, "s_lshl_b32"),
+   (0x1f, 0x1f, 0x1d, 0x1d, 0x1f, "s_lshl_b64"),
+   (0x20, 0x20, 0x1e, 0x1e, 0x20, "s_lshr_b32"),
+   (0x21, 0x21, 0x1f, 0x1f, 0x21, "s_lshr_b64"),
+   (0x22, 0x22, 0x20, 0x20, 0x22, "s_ashr_i32"),
+   (0x23, 0x23, 0x21, 0x21, 0x23, "s_ashr_i64"),
+   (0x24, 0x24, 0x22, 0x22, 0x24, "s_bfm_b32"),
+   (0x25, 0x25, 0x23, 0x23, 0x25, "s_bfm_b64"),
+   (0x26, 0x26, 0x24, 0x24, 0x26, "s_mul_i32"),
+   (0x27, 0x27, 0x25, 0x25, 0x27, "s_bfe_u32"),
+   (0x28, 0x28, 0x26, 0x26, 0x28, "s_bfe_i32"),
+   (0x29, 0x29, 0x27, 0x27, 0x29, "s_bfe_u64"),
+   (0x2a, 0x2a, 0x28, 0x28, 0x2a, "s_bfe_i64"),
+   (0x2b, 0x2b, 0x29, 0x29,   -1, "s_cbranch_g_fork"),
+   (0x2c, 0x2c, 0x2a, 0x2a, 0x2c, "s_absdiff_i32"),
+   (  -1,   -1, 0x2b, 0x2b,   -1, "s_rfe_restore_b64"),
+   (  -1,   -1,   -1, 0x2e, 0x2e, "s_lshl1_add_u32"),
+   (  -1,   -1,   -1, 0x2f, 0x2f, "s_lshl2_add_u32"),
+   (  -1,   -1,   -1, 0x30, 0x30, "s_lshl3_add_u32"),
+   (  -1,   -1,   -1, 0x31, 0x31, "s_lshl4_add_u32"),
+   (  -1,   -1,   -1, 0x32, 0x32, "s_pack_ll_b32_b16"),
+   (  -1,   -1,   -1, 0x33, 0x33, "s_pack_lh_b32_b16"),
+   (  -1,   -1,   -1, 0x34, 0x34, "s_pack_hh_b32_b16"),
+   (  -1,   -1,   -1, 0x2c, 0x35, "s_mul_hi_u32"),
+   (  -1,   -1,   -1, 0x2c, 0x35, "s_mul_hi_i32"),
 }
-for (code, name) in SOP2:
-    opcode(name, code, Format.SOP2)
+for (gfx6, gfx7, gfx8, gfx9, gfx10, name) in SOP2:
+    opcode(name, gfx9, Format.SOP2)
 
 
 # SOPK instructions: 0 input (+ imm), 1 output + optional scc
 SOPK = {
-   (0, "s_movk_i32"),
-   (1, "s_cmovk_i32"), # GFX8_GFX9
-   (1, "s_version"), # GFX10+
-   (2, "s_cmpk_eq_i32"),
-   (3, "s_cmpk_lg_i32"),
-   (4, "s_cmpk_gt_i32"),
-   (5, "s_cmpk_ge_i32"),
-   (6, "s_cmpk_lt_i32"),
-   (7, "s_cmpk_le_i32"),
-   (8, "s_cmpk_eq_u32"),
-   (9, "s_cmpk_lg_u32"),
-   (10, "s_cmpk_gt_u32"),
-   (11, "s_cmpk_ge_u32"),
-   (12, "s_cmpk_lt_u32"),
-   (13, "s_cmpk_le_u32"),
-   (14, "s_addk_i32"),
-   (15, "s_mulk_i32"),
-   (16, "s_cbranch_i_fork"),
-   (17, "s_getreg_b32"),
-   (18, "s_setreg_b32"),
-   (20, "s_setreg_imm32_b32"), # requires 32bit literal
-   (21, "s_call_b64_gfx8"),
-   (22, "s_call_b64"),
-   (23, "s_waitcnt_vscnt"),
-   (24, "s_waitcnt_vmcnt"),
-   (25, "s_waitcnt_expcnt"),
-   (26, "s_waitcnt_lgkmcnt"),
-   (27, "s_subvector_loop_begin"),
-   (28, "s_subvector_loop_end"),
+  # GFX6, GFX7, GFX8, GFX9, GFX10, name
+   (0x00, 0x00, 0x00, 0x00, 0x00, "s_movk_i32"),
+   (  -1,   -1,   -1,   -1, 0x01, "s_version"), # GFX10+
+   (0x02, 0x02, 0x01, 0x01, 0x02, "s_cmovk_i32"), # GFX8_GFX9
+   (0x03, 0x03, 0x02, 0x02, 0x03, "s_cmpk_eq_i32"),
+   (0x04, 0x04, 0x03, 0x03, 0x04, "s_cmpk_lg_i32"),
+   (0x05, 0x05, 0x04, 0x04, 0x05, "s_cmpk_gt_i32"),
+   (0x06, 0x06, 0x05, 0x05, 0x06, "s_cmpk_ge_i32"),
+   (0x07, 0x07, 0x06, 0x06, 0x07, "s_cmpk_lt_i32"),
+   (0x08, 0x08, 0x07, 0x07, 0x08, "s_cmpk_le_i32"),
+   (0x09, 0x09, 0x08, 0x08, 0x09, "s_cmpk_eq_u32"),
+   (0x0a, 0x0a, 0x09, 0x09, 0x0a, "s_cmpk_lg_u32"),
+   (0x0b, 0x0b, 0x0a, 0x0a, 0x0b, "s_cmpk_gt_u32"),
+   (0x0c, 0x0c, 0x0b, 0x0b, 0x0c, "s_cmpk_ge_u32"),
+   (0x0d, 0x0d, 0x0c, 0x0c, 0x0d, "s_cmpk_lt_u32"),
+   (0x0e, 0x0e, 0x0d, 0x0d, 0x0e, "s_cmpk_le_u32"),
+   (0x0f, 0x0f, 0x0e, 0x0e, 0x0f, "s_addk_i32"),
+   (0x10, 0x10, 0x0f, 0x0f, 0x10, "s_mulk_i32"),
+   (0x11, 0x11, 0x10, 0x10,   -1, "s_cbranch_i_fork"),
+   (0x12, 0x12, 0x11, 0x11, 0x12, "s_getreg_b32"),
+   (0x13, 0x13, 0x12, 0x12, 0x13, "s_setreg_b32"),
+   (0x15, 0x15, 0x14, 0x14, 0x15, "s_setreg_imm32_b32"), # requires 32bit literal
+   (  -1,   -1, 0x15, 0x15, 0x16, "s_call_b64"),
+   (  -1,   -1,   -1,   -1, 0x17, "s_waitcnt_vscnt"),
+   (  -1,   -1,   -1,   -1, 0x18, "s_waitcnt_vmcnt"),
+   (  -1,   -1,   -1,   -1, 0x19, "s_waitcnt_expcnt"),
+   (  -1,   -1,   -1,   -1, 0x1a, "s_waitcnt_lgkmcnt"),
+   (  -1,   -1,   -1,   -1, 0x1b, "s_subvector_loop_begin"),
+   (  -1,   -1,   -1,   -1, 0x1c, "s_subvector_loop_end"),
 }
-for (code, name) in SOPK:
-   opcode(name, code, Format.SOPK)
+for (gfx6, gfx7, gfx8, gfx9, gfx10, name) in SOPK:
+   opcode(name, gfx9, Format.SOPK)
 
 
 # SOP1 instructions: 1 input, 1 output (+optional SCC)
 SOP1 = {
-   (0, "s_mov_b32"),
-   (1, "s_mov_b64"),
-   (2, "s_cmov_b32"),
-   (3, "s_cmov_b64"),
-   (4, "s_not_b32"),
-   (5, "s_not_b64"),
-   (6, "s_wqm_b32"),
-   (7, "s_wqm_b64"),
-   (8, "s_brev_b32"),
-   (9, "s_brev_b64"),
-   (10, "s_bcnt0_i32_b32"),
-   (11, "s_bcnt0_i32_b64"),
-   (12, "s_bcnt1_i32_b32"),
-   (13, "s_bcnt1_i32_b64"),
-   (14, "s_ff0_i32_b32"),
-   (15, "s_ff0_i32_b64"),
-   (16, "s_ff1_i32_b32"),
-   (17, "s_ff1_i32_b64"),
-   (18, "s_flbit_i32_b32"),
-   (19, "s_flbit_i32_b64"),
-   (20, "s_flbit_i32"),
-   (21, "s_flbit_i32_i64"),
-   (22, "s_sext_i32_i8"),
-   (23, "s_sext_i32_i16"),
-   (24, "s_bitset0_b32"),
-   (25, "s_bitset0_b64"),
-   (26, "s_bitset1_b32"),
-   (27, "s_bitset1_b64"),
-   (28, "s_getpc_b64"),
-   (29, "s_setpc_b64"),
-   (30, "s_swappc_b64"),
-   (31, "s_rfe_b64"),
-   (32, "s_and_saveexec_b64"),
-   (33, "s_or_saveexec_b64"),
-   (34, "s_xor_saveexec_b64"),
-   (35, "s_andn2_saveexec_b64"),
-   (36, "s_orn2_saveexec_b64"),
-   (37, "s_nand_saveexec_b64"),
-   (38, "s_nor_saveexec_b64"),
-   (39, "s_xnor_saveexec_b64"),
-   (40, "s_quadmask_b32"),
-   (41, "s_quadmask_b64"),
-   (42, "s_movrels_b32"),
-   (43, "s_movrels_b64"),
-   (44, "s_movreld_b32"),
-   (45, "s_movreld_b64"),
-   (46, "s_cbranch_join"),
-   (48, "s_abs_i32"),
-   (50, "s_set_gpr_idx_idx"),
-   (55, "s_andn1_saveexec_b64"),
-   (56, "s_orn1_saveexec_b64"),
-   (57, "s_andn1_wrexec_b64"),
-   (58, "s_andn2_wrexec_b64"),
-   (59, "s_bitreplicate_b64_b32"),
-   (60, "s_and_saveexec_b32"),
-   (61, "s_or_saveexec_b32"),
-   (62, "s_xor_saveexec_b32"),
-   (63, "s_andn2_saveexec_b32"),
-   (64, "s_orn2_saveexec_b32"),
-   (65, "s_nand_saveexec_b32"),
-   (66, "s_nor_saveexec_b32"),
-   (67, "s_xnor_saveexec_b32"),
-   (68, "s_andn1_saveexec_b32"),
-   (69, "s_orn1_saveexec_b32"),
-   (70, "s_andn1_wrexec_b32"),
-   (71, "s_andn2_wrexec_b32"),
-   (73, "s_movrelsd_2_b32"),
+  # GFX6, GFX7, GFX8, GFX9, GFX10, name
+   (0x03, 0x03, 0x00, 0x00, 0x03, "s_mov_b32"),
+   (0x04, 0x04, 0x01, 0x01, 0x04, "s_mov_b64"),
+   (0x05, 0x05, 0x02, 0x02, 0x05, "s_cmov_b32"),
+   (0x06, 0x06, 0x03, 0x03, 0x06, "s_cmov_b64"),
+   (0x07, 0x07, 0x04, 0x04, 0x07, "s_not_b32"),
+   (0x08, 0x08, 0x05, 0x05, 0x08, "s_not_b64"),
+   (0x09, 0x09, 0x06, 0x06, 0x09, "s_wqm_b32"),
+   (0x0a, 0x0a, 0x07, 0x07, 0x0a, "s_wqm_b64"),
+   (0x0b, 0x0b, 0x08, 0x08, 0x0b, "s_brev_b32"),
+   (0x0c, 0x0c, 0x09, 0x09, 0x0c, "s_brev_b64"),
+   (0x0d, 0x0d, 0x0a, 0x0a, 0x0d, "s_bcnt0_i32_b32"),
+   (0x0e, 0x0e, 0x0b, 0x0b, 0x0e, "s_bcnt0_i32_b64"),
+   (0x0f, 0x0f, 0x0c, 0x0c, 0x0f, "s_bcnt1_i32_b32"),
+   (0x10, 0x10, 0x0d, 0x0d, 0x10, "s_bcnt1_i32_b64"),
+   (0x11, 0x11, 0x0e, 0x0e, 0x11, "s_ff0_i32_b32"),
+   (0x12, 0x12, 0x0f, 0x0f, 0x12, "s_ff0_i32_b64"),
+   (0x13, 0x13, 0x10, 0x10, 0x13, "s_ff1_i32_b32"),
+   (0x14, 0x14, 0x11, 0x11, 0x14, "s_ff1_i32_b64"),
+   (0x15, 0x15, 0x12, 0x12, 0x15, "s_flbit_i32_b32"),
+   (0x16, 0x16, 0x13, 0x13, 0x16, "s_flbit_i32_b64"),
+   (0x17, 0x17, 0x14, 0x14, 0x17, "s_flbit_i32"),
+   (0x18, 0x18, 0x15, 0x15, 0x18, "s_flbit_i32_i64"),
+   (0x19, 0x19, 0x16, 0x16, 0x19, "s_sext_i32_i8"),
+   (0x1a, 0x1a, 0x17, 0x17, 0x1a, "s_sext_i32_i16"),
+   (0x1b, 0x1b, 0x18, 0x18, 0x1b, "s_bitset0_b32"),
+   (0x1c, 0x1c, 0x19, 0x19, 0x1c, "s_bitset0_b64"),
+   (0x1d, 0x1d, 0x1a, 0x1a, 0x1d, "s_bitset1_b32"),
+   (0x1e, 0x1e, 0x1b, 0x1b, 0x1e, "s_bitset1_b64"),
+   (0x1f, 0x1f, 0x1c, 0x1c, 0x1f, "s_getpc_b64"),
+   (0x20, 0x20, 0x1d, 0x1d, 0x20, "s_setpc_b64"),
+   (0x21, 0x21, 0x1e, 0x1e, 0x21, "s_swappc_b64"),
+   (0x22, 0x22, 0x1f, 0x1f, 0x22, "s_rfe_b64"),
+   (0x24, 0x24, 0x20, 0x20, 0x24, "s_and_saveexec_b64"),
+   (0x25, 0x25, 0x21, 0x21, 0x25, "s_or_saveexec_b64"),
+   (0x26, 0x26, 0x22, 0x22, 0x26, "s_xor_saveexec_b64"),
+   (0x27, 0x27, 0x23, 0x23, 0x27, "s_andn2_saveexec_b64"),
+   (0x28, 0x28, 0x24, 0x24, 0x28, "s_orn2_saveexec_b64"),
+   (0x29, 0x29, 0x25, 0x25, 0x29, "s_nand_saveexec_b64"),
+   (0x2a, 0x2a, 0x26, 0x26, 0x2a, "s_nor_saveexec_b64"),
+   (0x2b, 0x2b, 0x27, 0x27, 0x2b, "s_xnor_saveexec_b64"),
+   (0x2c, 0x2c, 0x28, 0x28, 0x2c, "s_quadmask_b32"),
+   (0x2d, 0x2d, 0x29, 0x29, 0x2d, "s_quadmask_b64"),
+   (0x2e, 0x2e, 0x2a, 0x2a, 0x2e, "s_movrels_b32"),
+   (0x2f, 0x2f, 0x2b, 0x2b, 0x2f, "s_movrels_b64"),
+   (0x30, 0x30, 0x2c, 0x2c, 0x30, "s_movreld_b32"),
+   (0x31, 0x31, 0x2d, 0x2d, 0x31, "s_movreld_b64"),
+   (0x32, 0x32, 0x2e, 0x2e,   -1, "s_cbranch_join"),
+   (0x34, 0x34, 0x30, 0x30, 0x34, "s_abs_i32"),
+   (0x35, 0x35,   -1,   -1, 0x35, "s_mov_fed_b32"),
+   (  -1,   -1, 0x32, 0x32,   -1, "s_set_gpr_idx_idx"),
+   (  -1,   -1,   -1, 0x33, 0x37, "s_andn1_saveexec_b64"),
+   (  -1,   -1,   -1, 0x34, 0x38, "s_orn1_saveexec_b64"),
+   (  -1,   -1,   -1, 0x35, 0x39, "s_andn1_wrexec_b64"),
+   (  -1,   -1,   -1, 0x36, 0x3a, "s_andn2_wrexec_b64"),
+   (  -1,   -1,   -1, 0x37, 0x3b, "s_bitreplicate_b64_b32"),
+   (  -1,   -1,   -1,   -1, 0x3c, "s_and_saveexec_b32"),
+   (  -1,   -1,   -1,   -1, 0x3d, "s_or_saveexec_b32"),
+   (  -1,   -1,   -1,   -1, 0x3e, "s_xor_saveexec_b32"),
+   (  -1,   -1,   -1,   -1, 0x3f, "s_andn2_saveexec_b32"),
+   (  -1,   -1,   -1,   -1, 0x40, "s_orn2_saveexec_b32"),
+   (  -1,   -1,   -1,   -1, 0x41, "s_nand_saveexec_b32"),
+   (  -1,   -1,   -1,   -1, 0x42, "s_nor_saveexec_b32"),
+   (  -1,   -1,   -1,   -1, 0x43, "s_xnor_saveexec_b32"),
+   (  -1,   -1,   -1,   -1, 0x44, "s_andn1_saveexec_b32"),
+   (  -1,   -1,   -1,   -1, 0x45, "s_orn1_saveexec_b32"),
+   (  -1,   -1,   -1,   -1, 0x46, "s_andn1_wrexec_b32"),
+   (  -1,   -1,   -1,   -1, 0x47, "s_andn2_wrexec_b32"),
+   (  -1,   -1,   -1,   -1, 0x49, "s_movrelsd_2_b32"),
 }
-for (code, name) in SOP1:
-   opcode(name, code, Format.SOP1)
+for (gfx6, gfx7, gfx8, gfx9, gfx10, name) in SOP1:
+   opcode(name, gfx9, Format.SOP1)
 
 
 # SOPC instructions: 2 inputs and 0 outputs (+SCC)
 SOPC = {
-   (0, "s_cmp_eq_i32"),
-   (1, "s_cmp_lg_i32"),
-   (2, "s_cmp_gt_i32"),
-   (3, "s_cmp_ge_i32"),
-   (4, "s_cmp_lt_i32"),
-   (5, "s_cmp_le_i32"),
-   (6, "s_cmp_eq_u32"),
-   (7, "s_cmp_lg_u32"),
-   (8, "s_cmp_gt_u32"),
-   (9, "s_cmp_ge_u32"),
-   (10, "s_cmp_lt_u32"),
-   (11, "s_cmp_le_u32"),
-   (12, "s_bitcmp0_b32"),
-   (13, "s_bitcmp1_b32"),
-   (14, "s_bitcmp0_b64"),
-   (15, "s_bitcmp1_b64"),
-   (16, "s_setvskip"),
-   (17, "s_set_gpr_idx_on"),
-   (18, "s_cmp_eq_u64"),
-   (19, "s_cmp_lg_u64")
+  # GFX6, GFX7, GFX8, GFX9, GFX10, name
+   (0x00, 0x00, 0x00, 0x00, 0x00, "s_cmp_eq_i32"),
+   (0x01, 0x01, 0x01, 0x01, 0x01, "s_cmp_lg_i32"),
+   (0x02, 0x02, 0x02, 0x02, 0x02, "s_cmp_gt_i32"),
+   (0x03, 0x03, 0x03, 0x03, 0x03, "s_cmp_ge_i32"),
+   (0x04, 0x04, 0x04, 0x04, 0x04, "s_cmp_lt_i32"),
+   (0x05, 0x05, 0x05, 0x05, 0x05, "s_cmp_le_i32"),
+   (0x06, 0x06, 0x06, 0x06, 0x06, "s_cmp_eq_u32"),
+   (0x07, 0x07, 0x07, 0x07, 0x07, "s_cmp_lg_u32"),
+   (0x08, 0x08, 0x08, 0x08, 0x08, "s_cmp_gt_u32"),
+   (0x09, 0x09, 0x09, 0x09, 0x09, "s_cmp_ge_u32"),
+   (0x0a, 0x0a, 0x0a, 0x0a, 0x0a, "s_cmp_lt_u32"),
+   (0x0b, 0x0b, 0x0b, 0x0b, 0x0b, "s_cmp_le_u32"),
+   (0x0c, 0x0c, 0x0c, 0x0c, 0x0c, "s_bitcmp0_b32"),
+   (0x0d, 0x0d, 0x0d, 0x0d, 0x0d, "s_bitcmp1_b32"),
+   (0x0e, 0x0e, 0x0e, 0x0e, 0x0e, "s_bitcmp0_b64"),
+   (0x0f, 0x0f, 0x0f, 0x0f, 0x0f, "s_bitcmp1_b64"),
+   (0x10, 0x10, 0x10, 0x10,   -1, "s_setvskip"),
+   (  -1,   -1, 0x11, 0x11,   -1, "s_set_gpr_idx_on"),
+   (  -1,   -1, 0x12, 0x12, 0x12, "s_cmp_eq_u64"),
+   (  -1,   -1, 0x13, 0x13, 0x13, "s_cmp_lg_u64"),
 }
-for (code, name) in SOPC:
-   opcode(name, code, Format.SOPC)
+for (gfx6, gfx7, gfx8, gfx9, gfx10, name) in SOPC:
+   opcode(name, gfx9, Format.SOPC)
 
 
-# SOPP instructions: 0 inputs (+optional scc/vcc) , 0 outputs
+# SOPP instructions: 0 inputs (+optional scc/vcc), 0 outputs
 SOPP = {
-   (0, "s_nop"),
-   (1, "s_endpgm"),
-   (2, "s_branch"),
-   (3, "s_wakeup"),
-   (4, "s_cbranch_scc0"),
-   (5, "s_cbranch_scc1"),
-   (6, "s_cbranch_vccz"),
-   (7, "s_cbranch_vccnz"),
-   (8, "s_cbranch_execz"),
-   (9, "s_cbranch_execnz"),
-   (10, "s_barrier"),
-   (11, "s_setkill"),
-   (12, "s_waitcnt"),
-   (13, "s_sethalt"),
-   (14, "s_sleep"),
-   (15, "s_setprio"),
-   (16, "s_sendmsg"),
-   (17, "s_sendmsghalt"),
-   (18, "s_trap"),
-   (19, "s_icache_inv"),
-   (20, "s_incperflevel"),
-   (21, "s_decperflevel"),
-   (22, "s_ttracedata"),
-   (23, "s_cbranch_cdbgsys"),
-   (24, "s_cbranch_cdbguser"),
-   (25, "s_cbranch_cdbgsys_or_user"),
-   (26, "s_cbranch_cdbgsys_and_user"),
-   (27, "s_endpgm_saved"),
-   (28, "s_set_grp_idx_off"),
-   (29, "s_set_grp_idx_mode"),
-   (30, "s_endpgm_ordered_ps_done"),
-   (31, "s_code_end"),
-   (32, "s_inst_prefetch"),
-   (33, "s_clause"),
-   (34, "s_wait_idle"),
-   (35, "s_waitcnt_depctr"),
-   (36, "s_round_mode"),
-   (37, "s_denorm_mode"),
-   (40, "s_ttracedata_imm"),
+  # GFX6, GFX7, GFX8, GFX9, GFX10, name
+   (0x00, 0x00, 0x00, 0x00, 0x00, "s_nop"),
+   (0x01, 0x01, 0x01, 0x01, 0x01, "s_endpgm"),
+   (0x02, 0x02, 0x02, 0x02, 0x02, "s_branch"),
+   (  -1,   -1, 0x03, 0x03, 0x03, "s_wakeup"),
+   (0x04, 0x04, 0x04, 0x04, 0x04, "s_cbranch_scc0"),
+   (0x05, 0x05, 0x05, 0x05, 0x05, "s_cbranch_scc1"),
+   (0x06, 0x06, 0x06, 0x06, 0x06, "s_cbranch_vccz"),
+   (0x07, 0x07, 0x07, 0x07, 0x07, "s_cbranch_vccnz"),
+   (0x08, 0x08, 0x08, 0x08, 0x08, "s_cbranch_execz"),
+   (0x09, 0x09, 0x09, 0x09, 0x09, "s_cbranch_execnz"),
+   (0x0a, 0x0a, 0x0a, 0x0a, 0x0a, "s_barrier"),
+   (  -1, 0x0b, 0x0b, 0x0b, 0x0b, "s_setkill"),
+   (0x0c, 0x0c, 0x0c, 0x0c, 0x0c, "s_waitcnt"),
+   (0x0d, 0x0d, 0x0d, 0x0d, 0x0d, "s_sethalt"),
+   (0x0e, 0x0e, 0x0e, 0x0e, 0x0e, "s_sleep"),
+   (0x0f, 0x0f, 0x0f, 0x0f, 0x0f, "s_setprio"),
+   (0x10, 0x10, 0x10, 0x10, 0x10, "s_sendmsg"),
+   (0x11, 0x11, 0x11, 0x11, 0x11, "s_sendmsghalt"),
+   (0x12, 0x12, 0x12, 0x12, 0x12, "s_trap"),
+   (0x13, 0x13, 0x13, 0x13, 0x13, "s_icache_inv"),
+   (0x14, 0x14, 0x14, 0x14, 0x14, "s_incperflevel"),
+   (0x15, 0x15, 0x15, 0x15, 0x15, "s_decperflevel"),
+   (0x16, 0x16, 0x16, 0x16, 0x16, "s_ttracedata"),
+   (  -1, 0x17, 0x17, 0x17, 0x17, "s_cbranch_cdbgsys"),
+   (  -1, 0x18, 0x18, 0x18, 0x18, "s_cbranch_cdbguser"),
+   (  -1, 0x19, 0x19, 0x19, 0x19, "s_cbranch_cdbgsys_or_user"),
+   (  -1, 0x1a, 0x1a, 0x1a, 0x1a, "s_cbranch_cdbgsys_and_user"),
+   (  -1,   -1, 0x1b, 0x1b, 0x1b, "s_endpgm_saved"),
+   (  -1,   -1, 0x1c, 0x1c,   -1, "s_set_gpr_idx_off"),
+   (  -1,   -1, 0x1d, 0x1d,   -1, "s_set_gpr_idx_mode"),
+   (  -1,   -1,   -1, 0x1e, 0x1e, "s_endpgm_ordered_ps_done"),
+   (  -1,   -1,   -1,   -1, 0x1f, "s_code_end"),
+   (  -1,   -1,   -1,   -1, 0x20, "s_inst_prefetch"),
+   (  -1,   -1,   -1,   -1, 0x21, "s_clause"),
+   (  -1,   -1,   -1,   -1, 0x22, "s_wait_idle"),
+   (  -1,   -1,   -1,   -1, 0x23, "s_waitcnt_depctr"),
+   (  -1,   -1,   -1,   -1, 0x24, "s_round_mode"),
+   (  -1,   -1,   -1,   -1, 0x25, "s_denorm_mode"),
+   (  -1,   -1,   -1,   -1, 0x26, "s_ttracedata_imm"),
 }
-for code, name in SOPP:
-   opcode(name, code, Format.SOPP)
+for (gfx6, gfx7, gfx8, gfx9, gfx10, name) in SOPP:
+   opcode(name, gfx9, Format.SOPP)
 
 
 # SMEM instructions: sbase input (2 sgpr), potentially 2 offset inputs, 1 sdata input/output
