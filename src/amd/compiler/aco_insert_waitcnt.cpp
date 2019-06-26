@@ -478,7 +478,8 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
 
 // TODO: introduce more fine-grained counters to differenciate
 // the types of memory operations we want to wait for
-uint16_t emit_memory_barrier(Instruction* instr, wait_ctx& ctx) {
+Instruction* emit_memory_barrier(Instruction* instr, wait_ctx& ctx)
+{
    uint16_t vm_cnt, lgkm_cnt;
    switch (instr->opcode) {
       case aco_opcode::p_memory_barrier_all:
@@ -486,7 +487,7 @@ uint16_t emit_memory_barrier(Instruction* instr, wait_ctx& ctx) {
          lgkm_cnt = ctx.lgkm_cnt ? 0 : -1;
          if (ctx.vm_cnt || ctx.lgkm_cnt) {
             reset_counters(ctx, vm_type | lgkm_type);
-            return create_waitcnt_imm(vm_cnt, -1, lgkm_cnt);
+            return create_waitcnt(ctx, create_waitcnt_imm(vm_cnt, -1, lgkm_cnt));
          }
          break;
       case aco_opcode::p_memory_barrier_atomic:
@@ -494,19 +495,19 @@ uint16_t emit_memory_barrier(Instruction* instr, wait_ctx& ctx) {
       case aco_opcode::p_memory_barrier_image:
          if (ctx.vm_cnt) {
             reset_counters(ctx, vm_type);
-            return create_waitcnt_imm(0, -1, -1);
+            return create_waitcnt(ctx, create_waitcnt_imm(0, -1, -1));
          }
          break;
       case aco_opcode::p_memory_barrier_shared:
          if (ctx.lgkm_cnt) {
             reset_counters(ctx, lgkm_type);
-            return create_waitcnt_imm(-1, -1, 0);
+            return create_waitcnt(ctx, create_waitcnt_imm(-1, -1, 0));
          }
          break;
       default:
          unreachable("emit_memory_barrier() should only be called with PSEUDO_BARRIER instructions.");
    }
-   return -1;
+   return nullptr;
 }
 
 Instruction* kill(Instruction* instr, wait_ctx& ctx)
@@ -515,20 +516,14 @@ Instruction* kill(Instruction* instr, wait_ctx& ctx)
       return nullptr;
 
    uint16_t imm = 0xFFFF;
-   if (ctx.exp_cnt && writes_exec(instr, ctx))
-   {
+   if (ctx.exp_cnt && writes_exec(instr, ctx)) {
       reset_counters(ctx, exp_type);
       imm = create_waitcnt_imm(-1, 0, -1);
    }
-   if (ctx.exp_cnt || ctx.vm_cnt || ctx.lgkm_cnt)
-   {
-      if (instr->format == Format::PSEUDO_BARRIER) {
-         imm &= emit_memory_barrier(instr, ctx);
-      } else {
-         imm &= uses_gpr(instr, ctx);
-         imm &= writes_vgpr(instr, ctx);
-         imm &= writes_sgpr(instr, ctx);
-      }
+   if (ctx.exp_cnt || ctx.vm_cnt || ctx.lgkm_cnt) {
+      imm &= uses_gpr(instr, ctx);
+      imm &= writes_vgpr(instr, ctx);
+      imm &= writes_sgpr(instr, ctx);
    }
    if (imm != 0xFFFF)
       return create_waitcnt(ctx, imm);
@@ -659,9 +654,16 @@ bool handle_block(Program *program, Block& block, wait_ctx& ctx)
 {
    bool has_gen = false;
    std::vector<aco_ptr<Instruction>> new_instructions;
-   for(auto& instr : block.instructions)
-   {
+
+   for(aco_ptr<Instruction>& instr : block.instructions) {
       Instruction* wait_instr;
+
+      if (instr->format == Format::PSEUDO_BARRIER) {
+         if ((wait_instr = emit_memory_barrier(instr.get(), ctx)))
+            new_instructions.emplace_back(wait_instr);
+         continue;
+      }
+
       if ((wait_instr = kill(instr.get(), ctx)))
          new_instructions.emplace_back(aco_ptr<Instruction>(wait_instr));
 
