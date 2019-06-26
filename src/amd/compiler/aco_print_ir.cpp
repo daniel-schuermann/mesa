@@ -156,7 +156,7 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
       case aco_opcode::s_barrier:
       case aco_opcode::s_icache_inv:
       case aco_opcode::s_ttracedata:
-      case aco_opcode::s_set_grp_idx_off: {
+      case aco_opcode::s_set_gpr_idx_off: {
          break;
       }
       default: {
