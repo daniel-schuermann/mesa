@@ -674,6 +674,10 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       break;
    }
    case aco_opcode::v_mul_f32: /* omod */
+      /* TODO: try to move the negate/abs modifier to the consumer instead */
+      if (instr->isVOP3())
+         break;
+
       if (instr->getOperand(0).isConstant() && instr->getOperand(1).isTemp()) {
          if (instr->getOperand(0).constantValue() == 0x40000000) { /* 2.0 */
             ctx.info[instr->getOperand(1).tempId()].set_omod2();
