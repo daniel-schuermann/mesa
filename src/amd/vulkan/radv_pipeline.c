@@ -184,7 +184,7 @@ static uint32_t get_hash_flags(struct radv_device *device)
 		hash_flags |= RADV_HASH_SHADER_PS_WAVE32;
 	if (device->physical_device->ge_wave_size == 32)
 		hash_flags |= RADV_HASH_SHADER_GE_WAVE32;
-	if (device->instance->perftest_flags & RADV_PERFTEST_ACO)
+	if (device->physical_device->use_aco)
 		hash_flags |= RADV_HASH_SHADER_ACO;
 	return hash_flags;
 }
