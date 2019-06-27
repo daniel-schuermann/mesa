@@ -90,36 +90,36 @@ radv_get_device_name(enum radeon_family family, char *name, size_t name_len, boo
 	const char *chip_string;
 
 	switch (family) {
-	case CHIP_TAHITI: chip_string = "AMD RADV TAHITI"; break;
-	case CHIP_PITCAIRN: chip_string = "AMD RADV PITCAIRN"; break;
-	case CHIP_VERDE: chip_string = "AMD RADV CAPE VERDE"; break;
-	case CHIP_OLAND: chip_string = "AMD RADV OLAND"; break;
-	case CHIP_HAINAN: chip_string = "AMD RADV HAINAN"; break;
-	case CHIP_BONAIRE: chip_string = "AMD RADV BONAIRE"; break;
-	case CHIP_KAVERI: chip_string = "AMD RADV KAVERI"; break;
-	case CHIP_KABINI: chip_string = "AMD RADV KABINI"; break;
-	case CHIP_HAWAII: chip_string = "AMD RADV HAWAII"; break;
-	case CHIP_TONGA: chip_string = "AMD RADV TONGA"; break;
-	case CHIP_ICELAND: chip_string = "AMD RADV ICELAND"; break;
-	case CHIP_CARRIZO: chip_string = "AMD RADV CARRIZO"; break;
-	case CHIP_FIJI: chip_string = "AMD RADV FIJI"; break;
-	case CHIP_POLARIS10: chip_string = "AMD RADV POLARIS10"; break;
-	case CHIP_POLARIS11: chip_string = "AMD RADV POLARIS11"; break;
-	case CHIP_POLARIS12: chip_string = "AMD RADV POLARIS12"; break;
-	case CHIP_STONEY: chip_string = "AMD RADV STONEY"; break;
-	case CHIP_VEGAM: chip_string = "AMD RADV VEGA M"; break;
-	case CHIP_VEGA10: chip_string = "AMD RADV VEGA10"; break;
-	case CHIP_VEGA12: chip_string = "AMD RADV VEGA12"; break;
-	case CHIP_VEGA20: chip_string = "AMD RADV VEGA20"; break;
-	case CHIP_RAVEN: chip_string = "AMD RADV RAVEN"; break;
-	case CHIP_RAVEN2: chip_string = "AMD RADV RAVEN2"; break;
-	case CHIP_NAVI10: chip_string = "AMD RADV NAVI10"; break;
-	case CHIP_NAVI12: chip_string = "AMD RADV NAVI12"; break;
-	case CHIP_NAVI14: chip_string = "AMD RADV NAVI14"; break;
-	default: chip_string = "AMD RADV unknown"; break;
+	case CHIP_TAHITI: chip_string = "TAHITI"; break;
+	case CHIP_PITCAIRN: chip_string = "PITCAIRN"; break;
+	case CHIP_VERDE: chip_string = "CAPE VERDE"; break;
+	case CHIP_OLAND: chip_string = "OLAND"; break;
+	case CHIP_HAINAN: chip_string = "HAINAN"; break;
+	case CHIP_BONAIRE: chip_string = "BONAIRE"; break;
+	case CHIP_KAVERI: chip_string = "KAVERI"; break;
+	case CHIP_KABINI: chip_string = "KABINI"; break;
+	case CHIP_HAWAII: chip_string = "HAWAII"; break;
+	case CHIP_TONGA: chip_string = "TONGA"; break;
+	case CHIP_ICELAND: chip_string = "ICELAND"; break;
+	case CHIP_CARRIZO: chip_string = "CARRIZO"; break;
+	case CHIP_FIJI: chip_string = "FIJI"; break;
+	case CHIP_POLARIS10: chip_string = "POLARIS10"; break;
+	case CHIP_POLARIS11: chip_string = "POLARIS11"; break;
+	case CHIP_POLARIS12: chip_string = "POLARIS12"; break;
+	case CHIP_STONEY: chip_string = "STONEY"; break;
+	case CHIP_VEGAM: chip_string = "VEGA M"; break;
+	case CHIP_VEGA10: chip_string = "VEGA10"; break;
+	case CHIP_VEGA12: chip_string = "VEGA12"; break;
+	case CHIP_VEGA20: chip_string = "VEGA20"; break;
+	case CHIP_RAVEN: chip_string = "RAVEN"; break;
+	case CHIP_RAVEN2: chip_string = "RAVEN2"; break;
+	case CHIP_NAVI10: chip_string = "NAVI10"; break;
+	case CHIP_NAVI12: chip_string = "NAVI12"; break;
+	case CHIP_NAVI14: chip_string = "NAVI14"; break;
+	default: chip_string = "unknown"; break;
 	}
 
-	snprintf(name, name_len, "%s (%sLLVM " MESA_LLVM_VERSION_STRING ")", chip_string, aco ? "ACO and " : "");
+	snprintf(name, name_len, "AMD RADV%s %s (LLVM " MESA_LLVM_VERSION_STRING ")", aco ? "/ACO" : "", chip_string);
 }
 
 static uint64_t
