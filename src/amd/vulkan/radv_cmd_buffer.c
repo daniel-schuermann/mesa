@@ -2779,7 +2779,7 @@ radv_dst_access_flush(struct radv_cmd_buffer *cmd_buffer,
 			break;
 		case VK_ACCESS_SHADER_READ_BIT:
 			flush_bits |= RADV_CMD_FLAG_INV_VCACHE;
-			if (cmd_buffer->device->instance->perftest_flags & RADV_PERFTEST_ACO)
+			if (cmd_buffer->device->physical_device->use_aco)
 				flush_bits |= RADV_CMD_FLAG_INV_SCACHE;
 
 			if (!image_is_coherent)
