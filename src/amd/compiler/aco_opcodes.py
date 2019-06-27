@@ -740,44 +740,83 @@ for (gfx6, gfx7, gfx8, gfx9, gfx10, name, in_mod, out_mod) in VOP1:
 # VOPC instructions:
 
 VOPC_CLASS = {
-   (16, "v_cmp_class_f32"),
-   (17, "v_cmpx_class_f32"),
-   (18, "v_cmp_class_f64"),
-   (19, "v_cmpx_class_f64"),
-   (20, "v_cmp_class_f16"),
-   (21, "v_cmpx_class_f16"),
+   (0x88, 0x88, 0x10, 0x10, 0x88, "v_cmp_class_f32"),
+   (  -1,   -1, 0x14, 0x14, 0x8f, "v_cmp_class_f16"),
+   (0x98, 0x98, 0x11, 0x11, 0x98, "v_cmpx_class_f32"),
+   (  -1,   -1, 0x15, 0x15, 0x9f, "v_cmpx_class_f16"),
+   (0xa8, 0xa8, 0x12, 0x12, 0xa8, "v_cmp_class_f64"),
+   (0xb8, 0xb8, 0x13, 0x13, 0xb8, "v_cmpx_class_f64"),
 }
-for code, name in VOPC_CLASS:
-    opcode(name, code, Format.VOPC, True, False)
-
-PREFIX = ["v_cmp_", "v_cmpx_"]
+for (gfx6, gfx7, gfx8, gfx9, gfx10, name) in VOPC_CLASS:
+    opcode(name, gfx9, Format.VOPC, True, False)
 
 COMPF = ["f", "lt", "eq", "le", "gt", "lg", "ge", "o", "u", "nge", "nlg", "ngt", "nle", "neq", "nlt", "tru"]
-SUFFIX_F = ["_f16", "_f32", "_f64"]
 
-code = 32
-for post in SUFFIX_F:
-   for pre in PREFIX:
-      for comp in COMPF:
-         opcode(pre+comp+post, code, Format.VOPC, True, False)
-         VOPC_GFX6[code] = max(0, code - 0x40)
-         code = code + 1
-assert(code == 128)
+for i in range(8):
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, 0x20+i, 0x20+i, 0xc8+i, "v_cmp_"+COMPF[i]+"_f16")
+   opcode(name, gfx9, Format.VOPC, True, False)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, 0x30+i, 0x30+i, 0xd8+i, "v_cmpx_"+COMPF[i]+"_f16")
+   opcode(name, gfx9, Format.VOPC, True, False)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, 0x28+i, 0x28+i, 0xe8+i, "v_cmp_"+COMPF[i+8]+"_f16")
+   opcode(name, gfx9, Format.VOPC, True, False)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, 0x38+i, 0x38+i, 0xf8+i, "v_cmpx_"+COMPF[i+8]+"_f16")
+   opcode(name, gfx9, Format.VOPC, True, False)
+
+for i in range(16):
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0x00+i, 0x00+i, 0x40+i, 0x40+i, 0x00+i, "v_cmp_"+COMPF[i]+"_f32")
+   opcode(name, gfx9, Format.VOPC, True, False)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0x10+i, 0x10+i, 0x50+i, 0x50+i, 0x10+i, "v_cmpx_"+COMPF[i]+"_f32")
+   opcode(name, gfx9, Format.VOPC, True, False)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0x20+i, 0x20+i, 0x60+i, 0x60+i, 0x20+i, "v_cmp_"+COMPF[i]+"_f64")
+   opcode(name, gfx9, Format.VOPC, True, False)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0x30+i, 0x30+i, 0x70+i, 0x70+i, 0x30+i, "v_cmpx_"+COMPF[i]+"_f64")
+   opcode(name, gfx9, Format.VOPC, True, False)
+   # GFX_6_7
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0x40+i, 0x40+i, -1, -1, -1, "v_cmps_"+COMPF[i]+"_f32")
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0x50+i, 0x50+i, -1, -1, -1, "v_cmpsx_"+COMPF[i]+"_f32")
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0x60+i, 0x60+i, -1, -1, -1, "v_cmps_"+COMPF[i]+"_f64")
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0x70+i, 0x70+i, -1, -1, -1, "v_cmpsx_"+COMPF[i]+"_f64")
 
 COMPI = ["f", "lt", "eq", "le", "gt", "lg", "ge", "tru"]
-SIGNED = ["_i", "_u"]
-BITSIZE = ["16", "32", "64"]
 
-code = 160
-for bits in BITSIZE:
-   for pre in PREFIX:
-      for s in SIGNED:
-         for cmp in COMPI:
-            opcode(pre+cmp+s+bits, code, Format.VOPC)
-            if (bits != "16"):
-                VOPC_GFX6[code] = code - (0x40 if s == "_i" else 0x8)
-            code = code + 1
-assert(code == 256)
+# GFX_8_9
+for i in [0,7]: # only 0 and 7
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, 0xa0+i, 0xa0+i, -1, "v_cmp_"+COMPI[i]+"_i16")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, 0xb0+i, 0xb0+i, -1, "v_cmpx_"+COMPI[i]+"_i16")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, 0xa8+i, 0xa8+i, -1, "v_cmp_"+COMPI[i]+"_u16")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, 0xb8+i, 0xb8+i, -1, "v_cmpx_"+COMPI[i]+"_u16")
+   opcode(name, gfx9, Format.VOPC)
+
+for i in range(1, 7): # [1..6]
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, 0xa0+i, 0xa0+i, 0x88+i, "v_cmp_"+COMPI[i]+"_i16")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, 0xb0+i, 0xb0+i, 0x98+i, "v_cmpx_"+COMPI[i]+"_i16")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, 0xa8+i, 0xa8+i, 0xa8+i, "v_cmp_"+COMPI[i]+"_u16")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, 0xb8+i, 0xb8+i, 0xb8+i, "v_cmpx_"+COMPI[i]+"_u16")
+   opcode(name, gfx9, Format.VOPC)
+
+for i in range(8):
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0x80+i, 0x80+i, 0xc0+i, 0xc0+i, 0x80+i, "v_cmp_"+COMPI[i]+"_i32")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0x90+i, 0x90+i, 0xd0+i, 0xd0+i, 0x90+i, "v_cmpx_"+COMPI[i]+"_i32")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0xa0+i, 0xa0+i, 0xe0+i, 0xe0+i, 0xa0+i, "v_cmp_"+COMPI[i]+"_i64")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0xb0+i, 0xb0+i, 0xf0+i, 0xf0+i, 0xb0+i, "v_cmpx_"+COMPI[i]+"_i64")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0xc0+i, 0xc0+i, 0xc8+i, 0xc8+i, 0xc0+i, "v_cmp_"+COMPI[i]+"_u32")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0xd0+i, 0xd0+i, 0xd8+i, 0xd8+i, 0xd0+i, "v_cmpx_"+COMPI[i]+"_u32")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0xe0+i, 0xe0+i, 0xe8+i, 0xe8+i, 0xe0+i, "v_cmp_"+COMPI[i]+"_u64")
+   opcode(name, gfx9, Format.VOPC)
+   (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (0xf0+i, 0xf0+i, 0xf8+i, 0xf8+i, 0xf0+i, "v_cmpx_"+COMPI[i]+"_u64")
+   opcode(name, gfx9, Format.VOPC)
 
 
 # VOPP instructions: packed 16bit instructions - 1 or 2 inputs and 1 output
