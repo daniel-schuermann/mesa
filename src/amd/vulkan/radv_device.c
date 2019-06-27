@@ -314,8 +314,14 @@ radv_physical_device_init(struct radv_physical_device *device,
 
 	radv_handle_env_var_force_family(device);
 
-	radv_get_device_name(device->rad_info.family, device->name, sizeof(device->name),
-			     instance->perftest_flags & RADV_PERFTEST_ACO);
+	device->use_aco = instance->perftest_flags & RADV_PERFTEST_ACO;
+	if ((device->rad_info.chip_class < GFX8 ||
+	     device->rad_info.chip_class > GFX9) && device->use_aco) {
+		fprintf(stderr, "WARNING: disabling ACO on unsupported GPUs.\n");
+		device->use_aco = false;
+	}
+
+	radv_get_device_name(device->rad_info.family, device->name, sizeof(device->name), device->use_aco);
 
 	if (radv_device_get_cache_uuid(device->rad_info.family, device->cache_uuid)) {
 		device->ws->destroy(device->ws);
@@ -328,7 +334,7 @@ radv_physical_device_init(struct radv_physical_device *device,
 	uint64_t shader_env_flags =
 		(device->instance->perftest_flags & RADV_PERFTEST_SISCHED ? 0x1 : 0) |
 		(device->instance->debug_flags & RADV_DEBUG_UNSAFE_MATH ? 0x2 : 0) |
-		(device->instance->perftest_flags & RADV_PERFTEST_ACO ? 0x4 : 0);
+		(device->use_aco ? 0x4 : 0);
 
 	/* The gpu id is already embedded in the uuid so we just pass "radv"
 	 * when creating the cache.
@@ -384,7 +390,6 @@ radv_physical_device_init(struct radv_physical_device *device,
 					  device->rad_info.chip_class >= GFX10;
 
 	device->use_shader_ballot = device->instance->perftest_flags & RADV_PERFTEST_SHADER_BALLOT;
-	device->use_aco = device->instance->perftest_flags & RADV_PERFTEST_ACO;
 
 	/* Determine the number of threads per wave for all stages. */
 	device->cs_wave_size = 64;
