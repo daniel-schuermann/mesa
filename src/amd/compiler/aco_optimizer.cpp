@@ -614,7 +614,9 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          }
          assert(k == num_ops);
       }
-      if (instr->getDefinition(0).getTemp().size() == instr->num_operands)
+      if (instr->num_operands == 1 && instr->getOperand(0).isTemp())
+         ctx.info[instr->getDefinition(0).tempId()].set_temp(instr->getOperand(0).getTemp());
+      else if (instr->getDefinition(0).getTemp().size() == instr->num_operands)
          ctx.info[instr->getDefinition(0).tempId()].set_vec(instr.get());
       break;
    }
