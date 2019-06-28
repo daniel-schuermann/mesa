@@ -73,13 +73,13 @@ enum Label {
    label_clamp_success = 1 << 13,
    label_undefined = 1 << 14,
    label_vcc = 1 << 15,
-   label_base_offset = 1 << 16,
-   label_b2f = 1 << 17,
+   label_b2f = 1 << 16,
+   label_add_sub = 1 << 17,
 };
 
-static constexpr uint32_t instr_labels = label_vec | label_mul | label_mad | label_omod_success | label_clamp_success;
-static constexpr uint32_t temp_labels = label_abs | label_neg | label_temp | label_vcc | label_base_offset | label_b2f;
-static constexpr uint32_t val_labels = label_constant | label_literal | label_mad | label_base_offset;
+static constexpr uint32_t instr_labels = label_vec | label_mul | label_mad | label_omod_success | label_clamp_success | label_add_sub;
+static constexpr uint32_t temp_labels = label_abs | label_neg | label_temp | label_vcc | label_b2f;
+static constexpr uint32_t val_labels = label_constant | label_literal | label_mad;
 
 struct ssa_info {
    uint32_t val;
@@ -291,18 +291,6 @@ struct ssa_info {
       return is_constant() || is_literal();
    }
 
-   void set_base_offset(Temp base, uint32_t offset)
-   {
-      add_label(label_base_offset);
-      temp = base;
-      val = offset;
-   }
-
-   bool is_base_offset()
-   {
-      return label & label_base_offset;
-   }
-
    void set_b2f(Temp val)
    {
       add_label(label_b2f);
@@ -312,6 +300,17 @@ struct ssa_info {
    bool is_b2f()
    {
       return label & label_b2f;
+   }
+
+   void set_add_sub(Instruction *add_sub_instr)
+   {
+      add_label(label_add_sub);
+      instr = add_sub_instr;
+   }
+
+   bool is_add_sub()
+   {
+      return label & label_add_sub;
    }
 
 };
@@ -406,6 +405,52 @@ bool can_accept_constant(aco_ptr<Instruction>& instr, unsigned operand)
       }
       return true;
    }
+}
+
+bool parse_base_offset(opt_ctx &ctx, Instruction* instr, unsigned op_index, Temp *base, uint32_t *offset)
+{
+   Operand op = instr->getOperand(op_index);
+
+   if (!op.isTemp())
+      return false;
+   Temp tmp = op.getTemp();
+   if (!ctx.info[tmp.id()].is_add_sub())
+      return false;
+
+   Instruction *add_instr = ctx.info[tmp.id()].instr;
+
+   switch (add_instr->opcode) {
+   case aco_opcode::v_add_u32:
+   case aco_opcode::v_add_co_u32:
+   case aco_opcode::s_add_i32:
+   case aco_opcode::s_add_u32:
+      break;
+   default:
+      return false;
+   }
+
+   for (unsigned i = 0; i < 2; i++) {
+      if (add_instr->getOperand(i).isConstant()) {
+         *offset = add_instr->getOperand(i).constantValue();
+      } else if (add_instr->getOperand(i).isTemp() &&
+                 ctx.info[add_instr->getOperand(i).tempId()].is_constant_or_literal()) {
+         *offset = ctx.info[add_instr->getOperand(i).tempId()].val;
+      } else {
+         continue;
+      }
+      if (!add_instr->getOperand(!i).isTemp())
+         continue;
+
+      uint32_t offset2 = 0;
+      if (parse_base_offset(ctx, add_instr, !i, base, &offset2)) {
+         *offset += offset2;
+      } else {
+         *base = add_instr->getOperand(!i).getTemp();
+      }
+      return true;
+   }
+
+   return false;
 }
 
 void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
@@ -503,6 +548,8 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       else if (instr->format == Format::MUBUF) {
 
          MUBUF_instruction *mubuf = static_cast<MUBUF_instruction *>(instr.get());
+         Temp base;
+         uint32_t offset;
          if (mubuf->offen && i == 0 && info.is_constant_or_literal() && mubuf->offset + info.val < 4096) {
             assert(!mubuf->idxen);
             instr->getOperand(i) = Operand(v1);
@@ -513,14 +560,14 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             instr->getOperand(2) = Operand((uint32_t) 0);
             mubuf->offset += info.val;
             continue;
-         } else if (mubuf->offen && i == 0 && info.is_base_offset() && info.temp.regClass() == v1 && mubuf->offset + info.val < 4096) {
+         } else if (mubuf->offen && i == 0 && parse_base_offset(ctx, instr.get(), i, &base, &offset) && base.regClass() == v1 && mubuf->offset + offset < 4096) {
             assert(!mubuf->idxen);
-            instr->getOperand(i).setTemp(info.temp);
-            mubuf->offset += info.val;
+            instr->getOperand(i).setTemp(base);
+            mubuf->offset += offset;
             continue;
-         } else if (i == 2 && info.is_base_offset() && info.temp.regClass() == s1 && mubuf->offset + info.val < 4096) {
-            instr->getOperand(i).setTemp(info.temp);
-            mubuf->offset += info.val;
+         } else if (i == 2 && parse_base_offset(ctx, instr.get(), i, &base, &offset) && base.regClass() == s1 && mubuf->offset + info.val < 4096) {
+            instr->getOperand(i).setTemp(base);
+            mubuf->offset += offset;
             continue;
          }
       }
@@ -529,9 +576,9 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       else if (instr->format == Format::DS) {
 
          DS_instruction *ds = static_cast<DS_instruction *>(instr.get());
-         if (i == 0 && info.is_base_offset() && info.temp.regClass() == instr->getOperand(i).regClass()) {
-            Temp base = info.temp;
-            uint32_t offset = info.val;
+         Temp base;
+         uint32_t offset;
+         if (i == 0 && parse_base_offset(ctx, instr.get(), i, &base, &offset) && base.regClass() == instr->getOperand(i).regClass()) {
             if (instr->opcode == aco_opcode::ds_write2_b32 || instr->opcode == aco_opcode::ds_read2_b32) {
                if (offset % 4 == 0 &&
                    ds->offset0 + (offset >> 2) <= 255 &&
@@ -553,10 +600,12 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       else if (instr->format == Format::SMEM) {
 
          SMEM_instruction *smem = static_cast<SMEM_instruction *>(instr.get());
+         Temp base;
+         uint32_t offset;
          if (i == 1 && info.is_constant_or_literal() && info.val <= 0xFFFFF) {
             instr->getOperand(i) = Operand(info.val);
             continue;
-         } else if (i == 1 && info.is_base_offset() && info.temp.regClass() == s1 && info.val <= 0xFFFFF && ctx.program->chip_class >= GFX9) {
+         } else if (i == 1 && parse_base_offset(ctx, instr.get(), i, &base, &offset) && base.regClass() == s1 && offset <= 0xFFFFF && ctx.program->chip_class >= GFX9) {
             bool soe = smem->num_operands >= (smem->num_definitions ? 3 : 4);
             if (soe &&
                 (!ctx.info[smem->getOperand(smem->num_operands - 1).tempId()].is_constant_or_literal() ||
@@ -564,15 +613,15 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
                continue;
             }
             if (soe) {
-               smem->getOperand(1) = Operand(info.val);
-               smem->getOperand(smem->num_operands - 1) = Operand(info.temp);
+               smem->getOperand(1) = Operand(offset);
+               smem->getOperand(smem->num_operands - 1) = Operand(base);
             } else {
                SMEM_instruction *new_instr = create_instruction<SMEM_instruction>(smem->opcode, Format::SMEM, smem->num_operands + 1, smem->num_definitions);
                new_instr->getOperand(0) = smem->getOperand(0);
-               new_instr->getOperand(1) = Operand(info.val);
+               new_instr->getOperand(1) = Operand(offset);
                if (!smem->num_definitions)
                   new_instr->getOperand(2) = smem->getOperand(2);
-               new_instr->getOperand(new_instr->num_operands - 1) = Operand(info.temp);
+               new_instr->getOperand(new_instr->num_operands - 1) = Operand(base);
                if (smem->num_definitions)
                   new_instr->getDefinition(0) = smem->getDefinition(0);
                instr.reset(new_instr);
@@ -813,26 +862,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    case aco_opcode::v_add_co_u32:
    case aco_opcode::s_add_i32:
    case aco_opcode::s_add_u32:
-      for (unsigned i = 0; i < 2; i++) {
-         Operand base = instr->getOperand(i);
-         Operand offset_op = instr->getOperand(!i);
-         if (!base.isTemp() || (!offset_op.isConstant() && !offset_op.isTemp()))
-            continue;
-         if (offset_op.isTemp() && !ctx.info[offset_op.tempId()].is_constant_or_literal())
-            continue;
-
-         uint32_t offset = offset_op.isTemp() ? ctx.info[offset_op.tempId()].val : offset_op.constantValue();
-         if (ctx.info[base.tempId()].is_base_offset()) {
-            ssa_info *prev = &ctx.info[base.tempId()];
-            ctx.info[instr->getDefinition(0).tempId()].set_base_offset(prev->temp, prev->val + offset);
-
-            instr->getOperand(0) = Operand(prev->val + offset);
-            instr->getOperand(1) = Operand(prev->temp);
-         } else {
-            ctx.info[instr->getDefinition(0).tempId()].set_base_offset(base.getTemp(), offset);
-         }
-         break;
-      }
+      ctx.info[instr->getDefinition(0).tempId()].set_add_sub(instr.get());
       break;
    default:
       break;
