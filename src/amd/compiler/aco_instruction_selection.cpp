@@ -4083,10 +4083,18 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
       }
       assert(offset <= max_offset); /* bytes_read shouldn't be large enough for this to happen */
 
+      Temp res;
       if (op == aco_opcode::ds_read2_b32)
-         result[result_size++] = bld.ds(op, bld.def(RegClass(vgpr, size)), address_offset, m, offset >> 2, (offset >> 2) + 1);
+         res = bld.ds(op, bld.def(RegClass(vgpr, size)), address_offset, m, offset >> 2, (offset >> 2) + 1);
       else
-         result[result_size++] = bld.ds(op, bld.def(RegClass(vgpr, size)), address_offset, m, offset);
+         res = bld.ds(op, bld.def(RegClass(vgpr, size)), address_offset, m, offset);
+
+      aco_ptr<Pseudo_instruction> split{create_instruction<Pseudo_instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, res.size())};
+      split->getOperand(0) = Operand(res);
+      for (unsigned i = 0; i < res.size(); i++)
+         split->getDefinition(i) = Definition(result[result_size++] = bld.tmp(v1));
+      ctx->block->instructions.emplace_back(std::move(split));
+
       bytes_read += size * 4;
    }
 
