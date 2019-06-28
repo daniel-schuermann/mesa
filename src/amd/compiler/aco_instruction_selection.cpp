@@ -1573,6 +1573,116 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_f2i64: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      if (instr->src[0].src.ssa->bit_size == 32 && dst.type() == vgpr) {
+         Temp exponent = bld.vop1(aco_opcode::v_frexp_exp_i32_f32, bld.def(v1), src);
+         exponent = bld.vop3(aco_opcode::v_med3_i32, bld.def(v1), Operand(0x0u), exponent, Operand(64u));
+         Temp mantissa = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(0x7fffffu), src);
+         Temp sign = bld.vop2(aco_opcode::v_ashrrev_i32, bld.def(v1), Operand(31u), src);
+         mantissa = bld.vop2(aco_opcode::v_or_b32, bld.def(v1), Operand(0x800000u), mantissa);
+         mantissa = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(7u), mantissa);
+         mantissa = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2), Operand(0u), mantissa);
+         Temp borrow = emit_v_sub32(ctx, exponent, Operand(63u), Operand(exponent), true);
+         mantissa = bld.vop3(aco_opcode::v_lshrrev_b64, bld.def(v2), exponent, mantissa);
+         Temp saturate = bld.vop1(aco_opcode::v_bfrev_b32, bld.def(v1), Operand(0xfffffffeu));
+         emit_split_vector(ctx, mantissa, 2);
+         Temp lower = emit_extract_vector(ctx, mantissa, 0, v1);
+         Temp upper = emit_extract_vector(ctx, mantissa, 1, v1);
+         lower = bld.vop2_e64(aco_opcode::v_cndmask_b32, bld.def(v1), lower, Operand(0xffffffffu), borrow);
+         upper = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), upper, saturate, borrow);
+         lower = bld.vop2(aco_opcode::v_xor_b32, bld.def(v1), sign, lower);
+         upper = bld.vop2(aco_opcode::v_xor_b32, bld.def(v1), sign, upper);
+         borrow = emit_v_sub32(ctx, lower, Operand(lower), Operand(sign), true);
+         emit_v_sub32(ctx, upper, Operand(upper), Operand(sign), false, Operand(borrow));
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), lower, upper);
+
+      } else if (instr->src[0].src.ssa->bit_size == 32 && dst.type() == sgpr) {
+         if (src.type() == vgpr)
+            src = bld.as_uniform(src);
+         Temp exponent = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), bld.def(s1, scc), src, Operand(0x80017u));
+         exponent = bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.def(s1, scc), exponent, Operand(126u));
+         exponent = bld.sop2(aco_opcode::s_max_u32, bld.def(s1), bld.def(s1, scc), Operand(0u), exponent);
+         exponent = bld.sop2(aco_opcode::s_min_u32, bld.def(s1), bld.def(s1, scc), Operand(64u), exponent);
+         Temp mantissa = bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), Operand(0x7fffffu), src);
+         Temp sign = bld.sop2(aco_opcode::s_ashr_i32, bld.def(s1), bld.def(s1, scc), src, Operand(31u));
+         mantissa = bld.sop2(aco_opcode::s_or_b32, bld.def(s1), bld.def(s1, scc), Operand(0x800000u), mantissa);
+         mantissa = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), mantissa, Operand(7u));
+         mantissa = bld.pseudo(aco_opcode::p_create_vector, bld.def(s2), Operand(0u), mantissa);
+         exponent = bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.def(s1, scc), Operand(63u), exponent);
+         mantissa = bld.sop2(aco_opcode::s_lshr_b64, bld.def(s2), bld.def(s1, scc), mantissa, exponent);
+         Temp cond = bld.sopc(aco_opcode::s_cmp_eq_u32, bld.def(s1, scc), exponent, Operand(0xffffffffu)); // exp >= 64
+         Temp saturate = bld.sop1(aco_opcode::s_brev_b64, bld.def(s2), Operand(0xfffffffeu));
+         mantissa = bld.sop2(aco_opcode::s_cselect_b64, bld.def(s2), saturate, mantissa, cond);
+         emit_split_vector(ctx, mantissa, 2);
+         Temp lower = emit_extract_vector(ctx, mantissa, 0, s1);
+         Temp upper = emit_extract_vector(ctx, mantissa, 1, s1);
+         lower = bld.sop2(aco_opcode::s_xor_b32, bld.def(s1), bld.def(s1, scc), sign, lower);
+         upper = bld.sop2(aco_opcode::s_xor_b32, bld.def(s1), bld.def(s1, scc), sign, upper);
+         Temp borrow = bld.tmp(s1);
+         lower = bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.scc(Definition(borrow)), lower, sign);
+         upper = bld.sop2(aco_opcode::s_subb_u32, bld.def(s1), bld.def(s1, scc), upper, sign, borrow);
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), lower, upper);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_f2u64: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      if (instr->src[0].src.ssa->bit_size == 32 && dst.type() == vgpr) {
+         Temp exponent = bld.vop1(aco_opcode::v_frexp_exp_i32_f32, bld.def(v1), src);
+         Temp exponent_in_range = bld.vopc(aco_opcode::v_cmp_ge_i32, bld.hint_vcc(bld.def(s2)), Operand(64u), exponent);
+         exponent = bld.vop2(aco_opcode::v_max_i32, bld.def(v1), Operand(0x0u), exponent);
+         Temp mantissa = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(0x7fffffu), src);
+         mantissa = bld.vop2(aco_opcode::v_or_b32, bld.def(v1), Operand(0x800000u), mantissa);
+         Temp exponent_small = bld.tmp(v1);
+         emit_v_sub32(ctx, exponent_small, Operand(24u), Operand(exponent));
+         Temp small = bld.vop2(aco_opcode::v_lshrrev_b32, bld.def(v1), exponent_small, mantissa);
+         mantissa = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2), Operand(0u), mantissa);
+         Temp cond_small = emit_v_sub32(ctx, exponent, Operand(exponent), Operand(24u), true);
+         mantissa = bld.vop3(aco_opcode::v_lshlrev_b64, bld.def(v2), exponent, mantissa);
+         emit_split_vector(ctx, mantissa, 2);
+         Temp lower = emit_extract_vector(ctx, mantissa, 0, v1);
+         Temp upper = emit_extract_vector(ctx, mantissa, 1, v1);
+         lower = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), lower, small, cond_small);
+         upper = bld.vop2_e64(aco_opcode::v_cndmask_b32, bld.def(v1), upper, Operand(0u), cond_small);
+         lower = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), Operand(0xffffffffu), lower, exponent_in_range);
+         upper = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), Operand(0xffffffffu), upper, exponent_in_range);
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), lower, upper);
+
+      } else if (instr->src[0].src.ssa->bit_size == 32 && dst.type() == sgpr) {
+         if (src.type() == vgpr)
+            src = bld.as_uniform(src);
+         Temp exponent = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), bld.def(s1, scc), src, Operand(0x80017u));
+         exponent = bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.def(s1, scc), exponent, Operand(126u));
+         exponent = bld.sop2(aco_opcode::s_max_u32, bld.def(s1), bld.def(s1, scc), Operand(0u), exponent);
+         Temp mantissa = bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), Operand(0x7fffffu), src);
+         mantissa = bld.sop2(aco_opcode::s_or_b32, bld.def(s1), bld.def(s1, scc), Operand(0x800000u), mantissa);
+         Temp exponent_small = bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.def(s1, scc), Operand(24u), exponent);
+         Temp small = bld.sop2(aco_opcode::s_lshr_b32, bld.def(s1), bld.def(s1, scc), mantissa, exponent_small);
+         mantissa = bld.pseudo(aco_opcode::p_create_vector, bld.def(s2), Operand(0u), mantissa);
+         Temp exponent_large = bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.def(s1, scc), exponent, Operand(24u));
+         mantissa = bld.sop2(aco_opcode::s_lshl_b64, bld.def(s2), bld.def(s1, scc), mantissa, exponent_large);
+         Temp cond = bld.sopc(aco_opcode::s_cmp_ge_i32, bld.def(s1, scc), Operand(64u), exponent);
+         mantissa = bld.sop2(aco_opcode::s_cselect_b64, bld.def(s2), mantissa, Operand(0xffffffffu), cond);
+         emit_split_vector(ctx, mantissa, 2);
+         Temp lower = emit_extract_vector(ctx, mantissa, 0, s1);
+         Temp upper = emit_extract_vector(ctx, mantissa, 1, s1);
+         Temp cond_small = bld.sopc(aco_opcode::s_cmp_le_i32, bld.def(s1, scc), exponent, Operand(24u));
+         lower = bld.sop2(aco_opcode::s_cselect_b32, bld.def(s1), small, lower, cond_small);
+         upper = bld.sop2(aco_opcode::s_cselect_b32, bld.def(s1), Operand(0u), upper, cond_small);
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), lower, upper);
+
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_b2f32: {
       Temp src = get_alu_src(ctx, instr->src[0]);
       if (dst.regClass() == s1) {
