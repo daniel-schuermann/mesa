@@ -1532,17 +1532,6 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_i2i64: {
-      Temp src = get_alu_src(ctx, instr->src[0]);
-      if (src.size() == 1) {
-         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), src, Operand(0u));
-      } else {
-         fprintf(stderr, "Unimplemented NIR instr bit size: ");
-         nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
-      }
-      break;
-   }
    case nir_op_i2f32: {
       assert(dst.size() == 1);
       emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f32_i32, dst);
@@ -1697,6 +1686,18 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_i2i32: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      if (instr->src[0].src.ssa->bit_size == 64) {
+         /* we can actually just say dst = src, as it would map the lower register */
+         emit_extract_vector(ctx, src, 0, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_u2u32: {
       Temp src = get_alu_src(ctx, instr->src[0]);
       if (instr->src[0].src.ssa->bit_size == 16) {
@@ -1709,6 +1710,28 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       } else if (instr->src[0].src.ssa->bit_size == 64) {
          /* we can actually just say dst = src, as it would map the lower register */
          emit_extract_vector(ctx, src, 0, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_i2i64: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      if (instr->src[0].src.ssa->bit_size == 32) {
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), src, Operand(0u));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_u2u64: {
+      Temp src = get_alu_src(ctx, instr->src[0]);
+      if (instr->src[0].src.ssa->bit_size == 32) {
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), src, Operand(0u));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
