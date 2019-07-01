@@ -694,13 +694,6 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       Temp src = get_alu_src(ctx, instr->src[0]);
       if (dst.regClass() == v1) {
          emit_v_sub32(ctx, dst, Operand((uint32_t) 0), Operand(src));
-      } else if (dst.regClass() == v2) {
-         emit_split_vector(ctx, src, 2);
-         Temp lower = bld.tmp(v1);
-         Temp borrow = emit_v_sub32(ctx, lower, Operand((uint32_t) 0), Operand(emit_extract_vector(ctx, src, 0, v1)), true);
-         Temp upper = bld.tmp(v1);
-         emit_v_sub32(ctx, upper, Operand((uint32_t) 0), Operand(emit_extract_vector(ctx, src, 1, v1)), false, Operand(borrow));
-         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), lower, upper);
       } else if (dst.regClass() == s1) {
          bld.sop2(aco_opcode::s_mul_i32, Definition(dst), Operand((uint32_t) -1), src);
       } else {
@@ -758,24 +751,6 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          emit_vop2_instruction(ctx, instr, aco_opcode::v_max_i32, dst, true);
       } else if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_max_i32, dst, true);
-      } else if (dst.regClass() == v2) {
-         // TODO: if the result is only used for compares, we should lower it in NIR
-         Temp src0 = get_alu_src(ctx, instr->src[0]);
-         Temp src1 = get_alu_src(ctx, instr->src[1]);
-         assert(src0.size() == 2 && src1.size() == 2);
-         Temp cmp = {ctx->program->allocateId(), s2};
-         emit_vopc_instruction(ctx, instr, aco_opcode::v_cmp_lt_u64, cmp);
-         emit_split_vector(ctx, src0, 2);
-         emit_split_vector(ctx, src1, 2);
-         Temp dst0 = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1),
-                              emit_extract_vector(ctx, src0, 0, v1),
-                              emit_extract_vector(ctx, src1, 0, v1),
-                              cmp);
-         Temp dst1 = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1),
-                              emit_extract_vector(ctx, src0, 1, v1),
-                              emit_extract_vector(ctx, src1, 1, v1),
-                              cmp);
-         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), dst0, dst1);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
