@@ -102,6 +102,16 @@ lower_bcsel64(nir_builder *b, nir_ssa_def *cond, nir_ssa_def *x, nir_ssa_def *y)
 }
 
 static nir_ssa_def *
+emit_bcsel64(nir_builder *b, nir_ssa_def *cond, nir_ssa_def *x,
+             nir_ssa_def *y, nir_lower_int64_options options)
+{
+   if (options & nir_lower_mov64)
+      return lower_bcsel64(b, cond, x, y);
+   else
+      return nir_bcsel(b, cond, x, y);
+}
+
+static nir_ssa_def *
 lower_inot64(nir_builder *b, nir_ssa_def *x)
 {
    nir_ssa_def *x_lo = nir_unpack_64_2x32_split_x(b, x);
@@ -147,7 +157,51 @@ lower_ixor64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
 }
 
 static nir_ssa_def *
-lower_ishl64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
+lower_int64_compare(nir_builder *b, nir_op op, nir_ssa_def *x, nir_ssa_def *y)
+{
+   nir_ssa_def *x_lo = nir_unpack_64_2x32_split_x(b, x);
+   nir_ssa_def *x_hi = nir_unpack_64_2x32_split_y(b, x);
+   nir_ssa_def *y_lo = nir_unpack_64_2x32_split_x(b, y);
+   nir_ssa_def *y_hi = nir_unpack_64_2x32_split_y(b, y);
+
+   switch (op) {
+   case nir_op_ieq:
+      return nir_iand(b, nir_ieq(b, x_hi, y_hi), nir_ieq(b, x_lo, y_lo));
+   case nir_op_ine:
+      return nir_ior(b, nir_ine(b, x_hi, y_hi), nir_ine(b, x_lo, y_lo));
+   case nir_op_ult:
+      return nir_ior(b, nir_ult(b, x_hi, y_hi),
+                        nir_iand(b, nir_ieq(b, x_hi, y_hi),
+                                    nir_ult(b, x_lo, y_lo)));
+   case nir_op_ilt:
+      return nir_ior(b, nir_ilt(b, x_hi, y_hi),
+                        nir_iand(b, nir_ieq(b, x_hi, y_hi),
+                                    nir_ult(b, x_lo, y_lo)));
+      break;
+   case nir_op_uge:
+      /* Lower as !(x < y) in the hopes of better CSE */
+      return nir_inot(b, lower_int64_compare(b, nir_op_ult, x, y));
+   case nir_op_ige:
+      /* Lower as !(x < y) in the hopes of better CSE */
+      return nir_inot(b, lower_int64_compare(b, nir_op_ilt, x, y));
+   default:
+      unreachable("Invalid comparison");
+   }
+}
+
+static nir_ssa_def *
+emit_icmp64(nir_builder *b, nir_op op, nir_ssa_def *x, nir_ssa_def *y,
+            nir_lower_int64_options options)
+{
+   if (options & nir_lower_icmp64)
+      return lower_int64_compare(b, op, x, y);
+   else
+      return nir_build_alu(b, op, x, y, NULL, NULL);
+}
+
+static nir_ssa_def *
+lower_ishl64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y,
+             nir_lower_int64_options options)
 {
    /* Implemented as
     *
@@ -183,14 +237,26 @@ lower_ishl64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
       nir_pack_64_2x32_split(b, nir_imm_int(b, 0),
                                 nir_ishl(b, x_lo, reverse_count));
 
-   return nir_bcsel(b,
-                    nir_ieq(b, y, nir_imm_int(b, 0)), x,
-                    nir_bcsel(b, nir_uge(b, y, nir_imm_int(b, 32)),
-                                 res_if_ge_32, res_if_lt_32));
+   return emit_bcsel64(b, nir_ieq(b, y, nir_imm_int(b, 0)), x,
+                       emit_bcsel64(b, nir_uge(b, y, nir_imm_int(b, 32)),
+                                    res_if_ge_32, res_if_lt_32, options),
+                       options);
 }
 
 static nir_ssa_def *
-lower_ishr64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
+emit_ishl64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y,
+             nir_lower_int64_options options)
+{
+   if (options & nir_lower_shift64)
+      return lower_ishl64(b, x, y, options);
+   else
+      return nir_ishl(b, x, y);
+
+}
+
+static nir_ssa_def *
+lower_ishr64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y,
+             nir_lower_int64_options options)
 {
    /* Implemented as
     *
@@ -228,14 +294,15 @@ lower_ishr64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
       nir_pack_64_2x32_split(b, nir_ishr(b, x_hi, reverse_count),
                                 nir_ishr(b, x_hi, nir_imm_int(b, 31)));
 
-   return nir_bcsel(b,
-                    nir_ieq(b, y, nir_imm_int(b, 0)), x,
-                    nir_bcsel(b, nir_uge(b, y, nir_imm_int(b, 32)),
-                                 res_if_ge_32, res_if_lt_32));
+   return emit_bcsel64(b, nir_ieq(b, y, nir_imm_int(b, 0)), x,
+                       emit_bcsel64(b, nir_uge(b, y, nir_imm_int(b, 32)),
+                                    res_if_ge_32, res_if_lt_32, options),
+                       options);
 }
 
 static nir_ssa_def *
-lower_ushr64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
+lower_ushr64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y,
+             nir_lower_int64_options options)
 {
    /* Implemented as
     *
@@ -272,10 +339,10 @@ lower_ushr64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
       nir_pack_64_2x32_split(b, nir_ushr(b, x_hi, reverse_count),
                                 nir_imm_int(b, 0));
 
-   return nir_bcsel(b,
-                    nir_ieq(b, y, nir_imm_int(b, 0)), x,
-                    nir_bcsel(b, nir_uge(b, y, nir_imm_int(b, 32)),
-                                 res_if_ge_32, res_if_lt_32));
+   return emit_bcsel64(b, nir_ieq(b, y, nir_imm_int(b, 0)), x,
+                       emit_bcsel64(b, nir_uge(b, y, nir_imm_int(b, 32)),
+                                    res_if_ge_32, res_if_lt_32, options),
+                       options);
 }
 
 static nir_ssa_def *
@@ -294,6 +361,16 @@ lower_iadd64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
 }
 
 static nir_ssa_def *
+emit_iadd64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y,
+            nir_lower_int64_options options)
+{
+   if (options & nir_lower_iadd64)
+      return lower_iadd64(b, x, y);
+   else
+      return nir_iadd(b, x, y);
+}
+
+static nir_ssa_def *
 lower_isub64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
 {
    nir_ssa_def *x_lo = nir_unpack_64_2x32_split_x(b, x);
@@ -309,110 +386,76 @@ lower_isub64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
 }
 
 static nir_ssa_def *
-lower_ineg64(nir_builder *b, nir_ssa_def *x)
+emit_isub64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y,
+            nir_lower_int64_options options)
+{
+   if (options & nir_lower_iadd64)
+      return lower_isub64(b, x, y);
+   else
+      return nir_isub(b, x, y);
+}
+
+static nir_ssa_def *
+lower_ineg64(nir_builder *b, nir_ssa_def *x, nir_lower_int64_options options)
 {
    /* Since isub is the same number of instructions (with better dependencies)
     * as iadd, subtraction is actually more efficient for ineg than the usual
     * 2's complement "flip the bits and add one".
     */
-   return lower_isub64(b, nir_imm_int64(b, 0), x);
+   return emit_isub64(b, nir_imm_int64(b, 0), x, options);
 }
 
 static nir_ssa_def *
-lower_iabs64(nir_builder *b, nir_ssa_def *x)
+emit_ineg64(nir_builder *b, nir_ssa_def *x, nir_lower_int64_options options)
+{
+   if (options & nir_lower_ineg64)
+      return lower_ineg64(b, x, options);
+   else
+      return nir_ineg(b, x);
+}
+
+static nir_ssa_def *
+lower_iabs64(nir_builder *b, nir_ssa_def *x, nir_lower_int64_options options)
 {
    nir_ssa_def *x_hi = nir_unpack_64_2x32_split_y(b, x);
    nir_ssa_def *x_is_neg = nir_ilt(b, x_hi, nir_imm_int(b, 0));
-   return nir_bcsel(b, x_is_neg, nir_ineg(b, x), x);
+   return emit_bcsel64(b, x_is_neg, emit_ineg64(b, x, options), x, options);
 }
 
 static nir_ssa_def *
-lower_int64_compare(nir_builder *b, nir_op op, nir_ssa_def *x, nir_ssa_def *y)
+emit_iabs64(nir_builder *b, nir_ssa_def *x, nir_lower_int64_options options)
 {
-   nir_ssa_def *x_lo = nir_unpack_64_2x32_split_x(b, x);
-   nir_ssa_def *x_hi = nir_unpack_64_2x32_split_y(b, x);
-   nir_ssa_def *y_lo = nir_unpack_64_2x32_split_x(b, y);
-   nir_ssa_def *y_hi = nir_unpack_64_2x32_split_y(b, y);
+   if (options & nir_lower_iabs64)
+      return lower_iabs64(b, x, options);
+   else
+      return nir_iabs(b, x);
+}
 
+static nir_ssa_def *
+lower_minmax64(nir_builder *b, nir_op op, nir_ssa_def *x, nir_ssa_def *y,
+               nir_lower_int64_options options)
+{
+   nir_op cmp_op;
    switch (op) {
-   case nir_op_ieq:
-      return nir_iand(b, nir_ieq(b, x_hi, y_hi), nir_ieq(b, x_lo, y_lo));
-   case nir_op_ine:
-      return nir_ior(b, nir_ine(b, x_hi, y_hi), nir_ine(b, x_lo, y_lo));
-   case nir_op_ult:
-      return nir_ior(b, nir_ult(b, x_hi, y_hi),
-                        nir_iand(b, nir_ieq(b, x_hi, y_hi),
-                                    nir_ult(b, x_lo, y_lo)));
-   case nir_op_ilt:
-      return nir_ior(b, nir_ilt(b, x_hi, y_hi),
-                        nir_iand(b, nir_ieq(b, x_hi, y_hi),
-                                    nir_ult(b, x_lo, y_lo)));
-      break;
-   case nir_op_uge:
-      /* Lower as !(x < y) in the hopes of better CSE */
-      return nir_inot(b, lower_int64_compare(b, nir_op_ult, x, y));
-   case nir_op_ige:
-      /* Lower as !(x < y) in the hopes of better CSE */
-      return nir_inot(b, lower_int64_compare(b, nir_op_ilt, x, y));
+   case nir_op_umax:
+      cmp_op = nir_op_ult; break;
+   case nir_op_imax:
+      cmp_op = nir_op_ilt; break;
+   case nir_op_umin:
+      cmp_op = nir_op_uge; break;
+   case nir_op_imin:
+      cmp_op = nir_op_ige; break;
    default:
-      unreachable("Invalid comparison");
+      unreachable("Invalid opcode for lower_minmax64()");
    }
-}
 
-static nir_ssa_def *
-lower_umax64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
-{
-   return nir_bcsel(b, lower_int64_compare(b, nir_op_ult, x, y), y, x);
-}
-
-static nir_ssa_def *
-lower_imax64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
-{
-   return nir_bcsel(b, lower_int64_compare(b, nir_op_ilt, x, y), y, x);
-}
-
-static nir_ssa_def *
-lower_umin64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
-{
-   return nir_bcsel(b, lower_int64_compare(b, nir_op_ult, x, y), x, y);
-}
-
-static nir_ssa_def *
-lower_imin64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
-{
-   return nir_bcsel(b, lower_int64_compare(b, nir_op_ilt, x, y), x, y);
-}
-
-static nir_ssa_def *
-lower_mul_2x32_64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y,
-                  bool sign_extend)
-{
-   nir_ssa_def *res_hi = sign_extend ? nir_imul_high(b, x, y)
-                                     : nir_umul_high(b, x, y);
-
-   return nir_pack_64_2x32_split(b, nir_imul(b, x, y), res_hi);
-}
-
-static nir_ssa_def *
-lower_imul64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y)
-{
-   nir_ssa_def *x_lo = nir_unpack_64_2x32_split_x(b, x);
-   nir_ssa_def *x_hi = nir_unpack_64_2x32_split_y(b, x);
-   nir_ssa_def *y_lo = nir_unpack_64_2x32_split_x(b, y);
-   nir_ssa_def *y_hi = nir_unpack_64_2x32_split_y(b, y);
-
-   nir_ssa_def *mul_lo = nir_umul_2x32_64(b, x_lo, y_lo);
-   nir_ssa_def *res_hi = nir_iadd(b, nir_unpack_64_2x32_split_y(b, mul_lo),
-                         nir_iadd(b, nir_imul(b, x_lo, y_hi),
-                                     nir_imul(b, x_hi, y_lo)));
-
-   return nir_pack_64_2x32_split(b, nir_unpack_64_2x32_split_x(b, mul_lo),
-                                 res_hi);
+   return emit_bcsel64(b, emit_icmp64(b, cmp_op, x, y, options),
+                       y, x, options);
 }
 
 static nir_ssa_def *
 lower_mul_high64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y,
-                 bool sign_extend)
+                 bool sign_extend, nir_lower_int64_options options)
 {
    nir_ssa_def *x32[4], *y32[4];
    x32[0] = nir_unpack_64_2x32_split_x(b, x);
@@ -455,9 +498,9 @@ lower_mul_high64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y,
          nir_ssa_def *tmp = nir_umul_2x32_64(b, x32[i], y32[i]);
 
          if (res[i + j])
-            tmp = nir_iadd(b, tmp, nir_u2u64(b, res[i + j]));
+            tmp = emit_iadd64(b, tmp, nir_u2u64(b, res[i + j]), options);
          if (carry)
-            tmp = nir_iadd(b, tmp, carry);
+            tmp = emit_iadd64(b, tmp, carry, options);
          res[i + j] = nir_u2u32(b, tmp);
          carry = nir_ushr(b, tmp, nir_imm_int(b, 32));
       }
@@ -465,6 +508,41 @@ lower_mul_high64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y,
    }
 
    return nir_pack_64_2x32_split(b, res[2], res[3]);
+}
+
+static nir_ssa_def *
+lower_mul_2x32_64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y,
+                  bool sign_extend, nir_lower_int64_options options)
+{
+   nir_ssa_def *res_hi = sign_extend ? nir_imul_high(b, x, y) : nir_umul_high(b, x, y);
+   return nir_pack_64_2x32_split(b, nir_imul(b, x, y), res_hi);
+}
+
+static nir_ssa_def *
+emit_mul_2x32_64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y,
+                 bool sign_extend, nir_lower_int64_options options)
+{
+   if (options & nir_lower_imul_2x32_64)
+      return lower_mul_2x32_64(b, x, y, sign_extend, options);
+   else
+      return sign_extend ? nir_imul_2x32_64(b, x, y) : nir_umul_2x32_64(b, x, y);
+}
+
+static nir_ssa_def *
+lower_imul64(nir_builder *b, nir_ssa_def *x, nir_ssa_def *y, nir_lower_int64_options options)
+{
+   nir_ssa_def *x_lo = nir_unpack_64_2x32_split_x(b, x);
+   nir_ssa_def *x_hi = nir_unpack_64_2x32_split_y(b, x);
+   nir_ssa_def *y_lo = nir_unpack_64_2x32_split_x(b, y);
+   nir_ssa_def *y_hi = nir_unpack_64_2x32_split_y(b, y);
+
+   nir_ssa_def *mul_lo = emit_mul_2x32_64(b, x_lo, y_lo, false, options);
+   nir_ssa_def *res_hi = nir_iadd(b, nir_unpack_64_2x32_split_y(b, mul_lo),
+                         nir_iadd(b, nir_imul(b, x_lo, y_hi),
+                                     nir_imul(b, x_hi, y_lo)));
+
+   return nir_pack_64_2x32_split(b, nir_unpack_64_2x32_split_x(b, mul_lo),
+                                 res_hi);
 }
 
 static nir_ssa_def *
@@ -482,7 +560,8 @@ lower_isign64(nir_builder *b, nir_ssa_def *x)
 
 static void
 lower_udiv64_mod64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d,
-                   nir_ssa_def **q, nir_ssa_def **r)
+                   nir_ssa_def **q, nir_ssa_def **r,
+                   nir_lower_int64_options options)
 {
    /* TODO: We should specially handle the case where the denominator is a
     * constant.  In that case, we should be able to reduce it to a multiply by
@@ -552,10 +631,10 @@ lower_udiv64_mod64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d,
        *    quot.x |= 1U << i;
        * }
        */
-      nir_ssa_def *d_shift = nir_ishl(b, d, nir_imm_int(b, i));
-      nir_ssa_def *new_n = nir_isub(b, n, d_shift);
+      nir_ssa_def *d_shift = emit_ishl64(b, d, nir_imm_int(b, i), options);
+      nir_ssa_def *new_n = emit_isub64(b, n, d_shift, options);
       nir_ssa_def *new_q_lo = nir_ior(b, q_lo, nir_imm_int(b, 1u << i));
-      nir_ssa_def *cond = nir_uge(b, n, d_shift);
+      nir_ssa_def *cond = emit_icmp64(b, nir_op_uge, n, d_shift, options);
       if (i != 0) {
          /* log2_denom is always <= 31, so we don't need to bother with it
           * in the last iteration.
@@ -563,7 +642,7 @@ lower_udiv64_mod64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d,
          cond = nir_iand(b, cond,
                             nir_ige(b, nir_imm_int(b, 31 - i), log2_denom));
       }
-      n = nir_bcsel(b, cond, new_n, n);
+      n = emit_bcsel64(b, cond, new_n, n, options);
       q_lo = nir_bcsel(b, cond, new_q_lo, q_lo);
    }
 
@@ -572,15 +651,17 @@ lower_udiv64_mod64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d,
 }
 
 static nir_ssa_def *
-lower_udiv64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d)
+lower_udiv64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d,
+             nir_lower_int64_options options)
 {
    nir_ssa_def *q, *r;
-   lower_udiv64_mod64(b, n, d, &q, &r);
+   lower_udiv64_mod64(b, n, d, &q, &r, options);
    return q;
 }
 
 static nir_ssa_def *
-lower_idiv64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d)
+lower_idiv64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d,
+             nir_lower_int64_options options)
 {
    nir_ssa_def *n_hi = nir_unpack_64_2x32_split_y(b, n);
    nir_ssa_def *d_hi = nir_unpack_64_2x32_split_y(b, d);
@@ -588,20 +669,23 @@ lower_idiv64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d)
    nir_ssa_def *negate = nir_ine(b, nir_ilt(b, n_hi, nir_imm_int(b, 0)),
                                     nir_ilt(b, d_hi, nir_imm_int(b, 0)));
    nir_ssa_def *q, *r;
-   lower_udiv64_mod64(b, nir_iabs(b, n), nir_iabs(b, d), &q, &r);
-   return nir_bcsel(b, negate, nir_ineg(b, q), q);
+   lower_udiv64_mod64(b, emit_iabs64(b, n, options),
+                      emit_iabs64(b, d, options), &q, &r, options);
+   return emit_bcsel64(b, negate, emit_ineg64(b, q, options), q, options);
 }
 
 static nir_ssa_def *
-lower_umod64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d)
+lower_umod64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d,
+             nir_lower_int64_options options)
 {
    nir_ssa_def *q, *r;
-   lower_udiv64_mod64(b, n, d, &q, &r);
+   lower_udiv64_mod64(b, n, d, &q, &r, options);
    return r;
 }
 
 static nir_ssa_def *
-lower_imod64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d)
+lower_imod64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d,
+             nir_lower_int64_options options)
 {
    nir_ssa_def *n_hi = nir_unpack_64_2x32_split_y(b, n);
    nir_ssa_def *d_hi = nir_unpack_64_2x32_split_y(b, d);
@@ -609,24 +693,32 @@ lower_imod64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d)
    nir_ssa_def *d_is_neg = nir_ilt(b, d_hi, nir_imm_int(b, 0));
 
    nir_ssa_def *q, *r;
-   lower_udiv64_mod64(b, nir_iabs(b, n), nir_iabs(b, d), &q, &r);
+   lower_udiv64_mod64(b, emit_iabs64(b, n, options),
+                      emit_iabs64(b, d, options), &q, &r, options);
 
-   nir_ssa_def *rem = nir_bcsel(b, n_is_neg, nir_ineg(b, r), r);
+   nir_ssa_def *rem = emit_bcsel64(b, n_is_neg, emit_ineg64(b, r, options),
+                                   r, options);
 
-   return nir_bcsel(b, nir_ieq(b, r, nir_imm_int64(b, 0)), nir_imm_int64(b, 0),
-          nir_bcsel(b, nir_ieq(b, n_is_neg, d_is_neg), rem,
-                       nir_iadd(b, rem, d)));
+   return emit_bcsel64(b, emit_icmp64(b, nir_op_ieq, r, nir_imm_int(b, 0),
+                                      options),
+                       nir_imm_int64(b, 0),
+                       emit_bcsel64(b, nir_ieq(b, n_is_neg, d_is_neg),
+                                    rem, emit_iadd64(b, rem, d, options),
+                                    options),
+                       options);
 }
 
 static nir_ssa_def *
-lower_irem64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d)
+lower_irem64(nir_builder *b, nir_ssa_def *n, nir_ssa_def *d,
+             nir_lower_int64_options options)
 {
    nir_ssa_def *n_hi = nir_unpack_64_2x32_split_y(b, n);
    nir_ssa_def *n_is_neg = nir_ilt(b, n_hi, nir_imm_int(b, 0));
 
    nir_ssa_def *q, *r;
-   lower_udiv64_mod64(b, nir_iabs(b, n), nir_iabs(b, d), &q, &r);
-   return nir_bcsel(b, n_is_neg, nir_ineg(b, r), r);
+   lower_udiv64_mod64(b, emit_iabs64(b, n, options),
+                      emit_iabs64(b, d, options), &q, &r, options);
+   return emit_bcsel64(b, n_is_neg, emit_ineg64(b, r, options), r, options);
 }
 
 nir_lower_int64_options
@@ -691,7 +783,8 @@ nir_lower_int64_op_to_options_mask(nir_op opcode)
 }
 
 static nir_ssa_def *
-lower_int64_alu_instr(nir_builder *b, nir_alu_instr *alu)
+lower_int64_alu_instr(nir_builder *b, nir_alu_instr *alu,
+                      nir_lower_int64_options options)
 {
    nir_ssa_def *src[4];
    for (unsigned i = 0; i < nir_op_infos[alu->op].num_inputs; i++)
@@ -699,27 +792,27 @@ lower_int64_alu_instr(nir_builder *b, nir_alu_instr *alu)
 
    switch (alu->op) {
    case nir_op_imul:
-      return lower_imul64(b, src[0], src[1]);
+      return lower_imul64(b, src[0], src[1], options);
    case nir_op_imul_2x32_64:
-      return lower_mul_2x32_64(b, src[0], src[1], true);
+      return lower_mul_2x32_64(b, src[0], src[1], true, options);
    case nir_op_umul_2x32_64:
-      return lower_mul_2x32_64(b, src[0], src[1], false);
+      return lower_mul_2x32_64(b, src[0], src[1], false, options);
    case nir_op_imul_high:
-      return lower_mul_high64(b, src[0], src[1], true);
+      return lower_mul_high64(b, src[0], src[1], true, options);
    case nir_op_umul_high:
-      return lower_mul_high64(b, src[0], src[1], false);
+      return lower_mul_high64(b, src[0], src[1], false, options);
    case nir_op_isign:
       return lower_isign64(b, src[0]);
    case nir_op_udiv:
-      return lower_udiv64(b, src[0], src[1]);
+      return lower_udiv64(b, src[0], src[1], options);
    case nir_op_idiv:
-      return lower_idiv64(b, src[0], src[1]);
+      return lower_idiv64(b, src[0], src[1], options);
    case nir_op_umod:
-      return lower_umod64(b, src[0], src[1]);
+      return lower_umod64(b, src[0], src[1], options);
    case nir_op_imod:
-      return lower_imod64(b, src[0], src[1]);
+      return lower_imod64(b, src[0], src[1], options);
    case nir_op_irem:
-      return lower_irem64(b, src[0], src[1]);
+      return lower_irem64(b, src[0], src[1], options);
    case nir_op_b2i64:
       return lower_b2i64(b, src[0]);
    case nir_op_i2b1:
@@ -754,17 +847,14 @@ lower_int64_alu_instr(nir_builder *b, nir_alu_instr *alu)
    case nir_op_isub:
       return lower_isub64(b, src[0], src[1]);
    case nir_op_imin:
-      return lower_imin64(b, src[0], src[1]);
    case nir_op_imax:
-      return lower_imax64(b, src[0], src[1]);
    case nir_op_umin:
-      return lower_umin64(b, src[0], src[1]);
    case nir_op_umax:
-      return lower_umax64(b, src[0], src[1]);
+      return lower_minmax64(b, alu->op, src[0], src[1], options);
    case nir_op_iabs:
-      return lower_iabs64(b, src[0]);
+      return lower_iabs64(b, src[0], options);
    case nir_op_ineg:
-      return lower_ineg64(b, src[0]);
+      return lower_ineg64(b, src[0], options);
    case nir_op_iand:
       return lower_iand64(b, src[0], src[1]);
    case nir_op_ior:
@@ -774,11 +864,11 @@ lower_int64_alu_instr(nir_builder *b, nir_alu_instr *alu)
    case nir_op_inot:
       return lower_inot64(b, src[0]);
    case nir_op_ishl:
-      return lower_ishl64(b, src[0], src[1]);
+      return lower_ishl64(b, src[0], src[1], options);
    case nir_op_ishr:
-      return lower_ishr64(b, src[0], src[1]);
+      return lower_ishr64(b, src[0], src[1], options);
    case nir_op_ushr:
-      return lower_ushr64(b, src[0], src[1]);
+      return lower_ushr64(b, src[0], src[1], options);
    default:
       unreachable("Invalid ALU opcode to lower");
    }
@@ -838,7 +928,7 @@ lower_int64_impl(nir_function_impl *impl, nir_lower_int64_options options)
 
          b.cursor = nir_before_instr(instr);
 
-         nir_ssa_def *lowered = lower_int64_alu_instr(&b, alu);
+         nir_ssa_def *lowered = lower_int64_alu_instr(&b, alu, options);
          nir_ssa_def_rewrite_uses(&alu->dest.dest.ssa,
                                   nir_src_for_ssa(lowered));
          nir_instr_remove(&alu->instr);
