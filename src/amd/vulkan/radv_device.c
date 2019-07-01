@@ -534,6 +534,11 @@ radv_handle_per_app_options(struct radv_instance *instance,
 			 */
 			instance->perftest_flags |= RADV_PERFTEST_SISCHED;
 		}
+	} else if (!strcmp(name, "DOOM")) {
+		/* Much faster in DOOM with ACO but currently regresses other games */
+		if (instance->perftest_flags & RADV_PERFTEST_ACO) {
+			instance->perftest_flags |= RADV_PERFTEST_SHADER_BALLOT;
+		}
 	} else if (!strcmp(name, "DOOM_VFR")) {
 		/* Work around a Doom VFR game bug */
 		instance->debug_flags |= RADV_DEBUG_NO_DYNAMIC_BOUNDS;
