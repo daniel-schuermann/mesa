@@ -731,11 +731,21 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          Temp tmp = bld.sop2(aco_opcode::s_ashr_i32, bld.def(s1), bld.def(s1, scc), src, Operand(31u));
          Temp gtz = bld.sopc(aco_opcode::s_cmp_gt_i32, bld.def(s1, scc), src, Operand(0u));
          bld.sop2(aco_opcode::s_add_i32, Definition(dst), bld.def(s1, scc), gtz, tmp);
+      } else if (dst.regClass() == s2) {
+         Temp neg = bld.sop2(aco_opcode::s_ashr_i64, bld.def(s2), bld.def(s1, scc), src, Operand(63u));
+         Temp neqz = bld.sopc(aco_opcode::s_cmp_lg_u64, bld.def(s1, scc), src, Operand(0u));
+         bld.sop2(aco_opcode::s_or_b64, Definition(dst), bld.def(s1, scc), neg, neqz);
       } else if (dst.regClass() == v1) {
          Temp tmp = bld.vop2(aco_opcode::v_ashrrev_i32, bld.def(v1), Operand(31u), src);
-         Temp gtz = bld.tmp(s2);
-         bld.vopc(aco_opcode::v_cmp_ge_i32, Definition(gtz), Operand(0u), src).def(0).setHint(vcc);
+         Temp gtz = bld.vopc(aco_opcode::v_cmp_ge_i32, bld.hint_vcc(bld.def(s2)), Operand(0u), src);
          bld.vop2(aco_opcode::v_cndmask_b32, Definition(dst), Operand(1u), tmp, gtz);
+      } else if (dst.regClass() == v2) {
+         Temp upper = emit_extract_vector(ctx, src, 1, v1);
+         Temp neg = bld.vop2(aco_opcode::v_ashrrev_i32, bld.def(v1), Operand(31u), upper);
+         Temp gtz = bld.vopc(aco_opcode::v_cmp_ge_i64, bld.hint_vcc(bld.def(s2)), Operand(0u), src);
+         Temp lower = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), Operand(1u), neg, gtz);
+         upper = bld.vop2(aco_opcode::v_cndmask_b32, bld.def(v1), Operand(0u), neg, gtz);
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), lower, upper);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
