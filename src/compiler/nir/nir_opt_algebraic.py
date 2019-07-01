@@ -199,8 +199,8 @@ optimizations = [
    # Comparison simplifications
    (('~inot', ('flt', a, b)), ('fge', a, b)),
    (('~inot', ('fge', a, b)), ('flt', a, b)),
-   (('~inot', ('feq', a, b)), ('fne', a, b)),
-   (('~inot', ('fne', a, b)), ('feq', a, b)),
+   (('inot', ('feq', a, b)), ('fne', a, b)),
+   (('inot', ('fne', a, b)), ('feq', a, b)),
    (('inot', ('ilt', a, b)), ('ige', a, b)),
    (('inot', ('ult', a, b)), ('uge', a, b)),
    (('inot', ('ige', a, b)), ('ilt', a, b)),
