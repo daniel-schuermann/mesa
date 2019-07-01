@@ -869,14 +869,8 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    }
 }
 
-// TODO: we could possibly move the whole label_instruction pass to combine_instruction:
-// this would mean that we'd have to fix the instruction uses while value propagation
-
-void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
+void apply_sgprs(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 {
-   if (!instr->isVALU() || !ctx.uses[instr->getDefinition(0).tempId()])
-      return;
-
    /* apply sgprs */
    uint32_t sgpr_idx = 0;
    uint32_t sgpr_info_id = 0;
@@ -933,7 +927,10 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       ctx.uses[sgpr_info_id]--;
       ctx.uses[ctx.info[sgpr_info_id].temp.id()]++;
    }
+}
 
+bool apply_omod_clamp(opt_ctx &ctx, aco_ptr<Instruction>& instr)
+{
    /* check if we could apply omod on predecessor */
    if (instr->opcode == aco_opcode::v_mul_f32) {
       if (instr->getOperand(1).isTemp() && ctx.info[instr->getOperand(1).tempId()].is_omod_success()) {
@@ -959,7 +956,7 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          /* change the definition of instr to something unused, e.g. the original omod def */
          instr->getDefinition(0) = Definition(instr->getOperand(1).getTemp());
          ctx.uses[instr->getDefinition(0).tempId()] = 0;
-         return;
+         return true;
       }
       /* in all other cases, label this instruction as option for multiply-add */
       ctx.info[instr->getDefinition(0).tempId()].set_mul(instr.get());
@@ -993,7 +990,7 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          /* change the definition of instr to something unused, e.g. the original omod def */
          instr->getDefinition(0) = Definition(instr->getOperand(idx).getTemp());
          ctx.uses[instr->getDefinition(0).tempId()] = 0;
-         return;
+         return true;
       }
    }
 
@@ -1017,6 +1014,23 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          static_cast<VOP3A_instruction*>(instr.get())->clamp = true;
          ctx.info[instr->getDefinition(0).tempId()].set_clamp_success(instr.get());
       }
+   }
+
+   return false;
+}
+
+// TODO: we could possibly move the whole label_instruction pass to combine_instruction:
+// this would mean that we'd have to fix the instruction uses while value propagation
+
+void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
+{
+   if (!instr->num_definitions || !ctx.uses[instr->getDefinition(0).tempId()])
+      return;
+
+   if (instr->isVALU()) {
+      apply_sgprs(ctx, instr);
+      if (apply_omod_clamp(ctx, instr))
+         return;
    }
 
    /* neg(mul(a, b)) -> mul(neg(a), b) */
