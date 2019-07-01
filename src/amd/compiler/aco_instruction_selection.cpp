@@ -1060,6 +1060,17 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       Temp src1 = get_alu_src(ctx, instr->src[1]);
       if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_sub_i32, dst, true);
+      } else if (dst.regClass() == s2) {
+         emit_split_vector(ctx, src0, 2);
+         Temp lower0 = emit_extract_vector(ctx, src0, 0, s1);
+         Temp upper0 = emit_extract_vector(ctx, src0, 1, s1);
+         emit_split_vector(ctx, src1, 2);
+         Temp lower1 = emit_extract_vector(ctx, src1, 0, s1);
+         Temp upper1 = emit_extract_vector(ctx, src1, 1, s1);
+         Temp carry = bld.tmp(s1);
+         lower0 = bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.scc(Definition(carry)), lower0, lower1);
+         upper0 = bld.sop2(aco_opcode::s_subb_u32, bld.def(s1), bld.def(s1, scc), upper0, upper1, carry);
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), lower0, upper0);
       } else if (dst.regClass() == v1) {
          emit_v_sub32(ctx, dst, Operand(src0), Operand(src1));
       } else if (dst.regClass() == v2) {
