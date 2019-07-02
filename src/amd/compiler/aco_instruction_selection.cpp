@@ -2634,6 +2634,7 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       case 8:
          op = aco_opcode::s_buffer_load_dwordx8;
          break;
+      case 12:
       case 16:
          op = aco_opcode::s_buffer_load_dwordx16;
          break;
@@ -2650,24 +2651,44 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       load->getDefinition(0) = Definition(dst);
       load->can_reorder = true;
 
-      if (dst.size() == 3) {
       /* trim vector */
-         Temp vec = {ctx->program->allocateId(), s4};
+      if (dst.size() == 3 || dst.size() == 6) {
+         Temp vec = dst.size() == 3 ? bld.tmp(s4) : bld.tmp(s8);
          load->getDefinition(0) = Definition(vec);
          ctx->block->instructions.emplace_back(std::move(load));
          emit_split_vector(ctx, vec, 4);
-
+         RegClass rc = dst.size() == 3 ? s1 : s2;
          bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
-                    emit_extract_vector(ctx, vec, 0, s1),
-                    emit_extract_vector(ctx, vec, 1, s1),
-                    emit_extract_vector(ctx, vec, 2, s1));
+                    emit_extract_vector(ctx, vec, 0, rc),
+                    emit_extract_vector(ctx, vec, 1, rc),
+                    emit_extract_vector(ctx, vec, 2, rc));
       } else {
          ctx->block->instructions.emplace_back(std::move(load));
       }
 
    } else { /* vgpr dst */
+      unsigned size = dst.size();
+      unsigned offset = 0;
+      aco_ptr<MUBUF_instruction> mubuf;
+      Temp lower = Temp();
+      if (size > 4) {
+         /* for 64bit vec3/vec4 load 4 dwords and then the remaining */
+         mubuf.reset(create_instruction<MUBUF_instruction>(aco_opcode::buffer_load_dwordx4, Format::MUBUF, 3, 1));
+         mubuf->getOperand(0) = Operand(get_ssa_temp(ctx, instr->src[1].ssa));
+         mubuf->getOperand(1) = Operand(rsrc);
+         mubuf->getOperand(2) = Operand(0u);
+         lower = bld.tmp(v4);;
+         mubuf->getDefinition(0) = Definition(lower);
+         mubuf->offen = true;
+         mubuf->can_reorder = true;
+         ctx->block->instructions.emplace_back(std::move(mubuf));
+         offset = 16;
+         size -= 4;
+         emit_split_vector(ctx, lower, 2);
+      }
+
       aco_opcode op;
-      switch(dst.size()) {
+      switch(size) {
       case 1:
          op = aco_opcode::buffer_load_dword;
          break;
@@ -2684,15 +2705,36 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
          unreachable("Unimplemented regclass in load_ubo instruction.");
       }
 
-      aco_ptr<MUBUF_instruction> mubuf;
+
       mubuf.reset(create_instruction<MUBUF_instruction>(op, Format::MUBUF, 3, 1));
       mubuf->getOperand(0) = Operand(get_ssa_temp(ctx, instr->src[1].ssa));
       mubuf->getOperand(1) = Operand(rsrc);
-      mubuf->getOperand(2) = Operand((uint32_t) 0);
-      mubuf->getDefinition(0) = Definition(dst);
+      mubuf->getOperand(2) = Operand(offset);
       mubuf->offen = true;
       mubuf->can_reorder = true;
-      ctx->block->instructions.emplace_back(std::move(mubuf));
+
+      if (dst.size() == size) {
+         mubuf->getDefinition(0) = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(mubuf));
+      } else {
+         Temp upper = bld.tmp(RegClass(vgpr, size));
+         mubuf->getDefinition(0) = Definition(upper);
+         ctx->block->instructions.emplace_back(std::move(mubuf));
+         if (dst.size() == 6) {
+            bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
+                       emit_extract_vector(ctx, lower, 0, v2),
+                       emit_extract_vector(ctx, lower, 1, v2),
+                       upper);
+         } else {
+            assert(dst.size() == 8);
+            emit_split_vector(ctx, lower, 2);
+            bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
+                       emit_extract_vector(ctx, lower, 0, v2),
+                       emit_extract_vector(ctx, lower, 1, v2),
+                       emit_extract_vector(ctx, upper, 0, v2),
+                       emit_extract_vector(ctx, upper, 0, v2));
+         }
+      }
    }
 
    emit_split_vector(ctx, dst, instr->dest.ssa.num_components);
