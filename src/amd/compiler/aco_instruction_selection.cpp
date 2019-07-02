@@ -647,15 +647,15 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_mov: {
       Temp src = get_alu_src(ctx, instr->src[0]);
       aco_ptr<Instruction> mov;
-      if (dst.regClass() == s1) {
-         if (src.regClass() == v1)
+      if (dst.type() == sgpr) {
+         if (src.type() == vgpr)
             bld.pseudo(aco_opcode::p_as_uniform, Definition(dst), src);
          else if (src.regClass() == s1)
             bld.sop1(aco_opcode::s_mov_b32, Definition(dst), src);
+         else if (src.regClass() == s2)
+            bld.sop1(aco_opcode::s_mov_b64, Definition(dst), src);
          else
             unreachable("wrong src register class for nir_op_imov");
-      } else if (dst.regClass() == s2) {
-         bld.sop1(aco_opcode::s_mov_b64, Definition(dst), src);
       } else if (dst.regClass() == v1) {
          bld.vop1(aco_opcode::v_mov_b32, Definition(dst), src);
       } else if (dst.regClass() == v2) {
