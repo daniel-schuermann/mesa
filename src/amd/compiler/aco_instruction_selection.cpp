@@ -4101,41 +4101,44 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    // TODO: implement sparse reads using ds_read2_b32 and nir_ssa_def_components_read()
    Operand m = load_lds_size_m0(ctx);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-   assert(instr->dest.ssa.bit_size == 32 && "Bitsize not supported in load_shared.");
+   assert(instr->dest.ssa.bit_size >= 32 && "Bitsize not supported in load_shared.");
    Temp address = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
    Builder bld(ctx->program, ctx->block);
 
+   unsigned elem_size_bytes = instr->dest.ssa.bit_size / 8;
    unsigned bytes_read = 0;
    unsigned result_size = 0;
+   unsigned total_bytes = instr->num_components * elem_size_bytes;
    Temp result[instr->num_components];
 
    unsigned align = nir_intrinsic_align_mul(instr) ? nir_intrinsic_align(instr) : instr->dest.ssa.bit_size / 8;
 
-   while (bytes_read < instr->num_components * 4) {
-      unsigned todo = instr->num_components * 4 - bytes_read;
+   while (bytes_read < total_bytes) {
+      unsigned todo = total_bytes - bytes_read;
       bool aligned8 = bytes_read % 8 == 0 && align % 8 == 0;
       bool aligned16 = bytes_read % 16 == 0 && align % 16 == 0;
 
       aco_opcode op = aco_opcode::last_opcode;
-      unsigned size = 0;
       if (todo >= 16 && aligned16) {
          op = aco_opcode::ds_read_b128;
-         size = 4;
+         todo = 16;
       } else if (todo >= 12 && aligned16) {
          op = aco_opcode::ds_read_b96;
-         size = 3;
+         todo = 12;
       } else if (todo >= 8) {
          op = aligned8 ? aco_opcode::ds_read_b64 : aco_opcode::ds_read2_b32;
-         size = 2;
+         todo = 8;
       } else if (todo >= 4) {
          op = aco_opcode::ds_read_b32;
-         size = 1;
+         todo = 4;
       } else {
          assert(false);
       }
-
+      assert(todo % elem_size_bytes == 0);
+      unsigned size = todo / elem_size_bytes;
       unsigned offset = nir_intrinsic_base(instr) + bytes_read;
       unsigned max_offset = op == aco_opcode::ds_read2_b32 ? 1019 : 65535;
+
       Temp address_offset = address;
       if (offset > max_offset) {
          Temp new_addr{ctx->program->allocateId(), v1};
@@ -4147,19 +4150,20 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
 
       Temp res;
       if (op == aco_opcode::ds_read2_b32)
-         res = bld.ds(op, bld.def(RegClass(vgpr, size)), address_offset, m, offset >> 2, (offset >> 2) + 1);
+         res = bld.ds(op, bld.def(v2), address_offset, m, offset >> 2, (offset >> 2) + 1);
       else
-         res = bld.ds(op, bld.def(RegClass(vgpr, size)), address_offset, m, offset);
+         res = bld.ds(op, bld.def(RegClass(vgpr, todo / 4)), address_offset, m, offset);
 
-      aco_ptr<Pseudo_instruction> split{create_instruction<Pseudo_instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, res.size())};
+      aco_ptr<Pseudo_instruction> split{create_instruction<Pseudo_instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, size)};
       split->getOperand(0) = Operand(res);
-      for (unsigned i = 0; i < res.size(); i++)
-         split->getDefinition(i) = Definition(result[result_size++] = bld.tmp(v1));
+      for (unsigned i = 0; i < size; i++)
+         split->getDefinition(i) = Definition(result[result_size++] = bld.tmp(vgpr, elem_size_bytes / 4));
       ctx->block->instructions.emplace_back(std::move(split));
 
-      bytes_read += size * 4;
+      bytes_read += todo;
    }
 
+   assert(result_size == instr->num_components);
    aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, result_size, 1)};
    for (unsigned i = 0; i < result_size; i++)
       vec->getOperand(i) = Operand(result[i]);
@@ -4238,7 +4242,7 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    Temp data = get_ssa_temp(ctx, instr->src[0].ssa);
    Temp address = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
    unsigned elem_size_bytes = instr->src[0].ssa->bit_size / 8;
-   assert(elem_size_bytes == 4 && "Only 32bit store_shared currently supported.");
+   assert(elem_size_bytes >= 4 && "Only 32bit & 64bit store_shared currently supported.");
 
    /* we need at most two stores for 32bit variables */
    int start[2], count[2];
@@ -4260,8 +4264,10 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
       Temp val0 = emit_extract_vector(ctx, data, start[0], v1);
       Temp val1 = emit_extract_vector(ctx, data, start[1], v1);
       Builder bld(ctx->program, ctx->block);
-      bld.ds(aco_opcode::ds_write2_b32, address_offset, val0, val1, m,
-             (offset >> 2) + start[0], (offset >> 2) + start[1]);
+      aco_opcode op = elem_size_bytes == 4 ? aco_opcode::ds_write2_b32 : aco_opcode::ds_write2_b64;
+      offset = offset / elem_size_bytes;
+      bld.ds(op, address_offset, val0, val1, m,
+             offset + start[0], offset + start[1]);
       return;
    }
 
@@ -4270,7 +4276,7 @@ void visit_store_shared(isel_context *ctx, nir_intrinsic_instr *instr)
       if (count[i] == 0)
          continue;
 
-      Temp write_data = emit_extract_vector(ctx, data, start[i], RegClass(vgpr, count[i]));
+      Temp write_data = emit_extract_vector(ctx, data, start[i], RegClass(vgpr, count[i] * elem_size_bytes / 4));
       ds_write_helper(ctx, m, address, write_data, offset, start[i] * elem_size_bytes, align);
    }
    return;
