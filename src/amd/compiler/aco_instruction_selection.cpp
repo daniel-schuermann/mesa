@@ -133,14 +133,17 @@ Temp get_ssa_temp(struct isel_context *ctx, nir_ssa_def *def)
    return Temp{id, rc};
 }
 
-Temp emit_v_add32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_out=false)
+Temp emit_v_add32(isel_context *ctx, Temp dst, Operand a, Operand b, bool carry_out=false, Operand carry_in = Operand(s2))
 {
    if (!b.isTemp() || b.regClass().type() != RegType::vgpr)
       std::swap(a, b);
    assert(b.isTemp() && b.regClass().type() == RegType::vgpr); // in case two SGPRs are given
 
    Builder bld(ctx->program, ctx->block);
-   if (ctx->options->chip_class < GFX9 || carry_out) {
+   if (!carry_in.isUndefined()) {
+      return bld.vop2(aco_opcode::v_addc_co_u32, Definition(dst),
+                      bld.hint_vcc(bld.def(s2)), a, b, carry_in).def(1).getTemp();
+   } else if (ctx->options->chip_class < GFX9 || carry_out) {
       return bld.vop2(aco_opcode::v_add_co_u32, Definition(dst),
                       bld.hint_vcc(bld.def(s2)), a, b).def(1).getTemp();
    } else {
@@ -951,40 +954,34 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    }
    case nir_op_iadd: {
       if (dst.regClass() == s1) {
-         emit_sop2_instruction(ctx, instr, aco_opcode::s_add_i32, dst, true);
+         emit_sop2_instruction(ctx, instr, aco_opcode::s_add_u32, dst, true);
          break;
-      } else if (dst.regClass() == s2) {
-         Temp src0 = get_alu_src(ctx, instr->src[0]);
-         Temp src1 = get_alu_src(ctx, instr->src[1]);
-         Temp src00 = emit_extract_vector(ctx, src0, 0, s1);
-         Temp src10 = emit_extract_vector(ctx, src1, 0, s1);
-         Temp src01 = emit_extract_vector(ctx, src0, 1, s1);
-         Temp src11 = emit_extract_vector(ctx, src1, 1, s1);
+      }
+
+      Temp src0 = get_alu_src(ctx, instr->src[0]);
+      Temp src1 = get_alu_src(ctx, instr->src[1]);
+      if (dst.regClass() == v1) {
+         emit_v_add32(ctx, dst, Operand(src0), Operand(src1));
+         break;
+      }
+
+      assert(src0.size() == 2 && src1.size() == 2);
+      emit_split_vector(ctx, src0, 2);
+      emit_split_vector(ctx, src1, 2);
+      Temp src00 = emit_extract_vector(ctx, src0, 0, RegClass(src0.type(), 1));
+      Temp src10 = emit_extract_vector(ctx, src1, 0, RegClass(src1.type(), 1));
+      Temp src01 = emit_extract_vector(ctx, src0, 1, RegClass(src0.type(), 1));
+      Temp src11 = emit_extract_vector(ctx, src1, 1, RegClass(src1.type(), 1));
+
+      if (dst.regClass() == s2) {
          Temp carry = bld.tmp(s1);
          Temp dst0 = bld.sop2(aco_opcode::s_add_u32, bld.def(s1), bld.scc(Definition(carry)), src00, src10);
          Temp dst1 = bld.sop2(aco_opcode::s_addc_u32, bld.def(s1), bld.def(s1, scc), src01, src11, bld.scc(carry));
          bld.pseudo(aco_opcode::p_create_vector, Definition(dst), dst0, dst1);
-         break;
-      }
-      Temp src0 = get_alu_src(ctx, instr->src[0]);
-      Temp src1 = get_alu_src(ctx, instr->src[1]);
-      aco_ptr<Instruction> add;
-      if (dst.regClass() == v1) {
-         emit_v_add32(ctx, dst, Operand(src0), Operand(src1));
       } else if (dst.regClass() == v2) {
-         assert(src0.size() == 2 && src1.size() == 2);
-         emit_split_vector(ctx, src0, 2);
-         emit_split_vector(ctx, src1, 2);
-         Temp src00 = emit_extract_vector(ctx, src0, 0, RegClass(src0.type(), 1));
-         Temp src10 = emit_extract_vector(ctx, src1, 0, RegClass(src1.type(), 1));
-
          Temp dst0 = bld.tmp(v1), dst1 = bld.tmp(v1);
          Temp carry = emit_v_add32(ctx, dst0, Operand(src00), Operand(src10), true);
-         bld.vop2(aco_opcode::v_addc_co_u32, Definition(dst1), bld.def(s2),
-                  emit_extract_vector(ctx, src0, 1, v1),
-                  emit_extract_vector(ctx, src1, 1, v1),
-                  carry).def(1).setHint(vcc);
-
+         emit_v_add32(ctx, dst1, Operand(src01), Operand(src11), false, Operand(carry));
          bld.pseudo(aco_opcode::p_create_vector, Definition(dst), dst0, dst1);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
@@ -1030,9 +1027,30 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       Temp src1 = get_alu_src(ctx, instr->src[1]);
       if (dst.regClass() == s1) {
          bld.sop2(aco_opcode::s_add_u32, bld.def(s1), bld.scc(Definition(dst)), src0, src1);
-      } else if (dst.regClass() == v1) {
+         break;
+      }
+      if (dst.regClass() == v1) {
          Temp carry = emit_v_add32(ctx, bld.tmp(v1), Operand(src0), Operand(src1), true);
          bld.vop2_e64(aco_opcode::v_cndmask_b32, Definition(dst), Operand(0u), Operand(1u), carry);
+         break;
+      }
+
+      emit_split_vector(ctx, src0, 2);
+      emit_split_vector(ctx, src1, 2);
+      Temp src00 = emit_extract_vector(ctx, src0, 0, RegClass(src0.type(), 1));
+      Temp src10 = emit_extract_vector(ctx, src1, 0, RegClass(src1.type(), 1));
+      Temp src01 = emit_extract_vector(ctx, src0, 1, RegClass(src0.type(), 1));
+      Temp src11 = emit_extract_vector(ctx, src1, 1, RegClass(src1.type(), 1));
+      if (dst.regClass() == s2) {
+         Temp carry = bld.tmp(s1);
+         bld.sop2(aco_opcode::s_add_u32, bld.def(s1), bld.scc(Definition(carry)), src00, src10);
+         carry = bld.sop2(aco_opcode::s_addc_u32, bld.def(s1), bld.scc(bld.def(s1)), src01, src11, bld.scc(carry)).def(1).getTemp();
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), carry, Operand(0u));
+      } else if (dst.regClass() == v2) {
+         Temp carry = emit_v_add32(ctx, bld.tmp(v1), Operand(src00), Operand(src10), true);
+         carry = emit_v_add32(ctx, bld.tmp(v1), Operand(src01), Operand(src11), true, Operand(carry));
+         carry = bld.vop2_e64(aco_opcode::v_cndmask_b32, bld.def(v1), Operand(0u), Operand(1u), carry);
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), carry, Operand(0u));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
@@ -1041,32 +1059,34 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_isub: {
-      Temp src0 = get_alu_src(ctx, instr->src[0]);
-      Temp src1 = get_alu_src(ctx, instr->src[1]);
       if (dst.regClass() == s1) {
          emit_sop2_instruction(ctx, instr, aco_opcode::s_sub_i32, dst, true);
-      } else if (dst.regClass() == s2) {
-         emit_split_vector(ctx, src0, 2);
-         Temp lower0 = emit_extract_vector(ctx, src0, 0, s1);
-         Temp upper0 = emit_extract_vector(ctx, src0, 1, s1);
-         emit_split_vector(ctx, src1, 2);
-         Temp lower1 = emit_extract_vector(ctx, src1, 0, s1);
-         Temp upper1 = emit_extract_vector(ctx, src1, 1, s1);
-         Temp carry = bld.tmp(s1);
-         lower0 = bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.scc(Definition(carry)), lower0, lower1);
-         upper0 = bld.sop2(aco_opcode::s_subb_u32, bld.def(s1), bld.def(s1, scc), upper0, upper1, carry);
-         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), lower0, upper0);
-      } else if (dst.regClass() == v1) {
+         break;
+      }
+
+      Temp src0 = get_alu_src(ctx, instr->src[0]);
+      Temp src1 = get_alu_src(ctx, instr->src[1]);
+      if (dst.regClass() == v1) {
          emit_v_sub32(ctx, dst, Operand(src0), Operand(src1));
+         break;
+      }
+
+      emit_split_vector(ctx, src0, 2);
+      emit_split_vector(ctx, src1, 2);
+      Temp src00 = emit_extract_vector(ctx, src0, 0, RegClass(src0.type(), 1));
+      Temp src10 = emit_extract_vector(ctx, src1, 0, RegClass(src1.type(), 1));
+      Temp src01 = emit_extract_vector(ctx, src0, 1, RegClass(src0.type(), 1));
+      Temp src11 = emit_extract_vector(ctx, src1, 1, RegClass(src1.type(), 1));
+      if (dst.regClass() == s2) {
+         Temp carry = bld.tmp(s1);
+         Temp dst0 = bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.scc(Definition(carry)), src00, src10);
+         Temp dst1 = bld.sop2(aco_opcode::s_subb_u32, bld.def(s1), bld.def(s1, scc), src01, src11, carry);
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), dst0, dst1);
       } else if (dst.regClass() == v2) {
-         emit_split_vector(ctx, src0, 2);
-         emit_split_vector(ctx, src1, 2);
          Temp lower = bld.tmp(v1);
-         Temp borrow = emit_v_sub32(ctx, lower, Operand(emit_extract_vector(ctx, src0, 0, v1)),
-                                    Operand(emit_extract_vector(ctx, src1, 0, v1)), true);
+         Temp borrow = emit_v_sub32(ctx, lower, Operand(src00), Operand(src10), true);
          Temp upper = bld.tmp(v1);
-         emit_v_sub32(ctx, upper, Operand(emit_extract_vector(ctx, src0, 1, v1)),
-                      Operand(emit_extract_vector(ctx, src1, 1, v1)), false, Operand(borrow));
+         emit_v_sub32(ctx, upper, Operand(src01), Operand(src11), false, Operand(borrow));
          bld.pseudo(aco_opcode::p_create_vector, Definition(dst), lower, upper);
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
@@ -1080,10 +1100,29 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       Temp src1 = get_alu_src(ctx, instr->src[1]);
       if (dst.regClass() == s1) {
          bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.scc(Definition(dst)), src0, src1);
+         break;
       } else if (dst.regClass() == v1) {
-         Temp tmp = {ctx->program->allocateId(), v1};
-         Temp borrow = emit_v_sub32(ctx, tmp, Operand(src0), Operand(src1), true);
+         Temp borrow = emit_v_sub32(ctx, bld.tmp(v1), Operand(src0), Operand(src1), true);
          bld.vop2_e64(aco_opcode::v_cndmask_b32, Definition(dst), Operand(0u), Operand(1u), borrow);
+         break;
+      }
+
+      emit_split_vector(ctx, src0, 2);
+      emit_split_vector(ctx, src1, 2);
+      Temp src00 = emit_extract_vector(ctx, src0, 0, RegClass(src0.type(), 1));
+      Temp src10 = emit_extract_vector(ctx, src1, 0, RegClass(src1.type(), 1));
+      Temp src01 = emit_extract_vector(ctx, src0, 1, RegClass(src0.type(), 1));
+      Temp src11 = emit_extract_vector(ctx, src1, 1, RegClass(src1.type(), 1));
+      if (dst.regClass() == s2) {
+         Temp borrow = bld.tmp(s1);
+         bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.scc(Definition(borrow)), src00, src10);
+         borrow = bld.sop2(aco_opcode::s_subb_u32, bld.def(s1), bld.scc(bld.def(s1)), src01, src11, bld.scc(borrow)).def(1).getTemp();
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), borrow, Operand(0u));
+      } else if (dst.regClass() == v2) {
+         Temp borrow = emit_v_sub32(ctx, bld.tmp(v1), Operand(src00), Operand(src10), true);
+         borrow = emit_v_sub32(ctx, bld.tmp(v1), Operand(src01), Operand(src11), true, Operand(borrow));
+         borrow = bld.vop2_e64(aco_opcode::v_cndmask_b32, bld.def(v1), Operand(0u), Operand(1u), borrow);
+         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), borrow, Operand(0u));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
