@@ -883,12 +883,14 @@ struct Block {
 class Program final {
 public:
    std::vector<Block> blocks;
+   uint16_t sgpr_limit = 0;
    uint16_t max_vgpr = 0;
    uint16_t max_sgpr = 0;
    uint16_t num_waves = 0;
    ac_shader_config* config;
    struct radv_shader_variant_info *info;
    enum chip_class chip_class;
+   enum radeon_family family;
    gl_shader_stage stage;
    bool needs_exact = false; /* there exists an instruction with disable_wqm = true */
    bool needs_wqm = false; /* there exists a p_wqm instruction */
