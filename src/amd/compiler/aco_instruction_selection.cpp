@@ -1010,9 +1010,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
             if (src1.regClass() != v1)
                std::swap(src0, src1);
             assert(src1.regClass() == v1);
-            Temp tmp = bld.tmp(v1), carry = bld.tmp(v1);
-            bld.vop2(aco_opcode::v_add_co_u32, Definition(tmp), Definition(carry),
-                     src0, src1).def(1).setHint(vcc);
+            Temp tmp = bld.tmp(v1);
+            Temp carry = emit_v_add32(ctx, tmp, Operand(src0), Operand(src1), true);
             bld.vop2_e64(aco_opcode::v_cndmask_b32, Definition(dst), tmp, Operand((uint32_t) -1), carry);
          }
       } else {
