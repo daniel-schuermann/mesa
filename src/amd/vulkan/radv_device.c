@@ -841,7 +841,7 @@ void radv_GetPhysicalDeviceFeatures(
 		.shaderClipDistance                       = true,
 		.shaderCullDistance                       = true,
 		.shaderFloat64                            = !pdevice->use_aco,
-		.shaderInt64                              = !pdevice->use_aco,
+		.shaderInt64                              = true,
 		.shaderInt16                              = pdevice->rad_info.chip_class >= GFX9 && !pdevice->use_aco,
 		.sparseBinding                            = true,
 		.variableMultisampleRate                  = true,
