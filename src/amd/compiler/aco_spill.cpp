@@ -1540,7 +1540,7 @@ void spill(Program* program, live& live_vars, const struct radv_nir_compiler_opt
 
    /* else, we check if we can improve things a bit */
    uint16_t total_sgpr_regs = options->chip_class >= GFX8 ? 800 : 512;
-   uint16_t max_addressible_sgpr = options->chip_class >= GFX8 ? 102 : 104;
+   uint16_t max_addressible_sgpr = program->sgpr_limit;
 
    /* calculate target register demand */
    uint16_t max_vgpr = 0, max_sgpr = 0;
