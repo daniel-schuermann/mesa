@@ -1208,6 +1208,11 @@ setup_isel_context(Program* program, nir_shader *nir,
    program->config = config;
    program->info = info;
    program->chip_class = options->chip_class;
+   program->family = options->family;
+   program->sgpr_limit = options->chip_class >= GFX8 ? 102 : 104;
+   if (options->family == CHIP_TONGA)
+      program->sgpr_limit = 94; /* workaround hardware bug */
+
    program->stage = nir->info.stage;
    for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i)
       program->info->user_sgprs_locs.descriptor_sets[i].sgpr_idx = -1;
