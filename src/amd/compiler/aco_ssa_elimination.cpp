@@ -159,10 +159,16 @@ void try_remove_invert_block(ssa_elimination_ctx& ctx, Block* block)
 
    unsigned succ_idx = block->linear_succs[0];
    assert(block->linear_preds.size() == 2);
-   ctx.program->blocks[block->linear_preds[0]].linear_succs[0] = succ_idx;
-   ctx.program->blocks[block->linear_preds[1]].linear_succs[0] = succ_idx;
-   ctx.program->blocks[succ_idx].linear_preds[0] = block->linear_preds[0];
-   ctx.program->blocks[succ_idx].linear_preds[1] = block->linear_preds[1];
+   for (unsigned i = 0; i < 2; i++) {
+      Block *pred = &ctx.program->blocks[block->linear_preds[i]];
+      pred->linear_succs[0] = succ_idx;
+      ctx.program->blocks[succ_idx].linear_preds[i] = pred->index;
+
+      Pseudo_branch_instruction *branch = static_cast<Pseudo_branch_instruction*>(pred->instructions.back().get());
+      assert(branch->format == Format::PSEUDO_BRANCH);
+      branch->target[0] = succ_idx;
+      branch->target[1] = succ_idx;
+   }
 
    block->instructions.clear();
    block->linear_preds.clear();
