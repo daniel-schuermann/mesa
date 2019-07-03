@@ -122,7 +122,7 @@ void print_regs(ra_ctx& ctx, bool vgprs, std::array<uint32_t, 512>& reg_file)
 
 void adjust_max_used_regs(ra_ctx& ctx, RegClass rc, unsigned reg)
 {
-   unsigned max_addressible_sgpr = ctx.program->chip_class >= GFX8 ? 102 : 104;
+   unsigned max_addressible_sgpr = ctx.program->sgpr_limit;
    unsigned size = rc.size();
    if (rc.type() == vgpr) {
       assert(reg >= 256);
@@ -620,7 +620,7 @@ PhysReg get_reg(ra_ctx& ctx,
    assert(regs_free >= size);
 
    /* try using more registers */
-   uint16_t max_addressible_sgpr = ctx.program->chip_class >= GFX8 ? 102 : 104;
+   uint16_t max_addressible_sgpr = ctx.program->sgpr_limit;
    if (rc.type() == vgpr && ctx.program->max_vgpr < 256) {
       update_vgpr_sgpr_demand(ctx.program, ctx.program->max_vgpr + 1, ctx.program->max_sgpr);
       return get_reg(ctx, reg_file, rc, parallelcopies, instr);
@@ -1780,6 +1780,10 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
    /* num_gpr = rnd_up(max_used_gpr + 1) */
    program->config->num_vgprs = (ctx.max_used_vgpr + 1 + 3) & ~3;
+   if (program->family == CHIP_TONGA) {
+      assert(ctx.max_used_sgpr <= 93);
+      ctx.max_used_sgpr = 93; /* workaround hardware bug */
+   }
    program->config->num_sgprs = (ctx.max_used_sgpr + 1 + 2 + 7) & ~7; /* + 2 sgprs for vcc */
 }
 

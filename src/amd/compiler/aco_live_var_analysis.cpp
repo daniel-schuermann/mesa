@@ -202,7 +202,7 @@ void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr)
 {
    // TODO: also take shared mem into account
    uint16_t total_sgpr_regs = program->chip_class >= GFX8 ? 800 : 512;
-   uint16_t max_addressible_sgpr = program->chip_class >= GFX8 ? 102 : 104;
+   uint16_t max_addressible_sgpr = program->sgpr_limit;
    /* VGPRs are allocated in chunks of 4 */
    uint16_t rounded_vgpr_demand = std::max<uint16_t>(4, (vgpr + 3) & ~3);
    /* SGPRs are allocated in chunks of 16 between 8 and 104. VCC occupies the last 2 registers */
