@@ -836,6 +836,20 @@ void handle_pseudo(ra_ctx& ctx,
    }
 }
 
+bool operand_can_use_reg(aco_ptr<Instruction>& instr, unsigned idx, PhysReg reg)
+{
+   switch (instr->format) {
+   case Format::SMEM:
+      return reg != scc &&
+             reg != exec &&
+             (reg != m0 || idx == 1 || idx == 3) && /* offset can be m0 */
+             (reg != vcc || (instr->num_definitions == 0 && idx == 2)); /* sdata can be vcc */
+   default:
+      // TODO: there are more instructions with restrictions on registers
+      return true;
+   }
+}
+
 } /* end namespace */
 
 
@@ -1229,7 +1243,6 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
             /* check if the operand is fixed */
             if (operand.isFixed()) {
-               adjust_max_used_regs(ctx, operand.regClass(), operand.physReg().reg);
 
                if (operand.physReg() == ctx.assignments[operand.tempId()].first) {
                   /* we are fine: the operand is already assigned the correct reg */
@@ -1278,7 +1291,24 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                }
             } else {
                assert(ctx.assignments.find(operand.tempId()) != ctx.assignments.end());
-               operand.setFixed(ctx.assignments[operand.tempId()].first);
+               PhysReg reg = ctx.assignments[operand.tempId()].first;
+
+               if (operand_can_use_reg(instr, i, reg)) {
+                  operand.setFixed(ctx.assignments[operand.tempId()].first);
+               } else {
+                  Operand pc_op = operand;
+                  pc_op.setFixed(reg);
+                  PhysReg new_reg = get_reg(ctx, register_file, operand.regClass(), parallelcopy, instr);
+                  Definition pc_def = Definition(program->allocateId(), new_reg, pc_op.regClass());
+                  ctx.assignments[pc_def.tempId()] = {reg, pc_def.regClass()};
+                  for (unsigned i = 0; i < operand.size(); i++) {
+                        register_file[pc_op.physReg() + i] = 0;
+                        register_file[pc_def.physReg() + i] = pc_def.tempId();
+                  }
+                  parallelcopy.emplace_back(pc_op, pc_def);
+                  operand.setFixed(new_reg);
+               }
+
                if (instr->format == Format::EXP)
                   ctx.war_hint.set(operand.physReg().reg);
             }
