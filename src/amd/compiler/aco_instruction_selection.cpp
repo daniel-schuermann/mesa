@@ -2770,37 +2770,45 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
    if (offset != 0) // TODO check if index != 0 as well
       index = bld.sop2(aco_opcode::s_add_i32, bld.def(s1), bld.def(s1, scc), Operand(offset), index);
    Temp ptr = convert_pointer_to_64_bit(ctx, ctx->push_constants);
-
+   Temp vec = dst;
+   bool trim = false;
    aco_opcode op;
-   RegClass rc;
+
    switch (dst.size()) {
    case 1:
       op = aco_opcode::s_load_dword;
-      rc = s1;
       break;
    case 2:
       op = aco_opcode::s_load_dwordx2;
-      rc = s2;
       break;
    case 3:
+      vec = bld.tmp(s4);
+      trim = true;
    case 4:
       op = aco_opcode::s_load_dwordx4;
-      rc = s4;
+      break;
+   case 6:
+      vec = bld.tmp(s8);
+      trim = true;
+   case 8:
+      op = aco_opcode::s_load_dwordx8;
       break;
    default:
       unreachable("unimplemented or forbidden load_push_constant.");
    }
 
-   Temp vec = dst.size() == 3 ? bld.tmp(rc) : dst;
    bld.smem(op, Definition(vec), ptr, index);
-   emit_split_vector(ctx, vec, vec.size());
 
-   if (dst.size() == 3) {
+   if (trim) {
+      emit_split_vector(ctx, vec, 4);
+      RegClass rc = dst.size() == 3 ? s1 : s2;
       bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
-                 emit_extract_vector(ctx, vec, 0, s1),
-                 emit_extract_vector(ctx, vec, 1, s1),
-                 emit_extract_vector(ctx, vec, 2, s1));
+                 emit_extract_vector(ctx, vec, 0, rc),
+                 emit_extract_vector(ctx, vec, 1, rc),
+                 emit_extract_vector(ctx, vec, 2, rc));
+
    }
+   emit_split_vector(ctx, dst, instr->dest.ssa.num_components);
 }
 
 void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
