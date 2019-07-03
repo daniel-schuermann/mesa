@@ -1381,7 +1381,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                if (definition.hasHint() && register_file[definition.physReg().reg] == 0)
                   definition.setFixed(definition.physReg());
                else if (instr->opcode == aco_opcode::p_split_vector) {
-                  PhysReg reg = PhysReg{instr->getOperand(0).physReg() + i};
+                  PhysReg reg = PhysReg{instr->getOperand(0).physReg() + i * definition.size()};
                   if (!get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg))
                      reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
                   definition.setFixed(reg);
