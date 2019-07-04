@@ -52,32 +52,36 @@ void dominator_tree(Program* program)
       int new_logical_idom = -1;
       int new_linear_idom = -1;
       for (unsigned pred_idx : block.logical_preds) {
-         if ((int) program->blocks[pred_idx].logical_idom != -1) {
-            if (new_logical_idom == -1) {
-               new_logical_idom = pred_idx;
-            } else {
-               while ((int) pred_idx != new_logical_idom) {
-                  if ((int) pred_idx > new_logical_idom)
-                     pred_idx = program->blocks[pred_idx].logical_idom;
-                  if ((int) pred_idx < new_logical_idom)
-                     new_logical_idom = program->blocks[new_logical_idom].logical_idom;
-               }
-            }
+         if ((int) program->blocks[pred_idx].logical_idom == -1)
+            continue;
+         
+         if (new_logical_idom == -1) {
+            new_logical_idom = pred_idx;
+            continue;
+         }
+         
+         while ((int) pred_idx != new_logical_idom) {
+            if ((int) pred_idx > new_logical_idom)
+               pred_idx = program->blocks[pred_idx].logical_idom;
+            if ((int) pred_idx < new_logical_idom)
+               new_logical_idom = program->blocks[new_logical_idom].logical_idom;
          }
       }
 
       for (unsigned pred_idx : block.linear_preds) {
-         if ((int) program->blocks[pred_idx].linear_idom != -1) {
-            if (new_linear_idom == -1) {
-               new_linear_idom = pred_idx;
-            } else {
-               while ((int) pred_idx != new_linear_idom) {
-                  if ((int) pred_idx > new_linear_idom)
-                     pred_idx = program->blocks[pred_idx].linear_idom;
-                  if ((int) pred_idx < new_linear_idom)
-                     new_linear_idom = program->blocks[new_linear_idom].linear_idom;
-               }
-            }
+         if ((int) program->blocks[pred_idx].linear_idom == -1)
+            continue;
+            
+         if (new_linear_idom == -1) {
+            new_linear_idom = pred_idx;
+            continue;
+         }
+         
+         while ((int) pred_idx != new_linear_idom) {
+            if ((int) pred_idx > new_linear_idom)
+               pred_idx = program->blocks[pred_idx].linear_idom;
+            if ((int) pred_idx < new_linear_idom)
+               new_linear_idom = program->blocks[new_linear_idom].linear_idom;
          }
       }
 
