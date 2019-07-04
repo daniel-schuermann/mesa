@@ -1524,6 +1524,57 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
       }
       block.instructions = std::move(instructions);
    }
+
+   /* SSA elimination inserts copies for logical phis right before p_logical_end
+    * So if a linear vgpr is used between that p_logical_end and the branch,
+    * we need to ensure logical phis don't choose a definition which aliases
+    * the linear vgpr.
+    * TODO: Moving the spills and reloads to before p_logical_end might produce
+    *       slightly better code. */
+   for (Block& block : ctx.program->blocks) {
+      /* only merge blocks, loop headers and loop exits have logical phis */
+      if (!(block.kind & (block_kind_merge | block_kind_loop_header | block_kind_loop_exit)))
+         continue;
+
+      bool has_logical_phis = false;
+      for (aco_ptr<Instruction>& instr : block.instructions) {
+         if (instr->opcode == aco_opcode::p_phi) {
+            has_logical_phis = true;
+            break;
+         } else if (instr->opcode != aco_opcode::p_linear_phi) {
+            break;
+         }
+      }
+      if (!has_logical_phis)
+         continue;
+
+      std::set<Temp> vgprs;
+      for (unsigned pred_idx : block.logical_preds) {
+         Block& pred = ctx.program->blocks[pred_idx];
+         for (int i = pred.instructions.size() - 1; i >= 0; i--) {
+            aco_ptr<Instruction>& pred_instr = pred.instructions[i];
+            if (pred_instr->opcode == aco_opcode::p_logical_end) {
+               break;
+            } else if (pred_instr->opcode == aco_opcode::p_spill ||
+                       pred_instr->opcode == aco_opcode::p_reload) {
+               vgprs.insert(pred_instr->getOperand(0).getTemp());
+            }
+         }
+      }
+      if (!vgprs.size())
+         continue;
+
+      aco_ptr<Instruction> destr{create_instruction<Pseudo_instruction>(aco_opcode::p_end_linear_vgpr, Format::PSEUDO, vgprs.size(), 0)};
+      int k = 0;
+      for (Temp tmp : vgprs) {
+         destr->getOperand(k++) = Operand(tmp);
+      }
+      /* find insertion point */
+      std::vector<aco_ptr<Instruction>>::iterator it = block.instructions.begin();
+      while ((*it)->opcode == aco_opcode::p_linear_phi || (*it)->opcode == aco_opcode::p_phi)
+         ++it;
+      block.instructions.insert(it, std::move(destr));
+   }
 }
 
 } /* end namespace */
