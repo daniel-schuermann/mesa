@@ -40,7 +40,7 @@ namespace aco {
  * consisting of the information about the cnt values to be waited for.
  * Note: After merge-nodes, it might occur that for the same register
  *       multiple cnt values are to be waited for.
- * 
+ *
  * The values are updated according to the encountered instructions:
  * - additional events increment the counter of waits of the same type
  * - or erase vgprs with counters higher than to be waited for.
@@ -228,7 +228,7 @@ bool writes_exec(Instruction* instr, wait_ctx& ctx)
    {
       default:
          return false;
-      case Format::SOP1: 
+      case Format::SOP1:
       case Format::SOP2:
       case Format::SOPK:
       case Format::VOP3:
@@ -236,13 +236,13 @@ bool writes_exec(Instruction* instr, wait_ctx& ctx)
    }
 
    /* check if the dst writes exec */
-   for (unsigned i = 0; i < instr->definitionCount(); i++)
+   for (unsigned i = 0; i < instr->definitions.size(); i++)
    {
-      if ((instr->getDefinition(i).regClass() == RegClass::s2 &&
-           instr->getDefinition(i).physReg() == exec) ||
-          (instr->getDefinition(i).regClass() == RegClass::s1 &&
-          (instr->getDefinition(i).physReg() == exec_lo ||
-           instr->getDefinition(i).physReg() == exec_hi )))
+      if ((instr->definitions[i].regClass() == RegClass::s2 &&
+           instr->definitions[i].physReg() == exec) ||
+          (instr->definitions[i].regClass() == RegClass::s1 &&
+          (instr->definitions[i].physReg() == exec_lo ||
+           instr->definitions[i].physReg() == exec_hi )))
          return true;
    }
    return false;
@@ -255,15 +255,15 @@ uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
    uint16_t new_vm_cnt = ctx.max_vm_cnt;
    uint16_t new_lgkm_cnt = ctx.max_lgkm_cnt;
 
-   for (unsigned i = 0; i < instr->definitionCount(); i++)
+   for (unsigned i = 0; i < instr->definitions.size(); i++)
    {
-      if (instr->getDefinition(i).getTemp().type() != RegType::vgpr)
+      if (instr->definitions[i].getTemp().type() != RegType::vgpr)
          continue;
 
       /* check consecutively written vgprs */
-      for (unsigned j = 0; j < instr->getDefinition(i).getTemp().size(); j++)
+      for (unsigned j = 0; j < instr->definitions[i].getTemp().size(); j++)
       {
-         uint8_t reg = (uint8_t) instr->getDefinition(i).physReg() + j;
+         uint8_t reg = (uint8_t) instr->definitions[i].physReg() + j;
 
          std::unordered_map<uint8_t,wait_entry>::iterator it;
          it = ctx.vgpr_map.find(reg);
@@ -332,15 +332,15 @@ uint16_t writes_sgpr(Instruction* instr, wait_ctx& ctx)
 {
    bool needs_waitcnt = false;
    uint16_t new_lgkm_cnt = ctx.max_lgkm_cnt;
-   for (unsigned i = 0; i < instr->definitionCount(); i++)
+   for (unsigned i = 0; i < instr->definitions.size(); i++)
    {
-      if (instr->getDefinition(i).getTemp().type() != RegType::sgpr)
+      if (instr->definitions[i].getTemp().type() != RegType::sgpr)
          continue;
 
       /* check consecutively written sgprs */
-      for (unsigned j = 0; j < instr->getDefinition(i).getTemp().size(); j++)
+      for (unsigned j = 0; j < instr->definitions[i].getTemp().size(); j++)
       {
-         uint8_t reg = (uint8_t) instr->getDefinition(i).physReg() + j;
+         uint8_t reg = (uint8_t) instr->definitions[i].physReg() + j;
 
          std::unordered_map<uint8_t,wait_entry>::iterator it;
          it = ctx.sgpr_map.find(reg);
@@ -385,15 +385,15 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
    bool needs_waitcnt = false;
    uint16_t new_lgkm_cnt = ctx.max_lgkm_cnt;
    uint16_t new_vm_cnt = ctx.max_vm_cnt;
-   for (unsigned i = 0; i < instr->num_operands; i++) {
-      if (instr->getOperand(i).isConstant() || instr->getOperand(i).isUndefined())
+   for (const Operand op : instr->operands) {
+      if (op.isConstant() || op.isUndefined())
          continue;
 
       /* check consecutively read sgprs */
-      for (unsigned j = 0; j < instr->getOperand(i).size(); j++) {
-         uint8_t reg = (uint8_t) instr->getOperand(i).physReg() + j;
+      for (unsigned j = 0; j < op.size(); j++) {
+         uint8_t reg = (uint8_t) op.physReg() + j;
          std::unordered_map<uint8_t,wait_entry>::iterator it;
-         if (instr->getOperand(i).getTemp().type() == RegType::sgpr) {
+         if (op.getTemp().type() == RegType::sgpr) {
             it = ctx.sgpr_map.find(reg);
             if (it == ctx.sgpr_map.end())
                continue;
@@ -541,8 +541,8 @@ bool gen(Instruction* instr, wait_ctx& ctx)
       {
          if (exp_instr->enabled_mask & (1 << i)) {
             unsigned idx = exp_instr->compressed ? i >> 1 : i;
-            assert(idx < exp_instr->num_operands);
-            auto it = ctx.vgpr_map.emplace(exp_instr->getOperand(idx).physReg(),
+            assert(idx < exp_instr->operands.size());
+            auto it = ctx.vgpr_map.emplace(exp_instr->operands[idx].physReg(),
                                            wait_entry(t, ctx.max_vm_cnt, 0, ctx.max_lgkm_cnt)).first;
             it->second.exp_cnt = 0;
 
@@ -560,11 +560,11 @@ bool gen(Instruction* instr, wait_ctx& ctx)
          if ((e.second.type & (vm_type | lgkm_type)))
             e.second.lgkm_cnt = e.second.vm_cnt = 0;
       }
-      if (instr->num_definitions) {
-         for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
+      if (instr->definitions.size()) {
+         for (unsigned i = 0; i < instr->definitions[0].size(); i++)
          {
             ctx.pending_flat++;
-            ctx.vgpr_map.emplace(instr->getDefinition(0).physReg() + i,
+            ctx.vgpr_map.emplace(instr->definitions[0].physReg() + i,
             wait_entry((wait_type)((int)lgkm_type | (int)vm_type), 0, ctx.max_exp_cnt, 0, true));
          }
          return true;
@@ -573,10 +573,10 @@ bool gen(Instruction* instr, wait_ctx& ctx)
    }
    case Format::SMEM: {
       ctx.lgkm_cnt++;
-      if (instr->num_definitions) {
-         for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
+      if (instr->definitions.size()) {
+         for (unsigned i = 0; i < instr->definitions[0].size(); i++)
          {
-            ctx.sgpr_map.emplace(instr->getDefinition(0).physReg() + i,
+            ctx.sgpr_map.emplace(instr->definitions[0].physReg() + i,
             wait_entry(lgkm_type, ctx.max_vm_cnt, ctx.max_exp_cnt, 0, false));
          }
          return true;
@@ -587,10 +587,10 @@ bool gen(Instruction* instr, wait_ctx& ctx)
       // TODO: check if reads and writes are in-order
       /* the counter is also used as check for membars, thus we need it also on writes */
       ctx.lgkm_cnt++;
-      if (instr->num_definitions) {
-         for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
+      if (instr->definitions.size()) {
+         for (unsigned i = 0; i < instr->definitions[0].size(); i++)
          {
-            ctx.vgpr_map.emplace(instr->getDefinition(0).physReg() + i,
+            ctx.vgpr_map.emplace(instr->definitions[0].physReg() + i,
             wait_entry(lgkm_type, ctx.max_vm_cnt, ctx.max_exp_cnt, 0));
          }
          return true;
@@ -608,16 +608,16 @@ bool gen(Instruction* instr, wait_ctx& ctx)
             e.second.vm_cnt++;
       }
       ctx.vm_cnt++;
-      if (instr->num_definitions) {
-         for (unsigned i = 0; i < instr->getDefinition(0).size(); i++)
+      if (instr->definitions.size()) {
+         for (unsigned i = 0; i < instr->definitions[0].size(); i++)
          {
-            ctx.vgpr_map.emplace(instr->getDefinition(0).physReg() + i,
+            ctx.vgpr_map.emplace(instr->definitions[0].physReg() + i,
             wait_entry(vm_type, 0, ctx.max_exp_cnt, ctx.max_lgkm_cnt));
          }
-      } else if (instr->num_operands == 4 && ctx.chip_class < GFX8) { // TODO: test if this is needed on GFX7 and GFX6 (and then update RA)
-         for (unsigned i = 0; i < instr->getOperand(3).size(); i++)
+      } else if (instr->operands.size() == 4 && ctx.chip_class < GFX8) { // TODO: test if this is needed on GFX7 and GFX6 (and then update RA)
+         for (unsigned i = 0; i < instr->operands[3].size(); i++)
          {
-            ctx.vgpr_map.emplace(instr->getOperand(3).physReg() + i,
+            ctx.vgpr_map.emplace(instr->operands[3].physReg() + i,
             wait_entry(vm_type, 0, ctx.max_exp_cnt, ctx.max_lgkm_cnt, false, true));
          }
       }

@@ -39,8 +39,8 @@ struct InstrHash {
    std::size_t operator()(Instruction* instr) const
    {
       uint64_t hash = (uint64_t) instr->opcode + (uint64_t) instr->format;
-      for (unsigned i = 0; i < instr->num_operands; i++) {
-         Operand op = instr->getOperand(i);
+      for (unsigned i = 0; i < instr->operands.size(); i++) {
+         Operand op = instr->operands[i];
          uint64_t val = op.isTemp() ? op.tempId() : op.isFixed() ? op.physReg() : op.constantValue();
          hash |= val << (i+1) * 8;
       }
@@ -80,43 +80,43 @@ struct InstrPred {
          return false;
       if (a->opcode != b->opcode)
          return false;
-      if (a->num_operands != b->num_operands || a->num_definitions != b->num_definitions)
+      if (a->operands.size() != b->operands.size() || a->definitions.size() != b->definitions.size())
          return false; /* possible with pseudo-instructions */
-      for (unsigned i = 0; i < a->num_operands; i++) {
-         if (a->getOperand(i).isConstant()) {
-            if (!b->getOperand(i).isConstant())
+      for (unsigned i = 0; i < a->operands.size(); i++) {
+         if (a->operands[i].isConstant()) {
+            if (!b->operands[i].isConstant())
                return false;
-            if (a->getOperand(i).constantValue() != b->getOperand(i).constantValue())
-               return false;
-         }
-         else if (a->getOperand(i).isTemp()) {
-            if (!b->getOperand(i).isTemp())
-               return false;
-            if (a->getOperand(i).tempId() != b->getOperand(i).tempId())
+            if (a->operands[i].constantValue() != b->operands[i].constantValue())
                return false;
          }
-         else if (a->getOperand(i).isUndefined() ^ b->getOperand(i).isUndefined())
+         else if (a->operands[i].isTemp()) {
+            if (!b->operands[i].isTemp())
+               return false;
+            if (a->operands[i].tempId() != b->operands[i].tempId())
+               return false;
+         }
+         else if (a->operands[i].isUndefined() ^ b->operands[i].isUndefined())
             return false;
-         if (a->getOperand(i).isFixed()) {
-            if (a->getOperand(i).physReg() == exec)
+         if (a->operands[i].isFixed()) {
+            if (a->operands[i].physReg() == exec)
                return false;
-            if (!b->getOperand(i).isFixed())
+            if (!b->operands[i].isFixed())
                return false;
-            if (!(a->getOperand(i).physReg() == b->getOperand(i).physReg()))
+            if (!(a->operands[i].physReg() == b->operands[i].physReg()))
                return false;
          }
       }
-      for (unsigned i = 0; i < a->num_definitions; i++) {
-         if (a->getDefinition(i).isTemp()) {
-            if (!b->getDefinition(i).isTemp())
+      for (unsigned i = 0; i < a->definitions.size(); i++) {
+         if (a->definitions[i].isTemp()) {
+            if (!b->definitions[i].isTemp())
                return false;
-            if (a->getDefinition(i).regClass() != b->getDefinition(i).regClass())
+            if (a->definitions[i].regClass() != b->definitions[i].regClass())
                return false;
          }
-         if (a->getDefinition(i).isFixed()) {
-            if (!b->getDefinition(i).isFixed())
+         if (a->definitions[i].isFixed()) {
+            if (!b->definitions[i].isFixed())
                return false;
-            if (!(a->getDefinition(i).physReg() == b->getDefinition(i).physReg()))
+            if (!(a->definitions[i].physReg() == b->definitions[i].physReg()))
                return false;
          }
       }
@@ -233,15 +233,15 @@ void process_block(Block& block,
    while (it != block.instructions.end()) {
       aco_ptr<Instruction>& instr = *it;
       /* first, rename operands */
-      for (unsigned i = 0; i < instr->num_operands; i++) {
-         if (!instr->getOperand(i).isTemp())
+      for (unsigned i = 0; i < instr->operands.size(); i++) {
+         if (!instr->operands[i].isTemp())
             continue;
-         std::map<uint32_t, Temp>::iterator it = renames.find(instr->getOperand(i).tempId());
+         std::map<uint32_t, Temp>::iterator it = renames.find(instr->operands[i].tempId());
          if (it != renames.end())
-            instr->getOperand(i).setTemp(it->second);
+            instr->operands[i].setTemp(it->second);
       }
 
-      if (!instr->num_definitions || !run) {
+      if (!instr->definitions.size() || !run) {
          if (instr->opcode == aco_opcode::p_logical_start)
             run = true;
          else if (instr->opcode == aco_opcode::p_logical_end)
@@ -250,7 +250,7 @@ void process_block(Block& block,
             std::pair<expr_set::iterator, bool> res = phi_values.emplace(instr.get());
             if (!res.second) {
                Instruction* orig_phi = *(res.first);
-               renames.emplace(instr->getDefinition(0).tempId(), orig_phi->getDefinition(0).getTemp()).second;
+               renames.emplace(instr->definitions[0].tempId(), orig_phi->definitions[0].getTemp()).second;
                ++it;
                continue;
             }
@@ -262,9 +262,9 @@ void process_block(Block& block,
 
       /* simple copy-propagation through renaming */
       if ((instr->opcode == aco_opcode::s_mov_b32 || instr->opcode == aco_opcode::s_mov_b64 || instr->opcode == aco_opcode::v_mov_b32) &&
-          !instr->getDefinition(0).isFixed() && instr->getOperand(0).isTemp() && instr->getOperand(0).regClass() == instr->getDefinition(0).regClass() &&
+          !instr->definitions[0].isFixed() && instr->operands[0].isTemp() && instr->operands[0].regClass() == instr->definitions[0].regClass() &&
           !instr->isDPP() && !((int)instr->format & (int)Format::SDWA)) {
-         renames[instr->getDefinition(0).tempId()] = instr->getOperand(0).getTemp();
+         renames[instr->definitions[0].tempId()] = instr->operands[0].getTemp();
       }
 
       std::pair<expr_set::iterator, bool> res = expr_values.emplace(instr.get());
@@ -272,10 +272,10 @@ void process_block(Block& block,
       /* if there was already an expression with the same value number */
       if (!res.second) {
          Instruction* orig_instr = *(res.first);
-         assert(instr->num_definitions == orig_instr->num_definitions);
-         for (unsigned i = 0; i < instr->num_definitions; i++) {
-            assert(instr->getDefinition(i).regClass() == orig_instr->getDefinition(i).regClass());
-            renames.emplace(instr->getDefinition(i).tempId(), orig_instr->getDefinition(i).getTemp()).second;
+         assert(instr->definitions.size() == orig_instr->definitions.size());
+         for (unsigned i = 0; i < instr->definitions.size(); i++) {
+            assert(instr->definitions[i].regClass() == orig_instr->definitions[i].regClass());
+            renames.emplace(instr->definitions[i].tempId(), orig_instr->definitions[i].getTemp()).second;
          }
       } else {
          new_instructions.emplace_back(std::move(instr));
@@ -292,12 +292,12 @@ void rename_phi_operands(Block& block, std::map<uint32_t, Temp>& renames)
       if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
          break;
 
-      for (unsigned i = 0; i < phi->num_operands; i++) {
-         if (!phi->getOperand(i).isTemp())
+      for (unsigned i = 0; i < phi->operands.size(); i++) {
+         if (!phi->operands[i].isTemp())
             continue;
-         std::map<uint32_t, Temp>::iterator it = renames.find(phi->getOperand(i).tempId());
+         std::map<uint32_t, Temp>::iterator it = renames.find(phi->operands[i].tempId());
          if (it != renames.end())
-            phi->getOperand(i).setTemp(it->second);
+            phi->operands[i].setTemp(it->second);
       }
    }
 }
