@@ -73,15 +73,15 @@ void move_element(T& list, size_t idx, size_t before) {
 static RegisterDemand getLiveChanges(aco_ptr<Instruction>& instr)
 {
    RegisterDemand changes;
-   for (unsigned i = 0; i < instr->definitionCount(); i++) {
-      Definition& def = instr->getDefinition(i);
+   for (unsigned i = 0; i < instr->definitions.size(); i++) {
+      Definition& def = instr->definitions[i];
       if (!def.isTemp() || def.isKill())
          continue;
       changes += def.getTemp();
    }
 
-   for (unsigned i = 0; i < instr->operandCount(); i++) {
-      Operand& op = instr->getOperand(i);
+   for (unsigned i = 0; i < instr->operands.size(); i++) {
+      Operand& op = instr->operands[i];
       if (!op.isTemp() || !op.isFirstKill())
          continue;
       changes -= op.getTemp();
@@ -93,8 +93,8 @@ static RegisterDemand getLiveChanges(aco_ptr<Instruction>& instr)
 static RegisterDemand getTempRegisters(aco_ptr<Instruction>& instr)
 {
    RegisterDemand temp_registers;
-   for (unsigned i = 0; i < instr->definitionCount(); i++) {
-      Definition& def = instr->getDefinition(i);
+   for (unsigned i = 0; i < instr->definitions.size(); i++) {
+      Definition& def = instr->definitions[i];
       if (!def.isTemp() || !def.isKill())
          continue;
       temp_registers += def.getTemp();
@@ -210,9 +210,9 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
 
    /* create the initial set of values which current depends on */
    std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
-   for (unsigned i = 0; i < current->num_operands; i++) {
-      if (current->getOperand(i).isTemp())
-         ctx.depends_on[current->getOperand(i).tempId()] = true;
+   for (unsigned i = 0; i < current->operands.size(); i++) {
+      if (current->operands[i].isTemp())
+         ctx.depends_on[current->operands[i].tempId()] = true;
    }
 
    /* maintain how many registers remain free when moving instructions */
@@ -243,10 +243,10 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
       /* if current depends on candidate, add additional dependencies and continue */
       bool can_move_down = true;
       bool writes_exec = false;
-      for (unsigned i = 0; i < candidate->num_definitions; i++) {
-         if (candidate->getDefinition(i).isTemp() && ctx.depends_on[candidate->getDefinition(i).tempId()])
+      for (unsigned i = 0; i < candidate->definitions.size(); i++) {
+         if (candidate->definitions[i].isTemp() && ctx.depends_on[candidate->definitions[i].tempId()])
             can_move_down = false;
-         if (candidate->getDefinition(i).isFixed() && candidate->getDefinition(i).physReg() == exec)
+         if (candidate->definitions[i].isFixed() && candidate->definitions[i].physReg() == exec)
             writes_exec = true;
       }
       if (writes_exec)
@@ -256,25 +256,25 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
          can_move_down = false;
       moving_interaction |= get_barrier_interaction(candidate.get());
       if (!can_move_down) {
-         for (unsigned i = 0; i < candidate->num_operands; i++) {
-            if (candidate->getOperand(i).isTemp())
-               ctx.depends_on[candidate->getOperand(i).tempId()] = true;
+         for (unsigned i = 0; i < candidate->operands.size(); i++) {
+            if (candidate->operands[i].isTemp())
+               ctx.depends_on[candidate->operands[i].tempId()] = true;
          }
          continue;
       }
 
       bool register_pressure_unknown = false;
       /* check if one of candidate's operands is killed by depending instruction */
-      for (unsigned i = 0; i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()]) {
+      for (unsigned i = 0; i < candidate->operands.size(); i++) {
+         if (candidate->operands[i].isTemp() && ctx.depends_on[candidate->operands[i].tempId()]) {
             // FIXME: account for difference in register pressure
             register_pressure_unknown = true;
          }
       }
       if (register_pressure_unknown) {
-         for (unsigned i = 0; i < candidate->num_operands; i++) {
-            if (candidate->getOperand(i).isTemp())
-               ctx.depends_on[candidate->getOperand(i).tempId()] = true;
+         for (unsigned i = 0; i < candidate->operands.size(); i++) {
+            if (candidate->operands[i].isTemp())
+               ctx.depends_on[candidate->operands[i].tempId()] = true;
          }
          continue;
       }
@@ -310,9 +310,9 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
    /* create the initial set of values which depend on current */
    std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
    std::fill(ctx.RAR_dependencies.begin(), ctx.RAR_dependencies.end(), false);
-   for (unsigned i = 0; i < current->num_definitions; i++) {
-      if (current->getDefinition(i).isTemp())
-         ctx.depends_on[current->getDefinition(i).tempId()] = true;
+   for (unsigned i = 0; i < current->definitions.size(); i++) {
+      if (current->definitions[i].isTemp())
+         ctx.depends_on[current->definitions[i].tempId()] = true;
    }
 
    /* find the first instruction depending on current or find another MEM */
@@ -331,8 +331,8 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
          break;
 
       bool writes_exec = false;
-      for (unsigned i = 0; i < candidate->num_definitions; i++) {
-         if (candidate->getDefinition(i).isFixed() && candidate->getDefinition(i).physReg() == exec)
+      for (unsigned i = 0; i < candidate->definitions.size(); i++) {
+         if (candidate->definitions[i].isFixed() && candidate->definitions[i].physReg() == exec)
             writes_exec = true;
       }
       if (writes_exec)
@@ -340,21 +340,21 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
 
       /* check if candidate depends on current */
       bool is_dependency = false;
-      for (unsigned i = 0; !is_dependency && i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()])
+      for (unsigned i = 0; !is_dependency && i < candidate->operands.size(); i++) {
+         if (candidate->operands[i].isTemp() && ctx.depends_on[candidate->operands[i].tempId()])
             is_dependency = true;
       }
       if ((moving_interaction & barrier_shared) && candidate->format == Format::DS)
          is_dependency = true;
       moving_interaction |= get_barrier_interaction(candidate.get());
       if (is_dependency) {
-         for (unsigned j = 0; j < candidate->num_definitions; j++) {
-            if (candidate->getDefinition(j).isTemp())
-               ctx.depends_on[candidate->getDefinition(j).tempId()] = true;
+         for (unsigned j = 0; j < candidate->definitions.size(); j++) {
+            if (candidate->definitions[j].isTemp())
+               ctx.depends_on[candidate->definitions[j].tempId()] = true;
          }
-         for (unsigned i = 0; i < candidate->num_operands; i++) {
-            if (candidate->getOperand(i).isTemp())
-               ctx.RAR_dependencies[candidate->getOperand(i).tempId()] = true;
+         for (unsigned i = 0; i < candidate->operands.size(); i++) {
+            if (candidate->operands[i].isTemp())
+               ctx.RAR_dependencies[candidate->operands[i].tempId()] = true;
          }
          if (!found_dependency) {
             insert_idx = candidate_idx;
@@ -382,18 +382,18 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
       // TODO: correctly calculate register pressure for this case
       bool register_pressure_unknown = false;
       /* check if candidate uses/kills an operand which is used by a dependency */
-      for (unsigned i = 0; i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && ctx.RAR_dependencies[candidate->getOperand(i).tempId()])
+      for (unsigned i = 0; i < candidate->operands.size(); i++) {
+         if (candidate->operands[i].isTemp() && ctx.RAR_dependencies[candidate->operands[i].tempId()])
             register_pressure_unknown = true;
       }
       if (register_pressure_unknown) {
-         for (unsigned i = 0; i < candidate->num_definitions; i++) {
-            if (candidate->getDefinition(i).isTemp())
-               ctx.RAR_dependencies[candidate->getDefinition(i).tempId()] = true;
+         for (unsigned i = 0; i < candidate->definitions.size(); i++) {
+            if (candidate->definitions[i].isTemp())
+               ctx.RAR_dependencies[candidate->definitions[i].tempId()] = true;
          }
-         for (unsigned i = 0; i < candidate->num_operands; i++) {
-            if (candidate->getOperand(i).isTemp())
-               ctx.RAR_dependencies[candidate->getOperand(i).tempId()] = true;
+         for (unsigned i = 0; i < candidate->operands.size(); i++) {
+            if (candidate->operands[i].isTemp())
+               ctx.RAR_dependencies[candidate->operands[i].tempId()] = true;
          }
          continue;
       }
@@ -438,9 +438,9 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
 
    /* create the initial set of values which current depends on */
    std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
-   for (unsigned i = 0; i < current->num_operands; i++) {
-      if (current->getOperand(i).isTemp())
-         ctx.depends_on[current->getOperand(i).tempId()] = true;
+   for (unsigned i = 0; i < current->operands.size(); i++) {
+      if (current->operands[i].isTemp())
+         ctx.depends_on[current->operands[i].tempId()] = true;
    }
 
    /* maintain how many registers remain free when moving instructions */
@@ -471,10 +471,10 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
       /* if current depends on candidate, add additional dependencies and continue */
       bool can_move_down = true;
       bool writes_exec = false;
-      for (unsigned i = 0; i < candidate->num_definitions; i++) {
-         if (candidate->getDefinition(i).isTemp() && ctx.depends_on[candidate->getDefinition(i).tempId()])
+      for (unsigned i = 0; i < candidate->definitions.size(); i++) {
+         if (candidate->definitions[i].isTemp() && ctx.depends_on[candidate->definitions[i].tempId()])
             can_move_down = false;
-         if (candidate->getDefinition(i).isFixed() && candidate->getDefinition(i).physReg() == exec)
+         if (candidate->definitions[i].isFixed() && candidate->definitions[i].physReg() == exec)
             writes_exec = true;
       }
       if (writes_exec)
@@ -484,25 +484,25 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
          can_move_down = false;
       moving_interaction |= get_barrier_interaction(candidate.get());
       if (!can_move_down) {
-         for (unsigned i = 0; i < candidate->num_operands; i++) {
-            if (candidate->getOperand(i).isTemp())
-               ctx.depends_on[candidate->getOperand(i).tempId()] = true;
+         for (unsigned i = 0; i < candidate->operands.size(); i++) {
+            if (candidate->operands[i].isTemp())
+               ctx.depends_on[candidate->operands[i].tempId()] = true;
          }
          continue;
       }
 
       bool register_pressure_unknown = false;
       /* check if one of candidate's operands is killed by depending instruction */
-      for (unsigned i = 0; i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()]) {
+      for (unsigned i = 0; i < candidate->operands.size(); i++) {
+         if (candidate->operands[i].isTemp() && ctx.depends_on[candidate->operands[i].tempId()]) {
             // FIXME: account for difference in register pressure
             register_pressure_unknown = true;
          }
       }
       if (register_pressure_unknown) {
-         for (unsigned i = 0; i < candidate->num_operands; i++) {
-            if (candidate->getOperand(i).isTemp())
-               ctx.depends_on[candidate->getOperand(i).tempId()] = true;
+         for (unsigned i = 0; i < candidate->operands.size(); i++) {
+            if (candidate->operands[i].isTemp())
+               ctx.depends_on[candidate->operands[i].tempId()] = true;
          }
          continue;
       }
@@ -537,9 +537,9 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
    /* create the initial set of values which depend on current */
    std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
    std::fill(ctx.RAR_dependencies.begin(), ctx.RAR_dependencies.end(), false);
-   for (unsigned i = 0; i < current->num_definitions; i++) {
-      if (current->getDefinition(i).isTemp())
-         ctx.depends_on[current->getDefinition(i).tempId()] = true;
+   for (unsigned i = 0; i < current->definitions.size(); i++) {
+      if (current->definitions[i].isTemp())
+         ctx.depends_on[current->definitions[i].tempId()] = true;
    }
 
    /* find the first instruction depending on current or find another VMEM */
@@ -558,8 +558,8 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
          break;
 
       bool writes_exec = false;
-      for (unsigned i = 0; i < candidate->num_definitions; i++) {
-         if (candidate->getDefinition(i).isFixed() && candidate->getDefinition(i).physReg() == exec)
+      for (unsigned i = 0; i < candidate->definitions.size(); i++) {
+         if (candidate->definitions[i].isFixed() && candidate->definitions[i].physReg() == exec)
             writes_exec = true;
       }
       if (writes_exec)
@@ -567,21 +567,21 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
 
       /* check if candidate depends on current */
       bool is_dependency = !can_reorder(candidate.get(), true) && !can_reorder_cur;
-      for (unsigned i = 0; !is_dependency && i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()])
+      for (unsigned i = 0; !is_dependency && i < candidate->operands.size(); i++) {
+         if (candidate->operands[i].isTemp() && ctx.depends_on[candidate->operands[i].tempId()])
             is_dependency = true;
       }
       if ((moving_interaction & barrier_shared) && candidate->format == Format::DS)
          is_dependency = true;
       moving_interaction |= get_barrier_interaction(candidate.get());
       if (is_dependency) {
-         for (unsigned j = 0; j < candidate->num_definitions; j++) {
-            if (candidate->getDefinition(j).isTemp())
-               ctx.depends_on[candidate->getDefinition(j).tempId()] = true;
+         for (unsigned j = 0; j < candidate->definitions.size(); j++) {
+            if (candidate->definitions[j].isTemp())
+               ctx.depends_on[candidate->definitions[j].tempId()] = true;
          }
-         for (unsigned i = 0; i < candidate->num_operands; i++) {
-            if (candidate->getOperand(i).isTemp())
-               ctx.RAR_dependencies[candidate->getOperand(i).tempId()] = true;
+         for (unsigned i = 0; i < candidate->operands.size(); i++) {
+            if (candidate->operands[i].isTemp())
+               ctx.RAR_dependencies[candidate->operands[i].tempId()] = true;
          }
          if (!found_dependency) {
             insert_idx = candidate_idx;
@@ -601,18 +601,18 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
 
       bool register_pressure_unknown = false;
       /* check if candidate uses/kills an operand which is used by a dependency */
-      for (unsigned i = 0; i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && ctx.RAR_dependencies[candidate->getOperand(i).tempId()])
+      for (unsigned i = 0; i < candidate->operands.size(); i++) {
+         if (candidate->operands[i].isTemp() && ctx.RAR_dependencies[candidate->operands[i].tempId()])
             register_pressure_unknown = true;
       }
       if (register_pressure_unknown) {
-         for (unsigned i = 0; i < candidate->num_definitions; i++) {
-            if (candidate->getDefinition(i).isTemp())
-               ctx.RAR_dependencies[candidate->getDefinition(i).tempId()] = true;
+         for (unsigned i = 0; i < candidate->definitions.size(); i++) {
+            if (candidate->definitions[i].isTemp())
+               ctx.RAR_dependencies[candidate->definitions[i].tempId()] = true;
          }
-         for (unsigned i = 0; i < candidate->num_operands; i++) {
-            if (candidate->getOperand(i).isTemp())
-               ctx.RAR_dependencies[candidate->getOperand(i).tempId()] = true;
+         for (unsigned i = 0; i < candidate->operands.size(); i++) {
+            if (candidate->operands[i].isTemp())
+               ctx.RAR_dependencies[candidate->operands[i].tempId()] = true;
          }
          continue;
       }
@@ -653,9 +653,9 @@ void schedule_position_export(sched_ctx& ctx, Block* block,
 
    /* create the initial set of values which current depends on */
    std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
-   for (unsigned i = 0; i < current->num_operands; i++) {
-      if (current->getOperand(i).isTemp())
-         ctx.depends_on[current->getOperand(i).tempId()] = true;
+   for (unsigned i = 0; i < current->operands.size(); i++) {
+      if (current->operands[i].isTemp())
+         ctx.depends_on[current->operands[i].tempId()] = true;
    }
 
    /* maintain how many registers remain free when moving instructions */
@@ -682,10 +682,10 @@ void schedule_position_export(sched_ctx& ctx, Block* block,
       /* if current depends on candidate, add additional dependencies and continue */
       bool can_move_down = true;
       bool writes_exec = false;
-      for (unsigned i = 0; i < candidate->num_definitions; i++) {
-         if (candidate->getDefinition(i).isTemp() && ctx.depends_on[candidate->getDefinition(i).tempId()])
+      for (unsigned i = 0; i < candidate->definitions.size(); i++) {
+         if (candidate->definitions[i].isTemp() && ctx.depends_on[candidate->definitions[i].tempId()])
             can_move_down = false;
-         if (candidate->getDefinition(i).isFixed() && candidate->getDefinition(i).physReg() == exec)
+         if (candidate->definitions[i].isFixed() && candidate->definitions[i].physReg() == exec)
             writes_exec = true;
       }
       if (writes_exec)
@@ -695,25 +695,25 @@ void schedule_position_export(sched_ctx& ctx, Block* block,
          can_move_down = false;
       moving_interaction |= get_barrier_interaction(candidate.get());
       if (!can_move_down) {
-         for (unsigned i = 0; i < candidate->num_operands; i++) {
-            if (candidate->getOperand(i).isTemp())
-               ctx.depends_on[candidate->getOperand(i).tempId()] = true;
+         for (unsigned i = 0; i < candidate->operands.size(); i++) {
+            if (candidate->operands[i].isTemp())
+               ctx.depends_on[candidate->operands[i].tempId()] = true;
          }
          continue;
       }
 
       bool register_pressure_unknown = false;
       /* check if one of candidate's operands is killed by depending instruction */
-      for (unsigned i = 0; i < candidate->num_operands; i++) {
-         if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()]) {
+      for (unsigned i = 0; i < candidate->operands.size(); i++) {
+         if (candidate->operands[i].isTemp() && ctx.depends_on[candidate->operands[i].tempId()]) {
             // FIXME: account for difference in register pressure
             register_pressure_unknown = true;
          }
       }
       if (register_pressure_unknown) {
-         for (unsigned i = 0; i < candidate->num_operands; i++) {
-            if (candidate->getOperand(i).isTemp())
-               ctx.depends_on[candidate->getOperand(i).tempId()] = true;
+         for (unsigned i = 0; i < candidate->operands.size(); i++) {
+            if (candidate->operands[i].isTemp())
+               ctx.depends_on[candidate->operands[i].tempId()] = true;
          }
          continue;
       }
@@ -753,7 +753,7 @@ void schedule_block(sched_ctx& ctx, Program *program, Block* block, live& live_v
    for (unsigned idx = 0; idx < block->instructions.size(); idx++) {
       Instruction* current = block->instructions[idx].get();
 
-      if (!current->num_definitions)
+      if (!current->definitions.size())
          continue;
 
       if (current->isVMEM())

@@ -43,7 +43,7 @@ bool VALU_writes_sgpr(aco_ptr<Instruction>& instr)
 {
    if ((uint32_t) instr->format & (uint32_t) Format::VOPC)
       return true;
-   if (instr->isVOP3() && instr->num_definitions == 2)
+   if (instr->isVOP3() && instr->definitions.size() == 2)
       return true;
    if (instr->opcode == aco_opcode::v_readfirstlane_b32 || instr->opcode == aco_opcode::v_readlane_b32)
       return true;
@@ -68,7 +68,7 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
 
    /* break off from prevous SMEM clause if needed */
    if (instr->format == Format::SMEM && ctx.chip_class >= GFX8) {
-      bool is_store = instr->num_definitions == 0;
+      bool is_store = instr->definitions.size() == 0;
       for (int pred_idx = new_idx - 1; pred_idx >= 0; pred_idx--) {
          aco_ptr<Instruction>& pred = new_instructions[pred_idx];
          if (pred->format != Format::SMEM)
@@ -76,25 +76,23 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
 
          /* Don't allow clauses with store instructions since the clause's
           * instructions may use the same address. */
-         if (is_store || pred->num_definitions == 0)
+         if (is_store || pred->definitions.size() == 0)
             return 1;
 
-         Definition& instr_def = instr->getDefinition(0);
-         Definition& pred_def = pred->getDefinition(0);
+         Definition& instr_def = instr->definitions[0];
+         Definition& pred_def = pred->definitions[0];
 
          /* ISA reference doesn't say anything about this, but best to be safe */
          if (regs_intersect(instr_def.physReg(), instr_def.size(), pred_def.physReg(), pred_def.size()))
             return 1;
 
-         for (unsigned i = 0; i < pred->num_operands; i++) {
-            Operand& op = pred->getOperand(i);
+         for (const Operand& op : pred->operands) {
             if (op.isConstant() || op.isUndefined() || !op.isFixed())
                continue;
             if (regs_intersect(instr_def.physReg(), instr_def.size(), op.physReg(), op.size()))
                return 1;
          }
-         for (unsigned j = 0; j < instr->num_operands; j++) {
-            Operand& op = instr->getOperand(j);
+         for (const Operand& op : instr->operands) {
             if (op.isConstant() || op.isUndefined() || !op.isFixed())
                continue;
             if (regs_intersect(pred_def.physReg(), pred_def.size(), op.physReg(), op.size()))
@@ -113,8 +111,8 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
          for (int pred_idx = new_idx - 1; pred_idx >= 0 && pred_idx >= new_idx - 2; pred_idx--) {
             aco_ptr<Instruction>& pred = new_instructions[pred_idx];
             if ((pred->isVALU() || pred->format == Format::VINTRP) &&
-                pred->num_definitions &&
-                pred->getDefinition(0).physReg() == instr->getOperand(0).physReg()) {
+                !pred->definitions.empty() &&
+                pred->definitions[0].physReg() == instr->operands[0].physReg()) {
                NOPs = std::max(NOPs, 2 + pred_idx - new_idx + 1);
                break;
             }
@@ -125,26 +123,26 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
       if (instr->format == Format::VINTRP && new_idx > 0 && ctx.chip_class >= GFX9) {
          aco_ptr<Instruction>& pred = new_instructions.back();
          if (pred->isSALU() &&
-             pred->num_definitions &&
-             pred->getDefinition(0).physReg() == m0)
+             !pred->definitions.empty() &&
+             pred->definitions[0].physReg() == m0)
             NOPs = std::max(NOPs, 1);
       }
 
-      for (unsigned i = 0; i < instr->num_operands; i++) {
+      for (const Operand& op : instr->operands) {
          /* VALU which uses VCCZ */
-         if (instr->getOperand(i).physReg() == PhysReg{251} &&
+         if (op.physReg() == PhysReg{251} &&
              ctx.VALU_wrvcc + 5 >= new_idx)
             NOPs = std::max(NOPs, 5 + ctx.VALU_wrvcc - new_idx + 1);
 
          /* VALU which uses EXECZ */
-         if (instr->getOperand(i).physReg() == PhysReg{252} &&
+         if (op.physReg() == PhysReg{252} &&
              ctx.VALU_wrexec + 5 >= new_idx)
             NOPs = std::max(NOPs, 5 + ctx.VALU_wrexec - new_idx + 1);
 
          /* VALU which reads VCC as a constant */
          if (ctx.VALU_wrvcc + 1 >= new_idx) {
-            for (unsigned k = 0; k < instr->getOperand(i).size(); k++) {
-               unsigned reg = instr->getOperand(i).physReg() + k;
+            for (unsigned k = 0; k < op.size(); k++) {
+               unsigned reg = op.physReg() + k;
                if (reg == ctx.vcc_physical || reg == ctx.vcc_physical + 1)
                   NOPs = std::max(NOPs, 1);
             }
@@ -156,13 +154,13 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
          case aco_opcode::v_writelane_b32: {
             if (ctx.VALU_wrsgpr + 4 < new_idx)
                break;
-            PhysReg reg = instr->getOperand(1).physReg();
+            PhysReg reg = instr->operands[1].physReg();
             for (int pred_idx = new_idx - 1; pred_idx >= 0 && pred_idx >= new_idx - 4; pred_idx--) {
                aco_ptr<Instruction>& pred = new_instructions[pred_idx];
                if (!pred->isVALU() || !VALU_writes_sgpr(pred))
                   continue;
-               for (unsigned i = 0; i < pred->num_definitions; i++) {
-                  if (pred->getDefinition(i).physReg() == reg)
+               for (const Definition& def : pred->definitions) {
+                  if (def.physReg() == reg)
                      NOPs = std::max(NOPs, 4 + pred_idx - new_idx + 1);
                }
             }
@@ -184,18 +182,17 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
       if (new_idx > 0) {
          aco_ptr<Instruction>& pred = new_instructions.back();
          if (pred->isVMEM() &&
-             pred->num_operands == 4 &&
-             pred->getOperand(3).size() > 2 &&
-             pred->getOperand(1).size() != 8 &&
-             (pred->format != Format::MUBUF || pred->getOperand(2).physReg() >= 102)) {
+             pred->operands.size() == 4 &&
+             pred->operands[3].size() > 2 &&
+             pred->operands[1].size() != 8 &&
+             (pred->format != Format::MUBUF || pred->operands[2].physReg() >= 102)) {
             /* Ops that use a 256-bit T# do not need a wait state.
              * BUFFER_STORE_* operations that use an SGPR for "offset"
              * do not require any wait states. */
-            PhysReg wrdata = pred->getOperand(3).physReg();
-            unsigned size = pred->getOperand(3).size();
+            PhysReg wrdata = pred->operands[3].physReg();
+            unsigned size = pred->operands[3].size();
             assert(wrdata >= 256);
-            for (unsigned i = 0; i < instr->num_definitions; i++) {
-               Definition& def = instr->getDefinition(i);
+            for (const Definition& def : instr->definitions) {
                if (regs_intersect(def.physReg(), def.size(), wrdata, size))
                   NOPs = std::max(NOPs, 1);
             }
@@ -203,12 +200,12 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
       }
 
       if (VALU_writes_sgpr(instr)) {
-         for (unsigned i = 0; i < instr->num_definitions; i++) {
-            if (instr->getDefinition(i).physReg() == vcc)
+         for (const Definition& def : instr->definitions) {
+            if (def.physReg() == vcc)
                ctx.VALU_wrvcc = NOPs ? new_idx : new_idx + 1;
-            else if (instr->getDefinition(i).physReg() == exec)
+            else if (def.physReg() == exec)
                ctx.VALU_wrexec = NOPs ? new_idx : new_idx + 1;
-            else if (instr->getDefinition(i).physReg() <= 102)
+            else if (def.physReg() <= 102)
                ctx.VALU_wrsgpr = NOPs ? new_idx : new_idx + 1;
          }
       }
@@ -220,19 +217,19 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
          if (!(pred->isVALU() && VALU_writes_sgpr(pred)))
             continue;
 
-         for (unsigned i = 0; i < pred->num_definitions; i++) {
-            if (pred->getDefinition(i).physReg() > 102)
+         for (const Definition& def : pred->definitions) {
+            if (def.physReg() > 102)
                continue;
 
-            if (instr->num_operands > 1 &&
-                regs_intersect(instr->getOperand(1).physReg(), instr->getOperand(1).size(),
-                               pred->getDefinition(i).physReg(), pred->getDefinition(i).size())) {
+            if (instr->operands.size() > 1 &&
+                regs_intersect(instr->operands[1].physReg(), instr->operands[1].size(),
+                               def.physReg(), def.size())) {
                   return 5 + pred_idx - new_idx + 1;
             }
 
-            if (instr->num_operands > 2 &&
-                regs_intersect(instr->getOperand(2).physReg(), instr->getOperand(2).size(),
-                               pred->getDefinition(i).physReg(), pred->getDefinition(i).size())) {
+            if (instr->operands.size() > 2 &&
+                regs_intersect(instr->operands[2].physReg(), instr->operands[2].size(),
+                               def.physReg(), def.size())) {
                   return 5 + pred_idx - new_idx + 1;
             }
          }
