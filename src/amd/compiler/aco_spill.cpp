@@ -1408,7 +1408,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
          }
       }
 
-      if (block.kind & block_kind_top_level) {
+      if (block.kind & block_kind_top_level && !block.linear_preds.empty()) {
          last_top_level_block_idx = block.index;
 
          /* check if any spilled variables use a created linear vgpr, otherwise destroy them */
@@ -1417,7 +1417,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
                continue;
 
             bool can_destroy = true;
-            for (std::pair<Temp, uint32_t> pair : ctx.spills_entry[block.index]) {
+            for (std::pair<Temp, uint32_t> pair : ctx.spills_exit[block.linear_preds[0]]) {
 
                if (sgpr_slot.find(pair.second) != sgpr_slot.end() &&
                    sgpr_slot[pair.second] / 64 == i) {
