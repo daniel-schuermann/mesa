@@ -567,7 +567,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             continue;
          } else if (info.is_neg() && can_use_VOP3(instr) && instr_info.can_use_input_modifiers[(int)instr->opcode]) {
             to_VOP3(ctx, instr);
-            instr->getOperand(i) = Operand(info.temp);
+            instr->getOperand(i).setTemp(info.temp);
             static_cast<VOP3A_instruction*>(instr.get())->neg[i] = true;
             continue;
          }
@@ -833,10 +833,13 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          if (ctx.info[instr->getOperand(1).tempId()].is_neg()) {
             ctx.info[instr->getDefinition(0).tempId()].set_temp(ctx.info[instr->getOperand(1).tempId()].temp);
          } else {
-            if (ctx.info[instr->getOperand(1).tempId()].is_abs()) /* neg(abs(x)) */
-               ctx.info[instr->getDefinition(0).tempId()].set_neg_abs(ctx.info[instr->getOperand(1).tempId()].temp);
-            else
+            if (ctx.info[instr->getOperand(1).tempId()].is_abs()) { /* neg(abs(x)) */
+               instr->getOperand(1).setTemp(ctx.info[instr->getOperand(1).tempId()].temp);
+               instr->opcode = aco_opcode::v_or_b32;
+               ctx.info[instr->getDefinition(0).tempId()].set_neg_abs(instr->getOperand(1).getTemp());
+            } else {
                ctx.info[instr->getDefinition(0).tempId()].set_neg(instr->getOperand(1).getTemp());
+            }
          }
       } else {
          ctx.info[instr->getDefinition(0).tempId()].set_bitwise(instr.get());
@@ -1935,6 +1938,8 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       /* convert to mul(neg(a), b) */
       ctx.uses[mul_instr->getDefinition(0).tempId()]--;
       Definition def = instr->getDefinition(0);
+      /* neg(abs(mul(a, b))) -> mul(neg(abs(a)), abs(b)) */
+      bool is_abs = ctx.info[instr->getDefinition(0).tempId()].is_abs();
       instr.reset(create_instruction<VOP3A_instruction>(aco_opcode::v_mul_f32, asVOP3(Format::VOP2), 2, 1));
       instr->getOperand(0) = mul_instr->getOperand(0);
       instr->getOperand(1) = mul_instr->getOperand(1);
@@ -1942,10 +1947,10 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       VOP3A_instruction* new_mul = static_cast<VOP3A_instruction*>(instr.get());
       if (mul_instr->isVOP3()) {
          VOP3A_instruction* mul = static_cast<VOP3A_instruction*>(mul_instr);
-         new_mul->neg[0] = mul->neg[0];
-         new_mul->neg[1] = mul->neg[1];
-         new_mul->abs[0] = mul->abs[0];
-         new_mul->abs[1] = mul->abs[1];
+         new_mul->neg[0] = mul->neg[0] && !is_abs;
+         new_mul->neg[1] = mul->neg[1] && !is_abs;
+         new_mul->abs[0] = mul->abs[0] || is_abs;
+         new_mul->abs[1] = mul->abs[1] || is_abs;
          new_mul->omod = mul->omod;
       }
       new_mul->neg[0] ^= true;
