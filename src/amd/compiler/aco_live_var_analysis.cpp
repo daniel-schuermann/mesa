@@ -55,7 +55,7 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
       exec_live = true;
    }
 
-   /* insert the live-outs from this block into our temporary sets */
+   /* split the live-outs from this block into the temporary sets */
    std::vector<std::set<Temp>>& live_temps = lives.live_out;
    for (std::set<Temp>::iterator it = live_temps[block->index].begin(); it != live_temps[block->index].end(); ++it)
    {
@@ -86,50 +86,56 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
       /* KILL */
       for (unsigned i = 0; i < insn->definitionCount(); ++i)
       {
-         auto& definition = insn->getDefinition(i);
-         if (definition.isTemp()) {
-            size_t n = 0;
-            if (definition.getTemp().is_linear())
-               n = live_sgprs.erase(definition.getTemp());
-            else
-               n = live_vgprs.erase(definition.getTemp());
-
-            if (n) {
-               if (definition.getTemp().type() == vgpr)
-                  vgpr_demand -= definition.size();
-               else
-                  sgpr_demand -= definition.size();
-               definition.setKill(false);
-            } else {
-               if (definition.getTemp().type() == vgpr)
-                  register_demand[idx].second += definition.size();
-               else
-                  register_demand[idx].first += definition.size();
-               definition.setKill(true);
-            }
-
-            if (definition.isFixed() && definition.physReg() == exec)
-               exec_live = false;
+         Definition &definition = insn->getDefinition(i);
+         if (!definition.isTemp()) {
+            continue;
          }
+
+         const Temp temp = definition.getTemp();
+         size_t n = 0;
+         if (temp.is_linear())
+            n = live_sgprs.erase(temp);
+         else
+            n = live_vgprs.erase(temp);
+
+         if (n) {
+            if (temp.type() == vgpr)
+               vgpr_demand -= temp.size();
+            else
+               sgpr_demand -= temp.size();
+            definition.setKill(false);
+         } else {
+            if (temp.type() == vgpr)
+               register_demand[idx].second += temp.size();
+            else
+               register_demand[idx].first += temp.size();
+            definition.setKill(true);
+         }
+
+         if (definition.isFixed() && definition.physReg() == exec)
+            exec_live = false;
       }
 
       /* GEN */
       if (insn->opcode == aco_opcode::p_phi ||
           insn->opcode == aco_opcode::p_linear_phi) {
          /* directly insert into the predecessors live-out set */
-         std::vector<unsigned>& preds = insn->opcode == aco_opcode::p_phi ? block->logical_preds : block->linear_preds;
+         std::vector<unsigned>& preds = insn->opcode == aco_opcode::p_phi 
+                                      ? block->logical_preds 
+                                      : block->linear_preds;
          for (unsigned i = 0; i < preds.size(); ++i)
          {
-            auto& operand = insn->getOperand(i);
-            if (operand.isTemp()) {
-               auto it = live_temps[preds[i]].insert(operand.getTemp());
-               /* check if we changed an already processed block */
-               if (it.second) {
-                  operand.setFirstKill(true);
-                  worklist.insert(preds[i]);
-                  if (insn->opcode == aco_opcode::p_phi && operand.getTemp().type() == sgpr)
-                     phi_sgpr_ops[preds[i]] += operand.size();
-               }
+            Operand &operand = insn->getOperand(i);
+            if (!operand.isTemp()) {
+               continue;
+            }
+            /* check if we changed an already processed block */
+            const bool inserted = live_temps[preds[i]].insert(operand.getTemp()).second;
+            if (inserted) {
+               operand.setFirstKill(true);
+               worklist.insert(preds[i]);
+               if (insn->opcode == aco_opcode::p_phi && operand.getTemp().type() == sgpr)
+                  phi_sgpr_ops[preds[i]] += operand.size();
             }
          }
       } else if (insn->opcode == aco_opcode::p_logical_end) {
@@ -137,34 +143,33 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
       } else {
          for (unsigned i = 0; i < insn->operandCount(); ++i)
          {
-            auto& operand = insn->getOperand(i);
-            if (operand.isTemp()) {
-               bool inserted = false;
-               if (operand.getTemp().is_linear())
-                  inserted = live_sgprs.insert(operand.getTemp()).second;
-               else
-                  inserted = live_vgprs.insert(operand.getTemp()).second;
-
-               if (inserted) {
-                  operand.setFirstKill(true);
-                  for (unsigned j = i + 1; j < insn->operandCount(); ++j) {
-                     if (insn->getOperand(j).isTemp() && insn->getOperand(j).tempId() == operand.tempId()) {
-                        insn->getOperand(j).setFirstKill(false);
-                        insn->getOperand(j).setKill(true);
-                     }
+            Operand& operand = insn->getOperand(i);
+            if (!operand.isTemp()) {
+               continue;
+            }
+            const Temp temp = operand.getTemp();
+            const bool inserted = temp.is_linear()
+                                ? live_sgprs.insert(temp).second
+                                : live_vgprs.insert(temp).second;
+            if (inserted) {
+               operand.setFirstKill(true);
+               for (unsigned j = i + 1; j < insn->operandCount(); ++j) {
+                  if (insn->getOperand(j).isTemp() && insn->getOperand(j).tempId() == operand.tempId()) {
+                     insn->getOperand(j).setFirstKill(false);
+                     insn->getOperand(j).setKill(true);
                   }
-
-                  if (operand.getTemp().type() == vgpr)
-                     vgpr_demand += operand.size();
-                  else
-                     sgpr_demand += operand.size();
-               } else {
-                  operand.setKill(false);
                }
 
-               if (operand.isFixed() && operand.physReg() == exec)
-                  exec_live = true;
+               if (temp.type() == vgpr)
+                  vgpr_demand += operand.size();
+               else
+                  sgpr_demand += operand.size();
+            } else {
+               operand.setKill(false);
             }
+
+            if (operand.isFixed() && operand.physReg() == exec)
+               exec_live = true;
          }
       }
 
