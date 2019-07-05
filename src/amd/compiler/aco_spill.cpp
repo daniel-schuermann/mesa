@@ -60,7 +60,7 @@ struct spill_ctx {
    std::vector<std::map<Temp, std::pair<uint32_t, uint32_t>>> next_use_distances_end;
    std::vector<std::pair<RegClass, std::set<uint32_t>>> interferences;
    std::vector<std::pair<uint32_t, uint32_t>> affinities;
-   std::map<uint32_t, unsigned> reload_count;
+   std::vector<bool> is_reloaded;
    std::map<Temp, remat_info> remat;
    std::map<Instruction *, unsigned> remat_use_count;
 
@@ -74,6 +74,7 @@ struct spill_ctx {
    uint32_t allocate_spill_id(RegClass rc)
    {
       interferences.emplace_back(rc, std::set<uint32_t>());
+      is_reloaded.push_back(false);
       return next_spill_id++;
    }
 
@@ -256,7 +257,7 @@ aco_ptr<Instruction> do_reload(spill_ctx& ctx, Temp tmp, Temp new_name, uint32_t
       aco_ptr<Pseudo_instruction> reload{create_instruction<Pseudo_instruction>(aco_opcode::p_reload, Format::PSEUDO, 1, 1)};
       reload->getOperand(0) = Operand(spill_id);
       reload->getDefinition(0) = Definition(new_name);
-      ctx.reload_count[spill_id]++;
+      ctx.is_reloaded[spill_id] = true;
       return reload;
    }
 }
@@ -1278,8 +1279,8 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
       ctx.interferences[pair.first].second.insert(ctx.interferences[pair.second].second.begin(), ctx.interferences[pair.second].second.end());
       ctx.interferences[pair.second].second.insert(ctx.interferences[pair.first].second.begin(), ctx.interferences[pair.first].second.end());
 
-      ctx.reload_count[pair.first] += ctx.reload_count[pair.second];
-      ctx.reload_count[pair.second] = ctx.reload_count[pair.first];
+      bool reloaded = ctx.is_reloaded[pair.first] || ctx.is_reloaded[pair.second];
+      ctx.is_reloaded[pair.first] = ctx.is_reloaded[pair.second] = reloaded;
    }
    for (MAYBE_UNUSED uint32_t i = 0; i < ctx.interferences.size(); i++)
       for (MAYBE_UNUSED uint32_t id : ctx.interferences[i].second)
@@ -1294,7 +1295,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
    while (!done) {
       done = true;
       for (unsigned id = 0; id < ctx.interferences.size(); id++) {
-         if (is_assigned[id] || !ctx.reload_count[id])
+         if (is_assigned[id] || !ctx.is_reloaded[id])
             continue;
          if (ctx.interferences[id].first.type() != sgpr)
             continue;
@@ -1330,7 +1331,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
    while (!done) {
       done = true;
       for (unsigned id = 0; id < ctx.interferences.size(); id++) {
-         if (is_assigned[id] || !ctx.reload_count[id])
+         if (is_assigned[id] || !ctx.is_reloaded[id])
             continue;
          if (ctx.interferences[id].first.type() != vgpr)
             continue;
@@ -1361,13 +1362,13 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
    }
 
    for (unsigned id = 0; id < is_assigned.size(); id++)
-      assert(is_assigned[id] || !ctx.reload_count[id]);
+      assert(is_assigned[id] || !ctx.is_reloaded[id]);
 
    for (std::pair<uint32_t, uint32_t> pair : ctx.affinities) {
       assert(is_assigned[pair.first] == is_assigned[pair.second]);
       if (!is_assigned[pair.first])
          continue;
-      assert(ctx.reload_count[pair.first] == ctx.reload_count[pair.second]);
+      assert(ctx.is_reloaded[pair.first] == ctx.is_reloaded[pair.second]);
       assert(ctx.interferences[pair.first].first.type() == ctx.interferences[pair.second].first.type());
       if (ctx.interferences[pair.first].first.type() == sgpr)
          assert(sgpr_slot[pair.first] == sgpr_slot[pair.second]);
@@ -1438,7 +1439,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
          if ((*it)->opcode == aco_opcode::p_spill) {
             uint32_t spill_id = (*it)->getOperand(1).constantValue();
 
-            if (!ctx.reload_count[spill_id]) {
+            if (!ctx.is_reloaded[spill_id]) {
                /* never reloaded, so don't spill */
             } else if (vgpr_slot.find(spill_id) != vgpr_slot.end()) {
                /* spill vgpr */
@@ -1480,7 +1481,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
 
          } else if ((*it)->opcode == aco_opcode::p_reload) {
             uint32_t spill_id = (*it)->getOperand(0).constantValue();
-            assert(ctx.reload_count[spill_id]);
+            assert(ctx.is_reloaded[spill_id]);
 
             if (vgpr_slot.find(spill_id) != vgpr_slot.end()) {
                /* reload vgpr */
