@@ -77,12 +77,12 @@ struct isel_context {
       struct {
          unsigned header_idx;
          Block* exit;
-         bool has_divergent_continue;
-         bool has_divergent_branch;
+         bool has_divergent_continue = false;
+         bool has_divergent_branch = false;
       } parent_loop;
       struct {
          Block* merge_block;
-         bool is_divergent;
+         bool is_divergent = false;
       } parent_if;
    } cf_info;
 
