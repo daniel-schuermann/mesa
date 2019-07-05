@@ -218,8 +218,8 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
    }
    case Format::MIMG: {
       MIMG_instruction* mimg = static_cast<MIMG_instruction*>(instr);
-      unsigned identity_dmask = instr->num_definitions ?
-                                (1 << instr->getDefinition(0).size()) - 1 :
+      unsigned identity_dmask = !instr->definitions.empty() ?
+                                (1 << instr->definitions[0].size()) - 1 :
                                 0xf;
       if ((mimg->dmask & identity_dmask) != identity_dmask)
          fprintf(output, " dmask:%s%s%s%s",
@@ -419,38 +419,38 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
 
 void aco_print_instr(struct Instruction *instr, FILE *output)
 {
-   if (instr->definitionCount()) {
-      for (unsigned i = 0; i < instr->definitionCount(); ++i) {
-         aco_print_definition(&instr->getDefinition(i), output);
-         if (i + 1 != instr->definitionCount())
+   if (instr->definitions.size()) {
+      for (unsigned i = 0; i < instr->definitions.size(); ++i) {
+         aco_print_definition(&instr->definitions[i], output);
+         if (i + 1 != instr->definitions.size())
             fprintf(output, ", ");
       }
       fprintf(output, " = ");
    }
    fprintf(output, "%s", instr_info.name[(int)instr->opcode]);
-   if (instr->operandCount()) {
-      bool abs[instr->num_operands];
-      bool neg[instr->num_operands];
+   if (instr->operands.size()) {
+      bool abs[instr->operands.size()];
+      bool neg[instr->operands.size()];
       if ((int)instr->format & (int)Format::VOP3A) {
          VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr);
-         for (unsigned i = 0; i < instr->operandCount(); ++i) {
+         for (unsigned i = 0; i < instr->operands.size(); ++i) {
             abs[i] = vop3->abs[i];
             neg[i] = vop3->neg[i];
          }
       } else if (instr->isDPP()) {
          DPP_instruction* dpp = static_cast<DPP_instruction*>(instr);
-         assert(instr->operandCount() <= 2);
-         for (unsigned i = 0; i < instr->operandCount(); ++i) {
+         assert(instr->operands.size() <= 2);
+         for (unsigned i = 0; i < instr->operands.size(); ++i) {
             abs[i] = dpp->abs[i];
             neg[i] = dpp->neg[i];
          }
       } else {
-         for (unsigned i = 0; i < instr->operandCount(); ++i) {
+         for (unsigned i = 0; i < instr->operands.size(); ++i) {
             abs[i] = false;
             neg[i] = false;
          }
       }
-      for (unsigned i = 0; i < instr->operandCount(); ++i) {
+      for (unsigned i = 0; i < instr->operands.size(); ++i) {
          if (i)
             fprintf(output, ", ");
          else
@@ -460,7 +460,7 @@ void aco_print_instr(struct Instruction *instr, FILE *output)
             fprintf(output, "-");
          if (abs[i])
             fprintf(output, "|");
-         aco_print_operand(&instr->getOperand(i), output);
+         aco_print_operand(&instr->operands[i], output);
          if (abs[i])
             fprintf(output, "|");
        }

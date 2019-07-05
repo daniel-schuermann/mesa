@@ -49,9 +49,9 @@ struct phi_info {
    phi_info(Operand op, unsigned idx, aco_ptr<Instruction>& phi) noexcept : op(op), idx(idx), phi(phi) {}
 
    bool operator<(const phi_info& rhs) const {
-      if (phi->getDefinition(0).getTemp() < rhs.phi->getDefinition(0).getTemp())
+      if (phi->definitions[0].getTemp() < rhs.phi->definitions[0].getTemp())
          return true;
-      if (phi->getDefinition(0).getTemp() == rhs.phi->getDefinition(0).getTemp()) {
+      if (phi->definitions[0].getTemp() == rhs.phi->definitions[0].getTemp()) {
          if (op.isConstant())
             return !rhs.op.isConstant() || op.constantValue() < rhs.op.constantValue();
          else
@@ -102,10 +102,10 @@ bool collect_phi_info(cssa_ctx& ctx)
          else
             break;
 
-         for (unsigned i = 0; i < phi->num_operands; i++) {
-            if (!phi->getOperand(i).isUndefined() && (phi->getOperand(i).isConstant() || !phi->getOperand(i).isKill())) {
+         for (unsigned i = 0; i < phi->operands.size(); i++) {
+            if (!phi->operands[i].isUndefined() && (phi->operands[i].isConstant() || !phi->operands[i].isKill())) {
                progress = true;
-               ctx.phi_infos[preds[i]].emplace_back(phi->getOperand(i), i, phi);
+               ctx.phi_infos[preds[i]].emplace_back(phi->operands[i], i, phi);
             }
          }
       }
@@ -122,7 +122,7 @@ void hoist_copies(cssa_ctx& ctx)
 
       std::vector<phi_info> phi_infos = std::move(ctx.phi_infos[block_idx]);
       for (phi_info info : phi_infos) {
-         bool is_linear = info.phi->getDefinition(0).getTemp().is_linear();
+         bool is_linear = info.phi->definitions[0].getTemp().is_linear();
          unsigned target_block = block_idx;
 
          /* check if the current block is empty */
@@ -164,8 +164,8 @@ void hoist_copies(cssa_ctx& ctx)
             if (is_dominated) {
                /* check if register pressure between existing copy and current insertion point is low enough */
                bool can_reuse = true;
-               uint16_t size = info.phi->getDefinition(0).size();
-               bool is_vgpr = info.phi->getDefinition(0).getTemp().type() == vgpr;
+               uint16_t size = info.phi->definitions[0].size();
+               bool is_vgpr = info.phi->definitions[0].getTemp().type() == vgpr;
                for (unsigned i = it->second.last_live_block; i < target_block; i++) {
                   if ((is_vgpr && ctx.program->blocks[i].register_demand.vgpr + size > ctx.program->max_reg_demand.vgpr) ||
                       (!is_vgpr && ctx.program->blocks[i].register_demand.sgpr + size > ctx.program->max_reg_demand.sgpr)) {
@@ -220,14 +220,14 @@ void emit_parallelcopies(cssa_ctx& ctx)
       unsigned idx = 0;
       for (phi_info& info : ctx.phi_infos[block_idx]) {
          if (info.merged != -1) {
-            info.phi->getOperand(info.idx) = ctx.phi_infos[block_idx][info.merged].op;
+            info.phi->operands[info.idx] = ctx.phi_infos[block_idx][info.merged].op;
             continue;
          }
-         copy->getOperand(idx) = info.op;
-         Temp tmp = {ctx.program->allocateId(), info.phi->getDefinition(0).regClass()};
-         copy->getDefinition(idx) = Definition(tmp);
+         copy->operands[idx] = info.op;
+         Temp tmp = {ctx.program->allocateId(), info.phi->definitions[0].regClass()};
+         copy->definitions[idx] = Definition(tmp);
          info.op = Operand(tmp);
-         info.phi->getOperand(info.idx) = info.op;
+         info.phi->operands[info.idx] = info.op;
          idx++;
       }
 

@@ -34,6 +34,7 @@
 #include "ac_binary.h"
 #include "amd_family.h"
 #include "aco_opcodes.h"
+#include "aco_util.h"
 
 
 struct radv_shader_variant_info;
@@ -539,17 +540,8 @@ struct Instruction {
    aco_opcode opcode;
    Format format;
 
-   Operand *operands;
-   uint32_t num_operands;
-
-   Definition *definitions;
-   uint32_t num_definitions;
-
-   // TODO remove
-   uint32_t definitionCount() const { return num_definitions; }
-   uint32_t operandCount() const { return num_operands; }
-   Operand& getOperand(int index) { return operands[index]; }
-   Definition& getDefinition(int index) { return definitions[index]; }
+   aco::span<Operand> operands;
+   aco::span<Definition> definitions;
 
    bool isVALU()
    {
@@ -846,11 +838,9 @@ T* create_instruction(aco_opcode opcode, Format format, uint32_t num_operands, u
 
    inst->opcode = opcode;
    inst->format = format;
-   inst->num_operands = num_operands;
-   inst->num_definitions = num_definitions;
 
-   inst->operands = (Operand*)(data + sizeof(T));
-   inst->definitions = (Definition*)(data + sizeof(T) + num_operands * sizeof(Operand));
+   inst->operands = aco::span<Operand>((Operand*)(data + sizeof(T)), num_operands);
+   inst->definitions = aco::span<Definition>((Definition*)inst->operands.end(), num_definitions);
 
    return inst;
 }

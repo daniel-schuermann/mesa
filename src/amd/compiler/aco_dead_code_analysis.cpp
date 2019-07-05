@@ -55,19 +55,19 @@ void process_block(dce_ctx& ctx, Block& block)
          continue;
 
       aco_ptr<Instruction>& instr = block.instructions[idx];
-      bool is_live = instr->num_definitions == 0;
+      bool is_live = instr->definitions.size() == 0;
 
-      for (unsigned i = 0; !is_live && i < instr->num_definitions; i++) {
-         if (!instr->getDefinition(i).isTemp() || ctx.uses[instr->getDefinition(i).tempId()])
+      for (unsigned i = 0; !is_live && i < instr->definitions.size(); i++) {
+         if (!instr->definitions[i].isTemp() || ctx.uses[instr->definitions[i].tempId()])
             is_live = true;
       }
 
       if (is_live) {
-         for (unsigned i = 0; i < instr->num_operands; i++) {
-            if (instr->getOperand(i).isTemp()) {
-               if (ctx.uses[instr->getOperand(i).tempId()] == 0)
+         for (unsigned i = 0; i < instr->operands.size(); i++) {
+            if (instr->operands[i].isTemp()) {
+               if (ctx.uses[instr->operands[i].tempId()] == 0)
                   process_predecessors = true;
-               ctx.uses[instr->getOperand(i).tempId()]++;
+               ctx.uses[instr->operands[i].tempId()]++;
             }
          }
          live[idx] = true;
@@ -94,7 +94,7 @@ std::vector<uint16_t> dead_code_analysis(Program *program) {
    /* add one use to exec to prevent startpgm from being removed */
    aco_ptr<Instruction>& startpgm = program->blocks[0].instructions[0];
    assert(startpgm->opcode == aco_opcode::p_startpgm);
-   ctx.uses[startpgm->getDefinition(startpgm->num_definitions - 1).tempId()]++;
+   ctx.uses[startpgm->definitions.back().tempId()]++;
 
    return ctx.uses;
 }

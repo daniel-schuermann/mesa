@@ -88,7 +88,7 @@ public:
       }
 
       operator Temp() const {
-         return instr->getDefinition(0).getTemp();
+         return instr->definitions[0].getTemp();
       }
 
       operator Operand() const {
@@ -96,7 +96,7 @@ public:
       }
 
       Definition& def(unsigned index) const {
-         return instr->getDefinition(index);
+         return instr->definitions[index];
       }
 
       aco_ptr<Instruction> get_ptr() const {
@@ -264,10 +264,10 @@ formats = [("pseudo", [Format.PSEUDO], 'Pseudo_instruction', list(itertools.prod
    {
       ${struct} *instr = create_instruction<${struct}>(opcode, (Format)(${'|'.join('(int)Format::%s' % f.name for f in formats)}), ${num_operands}, ${num_definitions});
         % for i in range(num_definitions):
-      instr->getDefinition(${i}) = def${i};
+            instr->definitions[${i}] = def${i};
         % endfor
         % for i in range(num_operands):
-      instr->getOperand(${i}) = op${i}.op;
+            instr->operands[${i}] = op${i}.op;
         % endfor
         % for f in formats:
             % for dest, field_name in zip(f.get_builder_field_dests(), f.get_builder_field_names()):
