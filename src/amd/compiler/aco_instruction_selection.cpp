@@ -2873,10 +2873,10 @@ void visit_discard(isel_context* ctx, nir_intrinsic_instr *instr)
       return;
    }
 
-   /* we handle discards the same way as jump instructions */
-   append_logical_end(ctx->block);
-
    if (ctx->block->loop_nest_depth) {
+      /* we handle discards the same way as jump instructions */
+      append_logical_end(ctx->block);
+
       /* in loops, discard behaves like break */
       Block *linear_target = ctx->cf_info.parent_loop.exit;
       ctx->block->kind |= block_kind_discard;
@@ -2917,12 +2917,11 @@ void visit_discard(isel_context* ctx, nir_intrinsic_instr *instr)
       if (!ctx->cf_info.parent_if.is_divergent) {
          /* program just ends here */
          ctx->block->kind |= block_kind_uniform;
-         ctx->cf_info.has_branch = true; /* not really, but doesn't need one */
          bld.exp(aco_opcode::exp, Operand(v1), Operand(v1), Operand(v1), Operand(v1),
                  0 /* enabled mask */, 9 /* dest */,
                  false /* compressed */, true/* done */, true /* valid mask */);
          bld.sopp(aco_opcode::s_endpgm);
-
+         // TODO: it will potentiall be followed by a branch which is dead code to sanitize NIR phis
       } else {
          ctx->block->kind |= block_kind_discard;
          /* branch and linear edge is added by visit_if() */
