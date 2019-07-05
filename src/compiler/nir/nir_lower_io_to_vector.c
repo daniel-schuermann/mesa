@@ -34,7 +34,17 @@
  * when all is said and done.
  */
 
-#define MAX_SLOTS MAX2(MAX_VARYINGS_INCL_PATCH, FRAG_RESULT_MAX)
+/* +1 because of how this pass handles dual source blending */
+#define MAX_SLOTS MAX2(MAX_VARYINGS_INCL_PATCH, FRAG_RESULT_MAX+1)
+
+static unsigned
+get_slot(const nir_variable *var)
+{
+   /* This handling of dual-source blending might not be correct when more than
+    * one render target is supported, but it seems no driver supports more than
+    * one. */
+   return var->data.location + var->data.index;
+}
 
 static const struct glsl_type *
 resize_array_vec_type(const struct glsl_type *type, unsigned num_components)
@@ -100,7 +110,8 @@ variables_can_merge(nir_shader *shader,
    assert(a->data.mode == b->data.mode);
    if (shader->info.stage == MESA_SHADER_FRAGMENT &&
        a->data.mode == nir_var_shader_in &&
-       a->data.interpolation != b->data.interpolation)
+       (a->data.interpolation != b->data.interpolation ||
+        a->data.index != b->data.index))
       return false;
 
    return true;
@@ -158,9 +169,8 @@ create_new_io_vars(nir_shader *shader, struct exec_list *io_list,
 
    nir_foreach_variable(var, io_list) {
       if (variable_can_rewrite(var)) {
-         unsigned loc = var->data.location;
          unsigned frac = var->data.location_frac;
-         old_vars[loc][frac] = var;
+         old_vars[get_slot(var)][frac] = var;
       }
    }
 
@@ -358,7 +368,7 @@ nir_lower_io_to_vector_impl(nir_function_impl *impl, nir_variable_mode modes)
 
             nir_variable *old_var = nir_deref_instr_get_variable(old_deref);
 
-            const unsigned loc = old_var->data.location;
+            const unsigned loc = get_slot(old_var);
             const unsigned old_frac = old_var->data.location_frac;
             nir_variable *new_var = old_deref->mode == nir_var_shader_in ?
                                     new_inputs[loc][old_frac] :
@@ -381,9 +391,9 @@ nir_lower_io_to_vector_impl(nir_function_impl *impl, nir_variable_mode modes)
             nir_deref_instr *new_deref;
             if (flat) {
                new_deref = build_array_deref_of_new_var_flat(
-                  shader, &b, new_var, old_deref, loc - new_var->data.location);
+                  shader, &b, new_var, old_deref, loc - get_slot(new_var));
             } else {
-               assert(new_var->data.location == loc);
+               assert(get_slot(new_var) == loc);
                new_deref = build_array_deref_of_new_var(&b, new_var, old_deref);
                assert(glsl_type_is_vector(new_deref->type));
             }
@@ -413,7 +423,7 @@ nir_lower_io_to_vector_impl(nir_function_impl *impl, nir_variable_mode modes)
 
             nir_variable *old_var = nir_deref_instr_get_variable(old_deref);
 
-            const unsigned loc = old_var->data.location;
+            const unsigned loc = get_slot(old_var);
             const unsigned old_frac = old_var->data.location_frac;
             nir_variable *new_var = new_outputs[loc][old_frac];
             bool flat = flat_outputs[loc];
@@ -428,9 +438,9 @@ nir_lower_io_to_vector_impl(nir_function_impl *impl, nir_variable_mode modes)
             nir_deref_instr *new_deref;
             if (flat) {
                new_deref = build_array_deref_of_new_var_flat(
-                  shader, &b, new_var, old_deref, loc - new_var->data.location);
+                  shader, &b, new_var, old_deref, loc - get_slot(new_var));
             } else {
-               assert(new_var->data.location == loc);
+               assert(get_slot(new_var) == loc);
                new_deref = build_array_deref_of_new_var(&b, new_var, old_deref);
                assert(glsl_type_is_vector(new_deref->type));
             }
