@@ -1088,6 +1088,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             assert(register_file[definition.physReg() + i] == 0);
             register_file[definition.physReg() + i] = definition.tempId();
          }
+         ctx.assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
       }
 
       /* look up the affinities */
@@ -1125,6 +1126,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                definition.setFixed(reg);
                for (unsigned i = 0; i < definition.size(); i++)
                   register_file[definition.physReg() + i] = definition.tempId();
+               ctx.assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
             }
          }
       }
@@ -1174,9 +1176,10 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
                /* see if it's a copy from a previous phi */
                //TODO: prefer moving some previous phis over live-ins
+               //TODO: somehow prevent phis fixed before the RA from being updated (shouldn't be a problem in practice since they can only be fixed to exec)
                Instruction *prev_phi = NULL;
-               for (auto it2 = block.instructions.begin(); !prev_phi && (it2 != it); ++it2) {
-                  if (*it2 && (*it2)->getDefinition(0).tempId() == pc.first.tempId())
+               for (auto it2 = instructions.begin(); it2 != instructions.end(); ++it2) {
+                  if ((*it2)->getDefinition(0).tempId() == pc.first.tempId())
                      prev_phi = it2->get();
                }
                if (prev_phi) {
@@ -1198,8 +1201,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
             for (unsigned i = 0; i < definition.size(); i++)
                register_file[definition.physReg() + i] = definition.tempId();
+            ctx.assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
          }
-         ctx.assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
          live.emplace(definition.getTemp());
 
          /* update phi affinities */
