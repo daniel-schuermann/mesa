@@ -78,8 +78,6 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
       if (exec_live)
          assert(sgpr_demand >= 2);
       register_demand[idx] = {sgpr_demand - (exec_live ? 2 : 0), vgpr_demand};
-      block->vgpr_demand = std::max(block->vgpr_demand, register_demand[idx].second);
-      block->sgpr_demand = std::max(block->sgpr_demand, register_demand[idx].first);
 
       Instruction *insn = block->instructions[idx].get();
       /* KILL */
@@ -162,6 +160,9 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
             }
          }
       }
+
+      block->vgpr_demand = std::max(block->vgpr_demand, register_demand[idx].second);
+      block->sgpr_demand = std::max(block->sgpr_demand, register_demand[idx].first);
    }
 
    /* now, we have the live-in sets and need to merge them into the live-out sets */
