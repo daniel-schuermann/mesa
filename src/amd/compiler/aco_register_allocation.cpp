@@ -43,6 +43,7 @@ struct ra_ctx {
    std::map<unsigned, Temp> orig_names;
    unsigned max_used_sgpr = 0;
    unsigned max_used_vgpr = 0;
+   std::bitset<32> defs_done;
 
    ra_ctx(Program* program) : program(program) {}
 };
@@ -509,6 +510,13 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
                reg_file[instr->getOperand(i).physReg() + k] = 0;
          }
       }
+      for (unsigned i = 0; i < instr->num_definitions; i++) {
+         Definition def = instr->getDefinition(i);
+         if (def.isTemp() && def.isFixed() && ctx.defs_done.test(i)) {
+            for (unsigned k = 0; k < def.getTemp().size(); k++)
+               reg_file[def.physReg() + k] = def.tempId();
+         }
+      }
       return {{}, false};
    }
 
@@ -562,6 +570,13 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
       if (instr->getOperand(i).isFirstKill()) {
          for (unsigned j = 0; j < instr->getOperand(i).getTemp().size(); j++)
             reg_file[instr->getOperand(i).physReg() + j] = 0;
+      }
+   }
+   for (unsigned i = 0; i < instr->num_definitions; i++) {
+      Definition def = instr->getDefinition(i);
+      if (def.isTemp() && def.isFixed() && ctx.defs_done.test(i)) {
+         for (unsigned k = 0; k < def.getTemp().size(); k++)
+            reg_file[def.physReg() + k] = def.tempId();
       }
    }
 
@@ -1360,6 +1375,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          }
 
          /* handle definitions */
+         ctx.defs_done.reset();
          for (unsigned i = 0; i < instr->num_definitions; ++i) {
             auto& definition = instr->getDefinition(i);
             if (definition.isFixed()) {
@@ -1481,14 +1497,16 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             }
 
             ctx.assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
-            for (unsigned i = 0; i < definition.size(); i++)
-               register_file[definition.physReg() + i] = definition.tempId();
+            for (unsigned j = 0; j < definition.size(); j++)
+               register_file[definition.physReg() + j] = definition.tempId();
             /* set live if it has a kill point */
             if (!definition.isKill()) {
                live.emplace(definition.getTemp());
             }
             /* add to renames table */
             renames[block.index][definition.tempId()] = definition.getTemp();
+
+            ctx.defs_done.set(i);
          }
 
          handle_pseudo(ctx, register_file, instr.get());
