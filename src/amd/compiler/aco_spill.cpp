@@ -1530,8 +1530,8 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
     * TODO: Moving the spills and reloads to before p_logical_end might produce
     *       slightly better code. */
    for (Block& block : ctx.program->blocks) {
-      /* only merge blocks, loop headers and loop exits have logical phis */
-      if (!(block.kind & (block_kind_merge | block_kind_loop_header | block_kind_loop_exit)))
+      /* loops exits are already handled */
+      if (block.logical_preds.size() <= 1)
          continue;
 
       bool has_logical_phis = false;
