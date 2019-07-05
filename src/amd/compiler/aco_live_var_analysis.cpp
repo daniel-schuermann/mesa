@@ -79,9 +79,9 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
 
       Instruction *insn = block->instructions[idx].get();
       /* KILL */
-      for (unsigned i = 0; i < insn->definitionCount(); ++i)
+      for (unsigned i = 0; i < insn->definitions.size(); ++i)
       {
-         Definition &definition = insn->getDefinition(i);
+         Definition &definition = insn->definitions[i];
          if (!definition.isTemp()) {
             continue;
          }
@@ -114,7 +114,7 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
                                       : block->linear_preds;
          for (unsigned i = 0; i < preds.size(); ++i)
          {
-            Operand &operand = insn->getOperand(i);
+            Operand &operand = insn->operands[i];
             if (!operand.isTemp()) {
                continue;
             }
@@ -130,9 +130,9 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
       } else if (insn->opcode == aco_opcode::p_logical_end) {
          new_demand.sgpr += phi_sgpr_ops[block->index];
       } else {
-         for (unsigned i = 0; i < insn->operandCount(); ++i)
+         for (unsigned i = 0; i < insn->operands.size(); ++i)
          {
-            Operand& operand = insn->getOperand(i);
+            Operand& operand = insn->operands[i];
             if (!operand.isTemp()) {
                continue;
             }
@@ -142,10 +142,10 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
                                 : live_vgprs.insert(temp).second;
             if (inserted) {
                operand.setFirstKill(true);
-               for (unsigned j = i + 1; j < insn->operandCount(); ++j) {
-                  if (insn->getOperand(j).isTemp() && insn->getOperand(j).tempId() == operand.tempId()) {
-                     insn->getOperand(j).setFirstKill(false);
-                     insn->getOperand(j).setKill(true);
+               for (unsigned j = i + 1; j < insn->operands.size(); ++j) {
+                  if (insn->operands[j].isTemp() && insn->operands[j].tempId() == operand.tempId()) {
+                     insn->operands[j].setFirstKill(false);
+                     insn->operands[j].setKill(true);
                   }
                }
                new_demand += temp;

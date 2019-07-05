@@ -49,16 +49,16 @@ void collect_phi_info(ssa_elimination_ctx& ctx)
          if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
             break;
 
-         for (unsigned i = 0; i < phi->num_operands; i++) {
-            if (phi->getOperand(i).isUndefined())
+         for (unsigned i = 0; i < phi->operands.size(); i++) {
+            if (phi->operands[i].isUndefined())
                continue;
-            if (phi->getOperand(i).isTemp() && phi->getOperand(i).physReg() == phi->getDefinition(0).physReg())
+            if (phi->operands[i].isTemp() && phi->operands[i].physReg() == phi->definitions[0].physReg())
                continue;
 
             std::vector<unsigned>& preds = phi->opcode == aco_opcode::p_phi ? block.logical_preds : block.linear_preds;
             phi_info& info = phi->opcode == aco_opcode::p_phi ? ctx.logical_phi_info : ctx.linear_phi_info;
             const auto result = info.emplace(preds[i], std::vector<std::pair<Definition, Operand>>());
-            result.first->second.emplace_back(phi->getDefinition(0), phi->getOperand(i));
+            result.first->second.emplace_back(phi->definitions[0], phi->operands[i]);
             ctx.empty_blocks[preds[i]] = false;
          }
       }
@@ -81,8 +81,8 @@ void insert_parallelcopies(ssa_elimination_ctx& ctx)
       unsigned i = 0;
       for (std::pair<Definition, Operand>& pair : entry.second)
       {
-         pc->getDefinition(i) = pair.first;
-         pc->getOperand(i) = pair.second;
+         pc->definitions[i] = pair.first;
+         pc->operands[i] = pair.second;
          i++;
       }
       /* this shouldn't be needed since we're only copying vgprs */
@@ -100,8 +100,8 @@ void insert_parallelcopies(ssa_elimination_ctx& ctx)
       unsigned i = 0;
       for (std::pair<Definition, Operand>& pair : entry.second)
       {
-         pc->getDefinition(i) = pair.first;
-         pc->getOperand(i) = pair.second;
+         pc->definitions[i] = pair.first;
+         pc->operands[i] = pair.second;
          i++;
       }
       pc->tmp_in_scc = block.scc_live_out;
@@ -122,7 +122,7 @@ void try_remove_merge_block(ssa_elimination_ctx& ctx, Block* block)
    /* check if this block is empty and the exec mask is not needed */
    for (aco_ptr<Instruction>& instr : block->instructions) {
       if (instr->opcode == aco_opcode::p_parallelcopy) {
-         if (instr->getDefinition(0).physReg() == exec)
+         if (instr->definitions[0].physReg() == exec)
             continue;
          else
             return;

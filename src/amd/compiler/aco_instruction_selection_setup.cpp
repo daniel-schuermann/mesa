@@ -1074,11 +1074,11 @@ void add_startpgm(struct isel_context *ctx)
    for (unsigned i = 0; i < args.count; i++) {
       if (args.assign[i]) {
          *args.assign[i] = Temp{ctx->program->allocateId(), args.types[i]};
-         startpgm->getDefinition(i) = Definition(*args.assign[i]);
-         startpgm->getDefinition(i).setFixed(args.reg[i]);
+         startpgm->definitions[i] = Definition(*args.assign[i]);
+         startpgm->definitions[i].setFixed(args.reg[i]);
       }
    }
-   startpgm->getDefinition(args.count) = Definition{ctx->program->allocateId(), exec, s2};
+   startpgm->definitions[args.count] = Definition{ctx->program->allocateId(), exec, s2};
    ctx->block->instructions.push_back(std::move(startpgm));
 }
 

@@ -69,12 +69,12 @@ void emit_dpp_op(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1, Ph
          aco_ptr<DPP_instruction> dpp{create_instruction<DPP_instruction>(
             op, (Format) ((uint32_t) format | (uint32_t) Format::DPP),
             format == Format::VOP2 ? 2 : 1, clobber_vcc ? 2 : 1)};
-         dpp->getOperand(0) = Operand(PhysReg{src0+i}, v1);
+         dpp->operands[0] = Operand(PhysReg{src0+i}, v1);
          if (format == Format::VOP2)
-            dpp->getOperand(1) = Operand(PhysReg{src1+i}, v1);
-         dpp->getDefinition(0) = Definition(PhysReg{dst+i}, v1);
+            dpp->operands[1] = Operand(PhysReg{src1+i}, v1);
+         dpp->definitions[0] = Definition(PhysReg{dst+i}, v1);
          if (clobber_vcc)
-            dpp->getDefinition(1) = Definition(vcc, s2);
+            dpp->definitions[1] = Definition(vcc, s2);
          dpp->dpp_ctrl = dpp_ctrl;
          dpp->row_mask = row_mask;
          dpp->bank_mask = bank_mask;
@@ -209,11 +209,11 @@ void emit_vopn(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1,
    default:
       assert(false);
    }
-   instr->getOperand(0) = Operand(src0, v1);
-   instr->getOperand(1) = Operand(src1, v1);
-   instr->getDefinition(0) = Definition(dst, v1);
+   instr->operands[0] = Operand(src0, v1);
+   instr->operands[1] = Operand(src1, v1);
+   instr->definitions[0] = Definition(dst, v1);
    if (clobber_vcc)
-      instr->getDefinition(1) = Definition(vcc, s2);
+      instr->definitions[1] = Definition(vcc, s2);
    ctx->instructions.emplace_back(std::move(instr));
 }
 
@@ -524,18 +524,18 @@ void lower_to_hw_instr(Program* program)
             {
             case aco_opcode::p_extract_vector:
             {
-               if (instr->getOperand(0).isUndefined())
+               if (instr->operands[0].isUndefined())
                   break;
 
-               unsigned reg = instr->getOperand(0).physReg() + instr->getOperand(1).constantValue() * instr->getDefinition(0).size();
-               RegClass rc = RegClass(instr->getOperand(0).getTemp().type(), 1);
-               RegClass rc_def = RegClass(instr->getDefinition(0).getTemp().type(), 1);
-               if (reg == instr->getDefinition(0).physReg())
+               unsigned reg = instr->operands[0].physReg() + instr->operands[1].constantValue() * instr->definitions[0].size();
+               RegClass rc = RegClass(instr->operands[0].getTemp().type(), 1);
+               RegClass rc_def = RegClass(instr->definitions[0].getTemp().type(), 1);
+               if (reg == instr->definitions[0].physReg())
                   break;
 
                std::map<PhysReg, copy_operation> copy_operations;
-               for (unsigned i = 0; i < instr->getDefinition(0).size(); i++) {
-                  Definition def = Definition(PhysReg{instr->getDefinition(0).physReg() + i}, rc_def);
+               for (unsigned i = 0; i < instr->definitions[0].size(); i++) {
+                  Definition def = Definition(PhysReg{instr->definitions[0].physReg() + i}, rc_def);
                   copy_operations[def.physReg()] = {Operand(PhysReg{reg + i}, rc), def, 0, 1};
                }
                handle_operands(copy_operations, &ctx, program->chip_class, pi);
@@ -544,26 +544,26 @@ void lower_to_hw_instr(Program* program)
             case aco_opcode::p_create_vector:
             {
                std::map<PhysReg, copy_operation> copy_operations;
-               RegClass rc_def = RegClass(instr->getDefinition(0).getTemp().type(), 1);
+               RegClass rc_def = RegClass(instr->definitions[0].getTemp().type(), 1);
                unsigned reg_idx = 0;
-               for (unsigned i = 0; i < instr->num_operands; i++)
+               for (unsigned i = 0; i < instr->operands.size(); i++)
                {
-                  if (instr->getOperand(i).isUndefined())
+                  if (instr->operands[i].isUndefined())
                      continue;
 
-                  if (instr->getOperand(i).isConstant()) {
-                     PhysReg reg = PhysReg{instr->getDefinition(0).physReg() + reg_idx};
+                  if (instr->operands[i].isConstant()) {
+                     PhysReg reg = PhysReg{instr->definitions[0].physReg() + reg_idx};
                      Definition def = Definition(reg, rc_def);
-                     copy_operations[reg] = {instr->getOperand(i), def, 0, 1};
+                     copy_operations[reg] = {instr->operands[i], def, 0, 1};
                      reg_idx++;
                      continue;
                   }
 
-                  RegClass rc_op = RegClass(instr->getOperand(i).getTemp().type(), 1);
-                  for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
+                  RegClass rc_op = RegClass(instr->operands[i].getTemp().type(), 1);
+                  for (unsigned j = 0; j < instr->operands[i].size(); j++)
                   {
-                     Operand op = Operand(PhysReg{instr->getOperand(i).physReg() + j}, rc_op);
-                     Definition def = Definition(PhysReg{instr->getDefinition(0).physReg() + reg_idx}, rc_def);
+                     Operand op = Operand(PhysReg{instr->operands[i].physReg() + j}, rc_op);
+                     Definition def = Definition(PhysReg{instr->definitions[0].physReg() + reg_idx}, rc_def);
                      copy_operations[def.physReg()] = {op, def, 0, 1};
                      reg_idx++;
                   }
@@ -573,17 +573,17 @@ void lower_to_hw_instr(Program* program)
             }
             case aco_opcode::p_split_vector:
             {
-               if (instr->getOperand(0).isUndefined())
+               if (instr->operands[0].isUndefined())
                   break;
 
                std::map<PhysReg, copy_operation> copy_operations;
-               RegClass rc_op = instr->getOperand(0).isConstant() ? s1 : RegClass(instr->getOperand(0).regClass().type(), 1);
-               for (unsigned i = 0; i < instr->num_definitions; i++) {
-                  unsigned k = instr->getDefinition(i).size();
-                  RegClass rc_def = RegClass(instr->getDefinition(i).getTemp().type(), 1);
+               RegClass rc_op = instr->operands[0].isConstant() ? s1 : RegClass(instr->operands[0].regClass().type(), 1);
+               for (unsigned i = 0; i < instr->definitions.size(); i++) {
+                  unsigned k = instr->definitions[i].size();
+                  RegClass rc_def = RegClass(instr->definitions[i].getTemp().type(), 1);
                   for (unsigned j = 0; j < k; j++) {
-                     Operand op = Operand(PhysReg{instr->getOperand(0).physReg() + (i*k+j)}, rc_op);
-                     Definition def = Definition(PhysReg{instr->getDefinition(i).physReg() + j}, rc_def);
+                     Operand op = Operand(PhysReg{instr->operands[0].physReg() + (i*k+j)}, rc_op);
+                     Definition def = Definition(PhysReg{instr->definitions[i].physReg() + j}, rc_def);
                      copy_operations[def.physReg()] = {op, def, 0, 1};
                   }
                }
@@ -594,19 +594,19 @@ void lower_to_hw_instr(Program* program)
             case aco_opcode::p_wqm:
             {
                std::map<PhysReg, copy_operation> copy_operations;
-               for (unsigned i = 0; i < instr->num_operands; i++)
+               for (unsigned i = 0; i < instr->operands.size(); i++)
                {
-                  Operand operand = instr->getOperand(i);
+                  Operand operand = instr->operands[i];
                   if (operand.isConstant() || operand.size() == 1) {
-                     assert(instr->getDefinition(i).size() == 1);
-                     copy_operations[instr->getDefinition(i).physReg()] = {operand, instr->getDefinition(i), 0, 1};
+                     assert(instr->definitions[i].size() == 1);
+                     copy_operations[instr->definitions[i].physReg()] = {operand, instr->definitions[i], 0, 1};
                   } else {
-                     RegClass def_rc = RegClass(instr->getDefinition(i).regClass().type(), 1);
+                     RegClass def_rc = RegClass(instr->definitions[i].regClass().type(), 1);
                      RegClass op_rc = RegClass(operand.getTemp().type(), 1);
                      for (unsigned j = 0; j < operand.size(); j++)
                      {
-                        Operand op = Operand(PhysReg{instr->getOperand(i).physReg() + j}, op_rc);
-                        Definition def = Definition(PhysReg{instr->getDefinition(i).physReg() + j}, def_rc);
+                        Operand op = Operand(PhysReg{instr->operands[i].physReg() + j}, op_rc);
+                        Definition def = Definition(PhysReg{instr->definitions[i].physReg() + j}, def_rc);
                         copy_operations[def.physReg()] = {op, def, 0, 1};
                      }
                   }
@@ -617,15 +617,15 @@ void lower_to_hw_instr(Program* program)
             case aco_opcode::p_discard_if:
             {
                // TODO: optimize uniform conditions
-               Definition branch_cond = instr->getDefinition(instr->num_definitions - 1);
-               Operand discard_cond = instr->getOperand(instr->num_operands - 1);
+               Definition branch_cond = instr->definitions.back();
+               Operand discard_cond = instr->operands.back();
                aco_ptr<Instruction> sop2;
                /* backwards, to finally branch on the global exec mask */
-               for (int i = instr->num_operands - 2; i >= 0; i--) {
+               for (int i = instr->operands.size() - 2; i >= 0; i--) {
                   bld.sop2(aco_opcode::s_andn2_b64,
-                           instr->getDefinition(i), /* new mask */
+                           instr->definitions[i], /* new mask */
                            branch_cond, /* scc */
-                           instr->getOperand(i), /* old mask */
+                           instr->operands[i], /* old mask */
                            discard_cond);
                }
 
@@ -644,33 +644,33 @@ void lower_to_hw_instr(Program* program)
             }
             case aco_opcode::p_spill:
             {
-               assert(instr->getOperand(0).regClass() == v1.as_linear());
-               for (unsigned i = 0; i < instr->getOperand(2).size(); i++) {
-                  bld.vop3(aco_opcode::v_writelane_b32, bld.def(v1, instr->getOperand(0).physReg()),
-                           Operand(PhysReg{instr->getOperand(2).physReg() + i}, s1),
-                           Operand(instr->getOperand(1).constantValue() + i));
+               assert(instr->operands[0].regClass() == v1.as_linear());
+               for (unsigned i = 0; i < instr->operands[2].size(); i++) {
+                  bld.vop3(aco_opcode::v_writelane_b32, bld.def(v1, instr->operands[0].physReg()),
+                           Operand(PhysReg{instr->operands[2].physReg() + i}, s1),
+                           Operand(instr->operands[1].constantValue() + i));
                }
                break;
             }
             case aco_opcode::p_reload:
             {
-               assert(instr->getOperand(0).regClass() == v1.as_linear());
-               for (unsigned i = 0; i < instr->getDefinition(0).size(); i++) {
+               assert(instr->operands[0].regClass() == v1.as_linear());
+               for (unsigned i = 0; i < instr->definitions[0].size(); i++) {
                   bld.vop3(aco_opcode::v_readlane_b32,
-                           bld.def(s1, PhysReg{instr->getDefinition(0).physReg() + i}),
-                           instr->getOperand(0), Operand(instr->getOperand(1).constantValue() + i));
+                           bld.def(s1, PhysReg{instr->definitions[0].physReg() + i}),
+                           instr->operands[0], Operand(instr->operands[1].constantValue() + i));
                }
                break;
             }
             case aco_opcode::p_as_uniform:
             {
-               assert(instr->getOperand(0).regClass().type() == RegType::vgpr);
-               assert(instr->getDefinition(0).regClass().type() == RegType::sgpr);
-               assert(instr->getOperand(0).size() == instr->getDefinition(0).size());
-               for (unsigned i = 0; i < instr->getDefinition(0).size(); i++) {
+               assert(instr->operands[0].regClass().type() == RegType::vgpr);
+               assert(instr->definitions[0].regClass().type() == RegType::sgpr);
+               assert(instr->operands[0].size() == instr->definitions[0].size());
+               for (unsigned i = 0; i < instr->definitions[0].size(); i++) {
                   bld.vop1(aco_opcode::v_readfirstlane_b32,
-                           bld.def(s1, PhysReg{instr->getDefinition(0).physReg() + i}),
-                           Operand(PhysReg{instr->getOperand(0).physReg() + i}, v1));
+                           bld.def(s1, PhysReg{instr->definitions[0].physReg() + i}),
+                           Operand(PhysReg{instr->operands[0].physReg() + i}, v1));
                }
                break;
             }
@@ -696,23 +696,23 @@ void lower_to_hw_instr(Program* program)
                   break;
                case aco_opcode::p_cbranch_nz:
                   assert(block.linear_succs[1] == branch->target[0]);
-                  if (branch->getOperand(0).physReg() == exec)
+                  if (branch->operands[0].physReg() == exec)
                      bld.sopp(aco_opcode::s_cbranch_execnz, &program->blocks[branch->target[0]]);
-                  else if (branch->getOperand(0).physReg() == vcc)
+                  else if (branch->operands[0].physReg() == vcc)
                      bld.sopp(aco_opcode::s_cbranch_vccnz, &program->blocks[branch->target[0]]);
                   else {
-                     assert(branch->getOperand(0).physReg() == scc);
+                     assert(branch->operands[0].physReg() == scc);
                      bld.sopp(aco_opcode::s_cbranch_scc1, &program->blocks[branch->target[0]]);
                   }
                   break;
                case aco_opcode::p_cbranch_z:
                   assert(block.linear_succs[1] == branch->target[0]);
-                  if (branch->getOperand(0).physReg() == exec)
+                  if (branch->operands[0].physReg() == exec)
                      bld.sopp(aco_opcode::s_cbranch_execz, &program->blocks[branch->target[0]]);
-                  else if (branch->getOperand(0).physReg() == vcc)
+                  else if (branch->operands[0].physReg() == vcc)
                      bld.sopp(aco_opcode::s_cbranch_vccz, &program->blocks[branch->target[0]]);
                   else {
-                     assert(branch->getOperand(0).physReg() == scc);
+                     assert(branch->operands[0].physReg() == scc);
                      bld.sopp(aco_opcode::s_cbranch_scc0, &program->blocks[branch->target[0]]);
                   }
                   break;
@@ -723,11 +723,11 @@ void lower_to_hw_instr(Program* program)
          } else if (instr->format == Format::PSEUDO_REDUCTION) {
             Pseudo_reduction_instruction* reduce = static_cast<Pseudo_reduction_instruction*>(instr.get());
             emit_reduction(&ctx, reduce->opcode, reduce->reduce_op, reduce->cluster_size,
-                           reduce->getOperand(1).physReg(), // tmp
-                           reduce->getDefinition(1).physReg(), // stmp
-                           reduce->getOperand(2).physReg(), // vtmp
-                           reduce->getDefinition(2).physReg(), // sitmp
-                           reduce->getOperand(0), reduce->getDefinition(0));
+                           reduce->operands[1].physReg(), // tmp
+                           reduce->definitions[1].physReg(), // stmp
+                           reduce->operands[2].physReg(), // vtmp
+                           reduce->definitions[2].physReg(), // sitmp
+                           reduce->operands[0], reduce->definitions[0]);
          } else {
             ctx.instructions.emplace_back(std::move(instr));
          }

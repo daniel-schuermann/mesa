@@ -79,9 +79,9 @@ void validate(Program* program, FILE * output)
          /* check num literals */
          if (instr->isSALU() || instr->isVALU()) {
             unsigned num_literals = 0;
-            for (unsigned i = 0; i < instr->num_operands; i++)
+            for (unsigned i = 0; i < instr->operands.size(); i++)
             {
-               if (instr->getOperand(i).isLiteral()) {
+               if (instr->operands[i].isLiteral()) {
                   check(instr->format == Format::SOP1 ||
                         instr->format == Format::SOP2 ||
                         instr->format == Format::SOPC ||
@@ -98,33 +98,33 @@ void validate(Program* program, FILE * output)
 
             /* check num sgprs for VALU */
             if (instr->isVALU()) {
-               check(instr->getDefinition(0).getTemp().type() == vgpr ||
+               check(instr->definitions[0].getTemp().type() == vgpr ||
                      (int) instr->format & (int) Format::VOPC ||
                      instr->opcode == aco_opcode::v_readfirstlane_b32 ||
                      instr->opcode == aco_opcode::v_readlane_b32,
                      "Wrong Definition type for VALU instruction", instr.get());
                unsigned num_sgpr = 0;
-               unsigned sgpr_idx = instr->num_operands;
-               for (unsigned i = 0; i < instr->num_operands; i++)
+               unsigned sgpr_idx = instr->operands.size();
+               for (unsigned i = 0; i < instr->operands.size(); i++)
                {
-                  if (instr->getOperand(i).hasRegClass() && instr->getOperand(i).regClass().type() == sgpr) {
+                  if (instr->operands[i].hasRegClass() && instr->operands[i].regClass().type() == sgpr) {
                      check(i != 1 || (int) instr->format & (int) Format::VOP3A, "Wrong source position for SGPR argument", instr.get());
 
-                     if (sgpr_idx == instr->num_operands || instr->getOperand(sgpr_idx).tempId() != instr->getOperand(i).tempId())
+                     if (sgpr_idx == instr->operands.size() || instr->operands[sgpr_idx].tempId() != instr->operands[i].tempId())
                         num_sgpr++;
                      sgpr_idx = i;
                   }
 
-                  if (instr->getOperand(i).isConstant() && !instr->getOperand(i).isLiteral())
+                  if (instr->operands[i].isConstant() && !instr->operands[i].isLiteral())
                      check(i == 0 || (int) instr->format & (int) Format::VOP3A, "Wrong source position for constant argument", instr.get());
                }
                check(num_sgpr + num_literals <= 1, "Only 1 Literal OR 1 SGPR allowed", instr.get());
             }
 
             if (instr->format == Format::SOP1 || instr->format == Format::SOP2) {
-               check(instr->getDefinition(0).getTemp().type() == sgpr, "Wrong Definition type for SALU instruction", instr.get());
-               for (unsigned i = 0; i < instr->num_operands; i++)
-                 check(instr->getOperand(i).isConstant() || instr->getOperand(i).regClass().type() <= sgpr,
+               check(instr->definitions[0].getTemp().type() == sgpr, "Wrong Definition type for SALU instruction", instr.get());
+               for (unsigned i = 0; i < instr->operands.size(); i++)
+                 check(instr->operands[i].isConstant() || instr->operands[i].regClass().type() <= sgpr,
                        "Wrong Operand type for SALU instruction", instr.get());
             }
          }
@@ -133,82 +133,82 @@ void validate(Program* program, FILE * output)
          case Format::PSEUDO: {
             if (instr->opcode == aco_opcode::p_create_vector) {
                unsigned size = 0;
-               for (unsigned i = 0; i < instr->num_operands; i++)
-                  size += instr->getOperand(i).size();
-               check(size == instr->getDefinition(0).size(), "Definition size does not match operand sizes", instr.get());
-               if (instr->getDefinition(0).getTemp().type() == sgpr)
-                  for (unsigned i = 0; i < instr->num_operands; i++)
-                     check(instr->getOperand(i).isConstant() || instr->getOperand(i).regClass().type() == sgpr,
+               for (unsigned i = 0; i < instr->operands.size(); i++)
+                  size += instr->operands[i].size();
+               check(size == instr->definitions[0].size(), "Definition size does not match operand sizes", instr.get());
+               if (instr->definitions[0].getTemp().type() == sgpr)
+                  for (unsigned i = 0; i < instr->operands.size(); i++)
+                     check(instr->operands[i].isConstant() || instr->operands[i].regClass().type() == sgpr,
                            "Wrong Operand type for scalar vector", instr.get());
             } else if (instr->opcode == aco_opcode::p_extract_vector) {
-               check((instr->getOperand(0).hasRegClass()) && instr->getOperand(1).isConstant(), "Wrong Operand types", instr.get());
-               check(instr->getOperand(1).constantValue() < instr->getOperand(0).size(), "Index out of range", instr.get());
-               check(instr->getDefinition(0).getTemp().type() == vgpr || instr->getOperand(0).regClass().type() == sgpr,
+               check((instr->operands[0].hasRegClass()) && instr->operands[1].isConstant(), "Wrong Operand types", instr.get());
+               check(instr->operands[1].constantValue() < instr->operands[0].size(), "Index out of range", instr.get());
+               check(instr->definitions[0].getTemp().type() == vgpr || instr->operands[0].regClass().type() == sgpr,
                      "Cannot extract SGPR value from VGPR vector", instr.get());
             } else if (instr->opcode == aco_opcode::p_parallelcopy) {
-               check(instr->num_definitions == instr->num_operands, "Number of Operands does not match number of Definitions", instr.get());
-               for (unsigned i = 0; i < instr->num_operands; i++) {
-                  if (instr->getOperand(i).isTemp())
-                     check((instr->getDefinition(i).getTemp().type() == instr->getOperand(i).regClass().type()) ||
-                           (instr->getDefinition(i).getTemp().type() == vgpr && instr->getOperand(i).regClass().type() == sgpr),
+               check(instr->definitions.size() == instr->operands.size(), "Number of Operands does not match number of Definitions", instr.get());
+               for (unsigned i = 0; i < instr->operands.size(); i++) {
+                  if (instr->operands[i].isTemp())
+                     check((instr->definitions[i].getTemp().type() == instr->operands[i].regClass().type()) ||
+                           (instr->definitions[i].getTemp().type() == vgpr && instr->operands[i].regClass().type() == sgpr),
                            "Operand and Definition types do not match", instr.get());
                }
             } else if (instr->opcode == aco_opcode::p_phi) {
-               check(instr->num_operands == block.logical_preds.size(), "Number of Operands does not match number of predecessors", instr.get());
-               check(instr->getDefinition(0).getTemp().type() == vgpr || instr->getDefinition(0).getTemp().regClass() == s2, "Logical Phi Definition must be vgpr or divergent boolean", instr.get());
+               check(instr->operands.size() == block.logical_preds.size(), "Number of Operands does not match number of predecessors", instr.get());
+               check(instr->definitions[0].getTemp().type() == vgpr || instr->definitions[0].getTemp().regClass() == s2, "Logical Phi Definition must be vgpr or divergent boolean", instr.get());
             } else if (instr->opcode == aco_opcode::p_linear_phi) {
-               for (unsigned i = 0; i < instr->num_operands; i++)
-                  check(!instr->getOperand(i).isTemp() || instr->getOperand(i).getTemp().is_linear(), "Wrong Operand type", instr.get());
-               check(instr->num_operands == block.linear_preds.size(), "Number of Operands does not match number of predecessors", instr.get());
+               for (const Operand& op : instr->operands)
+                  check(!op.isTemp() || op.getTemp().is_linear(), "Wrong Operand type", instr.get());
+               check(instr->operands.size() == block.linear_preds.size(), "Number of Operands does not match number of predecessors", instr.get());
             }
             break;
          }
          case Format::SMEM: {
-            if (instr->num_operands >= 1)
-               check(instr->getOperand(0).isTemp() && instr->getOperand(0).regClass().type() == sgpr, "SMEM operands must be sgpr", instr.get());
-            if (instr->num_operands >= 2)
-               check(instr->getOperand(1).isConstant() || (instr->getOperand(1).isTemp() && instr->getOperand(1).regClass().type() == sgpr),
+            if (instr->operands.size() >= 1)
+               check(instr->operands[0].isTemp() && instr->operands[0].regClass().type() == sgpr, "SMEM operands must be sgpr", instr.get());
+            if (instr->operands.size() >= 2)
+               check(instr->operands[1].isConstant() || (instr->operands[1].isTemp() && instr->operands[1].regClass().type() == sgpr),
                      "SMEM offset must be constant or sgpr", instr.get());
-            if (instr->num_definitions)
-               check(instr->getDefinition(0).getTemp().type() == sgpr, "SMEM result must be sgpr", instr.get());
+            if (instr->definitions.size())
+               check(instr->definitions[0].getTemp().type() == sgpr, "SMEM result must be sgpr", instr.get());
             break;
          }
          case Format::MTBUF:
          case Format::MUBUF:
          case Format::MIMG: {
-            check(instr->num_operands > 1, "VMEM instructions must have at least one operand", instr.get());
-            check(instr->getOperand(0).hasRegClass() && instr->getOperand(0).regClass().type() == vgpr,
+            check(instr->operands.size() > 1, "VMEM instructions must have at least one operand", instr.get());
+            check(instr->operands[0].hasRegClass() && instr->operands[0].regClass().type() == vgpr,
                   "VADDR must be in vgpr for VMEM instructions", instr.get());
-            check(instr->getOperand(1).isTemp() && instr->getOperand(1).regClass().type() == sgpr, "VMEM resource constant must be sgpr", instr.get());
-            check(instr->num_operands < 4 || (instr->getOperand(3).hasRegClass() && instr->getOperand(3).regClass().type() == vgpr), "VMEM write data must be vgpr", instr.get());
+            check(instr->operands[1].isTemp() && instr->operands[1].regClass().type() == sgpr, "VMEM resource constant must be sgpr", instr.get());
+            check(instr->operands.size() < 4 || (instr->operands[3].hasRegClass() && instr->operands[3].regClass().type() == vgpr), "VMEM write data must be vgpr", instr.get());
             break;
          }
          case Format::DS: {
-            for (unsigned i = 0; i < instr->num_operands; i++)
-               check((instr->getOperand(i).hasRegClass() && instr->getOperand(i).regClass().type() == vgpr) || instr->getOperand(i).physReg() == m0,
+            for (unsigned i = 0; i < instr->operands.size(); i++)
+               check((instr->operands[i].hasRegClass() && instr->operands[i].regClass().type() == vgpr) || instr->operands[i].physReg() == m0,
                      "Only VGPRs are valid DS instruction operands", instr.get());
-            if (instr->num_definitions)
-               check(instr->getDefinition(0).getTemp().type() == vgpr, "DS instruction must return VGPR", instr.get());
+            if (instr->definitions.size())
+               check(instr->definitions[0].getTemp().type() == vgpr, "DS instruction must return VGPR", instr.get());
             break;
          }
          case Format::EXP: {
             for (unsigned i = 0; i < 4; i++)
-               check(instr->getOperand(i).hasRegClass() && instr->getOperand(i).regClass().type() == vgpr,
+               check(instr->operands[i].hasRegClass() && instr->operands[i].regClass().type() == vgpr,
                      "Only VGPRs are valid Export arguments", instr.get());
             break;
          }
          case Format::FLAT:
-            check(instr->getOperand(1).isUndefined(), "Flat instructions don't support SADDR", instr.get());
+            check(instr->operands[1].isUndefined(), "Flat instructions don't support SADDR", instr.get());
             /* fallthrough */
          case Format::GLOBAL:
          case Format::SCRATCH: {
-            check(instr->getOperand(0).hasRegClass() && instr->getOperand(0).regClass().type() == vgpr, "FLAT/GLOBAL/SCRATCH address must be vgpr", instr.get());
-            check(instr->getOperand(1).hasRegClass() && instr->getOperand(1).regClass().type() == sgpr,
+            check(instr->operands[0].hasRegClass() && instr->operands[0].regClass().type() == vgpr, "FLAT/GLOBAL/SCRATCH address must be vgpr", instr.get());
+            check(instr->operands[1].hasRegClass() && instr->operands[1].regClass().type() == sgpr,
                   "FLAT/GLOBAL/SCRATCH sgpr address must be undefined or sgpr", instr.get());
-            if (instr->num_definitions)
-               check(instr->getDefinition(0).getTemp().type() == vgpr, "FLAT/GLOBAL/SCRATCH result must be vgpr", instr.get());
+            if (instr->definitions.size())
+               check(instr->definitions[0].getTemp().type() == vgpr, "FLAT/GLOBAL/SCRATCH result must be vgpr", instr.get());
             else
-               check(instr->getOperand(2).regClass().type() == vgpr, "FLAT/GLOBAL/SCRATCH data must be vgpr", instr.get());
+               check(instr->operands[2].regClass().type() == vgpr, "FLAT/GLOBAL/SCRATCH data must be vgpr", instr.get());
             break;
          }
          default:
@@ -281,17 +281,17 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
       loc.block = &block;
       for (aco_ptr<Instruction>& instr : block.instructions) {
          if (instr->opcode == aco_opcode::p_phi) {
-            for (unsigned i = 0; i < instr->num_operands; i++) {
-               if (instr->getOperand(i).isTemp() &&
-                   instr->getOperand(i).getTemp().type() == sgpr &&
-                   instr->getOperand(i).isFirstKill())
-                  phi_sgpr_ops[block.logical_preds[i]].emplace_back(instr->getOperand(i).getTemp());
+            for (unsigned i = 0; i < instr->operands.size(); i++) {
+               if (instr->operands[i].isTemp() &&
+                   instr->operands[i].getTemp().type() == sgpr &&
+                   instr->operands[i].isFirstKill())
+                  phi_sgpr_ops[block.logical_preds[i]].emplace_back(instr->operands[i].getTemp());
             }
          }
 
          loc.instr = instr.get();
-         for (unsigned i = 0; i < instr->num_operands; i++) {
-            Operand& op = instr->getOperand(i);
+         for (unsigned i = 0; i < instr->operands.size(); i++) {
+            Operand& op = instr->operands[i];
             if (!op.isTemp())
                continue;
             if (!op.isFixed())
@@ -307,8 +307,8 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
                assignments[op.tempId()].reg = op.physReg();
          }
 
-         for (unsigned i = 0; i < instr->num_definitions; i++) {
-            Definition& def = instr->getDefinition(i);
+         for (unsigned i = 0; i < instr->definitions.size(); i++) {
+            Definition& def = instr->definitions[i];
             if (!def.isTemp())
                continue;
             if (!def.isFixed())
@@ -366,8 +366,8 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
             }
          }
 
-         for (unsigned i = 0; i < instr->num_definitions; i++) {
-            Definition& def = instr->getDefinition(i);
+         for (unsigned i = 0; i < instr->definitions.size(); i++) {
+            Definition& def = instr->definitions[i];
             if (!def.isTemp())
                continue;
             live.erase(def.getTemp());
@@ -376,8 +376,8 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
          /* don't count phi operands as live-in, since they are actually
           * killed when they are copied at the predecessor */
          if (instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi) {
-            for (unsigned i = 0; i < instr->num_operands; i++) {
-               Operand& op = instr->getOperand(i);
+            for (unsigned i = 0; i < instr->operands.size(); i++) {
+               Operand& op = instr->operands[i];
                if (!op.isTemp())
                   continue;
                live.insert(op.getTemp());
@@ -403,8 +403,8 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
          }
 
          if (instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi) {
-            for (unsigned i = 0; i < instr->num_operands; i++) {
-               Operand& op = instr->getOperand(i);
+            for (unsigned i = 0; i < instr->operands.size(); i++) {
+               Operand& op = instr->operands[i];
                if (!op.isTemp())
                   continue;
                if (op.isFirstKill()) {
@@ -414,8 +414,8 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
             }
          }
 
-         for (unsigned i = 0; i < instr->num_definitions; i++) {
-            Definition& def = instr->getDefinition(i);
+         for (unsigned i = 0; i < instr->definitions.size(); i++) {
+            Definition& def = instr->definitions[i];
             if (!def.isTemp())
                continue;
             Temp tmp = def.getTemp();
@@ -427,8 +427,8 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
             }
          }
 
-         for (unsigned i = 0; i < instr->num_definitions; i++) {
-            Definition& def = instr->getDefinition(i);
+         for (unsigned i = 0; i < instr->definitions.size(); i++) {
+            Definition& def = instr->definitions[i];
             if (!def.isTemp())
                continue;
             if (def.isKill()) {
