@@ -26,12 +26,11 @@
  */
 
 #include <map>
-#include <math.h>
 
 #include "aco_ir.h"
 #include "aco_builder.h"
 #include "util/u_math.h"
-#include "common/sid.h"
+#include "sid.h"
 
 
 namespace aco {

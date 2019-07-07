@@ -28,10 +28,7 @@
  */
 
 #include "aco_ir.h"
-#include <vector>
-#include <set>
-
-#include "../vulkan/radv_shader.h"
+#include "vulkan/radv_shader.h"
 
 namespace aco {
 namespace {

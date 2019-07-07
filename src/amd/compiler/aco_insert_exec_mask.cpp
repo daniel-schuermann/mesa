@@ -22,8 +22,6 @@
  *
  */
 
-#include <vector>
-
 #include "aco_ir.h"
 #include "aco_builder.h"
 
