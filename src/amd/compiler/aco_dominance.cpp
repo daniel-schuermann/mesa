@@ -29,7 +29,6 @@
 #define ACO_DOMINANCE_CPP
 
 #include "aco_ir.h"
-#include <vector>
 
 /*
  * Implements the algorithms for computing the dominator tree from

@@ -26,7 +26,7 @@
 #include <unordered_set>
 #include <algorithm>
 
-#include "../vulkan/radv_shader.h" // for radv_nir_compiler_options
+#include "vulkan/radv_shader.h" // for radv_nir_compiler_options
 
 #define SMEM_WINDOW_SIZE (350 - ctx.num_waves * 35)
 #define VMEM_WINDOW_SIZE (1024 - ctx.num_waves * 64)
