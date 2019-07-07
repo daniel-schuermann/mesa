@@ -26,16 +26,12 @@
  *
  */
 
-#include <algorithm>
 #include <map>
 #include <unordered_map>
-#include <set>
 #include <functional>
-#include <bitset>
 
 #include "aco_ir.h"
 #include "sid.h"
-
 
 namespace aco {
 namespace {
