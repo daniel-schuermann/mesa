@@ -1,7 +1,4 @@
-#include <vector>
 #include <map>
-#include <iostream>
-#include <iomanip>
 
 #include "aco_ir.h"
 
