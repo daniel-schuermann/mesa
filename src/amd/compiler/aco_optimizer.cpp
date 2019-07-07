@@ -25,8 +25,8 @@
  *
  */
 
-#include <bitset>
 #include <math.h>
+
 #include "aco_ir.h"
 #include "util/half_float.h"
 

@@ -25,16 +25,14 @@
 #ifndef ACO_IR_H
 #define ACO_IR_H
 
-#include <ostream>
 #include <vector>
 #include <set>
-#include <vector>
 #include <bitset>
 #include <memory>
 
-#include "nir/nir.h"
-#include "common/ac_binary.h"
-#include "common/amd_family.h"
+#include "nir.h"
+#include "ac_binary.h"
+#include "amd_family.h"
 #include "aco_opcodes.h"
 
 
