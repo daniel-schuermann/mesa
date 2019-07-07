@@ -23,8 +23,7 @@
 
 #include "aco_interface.h"
 #include "aco_ir.h"
-
-#include "../vulkan/radv_shader.h"
+#include "vulkan/radv_shader.h"
 
 #include <iostream>
 void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* config,

@@ -1,6 +1,6 @@
 #include "aco_ir.h"
 
-#include "common/sid.h"
+#include "sid.h"
 
 namespace aco {
 

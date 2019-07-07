@@ -24,7 +24,6 @@
 
 #include "aco_ir.h"
 
-#include <stdarg.h>
 #include <map>
 
 namespace aco {

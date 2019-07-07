@@ -25,8 +25,6 @@
 
 #include <algorithm>
 #include <map>
-#include <set>
-#include <stack>
 
 #include "aco_ir.h"
 #include "aco_builder.h"

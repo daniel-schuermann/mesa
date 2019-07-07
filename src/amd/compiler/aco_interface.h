@@ -24,7 +24,7 @@
 #ifndef ACO_INTERFACE_H
 #define ACO_INTERFACE_H
 
-#include "nir/nir.h"
+#include "nir.h"
 
 #ifdef __cplusplus
 extern "C" {

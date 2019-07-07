@@ -24,9 +24,9 @@
 
 #include <unordered_map>
 #include "aco_ir.h"
-#include "nir/nir.h"
+#include "nir.h"
 #include "vulkan/radv_shader.h"
-#include "common/sid.h"
+#include "sid.h"
 
 #include "util/u_math.h"
 
