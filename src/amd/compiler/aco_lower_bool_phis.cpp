@@ -26,7 +26,6 @@
  */
 
 #include <map>
-#include <utility>
 
 #include "aco_ir.h"
 #include "aco_builder.h"

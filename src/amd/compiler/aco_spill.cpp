@@ -23,13 +23,10 @@
  *
  */
 
-#ifndef ACO_SPILL_CPP
-#define ACO_SPILL_CPP
-
 #include "aco_ir.h"
 #include <map>
 #include <stack>
-#include "../vulkan/radv_shader.h"
+#include "vulkan/radv_shader.h"
 
 
 /*
@@ -1654,4 +1651,3 @@ void spill(Program* program, live& live_vars, const struct radv_nir_compiler_opt
 
 }
 
-#endif
