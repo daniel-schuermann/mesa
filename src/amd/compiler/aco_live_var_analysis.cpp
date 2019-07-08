@@ -33,7 +33,8 @@
 namespace aco {
 namespace {
 
-void process_live_temps_per_block(Program *program, live& lives, Block* block, std::set<unsigned>& worklist)
+void process_live_temps_per_block(Program *program, live& lives, Block* block,
+                                  std::set<unsigned>& worklist, std::vector<uint16_t>& phi_sgpr_ops)
 {
    std::vector<std::pair<uint16_t,uint16_t>>& register_demand = lives.register_demand[block->index];
    uint16_t vgpr_demand = 0;
@@ -70,6 +71,8 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
             sgpr_demand += it->size();
       }
    }
+
+   sgpr_demand -= phi_sgpr_ops[block->index];
 
    /* traverse the instructions backwards */
    for (int idx = block->instructions.size() -1; idx >= 0; idx--)
@@ -124,9 +127,13 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block, s
                if (it.second) {
                   operand.setFirstKill(true);
                   worklist.insert(preds[i]);
+                  if (insn->opcode == aco_opcode::p_phi && operand.getTemp().type() == sgpr)
+                     phi_sgpr_ops[preds[i]] += operand.size();
                }
             }
          }
+      } else if (insn->opcode == aco_opcode::p_logical_end) {
+         sgpr_demand += phi_sgpr_ops[block->index];
       } else {
          for (unsigned i = 0; i < insn->operandCount(); ++i)
          {
@@ -227,6 +234,7 @@ live live_var_analysis(Program* program,
    result.live_out.resize(program->blocks.size());
    result.register_demand.resize(program->blocks.size());
    std::set<unsigned> worklist;
+   std::vector<uint16_t> phi_sgpr_ops(program->blocks.size());
    uint16_t vgpr_demand = 0;
    uint16_t sgpr_demand = 0;
 
@@ -237,7 +245,7 @@ live live_var_analysis(Program* program,
       std::set<unsigned>::reverse_iterator b_it = worklist.rbegin();
       unsigned block_idx = *b_it;
       worklist.erase(block_idx);
-      process_live_temps_per_block(program, result, &program->blocks[block_idx], worklist);
+      process_live_temps_per_block(program, result, &program->blocks[block_idx], worklist, phi_sgpr_ops);
       vgpr_demand = std::max(vgpr_demand, program->blocks[block_idx].vgpr_demand);
       sgpr_demand = std::max(sgpr_demand, program->blocks[block_idx].sgpr_demand);
    }
