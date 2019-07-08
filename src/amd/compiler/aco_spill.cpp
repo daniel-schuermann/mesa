@@ -1191,6 +1191,8 @@ void spill_block(spill_ctx& ctx, unsigned block_idx)
 
    if (process)
       process_block(ctx, block_idx, block, current_spills, spilled_sgprs, spilled_vgprs);
+   else
+      ctx.spills_exit[block_idx].insert(current_spills.begin(), current_spills.end());
 
    /* check if the next block leaves the current loop */
    if (block->loop_nest_depth == 0 || ctx.program->blocks[block_idx + 1].loop_nest_depth >= block->loop_nest_depth)
