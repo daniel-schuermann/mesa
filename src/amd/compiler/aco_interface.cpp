@@ -26,27 +26,18 @@
 #include "vulkan/radv_shader.h"
 
 #include <iostream>
-void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* config,
-                        struct ac_shader_binary* binary, struct radv_shader_variant_info *info,
+void aco_compile_shader(struct nir_shader *shader,
+                        struct radv_shader_binary **binary,
+                        struct radv_shader_variant_info *info,
                         struct radv_nir_compiler_options *options)
 {
    if (shader->info.stage != MESA_SHADER_FRAGMENT && shader->info.stage != MESA_SHADER_COMPUTE)
       return;
 
-   struct ac_shader_config local_config = *config;
-   struct ac_shader_binary local_binary = *binary;
-   struct radv_shader_variant_info local_info = *info;
-   struct radv_nir_compiler_options local_options = *options;
-
-   if (getenv("ACO_DRY_RUN")) {
-      config = &local_config;
-      binary = &local_binary;
-      info = &local_info;
-      options = &local_options;
-   }
+   ac_shader_config config = {0};
 
    /* Instruction Selection */
-   auto program = aco::select_program(shader, config, info, options);
+   auto program = aco::select_program(shader, &config, info, options);
    if (options->dump_preoptir) {
       std::cerr << "After Instruction Selection:\n";
       aco_print_program(program.get(), stderr);
@@ -112,14 +103,21 @@ void aco_compile_shader(struct nir_shader *shader, struct ac_shader_config* conf
       aco::print_asm(program.get(), code, options->family, std::cerr);
    }
    //std::cerr << binary->disasm_string;
-   uint32_t* bin = (uint32_t*) malloc(code.size() * sizeof(uint32_t));
-   for (unsigned i = 0; i < code.size(); i++)
-      bin[i] = code[i];
 
-   binary->code = (unsigned char*) bin;
-   binary->code_size = code.size() * sizeof(uint32_t);
-   binary->disasm_string = (char*) malloc(1);
-   binary->disasm_string[0] = '\0';
-   binary->llvm_ir_string = (char*) malloc(1);
-   binary->llvm_ir_string[0] = '\0';
+   size_t size = code.size() * sizeof(uint32_t) + sizeof(radv_shader_binary_legacy);
+   radv_shader_binary_legacy* legacy_binary = (radv_shader_binary_legacy*) malloc(size);
+
+   legacy_binary->base.type = RADV_BINARY_TYPE_LEGACY;
+   legacy_binary->base.stage = program->stage;
+   legacy_binary->base.is_gs_copy_shader = false;
+   legacy_binary->base.total_size = size;
+
+   memcpy(legacy_binary->data, code.data(), code.size() * sizeof(uint32_t));
+   legacy_binary->code_size = code.size() * sizeof(uint32_t);
+
+   legacy_binary->config = config;
+   legacy_binary->disasm_size = 0;
+   legacy_binary->llvm_ir_size = 0;
+
+   *binary = (radv_shader_binary*) legacy_binary;
 }
