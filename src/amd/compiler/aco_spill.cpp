@@ -47,7 +47,7 @@ struct spill_ctx {
    uint16_t target_vgpr;
    uint16_t target_sgpr;
    Program* program;
-   std::vector<std::vector<std::pair<uint16_t,uint16_t>>> register_demand;
+   std::vector<std::vector<RegisterDemand>> register_demand;
    std::vector<std::map<Temp, Temp>> renames;
    std::vector<std::map<Temp, uint32_t>> spills_entry;
    std::vector<std::map<Temp, uint32_t>> spills_exit;
@@ -62,7 +62,7 @@ struct spill_ctx {
    std::map<Instruction *, unsigned> remat_use_count;
 
    spill_ctx(uint16_t target_vgpr, uint16_t target_sgpr, Program* program,
-             std::vector<std::vector<std::pair<uint16_t,uint16_t>>> register_demand)
+             std::vector<std::vector<RegisterDemand>> register_demand)
       : target_vgpr(target_vgpr), target_sgpr(target_sgpr), program(program),
         register_demand(register_demand), renames(program->blocks.size()),
         spills_entry(program->blocks.size()), spills_exit(program->blocks.size()),
@@ -334,18 +334,17 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
       ctx.loop_header.emplace(block);
 
       /* check how many live-through variables should be spilled */
-      uint16_t sgpr_demand = 0, vgpr_demand = 0;
+      RegisterDemand new_demand;
       unsigned i = block_idx;
       while (ctx.program->blocks[i].loop_nest_depth >= block->loop_nest_depth) {
          assert(ctx.program->blocks.size() > i);
-         sgpr_demand = std::max(sgpr_demand, ctx.program->blocks[i].sgpr_demand);
-         vgpr_demand = std::max(vgpr_demand, ctx.program->blocks[i].vgpr_demand);
+         new_demand.update(ctx.program->blocks[i].register_demand);
          i++;
       }
       unsigned loop_end = i;
 
       /* select live-through vgpr variables */
-      while (vgpr_demand - spilled_vgprs > ctx.target_vgpr) {
+      while (new_demand.vgpr - spilled_vgprs > ctx.target_vgpr) {
          unsigned distance = 0;
          Temp to_spill;
          for (std::pair<Temp, std::pair<uint32_t, uint32_t>> pair : ctx.next_use_distances_end[block_idx - 1]) {
@@ -372,7 +371,7 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
       }
 
       /* select live-through sgpr variables */
-      while (sgpr_demand - spilled_sgprs > ctx.target_sgpr) {
+      while (new_demand.sgpr - spilled_sgprs > ctx.target_sgpr) {
          unsigned distance = 0;
          Temp to_spill;
          for (std::pair<Temp, std::pair<uint32_t, uint32_t>> pair : ctx.next_use_distances_end[block_idx - 1]) {
@@ -401,8 +400,8 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
 
 
       /* shortcut */
-      if (vgpr_demand - spilled_vgprs <= ctx.target_vgpr &&
-          sgpr_demand - spilled_sgprs <= ctx.target_sgpr)
+      if (new_demand.vgpr - spilled_vgprs <= ctx.target_vgpr &&
+          new_demand.sgpr - spilled_sgprs <= ctx.target_sgpr)
          return {spilled_sgprs, spilled_vgprs};
 
       /* if reg pressure is too high at beginning of loop, add variables with furthest use */
@@ -412,8 +411,8 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
 
       assert(idx != 0 && "loop without phis: TODO");
       idx--;
-      int32_t reg_pressure_sgpr = ctx.register_demand[block_idx][idx].first - spilled_sgprs;
-      int32_t reg_pressure_vgpr = ctx.register_demand[block_idx][idx].second - spilled_vgprs;
+      int32_t reg_pressure_sgpr = ctx.register_demand[block_idx][idx].sgpr - spilled_sgprs;
+      int32_t reg_pressure_vgpr = ctx.register_demand[block_idx][idx].vgpr - spilled_vgprs;
       while (reg_pressure_sgpr > ctx.target_sgpr) {
          unsigned distance = 0;
          Temp to_spill;
@@ -476,7 +475,7 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
       }
 
       /* if register demand is still too high, we just keep all spilled live vars and process the block */
-      if (block->sgpr_demand - spilled_sgprs > ctx.target_sgpr) {
+      if (block->register_demand.sgpr - spilled_sgprs > ctx.target_sgpr) {
          pred_idx = block->linear_preds[0];
          for (std::pair<Temp, uint32_t> pair : ctx.spills_exit[pred_idx]) {
             if (pair.first.type() == sgpr &&
@@ -486,7 +485,7 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
             }
          }
       }
-      if (block->vgpr_demand - spilled_vgprs > ctx.target_vgpr && block->logical_preds.size() == 1) {
+      if (block->register_demand.vgpr - spilled_vgprs > ctx.target_vgpr && block->logical_preds.size() == 1) {
          pred_idx = block->logical_preds[0];
          for (std::pair<Temp, uint32_t> pair : ctx.spills_exit[pred_idx]) {
             if (pair.first.type() == vgpr &&
@@ -591,8 +590,8 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
    } else {
       idx--;
    }
-   reg_pressure_sgpr += ctx.register_demand[block_idx][idx].first - spilled_sgprs;
-   reg_pressure_vgpr += ctx.register_demand[block_idx][idx].second - spilled_vgprs;
+   reg_pressure_sgpr += ctx.register_demand[block_idx][idx].sgpr - spilled_sgprs;
+   reg_pressure_vgpr += ctx.register_demand[block_idx][idx].vgpr - spilled_vgprs;
 
    while (reg_pressure_sgpr > ctx.target_sgpr) {
       assert(!partial_spills.empty());
@@ -711,7 +710,7 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
             insert_idx++;
          }
          ctx.register_demand[block->index].insert(std::next(ctx.register_demand[block->index].begin(), insert_idx),
-                                                  instructions.size(), std::pair<uint16_t, uint16_t>(0, 0));
+                                                  instructions.size(), RegisterDemand());
          block->instructions.insert(std::next(block->instructions.begin(), insert_idx),
                                     std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(instructions.begin()),
                                     std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(instructions.end()));
@@ -989,7 +988,7 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
    }
 
    ctx.register_demand[block->index].erase(ctx.register_demand[block->index].begin(), ctx.register_demand[block->index].begin() + idx);
-   ctx.register_demand[block->index].insert(ctx.register_demand[block->index].begin(), instructions.size(), std::pair<uint16_t, uint16_t>(0, 0));
+   ctx.register_demand[block->index].insert(ctx.register_demand[block->index].begin(), instructions.size(), RegisterDemand());
 
    std::vector<aco_ptr<Instruction>>::iterator start = std::next(block->instructions.begin(), idx);
    instructions.insert(instructions.end(), std::move_iterator<std::vector<aco_ptr<Instruction>>::iterator>(start),
@@ -1017,7 +1016,7 @@ void process_block(spill_ctx& ctx, unsigned block_idx, Block* block,
       idx++;
    }
 
-   if (block->vgpr_demand > ctx.target_vgpr || block->sgpr_demand > ctx.target_sgpr)
+   if (block->register_demand.vgpr > ctx.target_vgpr || block->register_demand.sgpr > ctx.target_sgpr)
       local_next_use_distance = local_next_uses(ctx, block);
 
    while (idx < block->instructions.size()) {
@@ -1052,33 +1051,28 @@ void process_block(spill_ctx& ctx, unsigned block_idx, Block* block,
       }
 
       /* check if register demand is low enough before and after the current instruction */
-      if (block->vgpr_demand > ctx.target_vgpr || block->sgpr_demand > ctx.target_sgpr) {
+      if (block->register_demand.vgpr > ctx.target_vgpr || block->register_demand.sgpr > ctx.target_sgpr) {
 
-         int sgpr_demand = ctx.register_demand[block_idx][idx].first;
-         int vgpr_demand = ctx.register_demand[block_idx][idx].second;
+         RegisterDemand new_demand = ctx.register_demand[block_idx][idx];
          if (idx == 0) {
             for (unsigned i = 0; i < instr->num_definitions; i++) {
                if (!instr->getDefinition(i).isTemp())
                   continue;
-               if (instr->getDefinition(i).getTemp().type() == vgpr)
-                  vgpr_demand += instr->getDefinition(i).size();
-               else
-                  sgpr_demand += instr->getDefinition(i).size();
+               new_demand += instr->getDefinition(i).getTemp();
             }
          } else {
-            sgpr_demand = std::max<int>(ctx.register_demand[block_idx][idx - 1].first, sgpr_demand);
-            vgpr_demand = std::max<int>(ctx.register_demand[block_idx][idx - 1].second, vgpr_demand);
+            new_demand.update(ctx.register_demand[block_idx][idx - 1]);
          }
 
          assert(!local_next_use_distance.empty());
 
          /* if reg pressure is too high, spill variable with furthest next use */
-         while (std::max(vgpr_demand - spilled_vgprs, 0) > ctx.target_vgpr ||
-                std::max(sgpr_demand - spilled_sgprs, 0) > ctx.target_sgpr) {
+         while (std::max(new_demand.vgpr - spilled_vgprs, 0) > ctx.target_vgpr ||
+                std::max(new_demand.sgpr - spilled_sgprs, 0) > ctx.target_sgpr) {
             unsigned distance = 0;
             Temp to_spill;
             bool do_rematerialize = false;
-            if (vgpr_demand - spilled_vgprs > ctx.target_vgpr) {
+            if (new_demand.vgpr - spilled_vgprs > ctx.target_vgpr) {
                for (std::pair<Temp, uint32_t> pair : local_next_use_distance[idx]) {
                   bool can_rematerialize = ctx.remat.count(pair.first);
                   if (pair.first.type() == vgpr &&
@@ -1177,8 +1171,8 @@ void spill_block(spill_ctx& ctx, unsigned block_idx)
    std::map<Temp, uint32_t> current_spills = ctx.spills_entry[block_idx];
 
    /* check conditions to process this block */
-   bool process = block->vgpr_demand - spilled_vgprs > ctx.target_vgpr ||
-                  block->sgpr_demand - spilled_sgprs > ctx.target_sgpr ||
+   bool process = block->register_demand.vgpr - spilled_vgprs > ctx.target_vgpr ||
+                  block->register_demand.sgpr - spilled_sgprs > ctx.target_sgpr ||
                   !ctx.renames[block_idx].empty() ||
                   ctx.remat_use_count.size();
 
@@ -1597,16 +1591,15 @@ void spill(Program* program, live& live_vars, const struct radv_nir_compiler_opt
    uint16_t max_addressible_sgpr = program->sgpr_limit;
 
    /* calculate target register demand */
-   uint16_t max_vgpr = 0, max_sgpr = 0;
+   RegisterDemand max_reg_demand;
    for (Block& block : program->blocks) {
-      max_vgpr = std::max(max_vgpr, block.vgpr_demand);
-      max_sgpr = std::max(max_sgpr, block.sgpr_demand);
+      max_reg_demand.update(block.register_demand);
    }
 
    uint16_t target_vgpr = 256;
    uint16_t target_sgpr = max_addressible_sgpr;
    unsigned num_waves = 1;
-   int spills_to_vgpr = (max_sgpr - max_addressible_sgpr + 63) / 64;
+   int spills_to_vgpr = (max_reg_demand.sgpr - max_addressible_sgpr + 63) / 64;
 
    /* test if it possible to increase occupancy with little spilling */
    for (unsigned num_waves_next = 2; num_waves_next <= 8; num_waves_next++) {
@@ -1615,13 +1608,13 @@ void spill(Program* program, live& live_vars, const struct radv_nir_compiler_opt
 
       /* Currently no vgpr spilling supported.
        * Spill as many sgprs as necessary to not hinder occupancy */
-      if (max_vgpr > target_vgpr_next)
+      if (max_reg_demand.vgpr > target_vgpr_next)
          break;
       /* check that we have enough free vgprs to spill sgprs to */
-      if (max_sgpr > target_sgpr_next) {
+      if (max_reg_demand.sgpr > target_sgpr_next) {
          /* add some buffer in case graph coloring is not perfect ... */
-         int spills_to_vgpr_next = (max_sgpr - target_sgpr_next + 63 + 32) / 64;
-         if (spills_to_vgpr_next + max_vgpr > target_vgpr_next)
+         int spills_to_vgpr_next = (max_reg_demand.sgpr - target_sgpr_next + 63 + 32) / 64;
+         if (spills_to_vgpr_next + max_reg_demand.vgpr > target_vgpr_next)
             break;
          spills_to_vgpr = spills_to_vgpr_next;
       }
@@ -1631,7 +1624,7 @@ void spill(Program* program, live& live_vars, const struct radv_nir_compiler_opt
       num_waves = num_waves_next;
    }
 
-   assert(max_vgpr <= target_vgpr && "VGPR spilling not yet supported.");
+   assert(max_reg_demand.vgpr <= target_vgpr && "VGPR spilling not yet supported.");
    /* nothing to do */
    if (num_waves == program->num_waves)
       return;

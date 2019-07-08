@@ -140,17 +140,17 @@ void hoist_copies(cssa_ctx& ctx)
               (!is_linear && block->logical_preds.size() == 1))) {
             /* check if register pressure is low enough at idom */
             Block& idom = ctx.program->blocks[idom_idx];
-            std::pair<uint16_t, uint16_t>& reg_pressure = ctx.live_vars.register_demand[idom_idx][idom.instructions.size() -1];
+            RegisterDemand& reg_pressure = ctx.live_vars.register_demand[idom_idx][idom.instructions.size() -1];;
 
-            if (info.phi->getDefinition(0).getTemp().type() == vgpr &&
-                reg_pressure.second + info.phi->getDefinition(0).size() <= ctx.program->max_vgpr) {
-               reg_pressure.second += info.phi->getDefinition(0).size();
+            if (info.phi->definitions[0].getTemp().type() == vgpr &&
+                reg_pressure.vgpr + int16_t(info.phi->definitions[0].size()) <= ctx.program->max_reg_demand.vgpr) {
+               reg_pressure.vgpr += info.phi->definitions[0].size();
                target_block = idom_idx;
             }
 
-            if (info.phi->getDefinition(0).getTemp().type() == sgpr &&
-                reg_pressure.first + info.phi->getDefinition(0).size() <= ctx.program->max_sgpr) {
-               reg_pressure.first += info.phi->getDefinition(0).size();
+            if (info.phi->definitions[0].getTemp().type() == sgpr &&
+                reg_pressure.sgpr +  int16_t(info.phi->definitions[0].size()) <= ctx.program->max_reg_demand.sgpr) {
+               reg_pressure.sgpr += info.phi->definitions[0].size();
                target_block = idom_idx;
             }
          }
@@ -167,8 +167,8 @@ void hoist_copies(cssa_ctx& ctx)
                uint16_t size = info.phi->getDefinition(0).size();
                bool is_vgpr = info.phi->getDefinition(0).getTemp().type() == vgpr;
                for (unsigned i = it->second.last_live_block; i < target_block; i++) {
-                  if ((is_vgpr && ctx.program->blocks[i].vgpr_demand + size > ctx.program->max_vgpr) ||
-                      (!is_vgpr && ctx.program->blocks[i].sgpr_demand + size > ctx.program->max_sgpr)) {
+                  if ((is_vgpr && ctx.program->blocks[i].register_demand.vgpr + size > ctx.program->max_reg_demand.vgpr) ||
+                      (!is_vgpr && ctx.program->blocks[i].register_demand.sgpr + size > ctx.program->max_reg_demand.sgpr)) {
                      can_reuse = false;
                      break;
                   }
@@ -178,9 +178,9 @@ void hoist_copies(cssa_ctx& ctx)
                   /* update register demand */
                   for (unsigned i = it->second.last_live_block; i < target_block; i++) {
                      if (is_vgpr)
-                        ctx.program->blocks[i].vgpr_demand += size;
+                        ctx.program->blocks[i].register_demand.vgpr += size;
                      else
-                        ctx.program->blocks[i].sgpr_demand += size;
+                        ctx.program->blocks[i].register_demand.sgpr += size;
                   }
 
                   /* update map and info */
