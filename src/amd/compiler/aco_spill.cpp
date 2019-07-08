@@ -612,6 +612,7 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
       assert(distance != 0);
 
       ctx.spills_entry[block_idx][to_spill] = ctx.allocate_spill_id(to_spill.regClass());
+      partial_spills.erase(to_spill);
       spilled_sgprs += to_spill.size();
       reg_pressure_sgpr -= to_spill.size();
    }
@@ -634,6 +635,7 @@ std::pair<unsigned, unsigned> init_live_in_vars(spill_ctx& ctx, Block* block, un
       assert(distance != 0);
 
       ctx.spills_entry[block_idx][to_spill] = ctx.allocate_spill_id(to_spill.regClass());
+      partial_spills.erase(to_spill);
       spilled_vgprs += to_spill.size();
       reg_pressure_vgpr -= to_spill.size();
    }
