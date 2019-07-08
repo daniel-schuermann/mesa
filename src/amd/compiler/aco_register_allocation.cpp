@@ -1242,6 +1242,40 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       /* Handle all other instructions of the block */
       for (; it != block.instructions.end(); ++it) {
          aco_ptr<Instruction>& instr = *it;
+
+         /* parallelcopies from p_phi are inserted here which means
+          * live ranges of killed operands end here as well */
+         if (instr->opcode == aco_opcode::p_logical_end) {
+            /* no need to process this instruction any further */
+            if (block.logical_succs.size() != 1) {
+               instructions.emplace_back(std::move(instr));
+               continue;
+            }
+
+            Block& succ = program->blocks[block.logical_succs[0]];
+            unsigned idx = 0;
+            for (; idx < succ.logical_preds.size(); idx++) {
+               if (succ.logical_preds[idx] == block.index)
+                  break;
+            }
+            for (aco_ptr<Instruction>& phi : succ.instructions) {
+               if (phi->opcode == aco_opcode::p_phi) {
+                  if (phi->getOperand(idx).isTemp() &&
+                      phi->getOperand(idx).getTemp().type() == sgpr &&
+                      phi->getOperand(idx).isFirstKill()) {
+                     Temp phi_op = read_variable(phi->getOperand(idx).getTemp(), block.index);
+                     PhysReg reg = ctx.assignments[phi_op.id()].first;
+                     assert(register_file[reg] == phi_op.id());
+                     register_file[reg] = 0;
+                  }
+               } else if (phi->opcode != aco_opcode::p_linear_phi) {
+                  break;
+               }
+            }
+            instructions.emplace_back(std::move(instr));
+            continue;
+         }
+
          std::vector<std::pair<Operand, Definition>> parallelcopy;
 
          assert(!is_phi(instr));

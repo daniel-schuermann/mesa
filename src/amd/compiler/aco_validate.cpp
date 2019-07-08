@@ -269,12 +269,22 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
 
    bool err = false;
    aco::live live_vars = aco::live_var_analysis(program, options);
+   std::vector<std::vector<Temp>> phi_sgpr_ops(program->blocks.size());
 
    std::map<unsigned, Assignment> assignments;
    for (Block& block : program->blocks) {
       Location loc;
       loc.block = &block;
       for (aco_ptr<Instruction>& instr : block.instructions) {
+         if (instr->opcode == aco_opcode::p_phi) {
+            for (unsigned i = 0; i < instr->num_operands; i++) {
+               if (instr->getOperand(i).isTemp() &&
+                   instr->getOperand(i).getTemp().type() == sgpr &&
+                   instr->getOperand(i).isFirstKill())
+                  phi_sgpr_ops[block.logical_preds[i]].emplace_back(instr->getOperand(i).getTemp());
+            }
+         }
+
          loc.instr = instr.get();
          for (unsigned i = 0; i < instr->num_operands; i++) {
             Operand& op = instr->getOperand(i);
@@ -321,6 +331,9 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
 
       std::set<Temp> live;
       live.insert(live_vars.live_out[block.index].begin(), live_vars.live_out[block.index].end());
+      /* remove killed p_phi sgpr operands */
+      for (Temp tmp : phi_sgpr_ops[block.index])
+         live.erase(tmp);
 
       /* check live out */
       for (Temp tmp : live) {
@@ -336,6 +349,18 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
 
       for (auto it = block.instructions.rbegin(); it != block.instructions.rend(); ++it) {
          aco_ptr<Instruction>& instr = *it;
+
+         /* check killed p_phi sgpr operands */
+         if (instr->opcode == aco_opcode::p_logical_end) {
+            for (Temp tmp : phi_sgpr_ops[block.index]) {
+               PhysReg reg = assignments.at(tmp.id()).reg;
+               for (unsigned i = 0; i < tmp.size(); i++) {
+                  if (regs[reg + i])
+                     err |= ra_fail(output, loc, Location(), "Assignment of element %d of %%%d already taken by %%%d in live-out", i, tmp.id(), regs[reg + i]);
+               }
+               live.emplace(tmp);
+            }
+         }
 
          for (unsigned i = 0; i < instr->num_definitions; i++) {
             Definition& def = instr->getDefinition(i);
@@ -364,6 +389,15 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
 
       for (aco_ptr<Instruction>& instr : block.instructions) {
          loc.instr = instr.get();
+
+         /* remove killed p_phi operands from regs */
+         if (instr->opcode == aco_opcode::p_logical_end) {
+            for (Temp tmp : phi_sgpr_ops[block.index]) {
+               PhysReg reg = assignments.at(tmp.id()).reg;
+               regs[reg] = 0;
+            }
+         }
+
          if (instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi) {
             for (unsigned i = 0; i < instr->num_operands; i++) {
                Operand& op = instr->getOperand(i);
