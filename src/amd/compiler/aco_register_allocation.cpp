@@ -53,7 +53,7 @@ struct ra_ctx {
 #if 0
 void print_regs(ra_ctx& ctx, bool vgprs, std::array<uint32_t, 512>& reg_file)
 {
-   unsigned max = vgprs ? ctx.program->max_vgpr : ctx.program->max_sgpr;
+   unsigned max = vgprs ? ctx.program->max_reg_demand.vgpr : ctx.program->max_reg_demand.sgpr;
    unsigned lb = vgprs ? 256 : 0;
    unsigned ub = lb + max;
    char reg_char = vgprs ? 'v' : 's';
@@ -623,10 +623,10 @@ PhysReg get_reg(ra_ctx& ctx,
    uint32_t lb, ub;
    if (rc.type() == vgpr) {
       lb = 256;
-      ub = 256 + ctx.program->max_vgpr;
+      ub = 256 + ctx.program->max_reg_demand.vgpr;
    } else {
       lb = 0;
-      ub = ctx.program->max_sgpr;
+      ub = ctx.program->max_reg_demand.sgpr;
       if (size == 2)
          stride = 2;
       else if (size >= 4)
@@ -660,11 +660,11 @@ PhysReg get_reg(ra_ctx& ctx,
 
    /* try using more registers */
    uint16_t max_addressible_sgpr = ctx.program->sgpr_limit;
-   if (rc.type() == vgpr && ctx.program->max_vgpr < 256) {
-      update_vgpr_sgpr_demand(ctx.program, ctx.program->max_vgpr + 1, ctx.program->max_sgpr);
+   if (rc.type() == vgpr && ctx.program->max_reg_demand.vgpr < 256) {
+      update_vgpr_sgpr_demand(ctx.program, RegisterDemand(ctx.program->max_reg_demand.vgpr + 1, ctx.program->max_reg_demand.sgpr));
       return get_reg(ctx, reg_file, rc, parallelcopies, instr);
-   } else if (rc.type() == sgpr && ctx.program->max_sgpr < max_addressible_sgpr) {
-      update_vgpr_sgpr_demand(ctx.program, ctx.program->max_vgpr, ctx.program->max_sgpr + 1);
+   } else if (rc.type() == sgpr && ctx.program->max_reg_demand.sgpr < max_addressible_sgpr) {
+      update_vgpr_sgpr_demand(ctx.program,  RegisterDemand(ctx.program->max_reg_demand.vgpr, ctx.program->max_reg_demand.sgpr + 1));
       return get_reg(ctx, reg_file, rc, parallelcopies, instr);
    }
 
@@ -683,10 +683,10 @@ std::pair<PhysReg, bool> get_reg_vec(ra_ctx& ctx,
    uint32_t lb, ub;
    if (rc.type() == vgpr) {
       lb = 256;
-      ub = 256 + ctx.program->max_vgpr;
+      ub = 256 + ctx.program->max_reg_demand.vgpr;
    } else {
       lb = 0;
-      ub = ctx.program->max_sgpr;
+      ub = ctx.program->max_reg_demand.sgpr;
       if (size == 2)
          stride = 2;
       else if (size >= 4)
@@ -708,10 +708,10 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
    uint32_t lb, ub;
    if (rc.type() == vgpr) {
       lb = 256;
-      ub = 256 + ctx.program->max_vgpr;
+      ub = 256 + ctx.program->max_reg_demand.vgpr;
    } else {
       lb = 0;
-      ub = ctx.program->max_sgpr;
+      ub = ctx.program->max_reg_demand.sgpr;
       if (size == 2)
          stride = 2;
       else if (size >= 4)
@@ -812,7 +812,7 @@ bool get_reg_specified(ra_ctx& ctx,
 
    if (rc.type() == vgpr) {
       lb = 256;
-      ub = 256 + ctx.program->max_vgpr;
+      ub = 256 + ctx.program->max_reg_demand.vgpr;
    } else {
       if (size == 2)
          stride = 2;
@@ -821,7 +821,7 @@ bool get_reg_specified(ra_ctx& ctx,
       if (reg % stride != 0)
          return false;
       lb = 0;
-      ub = ctx.program->max_sgpr;
+      ub = ctx.program->max_reg_demand.sgpr;
    }
 
    uint32_t reg_lo = reg.reg;
@@ -866,9 +866,9 @@ void handle_pseudo(ra_ctx& ctx,
          ;
       if (reg < 0) {
          reg = ctx.max_used_sgpr + 1;
-         for (; reg < ctx.program->max_sgpr && reg_file[reg]; reg++)
+         for (; reg < ctx.program->max_reg_demand.sgpr && reg_file[reg]; reg++)
             ;
-         assert(reg < ctx.program->max_sgpr);
+         assert(reg < ctx.program->max_reg_demand.sgpr);
       }
 
       adjust_max_used_regs(ctx, s1, reg);
@@ -1866,12 +1866,12 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
       block.scc_live_out = true;
 
       /* choose a register */
-      unsigned reg = 0;
-      for (; reg < ctx.program->max_sgpr && regs[reg]; reg++)
+      int16_t reg = 0;
+      for (; reg < ctx.program->max_reg_demand.sgpr && regs[reg]; reg++)
          ;
-      assert(reg < ctx.program->max_sgpr);
+      assert(reg < ctx.program->max_reg_demand.sgpr);
       adjust_max_used_regs(ctx, s1, reg);
-      block.scratch_sgpr = PhysReg{reg};
+      block.scratch_sgpr = PhysReg{(uint16_t)reg};
    }
 
    /* remove trivial phis */
