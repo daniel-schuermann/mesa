@@ -1784,8 +1784,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          } else {
             // TODO: in a post-RA optimization, we can check if src is in VCC, and directly use VCCNZ
             assert(src.regClass() == s2);
-            src = emit_extract_vector(ctx, src, 0, s1);
-            bld.sop2(aco_opcode::s_and_b32, Definition(dst), bld.def(s1, scc), Operand(1u), src);
+            bld.sopc(aco_opcode::s_cmp_lg_u64, bld.scc(Definition(dst)), Operand(0u), src);
          }
       } else {
          assert(dst.regClass() == v1 && src.regClass() == s2);
