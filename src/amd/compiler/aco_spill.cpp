@@ -1030,13 +1030,13 @@ void process_block(spill_ctx& ctx, unsigned block_idx, Block* block,
          if (!instr->getOperand(i).isTemp())
             continue;
          if (current_spills.find(instr->getOperand(i).getTemp()) == current_spills.end()) {
+            /* the Operand is in register: check if it was renamed */
+            if (ctx.renames[block_idx].find(instr->getOperand(i).getTemp()) != ctx.renames[block_idx].end())
+               instr->getOperand(i).setTemp(ctx.renames[block_idx][instr->getOperand(i).getTemp()]);
             /* prevent it's definining instruction from being DCE'd if it could be rematerialized */
             if (ctx.remat.count(instr->getOperand(i).getTemp())) {
                ctx.remat_use_count[ctx.remat[instr->getOperand(i).getTemp()].instr]++;
             }
-            /* the Operand is in register: check if it was renamed */
-            if (ctx.renames[block_idx].find(instr->getOperand(i).getTemp()) != ctx.renames[block_idx].end())
-               instr->getOperand(i).setTemp(ctx.renames[block_idx][instr->getOperand(i).getTemp()]);
             continue;
          }
          /* the Operand is spilled: add it to reloads */
