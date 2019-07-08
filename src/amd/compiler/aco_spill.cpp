@@ -894,6 +894,7 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
 
          ctx.spills_exit[pred_idx].erase(tmp);
          ctx.renames[pred_idx][tmp] = new_name;
+         phi->getOperand(i).setTemp(new_name);
       }
    }
 
