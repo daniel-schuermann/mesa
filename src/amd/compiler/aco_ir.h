@@ -135,17 +135,18 @@ struct RegClass {
    };
 
    RegClass() = default;
-   constexpr RegClass(RC rc) : rc(rc) {}
-   constexpr RegClass(RegType type, unsigned size) :
-      rc((RC) ((type == RegType::vgpr ? 1 << 5 : 0) | size)) {}
+   constexpr RegClass(RC rc) 
+      : rc(rc) {}
+   constexpr RegClass(RegType type, unsigned size) 
+      : rc((RC) ((type == RegType::vgpr ? 1 << 5 : 0) | size)) {}
 
-   operator RC() const { return rc; }
+   constexpr operator RC() const { return rc; }
    explicit operator bool() = delete;
 
-   RegType type() const { return rc <= RC::s16 ? sgpr : vgpr; }
-   unsigned size() const { return (unsigned) rc & 0x1F; }
-   bool is_linear() const { return rc <= RC::s16 || rc & (1 << 6); }
-   RegClass as_linear() const { return RegClass((RC) (rc | (1 << 6))); }
+   constexpr RegType type() const { return rc <= RC::s16 ? sgpr : vgpr; }
+   constexpr unsigned size() const { return (unsigned) rc & 0x1F; }
+   constexpr bool is_linear() const { return rc <= RC::s16 || rc & (1 << 6); }
+   constexpr RegClass as_linear() const { return RegClass((RC) (rc | (1 << 6))); }
 
 private:
    RC rc;
