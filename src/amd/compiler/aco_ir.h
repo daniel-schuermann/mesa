@@ -178,16 +178,16 @@ struct Temp {
    constexpr Temp(uint32_t id, RegClass cls) noexcept
       : id_(id), reg_class(cls) {}
 
-   uint32_t id() const noexcept { return id_; }
-   RegClass regClass() const noexcept { return reg_class; }
+   constexpr uint32_t id() const noexcept { return id_; }
+   constexpr RegClass regClass() const noexcept { return reg_class; }
 
-   unsigned size() const noexcept { return reg_class.size(); }
-   RegType type() const noexcept { return reg_class.type(); }
-   bool is_linear() const noexcept { return reg_class.is_linear(); }
+   constexpr unsigned size() const noexcept { return reg_class.size(); }
+   constexpr RegType type() const noexcept { return reg_class.type(); }
+   constexpr bool is_linear() const noexcept { return reg_class.is_linear(); }
 
-   bool operator <(Temp other) const noexcept { return id() < other.id(); }
-   bool operator==(Temp other) const noexcept { return id() == other.id(); }
-   bool operator!=(Temp other) const noexcept { return id() != other.id(); }
+   constexpr bool operator <(Temp other) const noexcept { return id() < other.id(); }
+   constexpr bool operator==(Temp other) const noexcept { return id() == other.id(); }
+   constexpr bool operator!=(Temp other) const noexcept { return id() != other.id(); }
 
 private:
    uint32_t id_;
