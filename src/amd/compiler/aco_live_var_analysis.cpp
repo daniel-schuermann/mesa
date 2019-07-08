@@ -28,6 +28,10 @@
  */
 
 #include "aco_ir.h"
+
+#include <set>
+#include <vector>
+
 #include "vulkan/radv_shader.h"
 
 namespace aco {
@@ -36,13 +40,11 @@ namespace {
 void process_live_temps_per_block(Program *program, live& lives, Block* block,
                                   std::set<unsigned>& worklist, std::vector<uint16_t>& phi_sgpr_ops)
 {
-   std::vector<std::pair<uint16_t,uint16_t>>& register_demand = lives.register_demand[block->index];
-   uint16_t vgpr_demand = 0;
-   uint16_t sgpr_demand = 0;
+   std::vector<RegisterDemand>& register_demand = lives.register_demand[block->index];
+   RegisterDemand new_demand;
 
    register_demand.resize(block->instructions.size());
-   block->vgpr_demand = 0;
-   block->sgpr_demand = 0;
+   block->register_demand = RegisterDemand();
 
    std::set<Temp> live_sgprs;
    std::set<Temp> live_vgprs;
@@ -51,36 +53,29 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
    bool exec_live = false;
    if (block->live_out_exec != Temp()) {
       live_sgprs.insert(block->live_out_exec);
-      sgpr_demand += 2;
+      new_demand.sgpr += 2;
       exec_live = true;
    }
 
    /* split the live-outs from this block into the temporary sets */
    std::vector<std::set<Temp>>& live_temps = lives.live_out;
-   for (std::set<Temp>::iterator it = live_temps[block->index].begin(); it != live_temps[block->index].end(); ++it)
-   {
-      bool inserted = false;
-      if ((*it).is_linear())
-         inserted = live_sgprs.insert(*it).second;
-      else
-         inserted = live_vgprs.insert(*it).second;
+   for (const Temp temp : live_temps[block->index]) {
+      const bool inserted = temp.is_linear()
+                          ? live_sgprs.insert(temp).second
+                          : live_vgprs.insert(temp).second;
       if (inserted) {
-         if (it->type() == vgpr)
-            vgpr_demand += it->size();
-         else
-            sgpr_demand += it->size();
+         new_demand += temp;
       }
    }
-
-   sgpr_demand -= phi_sgpr_ops[block->index];
+   new_demand.sgpr -= phi_sgpr_ops[block->index];
 
    /* traverse the instructions backwards */
    for (int idx = block->instructions.size() -1; idx >= 0; idx--)
    {
       /* substract the 2 sgprs from exec */
       if (exec_live)
-         assert(sgpr_demand >= 2);
-      register_demand[idx] = {sgpr_demand - (exec_live ? 2 : 0), vgpr_demand};
+         assert(new_demand.sgpr >= 2);
+      register_demand[idx] = RegisterDemand(new_demand.vgpr, new_demand.sgpr - (exec_live ? 2 : 0));
 
       Instruction *insn = block->instructions[idx].get();
       /* KILL */
@@ -99,16 +94,10 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
             n = live_vgprs.erase(temp);
 
          if (n) {
-            if (temp.type() == vgpr)
-               vgpr_demand -= temp.size();
-            else
-               sgpr_demand -= temp.size();
+            new_demand -= temp;
             definition.setKill(false);
          } else {
-            if (temp.type() == vgpr)
-               register_demand[idx].second += temp.size();
-            else
-               register_demand[idx].first += temp.size();
+            register_demand[idx] += temp;
             definition.setKill(true);
          }
 
@@ -139,7 +128,7 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
             }
          }
       } else if (insn->opcode == aco_opcode::p_logical_end) {
-         sgpr_demand += phi_sgpr_ops[block->index];
+         new_demand.sgpr += phi_sgpr_ops[block->index];
       } else {
          for (unsigned i = 0; i < insn->operandCount(); ++i)
          {
@@ -159,11 +148,7 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
                      insn->getOperand(j).setKill(true);
                   }
                }
-
-               if (temp.type() == vgpr)
-                  vgpr_demand += operand.size();
-               else
-                  sgpr_demand += operand.size();
+               new_demand += temp;
             } else {
                operand.setKill(false);
             }
@@ -173,8 +158,7 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
          }
       }
 
-      block->vgpr_demand = std::max(block->vgpr_demand, register_demand[idx].second);
-      block->sgpr_demand = std::max(block->sgpr_demand, register_demand[idx].first);
+      block->register_demand.update(register_demand[idx]);
    }
 
    /* now, we have the live-in sets and need to merge them into the live-out sets */
@@ -204,31 +188,29 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
       abort();
    }
 
-   assert(block->index != 0 || (vgpr_demand == 0 && (sgpr_demand == 0)));
+   assert(block->index != 0 || new_demand == RegisterDemand());
 }
 } /* end namespace */
 
-void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr)
+void update_vgpr_sgpr_demand(Program* program, const RegisterDemand new_demand)
 {
    // TODO: also take shared mem into account
-   uint16_t total_sgpr_regs = program->chip_class >= GFX8 ? 800 : 512;
-   uint16_t max_addressible_sgpr = program->sgpr_limit;
+   const int16_t total_sgpr_regs = program->chip_class >= GFX8 ? 800 : 512;
+   const int16_t max_addressible_sgpr = program->sgpr_limit;
    /* VGPRs are allocated in chunks of 4 */
-   uint16_t rounded_vgpr_demand = std::max<uint16_t>(4, (vgpr + 3) & ~3);
+   const int16_t rounded_vgpr_demand = std::max<int16_t>(4, (new_demand.vgpr + 3) & ~3);
    /* SGPRs are allocated in chunks of 16 between 8 and 104. VCC occupies the last 2 registers */
-   uint16_t rounded_sgpr_demand = std::min(std::max<uint16_t>(8, (sgpr + 2 + 7) & ~7), max_addressible_sgpr);
+   const int16_t rounded_sgpr_demand = std::min(std::max<int16_t>(8, (new_demand.sgpr + 2 + 7) & ~7), max_addressible_sgpr);
    /* this won't compile, register pressure reduction necessary */
-   if (vgpr > 256 || sgpr > max_addressible_sgpr) {
+   if (new_demand.vgpr > 256 || new_demand.sgpr > max_addressible_sgpr) {
       program->num_waves = 0;
-      program->max_sgpr = sgpr;
-      program->max_vgpr = vgpr;
+      program->max_reg_demand = new_demand;
    } else {
       program->num_waves = std::min<uint16_t>(10,
                                               std::min<uint16_t>(256 / rounded_vgpr_demand,
                                                                  total_sgpr_regs / rounded_sgpr_demand));
 
-      program->max_sgpr = std::min<uint16_t>(((total_sgpr_regs / program->num_waves) & ~7) - 2, max_addressible_sgpr);
-      program->max_vgpr = (256 / program->num_waves) & ~3;
+      program->max_reg_demand = {  int16_t((256 / program->num_waves) & ~3), std::min<int16_t>(((total_sgpr_regs / program->num_waves) & ~7) - 2, max_addressible_sgpr)};
    }
 }
 
@@ -240,8 +222,7 @@ live live_var_analysis(Program* program,
    result.register_demand.resize(program->blocks.size());
    std::set<unsigned> worklist;
    std::vector<uint16_t> phi_sgpr_ops(program->blocks.size());
-   uint16_t vgpr_demand = 0;
-   uint16_t sgpr_demand = 0;
+   RegisterDemand new_demand;
 
    /* this implementation assumes that the block idx corresponds to the block's position in program->blocks vector */
    for (Block& block : program->blocks)
@@ -251,12 +232,11 @@ live live_var_analysis(Program* program,
       unsigned block_idx = *b_it;
       worklist.erase(block_idx);
       process_live_temps_per_block(program, result, &program->blocks[block_idx], worklist, phi_sgpr_ops);
-      vgpr_demand = std::max(vgpr_demand, program->blocks[block_idx].vgpr_demand);
-      sgpr_demand = std::max(sgpr_demand, program->blocks[block_idx].sgpr_demand);
+      new_demand.update(program->blocks[block_idx].register_demand);
    }
 
    /* calculate the program's register demand and number of waves */
-   update_vgpr_sgpr_demand(program, vgpr_demand, sgpr_demand);
+   update_vgpr_sgpr_demand(program, new_demand);
 
    return result;
 }

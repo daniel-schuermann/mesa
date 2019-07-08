@@ -856,6 +856,68 @@ enum block_kind {
    block_kind_needs_lowering = 1 << 12,
 };
 
+
+struct RegisterDemand {
+   constexpr RegisterDemand() = default;
+   constexpr RegisterDemand(const int16_t v, const int16_t s)
+      : vgpr{v}, sgpr{s} {}
+   int16_t vgpr = 0;
+   int16_t sgpr = 0;
+
+   constexpr friend bool operator==(const RegisterDemand a, const RegisterDemand b) {
+      return a.vgpr == b.vgpr && a.sgpr == b.sgpr;
+   }
+
+   RegisterDemand operator+(const Temp t) {
+      if (t.type() == RegType::sgpr)
+         return RegisterDemand( vgpr, sgpr + t.size() );
+      else
+         return RegisterDemand( vgpr + t.size(), sgpr );
+   }
+
+   RegisterDemand operator+(const RegisterDemand other) {
+      return RegisterDemand(vgpr + other.vgpr, sgpr + other.sgpr);
+   }
+
+   RegisterDemand operator-(const RegisterDemand other) {
+      return RegisterDemand(vgpr - other.vgpr, sgpr - other.sgpr);
+   }
+
+   RegisterDemand& operator+=(const RegisterDemand other) {
+      vgpr += other.vgpr;
+      sgpr += other.sgpr;
+      return *this;
+   }
+
+   RegisterDemand& operator-=(const RegisterDemand other) {
+      vgpr -= other.vgpr;
+      sgpr -= other.sgpr;
+      return *this;
+   }
+
+   RegisterDemand& operator+=(const Temp t) {
+      if (t.type() == RegType::sgpr)
+         sgpr += t.size();
+      else
+         vgpr += t.size();
+      return *this;
+   }
+
+   RegisterDemand& operator-=(const Temp t) {
+      if (t.type() == RegType::sgpr)
+         sgpr -= t.size();
+      else
+         vgpr -= t.size();
+      return *this;
+   }
+
+   void update(const RegisterDemand other) {
+      vgpr = std::max(vgpr, other.vgpr);
+      sgpr = std::max(sgpr, other.sgpr);
+   }
+
+};
+
 /* CFG */
 struct Block {
    unsigned index;
@@ -865,8 +927,7 @@ struct Block {
    std::vector<unsigned> linear_preds;
    std::vector<unsigned> logical_succs;
    std::vector<unsigned> linear_succs;
-   uint16_t vgpr_demand = 0;
-   uint16_t sgpr_demand = 0;
+   RegisterDemand register_demand = RegisterDemand();
    uint16_t loop_nest_depth = 0;
    uint16_t kind = 0;
    int logical_idom = -1;
@@ -886,9 +947,8 @@ struct Block {
 class Program final {
 public:
    std::vector<Block> blocks;
+   RegisterDemand max_reg_demand = RegisterDemand();
    uint16_t sgpr_limit = 0;
-   uint16_t max_vgpr = 0;
-   uint16_t max_sgpr = 0;
    uint16_t num_waves = 0;
    ac_shader_config* config;
    struct radv_shader_variant_info *info;
@@ -933,7 +993,7 @@ struct live {
    /* live temps out per block */
    std::vector<std::set<Temp>> live_out;
    /* register demand (sgpr/vgpr) per instruction per block */
-   std::vector<std::vector<std::pair<uint16_t,uint16_t>>> register_demand;
+   std::vector<std::vector<RegisterDemand>> register_demand;
 };
 
 std::unique_ptr<Program> select_program(struct nir_shader *nir,
@@ -944,7 +1004,7 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
 void lower_wqm(Program* program, live& live_vars,
                const struct radv_nir_compiler_options *options);
 void lower_bool_phis(Program* program);
-void update_vgpr_sgpr_demand(Program* program, unsigned vgpr, unsigned sgpr);
+void update_vgpr_sgpr_demand(Program* program, const RegisterDemand new_demand);
 live live_var_analysis(Program* program, const struct radv_nir_compiler_options *options);
 std::vector<uint16_t> dead_code_analysis(Program *program);
 void dominator_tree(Program* program);
