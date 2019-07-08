@@ -1504,6 +1504,10 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
          else
             tmp = bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), half_pi, src);
 
+         /* before GFX9, v_sin_f32 and v_cos_f32 had a valid input domain of [-256, +256] */
+         if (ctx->options->chip_class < GFX9)
+            tmp = bld.vop1(aco_opcode::v_fract_f32, bld.def(v1), tmp);
+
          aco_opcode opcode = instr->op == nir_op_fsin ? aco_opcode::v_sin_f32 : aco_opcode::v_cos_f32;
          bld.vop1(opcode, Definition(dst), tmp);
       } else {
