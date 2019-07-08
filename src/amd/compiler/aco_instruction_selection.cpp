@@ -4942,7 +4942,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       Definition tmp = bld.def(s2);
       Temp src = get_ssa_temp(ctx, instr->src[0].ssa);
       if (instr->src[0].ssa->bit_size == 1 && src.regClass() == s2) {
-         bld.sop2(aco_opcode::s_and_b64, tmp, Operand(exec, s2), src);
+         bld.sop2(aco_opcode::s_and_b64, tmp, bld.def(s1, scc), Operand(exec, s2), src);
       } else if (instr->src[0].ssa->bit_size == 1 && src.regClass() == s1) {
          bld.sop2(aco_opcode::s_cselect_b64, tmp, Operand(exec, s2), Operand(0u), bld.scc(src));
       } else if (instr->src[0].ssa->bit_size == 32 && src.regClass() == v1) {
@@ -5153,8 +5153,8 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
             uint32_t half_mask = 0x11111111u << lane;
             Temp mask_tmp = bld.pseudo(aco_opcode::p_create_vector, bld.def(s2), Operand(half_mask), Operand(half_mask));
             bld.sop1(aco_opcode::s_wqm_b64, tmp,
-                     bld.sop2(aco_opcode::s_and_b64, bld.def(s2), mask_tmp,
-                              bld.sop2(aco_opcode::s_and_b64, bld.def(s2), src, Operand(exec, s2))));
+                     bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), mask_tmp,
+                              bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), src, Operand(exec, s2))));
          } else if (instr->dest.ssa.bit_size == 32) {
             bld.vop1_dpp(aco_opcode::v_mov_b32, tmp, src,
                          dpp_quad_perm(lane, lane, lane, lane));
