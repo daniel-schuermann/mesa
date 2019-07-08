@@ -808,7 +808,7 @@ declare_vs_input_vgprs(isel_context *ctx, struct arg_info *args)
    unsigned vgpr_idx = 0;
    add_arg(args, v1, &ctx->vertex_id, vgpr_idx++);
 /* if (!ctx->is_gs_copy_shader) */ {
-      if (ctx->options->key.vs.as_ls) {
+      if (ctx->options->key.vs.out.as_ls) {
          add_arg(args, v1, &ctx->rel_auto_id, vgpr_idx++);
          add_arg(args, v1, &ctx->instance_id, vgpr_idx++);
       } else {
@@ -824,11 +824,11 @@ static bool needs_view_index_sgpr(isel_context *ctx)
    switch (ctx->stage) {
    case MESA_SHADER_VERTEX:
       if (ctx->program->info->info.needs_multiview_view_index ||
-          (!ctx->options->key.vs.as_es && !ctx->options->key.vs.as_ls && ctx->options->key.has_multiview_view_index))
+          (!ctx->options->key.vs.out.as_es && !ctx->options->key.vs.out.as_ls && ctx->options->key.has_multiview_view_index))
          return true;
       break;
    case MESA_SHADER_TESS_EVAL:
-      if (ctx->program->info->info.needs_multiview_view_index || (!ctx->options->key.tes.as_es && ctx->options->key.has_multiview_view_index))
+      if (ctx->program->info->info.needs_multiview_view_index || (!ctx->options->key.tes.out.as_es && ctx->options->key.has_multiview_view_index))
          return true;
       break;
    case MESA_SHADER_GEOMETRY:
@@ -877,7 +877,7 @@ void add_startpgm(struct isel_context *ctx)
          add_arg(&args, s1, &ctx->view_index, user_sgpr_info.user_sgpr_idx);
          set_loc_shader(ctx, AC_UD_VIEW_INDEX, &user_sgpr_info.user_sgpr_idx, 1);
       }
-      if (ctx->options->key.vs.as_es)
+      if (ctx->options->key.vs.out.as_es)
          add_arg(&args, s1, &ctx->es2gs_offset, user_sgpr_info.user_sgpr_idx);
 
       declare_vs_input_vgprs(ctx, &args);
