@@ -496,7 +496,7 @@ void lower_to_hw_instr(Program* program)
                if (instr->getOperand(0).isUndefined())
                   break;
 
-               unsigned reg = instr->getOperand(0).physReg() + instr->getOperand(1).constantValue();
+               unsigned reg = instr->getOperand(0).physReg() + instr->getOperand(1).constantValue() * instr->getDefinition(0).size();
                RegClass rc = RegClass(instr->getOperand(0).getTemp().type(), 1);
                RegClass rc_def = RegClass(instr->getDefinition(0).getTemp().type(), 1);
                if (reg == instr->getDefinition(0).physReg())
