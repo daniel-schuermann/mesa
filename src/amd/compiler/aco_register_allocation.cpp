@@ -421,7 +421,8 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
    for (unsigned j = 0; !is_phi(instr) && j < instr->num_operands; j++) {
       if (instr->getOperand(j).isTemp() &&
           instr->getOperand(j).isFirstKill() &&
-          instr->getOperand(j).getTemp().type() == rc.type()) {
+          instr->getOperand(j).physReg() >= lb &&
+          instr->getOperand(j).physReg() < ub) {
          assert(instr->getOperand(j).isFixed());
          assert(reg_file[instr->getOperand(j).physReg().reg] == 0);
          for (unsigned k = 0; k < instr->getOperand(j).size(); k++)
@@ -1408,139 +1409,158 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                instr->getDefinition(0).setFixed(instr->getOperand(3).physReg());
          }
 
-         /* handle definitions */
          ctx.defs_done.reset();
+
+         /* handle fixed definitions first */
          for (unsigned i = 0; i < instr->num_definitions; ++i) {
             auto& definition = instr->getDefinition(i);
-            if (definition.isFixed()) {
-               adjust_max_used_regs(ctx, definition.regClass(), definition.physReg().reg);
+            if (!definition.isFixed())
+               continue;
 
-               /* check if target dst is blocked */
-               if (register_file[definition.physReg().reg] != 0) {
-                  /* create parallelcopy pair to move blocking var */
-                  Temp tmp = {register_file[definition.physReg().reg], ctx.assignments[register_file[definition.physReg().reg]].second};
-                  Operand pc_op = Operand(tmp);
-                  pc_op.setFixed(ctx.assignments[register_file[definition.physReg().reg]].first);
-                  RegClass rc = pc_op.regClass();
-                  tmp = Temp{program->allocateId(), rc};
-                  Definition pc_def = Definition(tmp);
+            adjust_max_used_regs(ctx, definition.regClass(), definition.physReg());
+            /* check if the target register is blocked */
+            if (register_file[definition.physReg().reg] != 0) {
+               /* create parallelcopy pair to move blocking var */
+               Temp tmp = {register_file[definition.physReg()], ctx.assignments[register_file[definition.physReg()]].second};
+               Operand pc_op = Operand(tmp);
+               pc_op.setFixed(ctx.assignments[register_file[definition.physReg().reg]].first);
+               RegClass rc = pc_op.regClass();
+               tmp = Temp{program->allocateId(), rc};
+               Definition pc_def = Definition(tmp);
 
-                  /* re-enable the killed operands, so that we don't move the blocking var there */
-                  for (unsigned i = 0; i < instr->num_operands; i++)
-                     if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill())
-                        for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
-                           register_file[instr->getOperand(i).physReg() + j] = 0xFFFF;
-                  /* find a new register for the blocking variable */
-                  PhysReg reg = get_reg(ctx, register_file, rc, parallelcopy, instr);
-                  /* once again, disable killed operands */
-                  for (unsigned i = 0; i < instr->num_operands; i++) {
-                     if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill())
-                        for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
-                           register_file[instr->getOperand(i).physReg() + j] = 0;
-                  }
-                  for (unsigned k = 0; k < i; k++) {
-                     if (instr->getDefinition(k).isTemp() && !instr->getDefinition(k).isKill())
-                        for (unsigned j = 0; j < instr->getDefinition(k).size(); j++)
-                           register_file[instr->getDefinition(k).physReg() + j] = instr->getDefinition(k).tempId();
-                  }
-                  pc_def.setFixed(reg);
+               /* re-enable the killed operands, so that we don't move the blocking var there */
+               for (unsigned i = 0; i < instr->num_operands; i++)
+                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill())
+                     for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
+                        register_file[instr->getOperand(i).physReg() + j] = 0xFFFF;
 
-                  /* finish assignment of parallelcopy */
-                  ctx.assignments[pc_def.tempId()] = {reg, pc_def.regClass()};
-                  parallelcopy.emplace_back(pc_op, pc_def);
-
-                  /* add changes to reg_file */
-                  for (unsigned i = 0; i < pc_op.size(); i++) {
-                     register_file[pc_op.physReg() + i] = 0x0;
-                     register_file[pc_def.physReg() + i] = pc_def.tempId();
-                  }
+               /* find a new register for the blocking variable */
+               PhysReg reg = get_reg(ctx, register_file, rc, parallelcopy, instr);
+               /* once again, disable killed operands */
+               for (unsigned i = 0; i < instr->num_operands; i++) {
+                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill())
+                     for (unsigned j = 0; j < instr->getOperand(i).size(); j++)
+                        register_file[instr->getOperand(i).physReg() + j] = 0;
                }
-            } else if (definition.isTemp()) {
-               /* find free reg */
-               if (definition.hasHint() && register_file[definition.physReg().reg] == 0)
-                  definition.setFixed(definition.physReg());
-               else if (instr->opcode == aco_opcode::p_split_vector) {
-                  PhysReg reg = PhysReg{instr->getOperand(0).physReg() + i * definition.size()};
-                  if (!get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg))
-                     reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
+               for (unsigned k = 0; k < i; k++) {
+                  if (instr->getDefinition(k).isTemp() && ctx.defs_done.test(k) && !instr->getDefinition(k).isKill())
+                     for (unsigned j = 0; j < instr->getDefinition(k).size(); j++)
+                        register_file[instr->getDefinition(k).physReg() + j] = instr->getDefinition(k).tempId();
+               }
+               pc_def.setFixed(reg);
+
+               /* finish assignment of parallelcopy */
+               ctx.assignments[pc_def.tempId()] = {reg, pc_def.regClass()};
+               parallelcopy.emplace_back(pc_op, pc_def);
+
+               /* add changes to reg_file */
+               for (unsigned i = 0; i < pc_op.size(); i++) {
+                  register_file[pc_op.physReg() + i] = 0x0;
+                  register_file[pc_def.physReg() + i] = pc_def.tempId();
+               }
+            }
+            ctx.defs_done.set(i);
+
+            if (!definition.isTemp())
+               continue;
+
+            /* set live if it has a kill point */
+            if (!definition.isKill())
+               live.emplace(definition.getTemp());
+
+            ctx.assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
+            renames[block.index][definition.tempId()] = definition.getTemp();
+            for (unsigned j = 0; j < definition.size(); j++)
+               register_file[definition.physReg() + j] = definition.tempId();
+         }
+
+         /* handle all other definitions */
+         for (unsigned i = 0; i < instr->num_definitions; ++i) {
+            auto& definition = instr->getDefinition(i);
+
+            if (definition.isFixed() || !definition.isTemp())
+               continue;
+
+            /* find free reg */
+            if (definition.hasHint() && register_file[definition.physReg().reg] == 0)
+               definition.setFixed(definition.physReg());
+            else if (instr->opcode == aco_opcode::p_split_vector) {
+               PhysReg reg = PhysReg{instr->getOperand(0).physReg() + i * definition.size()};
+               if (!get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg))
+                  reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
+               definition.setFixed(reg);
+            } else if (instr->opcode == aco_opcode::p_extract_vector) {
+               PhysReg reg;
+               if (instr->getOperand(0).isKill() &&
+                   instr->getOperand(0).getTemp().type() == definition.getTemp().type()) {
+                  reg = instr->getOperand(0).physReg();
+                  reg.reg += definition.size() * instr->getOperand(1).constantValue();
+                  assert(register_file[reg.reg] == 0);
+               } else {
+                  reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
+               }
+               definition.setFixed(reg);
+            } else if (instr->opcode == aco_opcode::p_create_vector) {
+               PhysReg reg = get_reg_create_vector(ctx, register_file, definition.regClass(),
+                                                   parallelcopy, instr);
+               definition.setFixed(reg);
+            } else if (affinities.find(definition.tempId()) != affinities.end() &&
+                       ctx.assignments.find(affinities[definition.tempId()]) != ctx.assignments.end()) {
+               PhysReg reg = ctx.assignments[affinities[definition.tempId()]].first;
+               if (get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg))
                   definition.setFixed(reg);
-               } else if (instr->opcode == aco_opcode::p_extract_vector) {
-                  PhysReg reg;
-                  if (instr->getOperand(0).isKill() &&
-                      instr->getOperand(0).getTemp().type() == definition.getTemp().type()) {
-                     reg = instr->getOperand(0).physReg();
-                     reg.reg += definition.size() * instr->getOperand(1).constantValue();
-                     assert(register_file[reg.reg] == 0);
+               else
+                  definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr));
+
+            } else if (vectors.find(definition.tempId()) != vectors.end()) {
+               Instruction* vec = vectors[definition.tempId()];
+               unsigned offset = 0;
+               for (unsigned i = 0; i < vec->num_operands; i++) {
+                  if (vec->getOperand(i).isTemp() && vec->getOperand(i).tempId() == definition.tempId())
+                     break;
+                  else
+                     offset += vec->getOperand(i).size();
+               }
+               unsigned k = 0;
+               for (unsigned i = 0; i < vec->num_operands; i++) {
+                  if (vec->getOperand(i).isTemp() &&
+                      vec->getOperand(i).tempId() != definition.tempId() &&
+                      vec->getOperand(i).getTemp().type() == definition.getTemp().type() &&
+                      ctx.assignments.find(vec->getOperand(i).tempId()) != ctx.assignments.end()) {
+                     PhysReg reg = ctx.assignments[vec->getOperand(i).tempId()].first;
+                     reg.reg = reg - k + offset;
+                     if (get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg)) {
+                        definition.setFixed(reg);
+                        break;
+                     }
+                  }
+                  k += vec->getOperand(i).size();
+               }
+               if (!definition.isFixed()) {
+                  std::pair<PhysReg, bool> res = get_reg_vec(ctx, register_file, vec->getDefinition(0).regClass());
+                  PhysReg reg = res.first;
+                  if (res.second) {
+                     reg.reg += offset;
                   } else {
                      reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
                   }
                   definition.setFixed(reg);
-               } else if (instr->opcode == aco_opcode::p_create_vector) {
-                  PhysReg reg = get_reg_create_vector(ctx, register_file, definition.regClass(),
-                                                      parallelcopy, instr);
-                  definition.setFixed(reg);
-               } else if (affinities.find(definition.tempId()) != affinities.end() &&
-                          ctx.assignments.find(affinities[definition.tempId()]) != ctx.assignments.end()) {
-                  PhysReg reg = ctx.assignments[affinities[definition.tempId()]].first;
-                  if (get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg))
-                     definition.setFixed(reg);
-                  else
-                     definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr));
+               }
+            } else
+               definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr));
 
-               } else if (vectors.find(definition.tempId()) != vectors.end()) {
-                  Instruction* vec = vectors[definition.tempId()];
-                  unsigned offset = 0;
-                  for (unsigned i = 0; i < vec->num_operands; i++) {
-                     if (vec->getOperand(i).isTemp() && vec->getOperand(i).tempId() == definition.tempId())
-                        break;
-                     else
-                        offset += vec->getOperand(i).size();
-                  }
-                  unsigned k = 0;
-                  for (unsigned i = 0; i < vec->num_operands; i++) {
-                     if (vec->getOperand(i).isTemp() &&
-                         vec->getOperand(i).tempId() != definition.tempId() &&
-                         vec->getOperand(i).getTemp().type() == definition.getTemp().type() &&
-                         ctx.assignments.find(vec->getOperand(i).tempId()) != ctx.assignments.end()) {
-                        PhysReg reg = ctx.assignments[vec->getOperand(i).tempId()].first;
-                        reg.reg = reg - k + offset;
-                        if (get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg)) {
-                           definition.setFixed(reg);
-                           break;
-                        }
-                     }
-                     k += vec->getOperand(i).size();
-                  }
-                  if (!definition.isFixed()) {
-                     std::pair<PhysReg, bool> res = get_reg_vec(ctx, register_file, vec->getDefinition(0).regClass());
-                     PhysReg reg = res.first;
-                     if (res.second) {
-                        reg.reg += offset;
-                     } else {
-                        reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
-                     }
-                     definition.setFixed(reg);
-                  }
-               } else
-                  definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr));
+            assert(definition.isFixed() && ((definition.getTemp().type() == vgpr && definition.physReg() >= 256) ||
+                                            (definition.getTemp().type() != vgpr && definition.physReg() < 256)));
+            ctx.defs_done.set(i);
 
-               assert(definition.isFixed() && ((definition.getTemp().type() == vgpr && definition.physReg() >= 256) ||
-                                               (definition.getTemp().type() != vgpr && definition.physReg() < 256)));
-            } else {
-               continue;
-            }
+            /* set live if it has a kill point */
+            if (!definition.isKill())
+               live.emplace(definition.getTemp());
 
             ctx.assignments[definition.tempId()] = {definition.physReg(), definition.regClass()};
+            renames[block.index][definition.tempId()] = definition.getTemp();
             for (unsigned j = 0; j < definition.size(); j++)
                register_file[definition.physReg() + j] = definition.tempId();
-            /* set live if it has a kill point */
-            if (!definition.isKill()) {
-               live.emplace(definition.getTemp());
-            }
-            /* add to renames table */
-            renames[block.index][definition.tempId()] = definition.getTemp();
-
-            ctx.defs_done.set(i);
          }
 
          handle_pseudo(ctx, register_file, instr.get());
