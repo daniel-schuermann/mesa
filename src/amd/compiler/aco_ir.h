@@ -576,6 +576,10 @@ struct Instruction {
              ((uint16_t) format & (uint16_t) Format::VOP3B) ||
              format == Format::VOP3P;
    }
+   bool isSDWA()
+   {
+      return (uint16_t) format & (uint16_t) Format::SDWA;
+   }
 
    bool isFlatOrGlobal()
    {
