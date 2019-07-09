@@ -401,6 +401,9 @@ bool can_use_VOP3(aco_ptr<Instruction>& instr)
    if (instr->num_operands && instr->getOperand(0).isLiteral())
       return false;
 
+   if (instr->isDPP() || instr->isSDWA())
+      return false;
+
    return instr->opcode != aco_opcode::v_madmk_f32 &&
           instr->opcode != aco_opcode::v_madak_f32 &&
           instr->opcode != aco_opcode::v_madmk_f16 &&
@@ -556,19 +559,27 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             instr->getOperand(i).setTemp(info.temp);
             info = ctx.info[info.temp.id()];
          }
-         if (info.is_abs() && can_use_VOP3(instr) && instr_info.can_use_input_modifiers[(int)instr->opcode]) {
-            to_VOP3(ctx, instr);
+         if (info.is_abs() && (can_use_VOP3(instr) || instr->isDPP()) && instr_info.can_use_input_modifiers[(int)instr->opcode]) {
+            if (!instr->isDPP())
+               to_VOP3(ctx, instr);
             instr->getOperand(i) = Operand(info.temp);
-            static_cast<VOP3A_instruction*>(instr.get())->abs[i] = true;
+            if (instr->isDPP())
+               static_cast<DPP_instruction*>(instr.get())->abs[i] = true;
+            else
+               static_cast<VOP3A_instruction*>(instr.get())->abs[i] = true;
          }
          if (info.is_neg() && instr->opcode == aco_opcode::v_add_f32) {
             instr->opcode = i ? aco_opcode::v_sub_f32 : aco_opcode::v_subrev_f32;
             instr->getOperand(i).setTemp(info.temp);
             continue;
-         } else if (info.is_neg() && can_use_VOP3(instr) && instr_info.can_use_input_modifiers[(int)instr->opcode]) {
-            to_VOP3(ctx, instr);
+         } else if (info.is_neg() && (can_use_VOP3(instr) || instr->isDPP()) && instr_info.can_use_input_modifiers[(int)instr->opcode]) {
+            if (!instr->isDPP())
+               to_VOP3(ctx, instr);
             instr->getOperand(i).setTemp(info.temp);
-            static_cast<VOP3A_instruction*>(instr.get())->neg[i] = true;
+            if (instr->isDPP())
+               static_cast<DPP_instruction*>(instr.get())->neg[i] = true;
+            else
+               static_cast<VOP3A_instruction*>(instr.get())->neg[i] = true;
             continue;
          }
          if (info.is_constant() && can_accept_constant(instr, i)) {
