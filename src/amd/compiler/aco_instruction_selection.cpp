@@ -353,14 +353,43 @@ Temp as_uniform_bool(isel_context *ctx, Temp val)
    }
 }
 
-Temp get_alu_src(struct isel_context *ctx, nir_alu_src src)
+Temp get_alu_src(struct isel_context *ctx, nir_alu_src src, unsigned size=1)
 {
-   if (src.src.ssa->num_components == 1 && src.swizzle[0] == 0)
+   if (src.src.ssa->num_components == 1 && src.swizzle[0] == 0 && size == 1)
       return get_ssa_temp(ctx, src.src.ssa);
 
+   if (src.src.ssa->num_components == size) {
+      bool identity_swizzle = true;
+      for (unsigned i = 0; identity_swizzle && i < size; i++) {
+         if (src.swizzle[i] != i)
+            identity_swizzle = false;
+      }
+      if (identity_swizzle)
+         return get_ssa_temp(ctx, src.src.ssa);
+   }
+
    Temp vec = get_ssa_temp(ctx, src.src.ssa);
-   assert(vec.size() % src.src.ssa->num_components == 0);
-   return emit_extract_vector(ctx, vec, src.swizzle[0], RegClass(vec.type(), vec.size() / src.src.ssa->num_components));
+   unsigned elem_size = vec.size() / src.src.ssa->num_components;
+   assert(elem_size > 0); /* TODO: 8 and 16-bit vectors not supported */
+   assert(vec.size() % elem_size == 0);
+
+   RegClass elem_rc = RegClass(vec.type(), elem_size);
+   if (size == 1) {
+      return emit_extract_vector(ctx, vec, src.swizzle[0], elem_rc);
+   } else {
+      assert(size <= 4);
+      std::array<Temp,4> elems;
+      aco_ptr<Pseudo_instruction> vec_instr{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, size, 1)};
+      for (unsigned i = 0; i < size; ++i) {
+         elems[i] = emit_extract_vector(ctx, vec, src.swizzle[i], elem_rc);
+         vec_instr->getOperand(i) = Operand{elems[i]};
+      }
+      Temp dst{ctx->program->allocateId(), RegClass(vec.type(), elem_size * size)};
+      vec_instr->getDefinition(0) = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(vec_instr));
+      ctx->allocated_vec.emplace(dst.id(), elems);
+      return dst;
+   }
 }
 
 Temp convert_pointer_to_64_bit(isel_context *ctx, Temp ptr)
@@ -1332,8 +1361,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_cube_face_coord: {
-      Temp in = get_ssa_temp(ctx, instr->src[0].src.ssa);
-      emit_split_vector(ctx, in, 3);
+      Temp in = get_alu_src(ctx, instr->src[0], 3);
       Temp src[3] = { emit_extract_vector(ctx, in, 0, v1),
                       emit_extract_vector(ctx, in, 1, v1),
                       emit_extract_vector(ctx, in, 2, v1) };
@@ -1347,8 +1375,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_cube_face_index: {
-      Temp in = get_ssa_temp(ctx, instr->src[0].src.ssa);
-      emit_split_vector(ctx, in, 3);
+      Temp in = get_alu_src(ctx, instr->src[0], 3);
       Temp src[3] = { emit_extract_vector(ctx, in, 0, v1),
                       emit_extract_vector(ctx, in, 1, v1),
                       emit_extract_vector(ctx, in, 2, v1) };
@@ -1819,7 +1846,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       break;
    }
    case nir_op_pack_half_2x16: {
-      Temp src = get_ssa_temp(ctx, instr->src[0].src.ssa);
+      Temp src = get_alu_src(ctx, instr->src[0], 2);
       emit_split_vector(ctx, src, 2);
 
       if (dst.regClass() == v1) {
