@@ -123,23 +123,27 @@ void validate(Program* program, FILE * output)
 
             if (instr->format == Format::SOP1 || instr->format == Format::SOP2) {
                check(instr->definitions[0].getTemp().type() == sgpr, "Wrong Definition type for SALU instruction", instr.get());
-               for (unsigned i = 0; i < instr->operands.size(); i++)
-                 check(instr->operands[i].isConstant() || instr->operands[i].regClass().type() <= sgpr,
+               for (const Operand& op : instr->operands) {
+                 check(op.isConstant() || op.regClass().type() <= RegType::sgpr,
                        "Wrong Operand type for SALU instruction", instr.get());
             }
+         }
          }
 
          switch (instr->format) {
          case Format::PSEUDO: {
             if (instr->opcode == aco_opcode::p_create_vector) {
                unsigned size = 0;
-               for (unsigned i = 0; i < instr->operands.size(); i++)
-                  size += instr->operands[i].size();
+               for (const Operand& op : instr->operands) {
+                  size += op.size();
+               }
                check(size == instr->definitions[0].size(), "Definition size does not match operand sizes", instr.get());
-               if (instr->definitions[0].getTemp().type() == sgpr)
-                  for (unsigned i = 0; i < instr->operands.size(); i++)
-                     check(instr->operands[i].isConstant() || instr->operands[i].regClass().type() == sgpr,
+               if (instr->definitions[0].getTemp().type() == RegType::sgpr) {
+                  for (const Operand& op : instr->operands) {
+                     check(op.isConstant() || op.regClass().type() == RegType::sgpr,
                            "Wrong Operand type for scalar vector", instr.get());
+                  }
+               }
             } else if (instr->opcode == aco_opcode::p_extract_vector) {
                check((instr->operands[0].hasRegClass()) && instr->operands[1].isConstant(), "Wrong Operand types", instr.get());
                check(instr->operands[1].constantValue() < instr->operands[0].size(), "Index out of range", instr.get());
@@ -184,9 +188,10 @@ void validate(Program* program, FILE * output)
             break;
          }
          case Format::DS: {
-            for (unsigned i = 0; i < instr->operands.size(); i++)
-               check((instr->operands[i].hasRegClass() && instr->operands[i].regClass().type() == vgpr) || instr->operands[i].physReg() == m0,
+            for (const Operand& op : instr->operands) {
+               check((op.hasRegClass() && op.regClass().type() == RegType::vgpr) || op.physReg() == m0,
                      "Only VGPRs are valid DS instruction operands", instr.get());
+            }
             if (instr->definitions.size())
                check(instr->definitions[0].getTemp().type() == vgpr, "DS instruction must return VGPR", instr.get());
             break;
@@ -376,8 +381,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
          /* don't count phi operands as live-in, since they are actually
           * killed when they are copied at the predecessor */
          if (instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi) {
-            for (unsigned i = 0; i < instr->operands.size(); i++) {
-               Operand& op = instr->operands[i];
+            for (const Operand& op : instr->operands) {
                if (!op.isTemp())
                   continue;
                live.insert(op.getTemp());
@@ -403,8 +407,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
          }
 
          if (instr->opcode != aco_opcode::p_phi && instr->opcode != aco_opcode::p_linear_phi) {
-            for (unsigned i = 0; i < instr->operands.size(); i++) {
-               Operand& op = instr->operands[i];
+            for (const Operand& op : instr->operands) {
                if (!op.isTemp())
                   continue;
                if (op.isFirstKill()) {
