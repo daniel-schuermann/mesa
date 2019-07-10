@@ -745,6 +745,11 @@ void add_branch_code(exec_ctx& ctx, Block* block)
    }
 
    if (block->kind & block_kind_discard) {
+
+      assert(block->instructions.back()->format == Format::PSEUDO_BRANCH);
+      aco_ptr<Instruction> branch = std::move(block->instructions.back());
+      block->instructions.pop_back();
+
       /* create a discard_if() instruction with the exec mask as condition */
       unsigned num = 0;
       if (ctx.loop.size()) {
@@ -754,7 +759,12 @@ void add_branch_code(exec_ctx& ctx, Block* block)
          num = ctx.info[idx].exec.size() - 1;
       }
 
-      Temp cond = ctx.info[idx].exec.back().first;
+      Temp old_exec = ctx.info[idx].exec.back().first;
+      Temp new_exec = bld.tmp(s2);
+      Temp cond = bld.sop1(aco_opcode::s_and_saveexec_b64, bld.def(s2), bld.def(s1, scc),
+                           bld.exec(Definition(new_exec)), Operand(0u), bld.exec(old_exec));
+      ctx.info[idx].exec.back().first = new_exec;
+
       aco_ptr<Pseudo_instruction> discard{create_instruction<Pseudo_instruction>(aco_opcode::p_discard_if, Format::PSEUDO, num + 1, num + 1)};
       for (unsigned i = 0; i < num; i++) {
          discard->getOperand(i) = Operand(ctx.info[block->index].exec[i].first);
@@ -763,23 +773,10 @@ void add_branch_code(exec_ctx& ctx, Block* block)
          ctx.info[block->index].exec[i].first = new_mask;
       }
       assert((ctx.info[block->index].exec[0].second & mask_type_wqm) == 0);
-      discard->getOperand(num) = bld.exec(cond);
+      discard->getOperand(num) = Operand(cond);
       discard->getDefinition(num) = bld.def(s1, scc);
 
-      assert(block->instructions.back()->format == Format::PSEUDO_BRANCH);
-      aco_ptr<Instruction> branch = std::move(block->instructions.back());
-      block->instructions.pop_back();
       bld.insert(std::move(discard));
-
-      if (!ctx.loop.size()) {
-         /* check if the successor is the merge block, otherwise set exec to 0 */
-         // TODO: this could be done better by directly branching to the merge block
-         Block& succ = ctx.program->blocks[block->linear_succs[0]];
-         if (!(succ.kind & block_kind_invert || succ.kind & block_kind_merge)) {
-            ctx.info[idx].exec.back().first = bld.sop1(aco_opcode::s_mov_b64, bld.def(s2, exec), Operand(0u));
-         }
-      }
-
       bld.insert(std::move(branch));
       /* no return here as it can be followed by a divergent break */
    }
