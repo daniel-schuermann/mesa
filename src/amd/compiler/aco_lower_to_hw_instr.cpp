@@ -546,25 +546,24 @@ void lower_to_hw_instr(Program* program)
                std::map<PhysReg, copy_operation> copy_operations;
                RegClass rc_def = RegClass(instr->definitions[0].getTemp().type(), 1);
                unsigned reg_idx = 0;
-               for (unsigned i = 0; i < instr->operands.size(); i++)
-               {
-                  if (instr->operands[i].isUndefined())
+               for (const Operand& op : instr->operands) {
+                  if (op.isUndefined())
                      continue;
 
-                  if (instr->operands[i].isConstant()) {
-                     PhysReg reg = PhysReg{instr->definitions[0].physReg() + reg_idx};
-                     Definition def = Definition(reg, rc_def);
-                     copy_operations[reg] = {instr->operands[i], def, 0, 1};
+                  if (op.isConstant()) {
+                     const PhysReg reg = PhysReg{instr->definitions[0].physReg() + reg_idx};
+                     const Definition def = Definition(reg, rc_def);
+                     copy_operations[reg] = {op, def, 0, 1};
                      reg_idx++;
                      continue;
                   }
 
-                  RegClass rc_op = RegClass(instr->operands[i].getTemp().type(), 1);
-                  for (unsigned j = 0; j < instr->operands[i].size(); j++)
+                  RegClass rc_op = RegClass(op.getTemp().type(), 1);
+                  for (unsigned j = 0; j < op.size(); j++)
                   {
-                     Operand op = Operand(PhysReg{instr->operands[i].physReg() + j}, rc_op);
-                     Definition def = Definition(PhysReg{instr->definitions[0].physReg() + reg_idx}, rc_def);
-                     copy_operations[def.physReg()] = {op, def, 0, 1};
+                     const Operand copy_op = Operand(PhysReg{op.physReg() + j}, rc_op);
+                     const Definition def = Definition(PhysReg{instr->definitions[0].physReg() + reg_idx}, rc_def);
+                     copy_operations[def.physReg()] = {copy_op, def, 0, 1};
                      reg_idx++;
                   }
                }

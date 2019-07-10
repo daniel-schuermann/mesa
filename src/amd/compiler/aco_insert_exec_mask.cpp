@@ -220,10 +220,10 @@ void get_block_needs(wqm_ctx &ctx, exec_ctx &exec_ctx, Block* block)
       }
 
       if (propagate_wqm) {
-         for (unsigned j = 0; j < instr->operands.size(); j++) {
-            if (!instr->operands[j].isTemp())
-               continue;
-            set_needs_wqm(ctx, instr->operands[j].getTemp());
+         for (const Operand& op : instr->operands) {
+            if (op.isTemp()) {
+               set_needs_wqm(ctx, op.getTemp());
+            }
          }
       } else if (preserve_wqm && info.block_needs & WQM) {
          needs = Preserve_WQM;
