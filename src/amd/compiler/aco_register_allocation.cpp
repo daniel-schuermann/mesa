@@ -366,7 +366,10 @@ bool get_regs_for_copies(ra_ctx& ctx,
          }
       }
 
-      assert(num_moves != 0xFF);
+      /* FIXME: we messed up and couldn't find space for the variables to be copied */
+      if (num_moves == 0xFF)
+         return false;
+
       reg_lo = best_pos;
       reg_hi = best_pos + size - 1;
 
@@ -386,7 +389,9 @@ bool get_regs_for_copies(ra_ctx& ctx,
       for (unsigned i = reg_lo; i <= reg_hi; i++)
          reg_file[i] = 0xFFFFFFFF;
 
-      get_regs_for_copies(ctx, reg_file, parallelcopies, new_vars, lb, ub, instr, def_reg_lo, def_reg_hi);
+      if (!get_regs_for_copies(ctx, reg_file, parallelcopies, new_vars, lb, ub, instr, def_reg_lo, def_reg_hi))
+         return false;
+
       adjust_max_used_regs(ctx, var.second, reg_lo);
 
       /* create parallelcopy pair (without definition id) */
@@ -555,7 +560,14 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
       }
    }
 
-   get_regs_for_copies(ctx, reg_file, parallelcopies, vars, lb, ub, instr, best_pos, best_pos + size - 1);
+   std::vector<std::pair<Operand, Definition>> pc;
+   std::array<uint32_t, 512> register_file = reg_file;
+   if (!get_regs_for_copies(ctx, reg_file, pc, vars, lb, ub, instr, best_pos, best_pos + size - 1)) {
+      reg_file = std::move(register_file);
+      return {{}, false};
+   }
+
+   parallelcopies.insert(parallelcopies.end(), pc.begin(), pc.end());
 
    /* we set the definition regs == 0. the actual caller is responsible for correct setting */
    for (unsigned i = 0; i < size; i++)
@@ -763,7 +775,9 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
       }
    }
 
-   get_regs_for_copies(ctx, reg_file, parallelcopies, vars, lb, ub, instr, best_pos, best_pos + size - 1);
+   MAYBE_UNUSED bool success = false;
+   success = get_regs_for_copies(ctx, reg_file, parallelcopies, vars, lb, ub, instr, best_pos, best_pos + size - 1);
+   assert(success);
 
    update_renames(ctx, reg_file, parallelcopies, instr);
    adjust_max_used_regs(ctx, rc, best_pos);
