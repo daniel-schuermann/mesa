@@ -2896,7 +2896,10 @@ void visit_discard(isel_context* ctx, nir_intrinsic_instr *instr)
    /* it can currently happen that NIR doesn't remove the unreachable code */
    if (!nir_instr_is_last(&instr->instr)) {
       ctx->program->needs_exact = true;
-      bld.pseudo(aco_opcode::p_discard_if, Operand(exec, s2));
+      /* save exec somewhere temporarily so that it doesn't get
+       * overwritten before the discard from outer exec masks */
+      Temp cond = bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), Operand(0xFFFFFFFF), Operand(exec, s2));
+      bld.pseudo(aco_opcode::p_discard_if, cond);
       ctx->block->kind |= block_kind_uses_discard_if;
       return;
    }
