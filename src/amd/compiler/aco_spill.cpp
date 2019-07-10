@@ -132,12 +132,12 @@ void next_uses_per_block(spill_ctx& ctx, unsigned block_idx, std::set<uint32_t>&
             next_uses.erase(instr->definitions[i].getTemp());
       }
 
-      for (unsigned i = 0; i < instr->operands.size(); i++) {
+      for (const Operand& op : instr->operands) {
          /* omit exec mask */
-         if (instr->operands[i].isFixed() && instr->operands[i].physReg() == exec)
+         if (op.isFixed() && op.physReg() == exec)
             continue;
-         if (instr->operands[i].isTemp())
-            next_uses[instr->operands[i].getTemp()] = {block_idx, idx};
+         if (op.isTemp())
+            next_uses[op.getTemp()] = {block_idx, idx};
       }
       idx--;
    }
@@ -209,9 +209,9 @@ bool should_rematerialize(aco_ptr<Instruction>& instr)
    if (instr->format == Format::PSEUDO && instr->opcode != aco_opcode::p_create_vector)
       return false;
 
-   for (unsigned i = 0; i < instr->operands.size(); i++) {
+   for (const Operand& op : instr->operands) {
       /* TODO: rematerialization using temporaries isn't yet supported */
-      if (instr->operands[i].isTemp())
+      if (op.isTemp())
          return false;
    }
 
@@ -299,11 +299,11 @@ std::vector<std::map<Temp, uint32_t>> local_next_uses(spill_ctx& ctx, Block* blo
       if (instr->opcode == aco_opcode::p_phi || instr->opcode == aco_opcode::p_linear_phi)
          break;
 
-      for (unsigned i = 0; i < instr->operands.size(); i++) {
-         if (instr->operands[i].isFixed() && instr->operands[i].physReg() == exec)
+      for (const Operand& op : instr->operands) {
+         if (op.isFixed() && op.physReg() == exec)
             continue;
-         if (instr->operands[i].isTemp())
-            next_uses[instr->operands[i].getTemp()] = idx;
+         if (op.isTemp())
+            next_uses[op.getTemp()] = idx;
       }
       for (unsigned i = 0; i < instr->definitions.size(); i++) {
          if (instr->definitions[i].isTemp())
@@ -565,10 +565,9 @@ RegisterDemand init_live_in_vars(spill_ctx& ctx, Block* block, unsigned block_id
             reg_pressure -= block->instructions[idx]->definitions[i].getTemp();
          }
       }
-      for (unsigned i = 0; i < block->instructions[idx]->operands.size(); i++) {
-         if (block->instructions[idx]->operands[i].isTemp() &&
-             block->instructions[idx]->operands[i].isFirstKill()) {
-            reg_pressure += block->instructions[idx]->operands[i].getTemp();
+      for (const Operand& op : block->instructions[idx]->operands) {
+         if (op.isTemp() && op.isFirstKill()) {
+            reg_pressure += op.getTemp();
          }
       }
    } else {
@@ -990,10 +989,10 @@ void process_block(spill_ctx& ctx, unsigned block_idx, Block* block,
    while (block->instructions[idx]->opcode == aco_opcode::p_phi ||
           block->instructions[idx]->opcode == aco_opcode::p_linear_phi) {
       aco_ptr<Instruction>& instr = block->instructions[idx];
-      for (unsigned i = 0; i < instr->operands.size(); i++) {
+      for (const Operand& op : instr->operands) {
          /* prevent it's definining instruction from being DCE'd if it could be rematerialized */
-         if (instr->operands[i].isTemp() && ctx.remat.count(instr->operands[i].getTemp()))
-            ctx.remat_use_count[ctx.remat[instr->operands[i].getTemp()].instr]++;
+         if (op.isTemp() && ctx.remat.count(op.getTemp()))
+            ctx.remat_use_count[ctx.remat[op.getTemp()].instr]++;
       }
       instructions.emplace_back(std::move(instr));
       idx++;
@@ -1008,25 +1007,25 @@ void process_block(spill_ctx& ctx, unsigned block_idx, Block* block,
       std::map<Temp, std::pair<Temp, uint32_t>> reloads;
       std::map<Temp, uint32_t> spills;
       /* rename and reload operands */
-      for (unsigned i = 0; i < instr->operands.size(); i++) {
-         if (!instr->operands[i].isTemp())
+      for (Operand& op : instr->operands) {
+         if (!op.isTemp())
             continue;
-         if (current_spills.find(instr->operands[i].getTemp()) == current_spills.end()) {
+         if (current_spills.find(op.getTemp()) == current_spills.end()) {
             /* the Operand is in register: check if it was renamed */
-            if (ctx.renames[block_idx].find(instr->operands[i].getTemp()) != ctx.renames[block_idx].end())
-               instr->operands[i].setTemp(ctx.renames[block_idx][instr->operands[i].getTemp()]);
+            if (ctx.renames[block_idx].find(op.getTemp()) != ctx.renames[block_idx].end())
+               op.setTemp(ctx.renames[block_idx][op.getTemp()]);
             /* prevent it's definining instruction from being DCE'd if it could be rematerialized */
-            if (ctx.remat.count(instr->operands[i].getTemp())) {
-               ctx.remat_use_count[ctx.remat[instr->operands[i].getTemp()].instr]++;
+            if (ctx.remat.count(op.getTemp())) {
+               ctx.remat_use_count[ctx.remat[op.getTemp()].instr]++;
             }
             continue;
          }
          /* the Operand is spilled: add it to reloads */
-         Temp new_tmp = {ctx.program->allocateId(), instr->operands[i].regClass()};
-         ctx.renames[block_idx][instr->operands[i].getTemp()] = new_tmp;
-         reloads[new_tmp] = std::make_pair(instr->operands[i].getTemp(), current_spills[instr->operands[i].getTemp()]);
-         current_spills.erase(instr->operands[i].getTemp());
-         instr->operands[i].setTemp(new_tmp);
+         Temp new_tmp = {ctx.program->allocateId(), op.regClass()};
+         ctx.renames[block_idx][op.getTemp()] = new_tmp;
+         reloads[new_tmp] = std::make_pair(op.getTemp(), current_spills[op.getTemp()]);
+         current_spills.erase(op.getTemp());
+         op.setTemp(new_tmp);
          spilled_registers -= new_tmp;
       }
 
@@ -1191,11 +1190,11 @@ void spill_block(spill_ctx& ctx, unsigned block_idx)
                continue;
             }
 
-            for (unsigned i = 0; i < phi->operands.size(); i++) {
-               if (!phi->operands[i].isTemp())
+            for (Operand& op : phi->operands) {
+               if (!op.isTemp())
                   continue;
-               if (phi->operands[i].getTemp() == rename.first)
-                  phi->operands[i].setTemp(rename.second);
+               if (op.getTemp() == rename.first)
+                  op.setTemp(rename.second);
             }
             instr_it++;
          }
@@ -1214,11 +1213,11 @@ void spill_block(spill_ctx& ctx, unsigned block_idx)
          bool renamed = false;
          while (!renamed && instr_it != current.instructions.end()) {
             aco_ptr<Instruction>& instr = *instr_it;
-            for (unsigned i = 0; i < instr->operands.size(); i++) {
-               if (!instr->operands[i].isTemp())
+            for (Operand& op : instr->operands) {
+               if (!op.isTemp())
                   continue;
-               if (instr->operands[i].getTemp() == rename.first) {
-                  instr->operands[i].setTemp(rename.second);
+               if (op.getTemp() == rename.first) {
+                  op.setTemp(rename.second);
                   /* we can stop with this block as soon as the variable is spilled */
                   if (instr->opcode == aco_opcode::p_spill)
                     renamed = true;

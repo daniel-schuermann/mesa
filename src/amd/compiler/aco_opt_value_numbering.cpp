@@ -233,12 +233,12 @@ void process_block(Block& block,
    while (it != block.instructions.end()) {
       aco_ptr<Instruction>& instr = *it;
       /* first, rename operands */
-      for (unsigned i = 0; i < instr->operands.size(); i++) {
-         if (!instr->operands[i].isTemp())
+      for (Operand& op : instr->operands) {
+         if (!op.isTemp())
             continue;
-         std::map<uint32_t, Temp>::iterator it = renames.find(instr->operands[i].tempId());
+         auto it = renames.find(op.tempId());
          if (it != renames.end())
-            instr->operands[i].setTemp(it->second);
+            op.setTemp(it->second);
       }
 
       if (!instr->definitions.size() || !run) {
@@ -292,12 +292,12 @@ void rename_phi_operands(Block& block, std::map<uint32_t, Temp>& renames)
       if (phi->opcode != aco_opcode::p_phi && phi->opcode != aco_opcode::p_linear_phi)
          break;
 
-      for (unsigned i = 0; i < phi->operands.size(); i++) {
-         if (!phi->operands[i].isTemp())
+      for (Operand& op : phi->operands) {
+         if (!op.isTemp())
             continue;
-         std::map<uint32_t, Temp>::iterator it = renames.find(phi->operands[i].tempId());
+         auto it = renames.find(op.tempId());
          if (it != renames.end())
-            phi->operands[i].setTemp(it->second);
+            op.setTemp(it->second);
       }
    }
 }

@@ -326,12 +326,9 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    }
 
    /* append literal dword */
-   for (unsigned i = 0; i < instr->operands.size(); i++)
-   {
-      if (instr->operands[i].isLiteral())
-      {
-         uint32_t literal = instr->operands[i].constantValue();
-         out.push_back(literal);
+   for (const Operand& op : instr->operands) {
+      if (op.isLiteral()) {
+         out.push_back(op.constantValue());
          break;
       }
    }

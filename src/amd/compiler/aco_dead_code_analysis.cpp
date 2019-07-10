@@ -63,11 +63,11 @@ void process_block(dce_ctx& ctx, Block& block)
       }
 
       if (is_live) {
-         for (unsigned i = 0; i < instr->operands.size(); i++) {
-            if (instr->operands[i].isTemp()) {
-               if (ctx.uses[instr->operands[i].tempId()] == 0)
+         for (const Operand& op : instr->operands) {
+            if (op.isTemp()) {
+               if (ctx.uses[op.tempId()] == 0)
                   process_predecessors = true;
-               ctx.uses[instr->operands[i].tempId()]++;
+               ctx.uses[op.tempId()]++;
             }
          }
          live[idx] = true;

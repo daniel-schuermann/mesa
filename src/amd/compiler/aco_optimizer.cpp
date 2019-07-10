@@ -419,8 +419,7 @@ void to_VOP3(opt_ctx& ctx, aco_ptr<Instruction>& instr)
    aco_ptr<Instruction> tmp = std::move(instr);
    Format format = asVOP3(tmp->format);
    instr.reset(create_instruction<VOP3A_instruction>(tmp->opcode, format, tmp->operands.size(), tmp->definitions.size()));
-   for (unsigned i = 0; i < instr->operands.size(); i++)
-      instr->operands[i] = tmp->operands[i];
+   std::copy(tmp->operands.cbegin(), tmp->operands.cend(), instr->operands.begin());
    for (unsigned i = 0; i < instr->definitions.size(); i++) {
       instr->definitions[i] = tmp->definitions[i];
       if (instr->definitions[i].isTemp()) {
@@ -694,11 +693,11 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    case aco_opcode::p_create_vector: {
       unsigned num_ops = instr->operands.size();
       bool is_undefined = true;
-      for (unsigned i = 0; i < instr->operands.size(); i++) {
-         if (!instr->operands[i].isUndefined())
+      for (const Operand& op : instr->operands) {
+         if (!op.isUndefined())
             is_undefined = false;
-         if (instr->operands[i].isTemp() && ctx.info[instr->operands[i].tempId()].is_vec())
-            num_ops += ctx.info[instr->operands[i].tempId()].instr->operands.size() - 1;
+         if (op.isTemp() && ctx.info[op.tempId()].is_vec())
+            num_ops += ctx.info[op.tempId()].instr->operands.size() - 1;
       }
       if (is_undefined) {
          ctx.info[instr->definitions[0].tempId()].set_undefined();
@@ -707,12 +706,12 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          instr.reset(create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, num_ops, 1));
          instr->definitions[0] = old_vec->definitions[0];
          unsigned k = 0;
-         for (unsigned i = 0; i < old_vec->operands.size(); i++) {
-            if (old_vec->operands[i].isTemp() && ctx.info[old_vec->operands[i].tempId()].is_vec()) {
-               for (unsigned j = 0; j < ctx.info[old_vec->operands[i].tempId()].instr->operands.size(); j++)
-                  instr->operands[k++] = ctx.info[old_vec->operands[i].tempId()].instr->operands[j];
+         for (Operand& old_op : old_vec->operands) {
+            if (old_op.isTemp() && ctx.info[old_op.tempId()].is_vec()) {
+               for (unsigned j = 0; j < ctx.info[old_op.tempId()].instr->operands.size(); j++)
+                  instr->operands[k++] = ctx.info[old_op.tempId()].instr->operands[j];
             } else {
-               instr->operands[k++] = old_vec->operands[i];
+               instr->operands[k++] = old_op;
             }
          }
          assert(k == num_ops);
@@ -1042,9 +1041,9 @@ unsigned original_temp_id(opt_ctx &ctx, Temp tmp)
 void decrease_uses(opt_ctx &ctx, Instruction* instr)
 {
    if (!--ctx.uses[instr->definitions[0].tempId()]) {
-      for (unsigned i = 0; i < instr->operands.size(); i++) {
-         if (instr->operands[i].isTemp())
-            ctx.uses[instr->operands[i].tempId()]--;
+      for (const Operand& op : instr->operands) {
+         if (op.isTemp())
+            ctx.uses[op.tempId()]--;
       }
    }
 }
@@ -2302,15 +2301,14 @@ void apply_literals(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
    /* apply literals on SALU */
    if (instr->isSALU()) {
-      for (unsigned i = 0; i < instr->operands.size(); i++)
-      {
-         if (!instr->operands[i].isTemp())
+      for (Operand& op : instr->operands) {
+         if (!op.isTemp())
             continue;
-         if (instr->operands[i].isLiteral())
+         if (op.isLiteral())
             break;
-         if (ctx.info[instr->operands[i].tempId()].is_literal() &&
-             ctx.uses[instr->operands[i].tempId()] == 0)
-            instr->operands[i] = Operand(ctx.info[instr->operands[i].tempId()].val);
+         if (ctx.info[op.tempId()].is_literal() &&
+             ctx.uses[op.tempId()] == 0)
+            op = Operand(ctx.info[op.tempId()].val);
       }
    }
 
