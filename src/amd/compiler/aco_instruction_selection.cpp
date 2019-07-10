@@ -4309,8 +4309,7 @@ void emit_memory_barrier(isel_context *ctx, nir_intrinsic_instr *instr) {
 
 Operand load_lds_size_m0(isel_context *ctx)
 {
-   if (ctx->options->chip_class >= GFX9) //m0 does not need to be initialized on GFX9+
-      return Operand(m0, s1);
+   /* TODO: m0 does not need to be initialized on GFX9+ */
    Builder bld(ctx->program, ctx->block);
    return bld.m0((Temp)bld.sopk(aco_opcode::s_movk_i32, bld.def(s1, m0), 0xffff));
 }
