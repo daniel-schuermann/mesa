@@ -526,6 +526,8 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
       return {{}, false};
    }
 
+   std::array<uint32_t, 512> register_file = reg_file;
+
    /* now, we figured the placement for our definition */
    std::set<std::pair<unsigned, unsigned>> vars;
    for (unsigned j = best_pos; j < best_pos + size; j++) {
@@ -561,9 +563,22 @@ std::pair<PhysReg, bool> get_reg_impl(ra_ctx& ctx,
    }
 
    std::vector<std::pair<Operand, Definition>> pc;
-   std::array<uint32_t, 512> register_file = reg_file;
    if (!get_regs_for_copies(ctx, reg_file, pc, vars, lb, ub, instr, best_pos, best_pos + size - 1)) {
       reg_file = std::move(register_file);
+      /* remove killed operands from reg_file once again */
+      for (unsigned i = 0; !is_phi(instr) && i < instr->num_operands; i++) {
+         if (instr->getOperand(i).isTemp() && instr->getOperand(i).isFirstKill()) {
+            for (unsigned k = 0; k < instr->getOperand(i).getTemp().size(); k++)
+               reg_file[instr->getOperand(i).physReg() + k] = 0;
+         }
+      }
+      for (unsigned i = 0; i < instr->num_definitions; i++) {
+         Definition def = instr->getDefinition(i);
+         if (def.isTemp() && def.isFixed() && ctx.defs_done.test(i)) {
+            for (unsigned k = 0; k < def.getTemp().size(); k++)
+               reg_file[def.physReg() + k] = def.tempId();
+         }
+      }
       return {{}, false};
    }
 
