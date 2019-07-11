@@ -27,11 +27,14 @@
 #include <algorithm>
 
 #include "vulkan/radv_shader.h" // for radv_nir_compiler_options
+#include "amdgfxregs.h"
 
 #define SMEM_WINDOW_SIZE (350 - ctx.num_waves * 35)
 #define VMEM_WINDOW_SIZE (1024 - ctx.num_waves * 64)
+#define POS_EXP_WINDOW_SIZE 512
 #define SMEM_MAX_MOVES (80 - ctx.num_waves * 8)
 #define VMEM_MAX_MOVES (128 - ctx.num_waves * 4)
+#define POS_EXP_MAX_MOVES 512
 
 namespace aco {
 
@@ -639,6 +642,108 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
    }
 }
 
+void schedule_position_export(sched_ctx& ctx, Block* block,
+                              std::vector<RegisterDemand>& register_demand,
+                              Instruction* current, int idx)
+{
+   assert(idx != 0);
+   int window_size = POS_EXP_WINDOW_SIZE;
+   int max_moves = POS_EXP_MAX_MOVES;
+   int16_t k = 0;
+
+   /* create the initial set of values which current depends on */
+   std::fill(ctx.depends_on.begin(), ctx.depends_on.end(), false);
+   for (unsigned i = 0; i < current->num_operands; i++) {
+      if (current->getOperand(i).isTemp())
+         ctx.depends_on[current->getOperand(i).tempId()] = true;
+   }
+
+   /* maintain how many registers remain free when moving instructions */
+   RegisterDemand register_pressure = register_demand[idx];
+
+   /* first, check if we have instructions before current to move down */
+   int insert_idx = idx + 1;
+   int moving_interaction = barrier_none;
+
+   for (int candidate_idx = idx - 1; k < max_moves && candidate_idx > (int) idx - window_size; candidate_idx--) {
+      assert(candidate_idx >= 0);
+      aco_ptr<Instruction>& candidate = block->instructions[candidate_idx];
+
+      /* break when encountering logical_start or barriers */
+      if (candidate->opcode == aco_opcode::p_logical_start)
+         break;
+      if (candidate->isVMEM() || candidate->format == Format::SMEM)
+         break;
+      if (!can_move_instr(candidate, current, moving_interaction))
+         break;
+
+      register_pressure.update(register_demand[candidate_idx]);
+
+      /* if current depends on candidate, add additional dependencies and continue */
+      bool can_move_down = true;
+      bool writes_exec = false;
+      for (unsigned i = 0; i < candidate->num_definitions; i++) {
+         if (candidate->getDefinition(i).isTemp() && ctx.depends_on[candidate->getDefinition(i).tempId()])
+            can_move_down = false;
+         if (candidate->getDefinition(i).isFixed() && candidate->getDefinition(i).physReg() == exec)
+            writes_exec = true;
+      }
+      if (writes_exec)
+         break;
+
+      if ((moving_interaction & barrier_shared) && candidate->format == Format::DS)
+         can_move_down = false;
+      moving_interaction |= get_barrier_interaction(candidate.get());
+      if (!can_move_down) {
+         for (unsigned i = 0; i < candidate->num_operands; i++) {
+            if (candidate->getOperand(i).isTemp())
+               ctx.depends_on[candidate->getOperand(i).tempId()] = true;
+         }
+         continue;
+      }
+
+      bool register_pressure_unknown = false;
+      /* check if one of candidate's operands is killed by depending instruction */
+      for (unsigned i = 0; i < candidate->num_operands; i++) {
+         if (candidate->getOperand(i).isTemp() && ctx.depends_on[candidate->getOperand(i).tempId()]) {
+            // FIXME: account for difference in register pressure
+            register_pressure_unknown = true;
+         }
+      }
+      if (register_pressure_unknown) {
+         for (unsigned i = 0; i < candidate->num_operands; i++) {
+            if (candidate->getOperand(i).isTemp())
+               ctx.depends_on[candidate->getOperand(i).tempId()] = true;
+         }
+         continue;
+      }
+
+      /* check if register pressure is low enough: the diff is negative if register pressure is decreased */
+      const RegisterDemand candidate_diff = getLiveChanges(candidate);
+      const RegisterDemand temp = getTempRegisters(candidate);;
+      if (RegisterDemand(register_pressure - candidate_diff).exceeds(ctx.max_registers))
+         break;
+      const RegisterDemand temp2 = getTempRegisters(block->instructions[insert_idx - 1]);
+      const RegisterDemand new_demand = register_demand[insert_idx - 1] - temp2 + temp;
+      if (new_demand.exceeds(ctx.max_registers))
+         break;
+      // TODO: we might want to look further to find a sequence of instructions to move down which doesn't exceed reg pressure
+
+      /* move the candidate below the export */
+      move_element(block->instructions, candidate_idx, insert_idx);
+
+      /* update register pressure */
+      move_element(register_demand, candidate_idx, insert_idx);
+      for (int i = candidate_idx; i < insert_idx - 1; i++) {
+         register_demand[i] -= candidate_diff;
+      }
+      register_demand[insert_idx - 1] = new_demand;
+      register_pressure -=  candidate_diff;
+      insert_idx--;
+      k++;
+   }
+}
+
 void schedule_block(sched_ctx& ctx, Program *program, Block* block, live& live_vars)
 {
    ctx.last_SMEM_dep_idx = 0;
@@ -655,6 +760,20 @@ void schedule_block(sched_ctx& ctx, Program *program, Block* block, live& live_v
          schedule_VMEM(ctx, block, live_vars.register_demand[block->index], current, idx);
       if (current->format == Format::SMEM)
          schedule_SMEM(ctx, block, live_vars.register_demand[block->index], current, idx);
+   }
+
+   if (program->stage == MESA_SHADER_VERTEX && block->index == program->blocks.size() - 1) {
+      /* Try to move position exports as far up as possible, to reduce register
+       * usage and because ISA reference guides say so. */
+      for (unsigned idx = 0; idx < block->instructions.size(); idx++) {
+         Instruction* current = block->instructions[idx].get();
+
+         if (current->format == Format::EXP) {
+            unsigned target = static_cast<Export_instruction*>(current)->dest;
+            if (target >= V_008DFC_SQ_EXP_POS && target < V_008DFC_SQ_EXP_PARAM)
+               schedule_position_export(ctx, block, live_vars.register_demand[block->index], current, idx);
+         }
+      }
    }
 
    /* resummarize the block's register demand */
