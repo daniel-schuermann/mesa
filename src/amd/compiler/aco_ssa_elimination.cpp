@@ -201,10 +201,8 @@ void try_remove_simple_block(ssa_elimination_ctx& ctx, Block* block)
       bool falls_through = true;
       for (unsigned j = block->index + 1; falls_through && j < succ.index; j++) {
          assert(ctx.program->blocks[j].index == j);
-         if (!ctx.program->blocks[j].instructions.empty()) {
-            assert(j == branch->target[0]);
+         if (!ctx.program->blocks[j].instructions.empty())
             falls_through = false;
-         }
       }
       if (falls_through) {
          branch->target[1] = succ.index;
