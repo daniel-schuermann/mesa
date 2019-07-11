@@ -971,6 +971,21 @@ static void visit_alu(struct ac_nir_context *ctx, const nir_alu_instr *instr)
 	case nir_op_unpack_half_2x16:
 		result = emit_unpack_half_2x16(&ctx->ac, src[0]);
 		break;
+	case nir_op_unpack_half_2x16_split_x: {
+		assert(ac_get_llvm_num_components(src[0]) == 1);
+		LLVMValueRef val = LLVMBuildTrunc(ctx->ac.builder, src[0], ctx->ac.i16, "");
+		val = LLVMBuildBitCast(ctx->ac.builder, val, ctx->ac.f16, "");
+		result = LLVMBuildFPExt(ctx->ac.builder, val, ctx->ac.f32, "");
+		break;
+	}
+	case nir_op_unpack_half_2x16_split_y: {
+		assert(ac_get_llvm_num_components(src[0]) == 1);
+		LLVMValueRef val = LLVMBuildLShr(ctx->ac.builder, src[0], LLVMConstInt(ctx->ac.i32, 16, false), "");
+		val = LLVMBuildTrunc(ctx->ac.builder, val, ctx->ac.i16, "");
+		val = LLVMBuildBitCast(ctx->ac.builder, val, ctx->ac.f16, "");
+		result = LLVMBuildFPExt(ctx->ac.builder, val, ctx->ac.f32, "");
+		break;
+	}
 	case nir_op_fddx:
 	case nir_op_fddy:
 	case nir_op_fddx_fine:
