@@ -997,8 +997,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       emit_split_vector(ctx, src1, 2);
       Temp src00 = emit_extract_vector(ctx, src0, 0, RegClass(src0.type(), 1));
       Temp src10 = emit_extract_vector(ctx, src1, 0, RegClass(src1.type(), 1));
-      Temp src01 = emit_extract_vector(ctx, src0, 1, RegClass(src0.type(), 1));
-      Temp src11 = emit_extract_vector(ctx, src1, 1, RegClass(src1.type(), 1));
+      Temp src01 = emit_extract_vector(ctx, src0, 1, RegClass(dst.type(), 1));
+      Temp src11 = emit_extract_vector(ctx, src1, 1, RegClass(dst.type(), 1));
 
       if (dst.regClass() == s2) {
          Temp carry = bld.tmp(s1);
@@ -1065,8 +1065,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       emit_split_vector(ctx, src1, 2);
       Temp src00 = emit_extract_vector(ctx, src0, 0, RegClass(src0.type(), 1));
       Temp src10 = emit_extract_vector(ctx, src1, 0, RegClass(src1.type(), 1));
-      Temp src01 = emit_extract_vector(ctx, src0, 1, RegClass(src0.type(), 1));
-      Temp src11 = emit_extract_vector(ctx, src1, 1, RegClass(src1.type(), 1));
+      Temp src01 = emit_extract_vector(ctx, src0, 1, RegClass(dst.type(), 1));
+      Temp src11 = emit_extract_vector(ctx, src1, 1, RegClass(dst.type(), 1));
       if (dst.regClass() == s2) {
          Temp carry = bld.tmp(s1);
          bld.sop2(aco_opcode::s_add_u32, bld.def(s1), bld.scc(Definition(carry)), src00, src10);
@@ -1101,8 +1101,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       emit_split_vector(ctx, src1, 2);
       Temp src00 = emit_extract_vector(ctx, src0, 0, RegClass(src0.type(), 1));
       Temp src10 = emit_extract_vector(ctx, src1, 0, RegClass(src1.type(), 1));
-      Temp src01 = emit_extract_vector(ctx, src0, 1, RegClass(src0.type(), 1));
-      Temp src11 = emit_extract_vector(ctx, src1, 1, RegClass(src1.type(), 1));
+      Temp src01 = emit_extract_vector(ctx, src0, 1, RegClass(dst.type(), 1));
+      Temp src11 = emit_extract_vector(ctx, src1, 1, RegClass(dst.type(), 1));
       if (dst.regClass() == s2) {
          Temp carry = bld.tmp(s1);
          Temp dst0 = bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.scc(Definition(carry)), src00, src10);
@@ -1137,8 +1137,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       emit_split_vector(ctx, src1, 2);
       Temp src00 = emit_extract_vector(ctx, src0, 0, RegClass(src0.type(), 1));
       Temp src10 = emit_extract_vector(ctx, src1, 0, RegClass(src1.type(), 1));
-      Temp src01 = emit_extract_vector(ctx, src0, 1, RegClass(src0.type(), 1));
-      Temp src11 = emit_extract_vector(ctx, src1, 1, RegClass(src1.type(), 1));
+      Temp src01 = emit_extract_vector(ctx, src0, 1, RegClass(dst.type(), 1));
+      Temp src11 = emit_extract_vector(ctx, src1, 1, RegClass(dst.type(), 1));
       if (dst.regClass() == s2) {
          Temp borrow = bld.tmp(s1);
          bld.sop2(aco_opcode::s_sub_u32, bld.def(s1), bld.scc(Definition(borrow)), src00, src10);
