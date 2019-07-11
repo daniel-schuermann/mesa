@@ -190,8 +190,11 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_op_fround_even:
                   case nir_op_fsin:
                   case nir_op_fcos:
+                  case nir_op_f2f32:
                   case nir_op_u2f32:
+                  case nir_op_u2f64:
                   case nir_op_i2f32:
+                  case nir_op_i2f64:
                   case nir_op_pack_half_2x16:
                   case nir_op_unpack_half_2x16:
                   case nir_op_fddx:
