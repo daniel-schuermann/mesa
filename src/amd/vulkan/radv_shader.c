@@ -72,6 +72,7 @@ static const struct nir_shader_compiler_options nir_options = {
 	.lower_unpack_snorm_4x8 = true,
 	.lower_unpack_unorm_2x16 = true,
 	.lower_unpack_unorm_4x8 = true,
+	.lower_unpack_half_2x16 = true, //TODO: only set this on ACO and remove the ac->nir code for this
 	.lower_extract_byte = true,
 	.lower_extract_word = true,
 	.lower_ffma = true,
