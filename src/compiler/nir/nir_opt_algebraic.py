@@ -781,7 +781,15 @@ optimizations = [
    (('ishr', 'a@16',  8), ('extract_i8', a, 1), '!options->lower_extract_byte'),
    (('ishr', 'a@32', 24), ('extract_i8', a, 3), '!options->lower_extract_byte'),
    (('ishr', 'a@64', 56), ('extract_i8', a, 7), '!options->lower_extract_byte'),
-   (('iand', 0xff, a), ('extract_u8', a, 0), '!options->lower_extract_byte')
+   (('iand', 0xff, a), ('extract_u8', a, 0), '!options->lower_extract_byte'),
+
+   # Useless masking before unpacking
+   (('unpack_half_2x16_split_x', ('iand', a, 0xffff)), ('unpack_half_2x16_split_x', a)),
+   (('unpack_32_2x16_split_x', ('iand', a, 0xffff)), ('unpack_32_2x16_split_x', a)),
+   (('unpack_64_2x32_split_x', ('iand', a, 0xffffffff)), ('unpack_64_2x32_split_x', a)),
+   (('unpack_half_2x16_split_y', ('iand', a, 0xffff0000)), ('unpack_half_2x16_split_y', a)),
+   (('unpack_32_2x16_split_y', ('iand', a, 0xffff0000)), ('unpack_32_2x16_split_y', a)),
+   (('unpack_64_2x32_split_y', ('iand', a, 0xffffffff00000000)), ('unpack_64_2x32_split_y', a)),
 ]
 
 # After the ('extract_u8', a, 0) pattern, above, triggers, there will be
