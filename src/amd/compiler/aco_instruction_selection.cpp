@@ -1595,14 +1595,44 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
+   case nir_op_f2f32: {
+      if (instr->src[0].src.ssa->bit_size == 64) {
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f32_f64, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_i2f32: {
       assert(dst.size() == 1);
       emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f32_i32, dst);
       break;
    }
+   case nir_op_i2f64: {
+      if (instr->src[0].src.ssa->bit_size == 32) {
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f64_i32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
    case nir_op_u2f32: {
       assert(dst.size() == 1);
       emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f32_u32, dst);
+      break;
+   }
+   case nir_op_u2f64: {
+      if (instr->src[0].src.ssa->bit_size == 32) {
+         emit_vop1_instruction(ctx, instr, aco_opcode::v_cvt_f64_u32, dst);
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
       break;
    }
    case nir_op_f2i32: {
