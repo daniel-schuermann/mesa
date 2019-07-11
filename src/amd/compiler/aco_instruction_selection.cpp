@@ -2056,15 +2056,23 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       }
       break;
    }
-   case nir_op_unpack_half_2x16: {
-      if (dst.regClass() == v2) {
-         Temp src = get_alu_src(ctx, instr->src[0]);
+   case nir_op_unpack_half_2x16_split_x: {
+      if (dst.regClass() == v1) {
          Builder bld(ctx->program, ctx->block);
-         bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
-                    bld.vop1(aco_opcode::v_cvt_f32_f16, bld.def(v1),
-                             bld.vop3(aco_opcode::v_bfe_u32, bld.def(v1), src, Operand(0u), Operand(16u))),
-                    bld.vop1(aco_opcode::v_cvt_f32_f16, bld.def(v1),
-                             bld.vop3(aco_opcode::v_bfe_u32, bld.def(v1), src, Operand(16u), Operand(16u))));
+         bld.vop1(aco_opcode::v_cvt_f32_f16, Definition(dst), get_alu_src(ctx, instr->src[0]));
+      } else {
+         fprintf(stderr, "Unimplemented NIR instr bit size: ");
+         nir_print_instr(&instr->instr, stderr);
+         fprintf(stderr, "\n");
+      }
+      break;
+   }
+   case nir_op_unpack_half_2x16_split_y: {
+      if (dst.regClass() == v1) {
+         Builder bld(ctx->program, ctx->block);
+         /* TODO: use SDWA here */
+         bld.vop1(aco_opcode::v_cvt_f32_f16, Definition(dst),
+                  bld.vop2(aco_opcode::v_lshrrev_b32, bld.def(v1), Operand(16u), as_vgpr(ctx, get_alu_src(ctx, instr->src[0]))));
       } else {
          fprintf(stderr, "Unimplemented NIR instr bit size: ");
          nir_print_instr(&instr->instr, stderr);
