@@ -80,7 +80,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       encoding |= opcode << 18;
       if (instr->operands.size() >= 2)
          encoding |= instr->operands[1].isConstant() ? 1 << 17 : 0;
-      bool soe = instr->operands.size() >= (instr->definitions.size() ? 3 : 4);
+      bool soe = instr->operands.size() >= (!instr->definitions.empty() ? 3 : 4);
       assert(!soe || ctx.chip_class >= GFX9);
       encoding |= soe ? 1 << 14 : 0;
       encoding |= smem->glc ? 1 << 16 : 0;
@@ -208,7 +208,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       encoding |= (0xF & mimg->dmask) << 8;
       out.push_back(encoding);
       encoding = (0xFF & instr->operands[0].physReg().reg); /* VADDR */
-      if (instr->definitions.size()) {
+      if (!instr->definitions.empty()) {
          encoding |= (0xFF & instr->definitions[0].physReg().reg) << 8; /* VDATA */
       } else if (instr->operands.size() == 4) {
          encoding |= (0xFF & instr->operands[3].physReg().reg) << 8; /* VDATA */
@@ -236,7 +236,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       encoding |= flat->slc ? 1 << 13 : 0;
       out.push_back(encoding);
       encoding = (0xFF & instr->operands[0].physReg().reg);
-      if (instr->definitions.size())
+      if (!instr->definitions.empty())
          encoding |= (0xFF & instr->definitions[0].physReg().reg) << 24;
       else
          encoding |= (0xFF & instr->operands[2].physReg().reg) << 8;

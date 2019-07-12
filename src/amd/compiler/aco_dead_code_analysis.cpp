@@ -24,6 +24,8 @@
 
 #include "aco_ir.h"
 
+#include <algorithm>
+
 /*
  * Implements an analysis pass to determine the number of uses
  * for each SSA-definition.
@@ -55,12 +57,9 @@ void process_block(dce_ctx& ctx, Block& block)
          continue;
 
       aco_ptr<Instruction>& instr = block.instructions[idx];
-      bool is_live = instr->definitions.size() == 0;
-
-      for (unsigned i = 0; !is_live && i < instr->definitions.size(); i++) {
-         if (!instr->definitions[i].isTemp() || ctx.uses[instr->definitions[i].tempId()])
-            is_live = true;
-      }
+      const bool is_live = instr->definitions.empty() ||
+                           std::any_of(instr->definitions.begin(), instr->definitions.end(),
+                              [&ctx] (const Definition& def) { return !def.isTemp() || ctx.uses[def.tempId()];});
 
       if (is_live) {
          for (const Operand& op : instr->operands) {

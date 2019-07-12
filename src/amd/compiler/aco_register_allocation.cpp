@@ -26,6 +26,7 @@
  *
  */
 
+#include <algorithm>
 #include <map>
 #include <unordered_map>
 #include <functional>
@@ -896,7 +897,7 @@ bool operand_can_use_reg(aco_ptr<Instruction>& instr, unsigned idx, PhysReg reg)
       return reg != scc &&
              reg != exec &&
              (reg != m0 || idx == 1 || idx == 3) && /* offset can be m0 */
-             (reg != vcc || (instr->definitions.size() == 0 && idx == 2)); /* sdata can be vcc */
+             (reg != vcc || (instr->definitions.empty() && idx == 2)); /* sdata can be vcc */
    default:
       // TODO: there are more instructions with restrictions on registers
       return true;
@@ -1107,13 +1108,13 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             phi_ressources.emplace_back(std::move(affinity_related));
          }
 
-         for (unsigned i = 0; i < instr->definitions.size(); i++) {
-            /* erase from live */
-            if (instr->definitions[i].isTemp()) {
-               live.erase(instr->definitions[i].getTemp());
-               std::map<unsigned, unsigned>::iterator it = temp_to_phi_ressources.find(instr->definitions[i].tempId());
-               if (it != temp_to_phi_ressources.end() && instr->definitions[i].regClass() == phi_ressources[it->second][0].regClass())
-                  phi_ressources[it->second][0] = instr->definitions[i].getTemp();
+         /* erase from live */
+         for (const Definition& def : instr->definitions) {
+            if (def.isTemp()) {
+               live.erase(def.getTemp());
+               std::map<unsigned, unsigned>::iterator it = temp_to_phi_ressources.find(def.tempId());
+               if (it != temp_to_phi_ressources.end() && def.regClass() == phi_ressources[it->second][0].regClass())
+                  phi_ressources[it->second][0] = def.getTemp();
             }
          }
       }
@@ -1630,10 +1631,13 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          handle_pseudo(ctx, register_file, instr.get());
 
          /* kill definitions */
-         for (unsigned i = 0; i < instr->definitions.size(); i++)
-             if (instr->definitions[i].isTemp() && instr->definitions[i].isKill())
-                for (unsigned j = 0; j < instr->definitions[i].size(); j++)
-                   register_file[instr->definitions[i].physReg() + j] = 0;
+         for (const Definition& def : instr->definitions) {
+             if (def.isTemp() && def.isKill()) {
+                for (unsigned j = 0; j < def.size(); j++) {
+                   register_file[def.physReg() + j] = 0;
+                }
+             }
+         }
 
          /* emit parallelcopy */
          if (!parallelcopy.empty()) {
@@ -1676,10 +1680,12 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
             if (temp_in_scc && sgpr_operands_alias_defs) {
                /* disable definitions and re-enable operands */
-               for (unsigned i = 0; i < instr->definitions.size(); i++) {
-                  if (instr->definitions[i].isTemp() && !instr->definitions[i].isKill())
-                     for (unsigned j = 0; j < instr->definitions[i].size(); j++)
-                        register_file[instr->definitions[i].physReg() + j] = 0x0;
+               for (const Definition& def : instr->definitions) {
+                  if (def.isTemp() && !def.isKill()) {
+                     for (unsigned j = 0; j < def.size(); j++) {
+                        register_file[def.physReg() + j] = 0x0;
+                     }
+                  }
                }
                for (const Operand& op : instr->operands) {
                   if (op.isTemp() && op.isFirstKill()) {
@@ -1696,10 +1702,12 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      for (unsigned j = 0; j < op.size(); j++)
                         register_file[op.physReg() + j] = 0x0;
                }
-               for (unsigned i = 0; i < instr->definitions.size(); i++) {
-                  if (instr->definitions[i].isTemp() && !instr->definitions[i].isKill())
-                     for (unsigned j = 0; j < instr->definitions[i].size(); j++)
-                        register_file[instr->definitions[i].physReg() + j] = instr->definitions[i].tempId();
+               for (const Definition& def : instr->definitions) {
+                  if (def.isTemp() && !def.isKill()) {
+                     for (unsigned j = 0; j < def.size(); j++) {
+                        register_file[def.physReg() + j] = def.tempId();
+                     }
+                  }
                }
             } else {
                pc->tmp_in_scc = false;
@@ -1744,9 +1752,10 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                Temp tmp = {program->allocateId(), can_sgpr ? s1 : v1};
                mov->definitions[0] = Definition(tmp);
                /* disable definitions and re-enable operands */
-               for (unsigned i = 0; i < instr->definitions.size(); i++) {
-                  for (unsigned j = 0; j < instr->definitions[i].size(); j++)
-                     register_file[instr->definitions[i].physReg() + j] = 0x0;
+               for (const Definition& def : instr->definitions) {
+                  for (unsigned j = 0; j < def.size(); j++) {
+                     register_file[def.physReg() + j] = 0x0;
+                  }
                }
                for (const Operand& op : instr->operands) {
                   if (op.isTemp() && op.isFirstKill()) {
@@ -1764,10 +1773,12 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                      for (unsigned j = 0; j < op.size(); j++)
                         register_file[op.physReg() + j] = 0x0;
                }
-               for (unsigned i = 0; i < instr->definitions.size(); i++) {
-                  if (instr->definitions[i].isTemp() && !instr->definitions[i].isKill())
-                     for (unsigned j = 0; j < instr->definitions[i].size(); j++)
-                        register_file[instr->definitions[i].physReg() + j] = instr->definitions[i].tempId();
+               for (const Definition& def : instr->definitions) {
+                  if (def.isTemp() && !def.isKill()) {
+                     for (unsigned j = 0; j < def.size(); j++) {
+                        register_file[def.physReg() + j] = def.tempId();
+                     }
+                  }
                }
             }
 
@@ -1787,8 +1798,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   }
                }
             }
-            for (unsigned i = 0; i < instr->definitions.size(); i++)
-               instr->definitions[i] = tmp->definitions[i];
+            std::copy(tmp->definitions.begin(), tmp->definitions.end(), instr->definitions.begin());
          }
          instructions.emplace_back(std::move(*it));
 
@@ -1902,15 +1912,11 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
    /* remove trivial phis */
    for (Block& block : program->blocks) {
-      std::vector<aco_ptr<Instruction>>::iterator it = block.instructions.begin();
-      for (; it != block.instructions.end();) {
-         if (!is_phi(*it))
-            break;
-         if (!(*it)->definitions.size())
-            it = block.instructions.erase(it);
-         else
-            ++it;
-      }
+      auto end = std::find_if(block.instructions.begin(), block.instructions.end(),
+                              [](aco_ptr<Instruction>& instr) { return !is_phi(instr);});
+      auto middle = std::remove_if(block.instructions.begin(), end,
+                                   [](const aco_ptr<Instruction>& instr) { return instr->definitions.empty();});
+      block.instructions.erase(middle, end);
    }
 
    /* num_gpr = rnd_up(max_used_gpr + 1) */
