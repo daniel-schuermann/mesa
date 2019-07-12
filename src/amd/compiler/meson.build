@@ -78,6 +78,7 @@ libaco_files = files(
   'aco_scheduler.cpp',
   'aco_ssa_elimination.cpp',
   'aco_spill.cpp',
+  'aco_util.h',
   'aco_validate.cpp',
 )
 
