@@ -4247,9 +4247,8 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
    unsigned bytes_read = 0;
    unsigned result_size = 0;
    unsigned total_bytes = instr->num_components * elem_size_bytes;
-   Temp result[instr->num_components];
-
    unsigned align = nir_intrinsic_align_mul(instr) ? nir_intrinsic_align(instr) : instr->dest.ssa.bit_size / 8;
+   std::array<Temp, 4> result;
 
    while (bytes_read < total_bytes) {
       unsigned todo = total_bytes - bytes_read;
@@ -4273,7 +4272,7 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
          assert(false);
       }
       assert(todo % elem_size_bytes == 0);
-      unsigned size = todo / elem_size_bytes;
+      unsigned num_elements = todo / elem_size_bytes;
       unsigned offset = nir_intrinsic_base(instr) + bytes_read;
       unsigned max_offset = op == aco_opcode::ds_read2_b32 ? 1019 : 65535;
 
@@ -4287,37 +4286,47 @@ void visit_load_shared(isel_context *ctx, nir_intrinsic_instr *instr)
       assert(offset <= max_offset); /* bytes_read shouldn't be large enough for this to happen */
 
       Temp res;
-      if (op == aco_opcode::ds_read2_b32)
-         res = bld.ds(op, bld.def(v2), address_offset, m, offset >> 2, (offset >> 2) + 1);
+      if (instr->num_components == 1 && dst.type() == vgpr)
+         res = dst;
       else
-         res = bld.ds(op, bld.def(RegClass(vgpr, todo / 4)), address_offset, m, offset);
+         res = bld.tmp(RegClass(vgpr, todo / 4));
 
-      aco_ptr<Pseudo_instruction> split{create_instruction<Pseudo_instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, size)};
-      split->getOperand(0) = Operand(res);
-      for (unsigned i = 0; i < size; i++)
-         split->getDefinition(i) = Definition(result[result_size++] = bld.tmp(vgpr, elem_size_bytes / 4));
-      ctx->block->instructions.emplace_back(std::move(split));
+      if (op == aco_opcode::ds_read2_b32)
+         res = bld.ds(op, Definition(res), address_offset, m, offset >> 2, (offset >> 2) + 1);
+      else
+         res = bld.ds(op, Definition(res), address_offset, m, offset);
+
+      if (instr->num_components == 1) {
+         assert(todo == total_bytes);
+         if (dst.type() == sgpr)
+            bld.pseudo(aco_opcode::p_as_uniform, Definition(dst), res);
+         return;
+      }
+
+      if (dst.type() == sgpr)
+         res = bld.as_uniform(res);
+
+      if (num_elements == 1) {
+         result[result_size++] = res;
+      } else {
+         assert(res != dst && res.size() % num_elements == 0);
+         aco_ptr<Pseudo_instruction> split{create_instruction<Pseudo_instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, num_elements)};
+         split->getOperand(0) = Operand(res);
+         for (unsigned i = 0; i < num_elements; i++)
+            split->getDefinition(i) = Definition(result[result_size++] = bld.tmp(res.type(), elem_size_bytes / 4));
+         ctx->block->instructions.emplace_back(std::move(split));
+      }
 
       bytes_read += todo;
    }
 
-   assert(result_size == instr->num_components);
+   assert(result_size == instr->num_components && result_size > 1);
    aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, result_size, 1)};
    for (unsigned i = 0; i < result_size; i++)
       vec->getOperand(i) = Operand(result[i]);
-   if (dst.type() == vgpr) {
-      vec->getDefinition(0) = Definition(dst);
-      ctx->block->instructions.emplace_back(std::move(vec));
-   } else {
-      Temp tmp{ctx->program->allocateId(), RegClass(vgpr, dst.size())};
-      vec->getDefinition(0) = Definition(tmp);
-      ctx->block->instructions.emplace_back(std::move(vec));
-
-      bld.pseudo(aco_opcode::p_as_uniform, Definition(dst), tmp);
-   }
-   emit_split_vector(ctx, dst, instr->num_components);
-
-   return;
+   vec->getDefinition(0) = Definition(dst);
+   ctx->block->instructions.emplace_back(std::move(vec));
+   ctx->allocated_vec.emplace(dst.id(), result);
 }
 
 void ds_write_helper(isel_context *ctx, Operand m, Temp address, Temp data, unsigned offset0, unsigned offset1, unsigned align)
