@@ -851,6 +851,7 @@ void handle_pseudo(ra_ctx& ctx,
    case aco_opcode::p_create_vector:
    case aco_opcode::p_split_vector:
    case aco_opcode::p_parallelcopy:
+   case aco_opcode::p_wqm:
       break;
    default:
       return;
@@ -1426,8 +1427,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             if (!instr->getOperand(2).isUndefined())
                instr->getDefinition(0).setFixed(instr->getOperand(2).physReg());
          } else if (instr->opcode == aco_opcode::s_addk_i32 ||
-                  instr->opcode == aco_opcode::s_mulk_i32 ||
-                  instr->opcode == aco_opcode::p_wqm) {
+                    instr->opcode == aco_opcode::s_mulk_i32) {
             if (!instr->getOperand(0).isUndefined())
                instr->getDefinition(0).setFixed(instr->getOperand(0).physReg());
          } else if ((instr->format == Format::MUBUF ||
@@ -1517,6 +1517,15 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                PhysReg reg = PhysReg{instr->getOperand(0).physReg() + i * definition.size()};
                if (!get_reg_specified(ctx, register_file, definition.regClass(), parallelcopy, instr, reg))
                   reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
+               definition.setFixed(reg);
+            } else if (instr->opcode == aco_opcode::p_wqm) {
+               PhysReg reg;
+               if (instr->getOperand(0).isKill() && instr->getOperand(0).getTemp().type() == definition.getTemp().type()) {
+                  reg = instr->getOperand(0).physReg();
+                  assert(register_file[reg.reg] == 0);
+               } else {
+                  reg = get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr);
+               }
                definition.setFixed(reg);
             } else if (instr->opcode == aco_opcode::p_extract_vector) {
                PhysReg reg;
