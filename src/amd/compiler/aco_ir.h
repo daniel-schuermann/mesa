@@ -48,7 +48,7 @@ namespace aco {
  * - VOP2* | VOP3A represents a VOP2 instruction in VOP3A encoding
  * - VOP2* | DPP represents a VOP2 instruction with data parallel primitive.
  * - VOP2* | SDWA represents a VOP2 instruction with sub-dword addressing.
- * 
+ *
  * (*) The same is applicable for VOP1 and VOPC instructions.
  */
 enum class Format : std::uint16_t {
@@ -137,9 +137,9 @@ struct RegClass {
    };
 
    RegClass() = default;
-   constexpr RegClass(RC rc) 
+   constexpr RegClass(RC rc)
       : rc(rc) {}
-   constexpr RegClass(RegType type, unsigned size) 
+   constexpr RegClass(RegType type, unsigned size)
       : rc((RC) ((type == RegType::vgpr ? 1 << 5 : 0) | size)) {}
 
    constexpr operator RC() const { return rc; }
@@ -457,7 +457,7 @@ public:
       return tempId() > 0;
    }
 
-   Temp getTemp() noexcept
+   Temp getTemp() const noexcept
    {
       return temp;
    }

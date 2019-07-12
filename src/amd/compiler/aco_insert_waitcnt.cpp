@@ -25,6 +25,7 @@
  *
  */
 
+#include <algorithm>
 #include <unordered_map>
 
 #include "aco_ir.h"
@@ -236,16 +237,9 @@ bool writes_exec(Instruction* instr, wait_ctx& ctx)
    }
 
    /* check if the dst writes exec */
-   for (unsigned i = 0; i < instr->definitions.size(); i++)
-   {
-      if ((instr->definitions[i].regClass() == RegClass::s2 &&
-           instr->definitions[i].physReg() == exec) ||
-          (instr->definitions[i].regClass() == RegClass::s1 &&
-          (instr->definitions[i].physReg() == exec_lo ||
-           instr->definitions[i].physReg() == exec_hi )))
-         return true;
-   }
-   return false;
+   return std::any_of(instr->definitions.begin(), instr->definitions.end(),
+    [](const Definition& def) { return (def.regClass() == RegClass::s2 && def.physReg() == exec) ||
+                                       (def.regClass() == RegClass::s1 && (def.physReg() == exec_lo || def.physReg() == exec_hi ));});
 }
 
 uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
@@ -255,15 +249,14 @@ uint16_t writes_vgpr(Instruction* instr, wait_ctx& ctx)
    uint16_t new_vm_cnt = ctx.max_vm_cnt;
    uint16_t new_lgkm_cnt = ctx.max_lgkm_cnt;
 
-   for (unsigned i = 0; i < instr->definitions.size(); i++)
-   {
-      if (instr->definitions[i].getTemp().type() != RegType::vgpr)
+   for (const Definition& def : instr->definitions) {
+      if (def.getTemp().type() != RegType::vgpr)
          continue;
 
       /* check consecutively written vgprs */
-      for (unsigned j = 0; j < instr->definitions[i].getTemp().size(); j++)
+      for (unsigned j = 0; j < def.getTemp().size(); j++)
       {
-         uint8_t reg = (uint8_t) instr->definitions[i].physReg() + j;
+         uint8_t reg = (uint8_t) def.physReg() + j;
 
          std::unordered_map<uint8_t,wait_entry>::iterator it;
          it = ctx.vgpr_map.find(reg);
@@ -332,15 +325,14 @@ uint16_t writes_sgpr(Instruction* instr, wait_ctx& ctx)
 {
    bool needs_waitcnt = false;
    uint16_t new_lgkm_cnt = ctx.max_lgkm_cnt;
-   for (unsigned i = 0; i < instr->definitions.size(); i++)
-   {
-      if (instr->definitions[i].getTemp().type() != RegType::sgpr)
+   for (const Definition& def : instr->definitions) {
+      if (def.getTemp().type() != RegType::sgpr)
          continue;
 
       /* check consecutively written sgprs */
-      for (unsigned j = 0; j < instr->definitions[i].getTemp().size(); j++)
+      for (unsigned j = 0; j < def.getTemp().size(); j++)
       {
-         uint8_t reg = (uint8_t) instr->definitions[i].physReg() + j;
+         uint8_t reg = (uint8_t) def.physReg() + j;
 
          std::unordered_map<uint8_t,wait_entry>::iterator it;
          it = ctx.sgpr_map.find(reg);
@@ -560,7 +552,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
          if ((e.second.type & (vm_type | lgkm_type)))
             e.second.lgkm_cnt = e.second.vm_cnt = 0;
       }
-      if (instr->definitions.size()) {
+      if (!instr->definitions.empty()) {
          for (unsigned i = 0; i < instr->definitions[0].size(); i++)
          {
             ctx.pending_flat++;
@@ -573,7 +565,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
    }
    case Format::SMEM: {
       ctx.lgkm_cnt++;
-      if (instr->definitions.size()) {
+      if (!instr->definitions.empty()) {
          for (unsigned i = 0; i < instr->definitions[0].size(); i++)
          {
             ctx.sgpr_map.emplace(instr->definitions[0].physReg() + i,
@@ -587,7 +579,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
       // TODO: check if reads and writes are in-order
       /* the counter is also used as check for membars, thus we need it also on writes */
       ctx.lgkm_cnt++;
-      if (instr->definitions.size()) {
+      if (!instr->definitions.empty()) {
          for (unsigned i = 0; i < instr->definitions[0].size(); i++)
          {
             ctx.vgpr_map.emplace(instr->definitions[0].physReg() + i,
@@ -608,7 +600,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
             e.second.vm_cnt++;
       }
       ctx.vm_cnt++;
-      if (instr->definitions.size()) {
+      if (!instr->definitions.empty()) {
          for (unsigned i = 0; i < instr->definitions[0].size(); i++)
          {
             ctx.vgpr_map.emplace(instr->definitions[0].physReg() + i,

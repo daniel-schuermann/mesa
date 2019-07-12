@@ -25,6 +25,7 @@
  *
  */
 
+#include <algorithm>
 #include <math.h>
 
 #include "aco_ir.h"
@@ -529,11 +530,8 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             case aco_opcode::p_split_vector:
             case aco_opcode::p_extract_vector:
             case aco_opcode::p_phi: {
-               bool all_vgpr = true;
-               for (unsigned i = 0; all_vgpr && i < instr->definitions.size(); i++) {
-                  if (instr->definitions[i].getTemp().type() != vgpr)
-                     all_vgpr = false;
-               }
+               const bool all_vgpr = std::none_of(instr->definitions.begin(), instr->definitions.end(),
+                                                  [] (const Definition& def) { return def.getTemp().type() != vgpr;});
                if (all_vgpr) {
                   instr->operands[i] = Operand(info.temp);
                   info = ctx.info[info.temp.id()];
@@ -659,7 +657,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             instr->operands[i] = Operand(info.val);
             continue;
          } else if (i == 1 && parse_base_offset(ctx, instr.get(), i, &base, &offset) && base.regClass() == s1 && offset <= 0xFFFFF && ctx.program->chip_class >= GFX9) {
-            bool soe = smem->operands.size() >= (smem->definitions.size() ? 3 : 4);
+            bool soe = smem->operands.size() >= (!smem->definitions.empty() ? 3 : 4);
             if (soe &&
                 (!ctx.info[smem->operands.back().tempId()].is_constant_or_literal() ||
                  ctx.info[smem->operands.back().tempId()].val != 0)) {
@@ -672,10 +670,10 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
                SMEM_instruction *new_instr = create_instruction<SMEM_instruction>(smem->opcode, Format::SMEM, smem->operands.size() + 1, smem->definitions.size());
                new_instr->operands[0] = smem->operands[0];
                new_instr->operands[1] = Operand(offset);
-               if (!smem->definitions.size())
+               if (smem->definitions.empty())
                   new_instr->operands[2] = smem->operands[2];
                new_instr->operands.back() = Operand(base);
-               if (smem->definitions.size())
+               if (!smem->definitions.empty())
                   new_instr->definitions[0] = smem->definitions[0];
                instr.reset(new_instr);
                smem = static_cast<SMEM_instruction *>(instr.get());
@@ -686,7 +684,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    }
 
    /* if this instruction doesn't define anything, return */
-   if (!instr->definitions.size())
+   if (instr->definitions.empty())
       return;
 
    switch (instr->opcode) {
@@ -724,8 +722,9 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    }
    case aco_opcode::p_split_vector: {
       if (instr->operands[0].isUndefined()) {
-         for (unsigned i = 0; i < instr->definitions.size(); i++)
-            ctx.info[instr->definitions[i].tempId()].set_undefined();
+         for (const Definition& def : instr->definitions) {
+            ctx.info[def.tempId()].set_undefined();
+         }
          break;
       }
       if (!ctx.info[instr->operands[0].tempId()].is_vec())
@@ -1919,7 +1918,7 @@ bool apply_omod_clamp(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    }
 
    /* apply omod / clamp modifiers if the def is used only once and the instruction can have modifiers */
-   if (instr->definitions.size() && ctx.uses[instr->definitions[0].tempId()] == 1 &&
+   if (!instr->definitions.empty() && ctx.uses[instr->definitions[0].tempId()] == 1 &&
        can_use_VOP3(instr) && instr_info.can_use_output_modifiers[(int)instr->opcode]) {
       if(ctx.info[instr->definitions[0].tempId()].is_omod2()) {
          to_VOP3(ctx, instr);
@@ -1948,7 +1947,7 @@ bool apply_omod_clamp(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
 void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 {
-   if (!instr->definitions.size() || !ctx.uses[instr->definitions[0].tempId()])
+   if (instr->definitions.empty() || !ctx.uses[instr->definitions[0].tempId()])
       return;
 
    if (instr->isVALU()) {
@@ -2186,11 +2185,9 @@ void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
    /* Dead Code Elimination:
     * We remove instructions if they define temporaries which all are unused */
-   bool is_used = instr->definitions.size() == 0;
-   for (unsigned i = 0; !is_used && i < instr->definitions.size(); i++) {
-      if (ctx.uses[instr->definitions[i].tempId()])
-         is_used = true;
-   }
+   const bool is_used = instr->definitions.empty() ||
+                        std::any_of(instr->definitions.begin(), instr->definitions.end(),
+                                    [&ctx](const Definition& def) { return ctx.uses[def.tempId()]; });
    if (!is_used) {
       instr.reset();
       return;
