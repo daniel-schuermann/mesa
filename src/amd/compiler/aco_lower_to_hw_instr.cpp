@@ -560,6 +560,7 @@ void lower_to_hw_instr(Program* program)
                break;
             }
             case aco_opcode::p_parallelcopy:
+            case aco_opcode::p_wqm:
             {
                std::map<PhysReg, copy_operation> copy_operations;
                for (unsigned i = 0; i < instr->num_operands; i++)
@@ -628,12 +629,6 @@ void lower_to_hw_instr(Program* program)
                            bld.def(s1, PhysReg{instr->getDefinition(0).physReg() + i}),
                            instr->getOperand(0), Operand(instr->getOperand(1).constantValue() + i));
                }
-               break;
-            }
-            case aco_opcode::p_wqm:
-            {
-               if (!instr->getOperand(0).isUndefined())
-                  assert(instr->getOperand(0).physReg() == instr->getDefinition(0).physReg());
                break;
             }
             case aco_opcode::p_as_uniform:
