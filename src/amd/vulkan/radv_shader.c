@@ -1172,7 +1172,7 @@ shader_variant_compile(struct radv_device *device,
 
 				clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &user1);
 				radv_compile_nir_shader(&ac_llvm, &binary, &variant_info,
-							shaders, shader_count, options);
+							llvm_shaders, shader_count, options);
 				clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &user2);
 
 				for (int i = 0; i < shader_count; i++)
