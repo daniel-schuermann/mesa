@@ -127,9 +127,9 @@ void next_uses_per_block(spill_ctx& ctx, unsigned block_idx, std::set<uint32_t>&
           instr->opcode == aco_opcode::p_phi)
          break;
 
-      for (unsigned i = 0; i < instr->definitions.size(); i++) {
-         if (instr->definitions[i].isTemp())
-            next_uses.erase(instr->definitions[i].getTemp());
+      for (const Definition& def : instr->definitions) {
+         if (def.isTemp())
+            next_uses.erase(def.getTemp());
       }
 
       for (const Operand& op : instr->operands) {
@@ -268,9 +268,9 @@ void get_rematerialize_info(spill_ctx& ctx)
          else if (instr->opcode == aco_opcode::p_logical_end)
             logical = false;
          if (logical && should_rematerialize(instr)) {
-            for (unsigned i = 0; i < instr->definitions.size(); i++) {
-               if (instr->definitions[i].isTemp()) {
-                  ctx.remat[instr->definitions[i].getTemp()] = (remat_info){instr.get()};
+            for (const Definition& def : instr->definitions) {
+               if (def.isTemp()) {
+                  ctx.remat[def.getTemp()] = (remat_info){instr.get()};
                   ctx.remat_use_count[instr.get()] = 0;
                }
             }
@@ -305,9 +305,9 @@ std::vector<std::map<Temp, uint32_t>> local_next_uses(spill_ctx& ctx, Block* blo
          if (op.isTemp())
             next_uses[op.getTemp()] = idx;
       }
-      for (unsigned i = 0; i < instr->definitions.size(); i++) {
-         if (instr->definitions[i].isTemp())
-            next_uses.erase(instr->definitions[i].getTemp());
+      for (const Definition& def : instr->definitions) {
+         if (def.isTemp())
+            next_uses.erase(def.getTemp());
       }
       local_next_uses[idx] = next_uses;
    }
@@ -560,9 +560,9 @@ RegisterDemand init_live_in_vars(spill_ctx& ctx, Block* block, unsigned block_id
    /* if reg pressure at first instruction is still too high, add partially spilled variables */
    RegisterDemand reg_pressure;
    if (idx == 0) {
-      for (unsigned i = 0; i < block->instructions[idx]->definitions.size(); i++) {
-         if (block->instructions[idx]->definitions[i].isTemp()) {
-            reg_pressure -= block->instructions[idx]->definitions[i].getTemp();
+      for (const Definition& def : block->instructions[idx]->definitions) {
+         if (def.isTemp()) {
+            reg_pressure -= def.getTemp();
          }
       }
       for (const Operand& op : block->instructions[idx]->operands) {
@@ -1034,10 +1034,10 @@ void process_block(spill_ctx& ctx, unsigned block_idx, Block* block,
 
          RegisterDemand new_demand = ctx.register_demand[block_idx][idx];
          if (idx == 0) {
-            for (unsigned i = 0; i < instr->definitions.size(); i++) {
-               if (!instr->definitions[i].isTemp())
+            for (const Definition& def : instr->definitions) {
+               if (!def.isTemp())
                   continue;
-               new_demand += instr->definitions[i].getTemp();
+               new_demand += def.getTemp();
             }
          } else {
             new_demand.update(ctx.register_demand[block_idx][idx - 1]);
