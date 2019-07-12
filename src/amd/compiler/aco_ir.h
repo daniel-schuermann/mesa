@@ -868,6 +868,10 @@ struct RegisterDemand {
       return a.vgpr == b.vgpr && a.sgpr == b.sgpr;
    }
 
+   constexpr bool exceeds(const RegisterDemand other) {
+      return vgpr > other.vgpr || sgpr > other.sgpr;
+   }
+
    RegisterDemand operator+(const Temp t) {
       if (t.type() == RegType::sgpr)
          return RegisterDemand( vgpr, sgpr + t.size() );
