@@ -173,7 +173,7 @@ void validate(Program* program, FILE * output)
             if (instr->operands.size() >= 2)
                check(instr->operands[1].isConstant() || (instr->operands[1].isTemp() && instr->operands[1].regClass().type() == sgpr),
                      "SMEM offset must be constant or sgpr", instr.get());
-            if (instr->definitions.size())
+            if (!instr->definitions.empty())
                check(instr->definitions[0].getTemp().type() == sgpr, "SMEM result must be sgpr", instr.get());
             break;
          }
@@ -192,7 +192,7 @@ void validate(Program* program, FILE * output)
                check((op.hasRegClass() && op.regClass().type() == RegType::vgpr) || op.physReg() == m0,
                      "Only VGPRs are valid DS instruction operands", instr.get());
             }
-            if (instr->definitions.size())
+            if (!instr->definitions.empty())
                check(instr->definitions[0].getTemp().type() == vgpr, "DS instruction must return VGPR", instr.get());
             break;
          }
@@ -210,7 +210,7 @@ void validate(Program* program, FILE * output)
             check(instr->operands[0].hasRegClass() && instr->operands[0].regClass().type() == vgpr, "FLAT/GLOBAL/SCRATCH address must be vgpr", instr.get());
             check(instr->operands[1].hasRegClass() && instr->operands[1].regClass().type() == sgpr,
                   "FLAT/GLOBAL/SCRATCH sgpr address must be undefined or sgpr", instr.get());
-            if (instr->definitions.size())
+            if (!instr->definitions.empty())
                check(instr->definitions[0].getTemp().type() == vgpr, "FLAT/GLOBAL/SCRATCH result must be vgpr", instr.get());
             else
                check(instr->operands[2].regClass().type() == vgpr, "FLAT/GLOBAL/SCRATCH data must be vgpr", instr.get());
@@ -371,8 +371,7 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
             }
          }
 
-         for (unsigned i = 0; i < instr->definitions.size(); i++) {
-            Definition& def = instr->definitions[i];
+         for (const Definition& def : instr->definitions) {
             if (!def.isTemp())
                continue;
             live.erase(def.getTemp());
@@ -423,15 +422,14 @@ bool validate_ra(Program *program, const struct radv_nir_compiler_options *optio
                continue;
             Temp tmp = def.getTemp();
             PhysReg reg = assignments.at(tmp.id()).reg;
-            for (unsigned i = 0; i < tmp.size(); i++) {
-               if (regs[reg + i])
-                  err |= ra_fail(output, loc, assignments.at(regs[reg + i]).defloc, "Assignment of element %d of %%%d already taken by %%%d from instruction", i, tmp.id(), regs[reg + i]);
-               regs[reg + i] = tmp.id();
+            for (unsigned j = 0; j < tmp.size(); j++) {
+               if (regs[reg + j])
+                  err |= ra_fail(output, loc, assignments.at(regs[reg + i]).defloc, "Assignment of element %d of %%%d already taken by %%%d from instruction", i, tmp.id(), regs[reg + j]);
+               regs[reg + j] = tmp.id();
             }
          }
 
-         for (unsigned i = 0; i < instr->definitions.size(); i++) {
-            Definition& def = instr->definitions[i];
+         for (const Definition& def : instr->definitions) {
             if (!def.isTemp())
                continue;
             if (def.isKill()) {

@@ -68,7 +68,7 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
 
    /* break off from prevous SMEM clause if needed */
    if (instr->format == Format::SMEM && ctx.chip_class >= GFX8) {
-      bool is_store = instr->definitions.size() == 0;
+      const bool is_store = instr->definitions.empty();
       for (int pred_idx = new_idx - 1; pred_idx >= 0; pred_idx--) {
          aco_ptr<Instruction>& pred = new_instructions[pred_idx];
          if (pred->format != Format::SMEM)
@@ -76,7 +76,7 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
 
          /* Don't allow clauses with store instructions since the clause's
           * instructions may use the same address. */
-         if (is_store || pred->definitions.size() == 0)
+         if (is_store || pred->definitions.empty())
             return 1;
 
          Definition& instr_def = instr->definitions[0];

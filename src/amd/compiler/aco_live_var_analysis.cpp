@@ -79,9 +79,7 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
 
       Instruction *insn = block->instructions[idx].get();
       /* KILL */
-      for (unsigned i = 0; i < insn->definitions.size(); ++i)
-      {
-         Definition &definition = insn->definitions[i];
+      for (Definition& definition : insn->definitions) {
          if (!definition.isTemp()) {
             continue;
          }

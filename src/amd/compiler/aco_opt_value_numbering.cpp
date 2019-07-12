@@ -241,7 +241,7 @@ void process_block(Block& block,
             op.setTemp(it->second);
       }
 
-      if (!instr->definitions.size() || !run) {
+      if (instr->definitions.empty() || !run) {
          if (instr->opcode == aco_opcode::p_logical_start)
             run = true;
          else if (instr->opcode == aco_opcode::p_logical_end)

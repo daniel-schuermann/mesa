@@ -419,7 +419,7 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
 
 void aco_print_instr(struct Instruction *instr, FILE *output)
 {
-   if (instr->definitions.size()) {
+   if (!instr->definitions.empty()) {
       for (unsigned i = 0; i < instr->definitions.size(); ++i) {
          aco_print_definition(&instr->definitions[i], output);
          if (i + 1 != instr->definitions.size())
