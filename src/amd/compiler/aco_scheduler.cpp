@@ -38,9 +38,8 @@ namespace aco {
 struct sched_ctx {
    std::vector<bool> depends_on;
    std::vector<bool> RAR_dependencies;
+   RegisterDemand max_registers;
    int16_t num_waves;
-   int16_t max_vgpr;
-   int16_t max_sgpr;
    int16_t last_SMEM_stall;
    int last_SMEM_dep_idx;
 };
@@ -279,12 +278,11 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
       /* check if register pressure is low enough: the diff is negative if register pressure is decreased */
       const RegisterDemand candidate_diff = getLiveChanges(candidate);
       const RegisterDemand tempDemand = getTempRegisters(candidate);
-      if (register_pressure.vgpr - candidate_diff.vgpr > ctx.max_vgpr ||
-          register_pressure.sgpr - candidate_diff.sgpr > ctx.max_sgpr)
+      if (RegisterDemand(register_pressure - candidate_diff).exceeds(ctx.max_registers))
          break;
       const RegisterDemand tempDemand2 = getTempRegisters(block->instructions[insert_idx - 1]);
       const RegisterDemand new_demand  = register_demand[insert_idx - 1] - tempDemand2 + tempDemand;
-      if (new_demand.sgpr > ctx.max_sgpr || new_demand.vgpr > ctx.max_vgpr)
+      if (new_demand.exceeds(ctx.max_registers))
          break;
       // TODO: we might want to look further to find a sequence of instructions to move down which doesn't exceed reg pressure
 
@@ -399,12 +397,11 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
       /* check if register pressure is low enough: the diff is negative if register pressure is decreased */
       const RegisterDemand candidate_diff = getLiveChanges(candidate);
       const RegisterDemand temp = getTempRegisters(candidate);
-      if (register_pressure.vgpr + candidate_diff.vgpr > ctx.max_vgpr ||
-          register_pressure.sgpr + candidate_diff.sgpr > ctx.max_sgpr)
+      if (RegisterDemand(register_pressure + candidate_diff).exceeds(ctx.max_registers))
          break;
       const RegisterDemand temp2 = getTempRegisters(block->instructions[insert_idx - 1]);
       const RegisterDemand new_demand = register_demand[insert_idx - 1] - temp2 + candidate_diff + temp;
-      if (new_demand.sgpr > ctx.max_sgpr || new_demand.vgpr > ctx.max_vgpr)
+      if (new_demand.exceeds(ctx.max_registers))
          break;
 
       /* move the candidate above the insert_idx */
@@ -509,12 +506,11 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
       /* check if register pressure is low enough: the diff is negative if register pressure is decreased */
       const RegisterDemand candidate_diff = getLiveChanges(candidate);
       const RegisterDemand temp = getTempRegisters(candidate);;
-      if (register_pressure.vgpr - candidate_diff.vgpr > ctx.max_vgpr ||
-          register_pressure.sgpr - candidate_diff.sgpr > ctx.max_sgpr)
+      if (RegisterDemand(register_pressure - candidate_diff).exceeds(ctx.max_registers))
          break;
       const RegisterDemand temp2 = getTempRegisters(block->instructions[insert_idx - 1]);
       const RegisterDemand new_demand = register_demand[insert_idx - 1] - temp2 + temp;
-      if (new_demand.sgpr > ctx.max_sgpr || new_demand.vgpr > ctx.max_vgpr)
+      if (new_demand.exceeds(ctx.max_registers))
          break;
       // TODO: we might want to look further to find a sequence of instructions to move down which doesn't exceed reg pressure
 
@@ -620,12 +616,11 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
       /* check if register pressure is low enough: the diff is negative if register pressure is decreased */
       const RegisterDemand candidate_diff = getLiveChanges(candidate);
       const RegisterDemand temp = getTempRegisters(candidate);
-      if (register_pressure.vgpr + candidate_diff.vgpr > ctx.max_vgpr ||
-          register_pressure.sgpr + candidate_diff.sgpr > ctx.max_sgpr)
+      if (RegisterDemand(register_pressure + candidate_diff).exceeds(ctx.max_registers))
          break;
       const RegisterDemand temp2 = getTempRegisters(block->instructions[insert_idx - 1]);
       const RegisterDemand new_demand = register_demand[insert_idx - 1] - temp2 + candidate_diff + temp;
-      if (new_demand.sgpr > ctx.max_sgpr || new_demand.vgpr > ctx.max_vgpr)
+      if (new_demand.exceeds(ctx.max_registers))
          break;
 
       /* move the candidate above the insert_idx */
@@ -682,8 +677,7 @@ void schedule_program(Program *program, live& live_vars)
    assert(ctx.num_waves);
    uint16_t total_sgpr_regs = program->chip_class >= GFX8 ? 800 : 512;
    uint16_t max_addressible_sgpr = program->sgpr_limit;
-   ctx.max_sgpr = std::min<uint16_t>(((total_sgpr_regs / ctx.num_waves) & ~7) - 2, max_addressible_sgpr);
-   ctx.max_vgpr = (256 / ctx.num_waves) & ~3;
+   ctx.max_registers = { int16_t((256 / ctx.num_waves) & ~3), std::min<int16_t>(((total_sgpr_regs / ctx.num_waves) & ~7) - 2, max_addressible_sgpr)};
 
    for (Block& block : program->blocks)
       schedule_block(ctx, program, &block, live_vars);
