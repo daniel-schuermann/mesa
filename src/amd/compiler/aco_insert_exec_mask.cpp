@@ -41,6 +41,7 @@ enum mask_type : uint8_t {
    mask_type_exact = 1 << 1,
    mask_type_wqm = 1 << 2,
    mask_type_loop = 1 << 3, /* active lanes of a loop */
+   mask_type_initial = 1 << 4, /* initially active lanes */
 };
 
 struct wqm_ctx {
@@ -124,7 +125,7 @@ bool needs_exact(aco_ptr<Instruction>& instr) {
       MIMG_instruction *mimg = static_cast<MIMG_instruction *>(instr.get());
       return mimg->disable_wqm;
    } else {
-      return instr->opcode == aco_opcode::p_fs_buffer_store_smem;
+      return instr->format == Format::EXP || instr->opcode == aco_opcode::p_fs_buffer_store_smem;
    }
 }
 
@@ -304,14 +305,19 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
       bld.insert(std::move(startpgm));
 
       if (ctx.handle_wqm) {
-         ctx.info[0].exec.emplace_back(exec_mask, mask_type_global | mask_type_exact);
+         ctx.info[0].exec.emplace_back(exec_mask, mask_type_global | mask_type_exact | mask_type_initial);
          /* if this block only needs WQM, initialize already */
          if (ctx.info[0].block_needs == WQM)
             transition_to_WQM(ctx, bld, 0);
       } else {
-         if (ctx.program->needs_wqm)
+         uint8_t mask = mask_type_global;
+         if (ctx.program->needs_wqm) {
             exec_mask = bld.sop1(aco_opcode::s_wqm_b64, bld.def(s2, exec), bld.def(s1, scc), bld.exec(exec_mask));
-         ctx.info[0].exec.emplace_back(exec_mask, mask_type_global);
+            mask |= mask_type_wqm;
+         } else {
+            mask |= mask_type_exact;
+         }
+         ctx.info[0].exec.emplace_back(exec_mask, mask);
       }
 
       return 1;
@@ -354,7 +360,7 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
       Temp loop_active = bld.insert(std::move(phi));
 
       if (info.has_divergent_break) {
-         uint8_t mask_type = (ctx.info[idx].exec.back().second & ~mask_type_global) | mask_type_loop;
+         uint8_t mask_type = (ctx.info[idx].exec.back().second & (mask_type_wqm | mask_type_exact)) | mask_type_loop;
          ctx.info[idx].exec.emplace_back(loop_active, mask_type);
       } else {
          ctx.info[idx].exec.back().first = loop_active;
@@ -617,20 +623,82 @@ void process_instructions(exec_ctx& ctx, Block* block,
          state = Exact;
       }
 
-      if (instr->opcode == aco_opcode::p_is_helper) {
+      if (instr->opcode == aco_opcode::p_is_helper || instr->opcode == aco_opcode::p_load_helper) {
          Definition dst = instr->getDefinition(0);
          if (state == Exact) {
             instr.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b64, Format::SOP1, 1, 1));
             instr->getOperand(0) = Operand(0u);
             instr->getDefinition(0) = dst;
          } else {
+            std::pair<Temp, uint8_t>& exact_mask = ctx.info[block->index].exec[0];
+            if (instr->opcode == aco_opcode::p_load_helper &&
+                !(ctx.info[block->index].exec[0].second & mask_type_initial)) {
+               /* find last initial exact mask */
+               for (int i = block->index; i >= 0; i--) {
+                  if (ctx.program->blocks[i].kind & block_kind_top_level &&
+                      ctx.info[i].exec[0].second & mask_type_initial) {
+                     exact_mask = ctx.info[i].exec[0];
+                     break;
+                  }
+               }
+            }
+
+            assert(instr->opcode == aco_opcode::p_is_helper || exact_mask.second & mask_type_initial);
+            assert(exact_mask.second & mask_type_exact);
+
             instr.reset(create_instruction<SOP2_instruction>(aco_opcode::s_andn2_b64, Format::SOP2, 2, 2));
             instr->getOperand(0) = Operand(ctx.info[block->index].exec.back().first); /* current exec */
-            assert(ctx.info[block->index].exec[0].second & mask_type_exact);
-            instr->getOperand(1) = Operand(ctx.info[block->index].exec[0].first);
+            instr->getOperand(1) = Operand(exact_mask.first);
             instr->getDefinition(0) = dst;
             instr->getDefinition(1) = bld.def(s1, scc);
          }
+      } else if (instr->opcode == aco_opcode::p_demote_to_helper) {
+         /* turn demote into discard_if with only exact masks */
+         assert((ctx.info[block->index].exec[0].second & (mask_type_exact | mask_type_global)) == (mask_type_exact | mask_type_global));
+         ctx.info[block->index].exec[0].second &= ~mask_type_initial;
+
+         int num = 0;
+         Temp cond;
+         if (instr->num_operands == 0) {
+            /* transition to exact and set exec to zero */
+            Temp old_exec = ctx.info[block->index].exec.back().first;
+            Temp new_exec = bld.tmp(s2);
+            cond = bld.sop1(aco_opcode::s_and_saveexec_b64, bld.def(s2), bld.def(s1, scc),
+                            bld.exec(Definition(new_exec)), Operand(0u), bld.exec(old_exec));
+            if (ctx.info[block->index].exec.back().second & mask_type_exact) {
+               ctx.info[block->index].exec.back().first = new_exec;
+            } else {
+               ctx.info[block->index].exec.back().first = cond;
+               ctx.info[block->index].exec.emplace_back(new_exec, mask_type_exact);
+            }
+         } else {
+            /* demote_if: transition to exact */
+            transition_to_Exact(ctx, bld, block->index);
+            assert(instr->getOperand(0).isTemp());
+            cond = instr->getOperand(0).getTemp();
+            num = 1;
+         }
+
+         for (unsigned i = 0; i < ctx.info[block->index].exec.size() - 1; i++)
+            num += ctx.info[block->index].exec[i].second & mask_type_exact ? 1 : 0;
+         instr.reset(create_instruction<Instruction>(aco_opcode::p_discard_if, Format::PSEUDO, num + 1, num + 1));
+         int k = 0;
+         for (unsigned i = 0; k < num; i++) {
+            if (ctx.info[block->index].exec[i].second & mask_type_exact) {
+               instr->getOperand(k) = Operand(ctx.info[block->index].exec[i].first);
+               Temp new_mask = bld.tmp(s2);
+               instr->getDefinition(k) = Definition(new_mask);
+               if (i == ctx.info[block->index].exec.size() - 1)
+                  instr->getDefinition(k).setFixed(exec);
+               k++;
+               ctx.info[block->index].exec[i].first = new_mask;
+            }
+         }
+         assert(k == num);
+         instr->getDefinition(num) = bld.def(s1, scc);
+         instr->getOperand(num) = Operand(cond);
+         state = Exact;
+
       } else if (instr->opcode == aco_opcode::p_fs_buffer_store_smem) {
          bool need_check = ctx.info[block->index].exec.size() != 1 &&
                            !(ctx.info[block->index].exec[ctx.info[block->index].exec.size() - 2].second & Exact);
