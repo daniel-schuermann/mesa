@@ -115,7 +115,6 @@ struct isel_context {
    Temp tg_size = Temp(0, s1);
    Temp local_invocation_ids[3] = {Temp(0, v1), Temp(0, v1), Temp(0, v1)};
 
-   uint64_t input_mask;
 };
 
 fs_input get_interp_input(nir_intrinsic_op intrin, enum glsl_interp_mode interp)
@@ -459,16 +458,6 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_load_front_face:
                      ctx->fs_vgpr_args[fs_input::front_face] = true;
                      break;
-                  case nir_intrinsic_load_interpolated_input:
-                     if (nir_intrinsic_base(intrinsic) == VARYING_SLOT_POS) {
-                        uint8_t mask = nir_ssa_def_components_read(&intrinsic->dest.ssa);
-                        for (unsigned i = 0; i < 4; i++) {
-                           if (mask & (1 << i))
-                              ctx->fs_vgpr_args[fs_input::frag_pos_0 + i] = true;
-
-                        }
-                     }
-                     break;
                   case nir_intrinsic_load_frag_coord:
                   case nir_intrinsic_load_sample_pos: {
                      uint8_t mask = nir_ssa_def_components_read(&intrinsic->dest.ssa);
@@ -486,13 +475,9 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      ctx->fs_vgpr_args[fs_input::ancillary] = true;
                      ctx->fs_vgpr_args[fs_input::sample_coverage] = true;
                      break;
-                  case nir_intrinsic_load_layer_id:
-                     ctx->input_mask |= 1ull << VARYING_SLOT_LAYER;
-                     break;
                   default:
                      break;
                }
-
                break;
             }
             case nir_instr_type_tex: {
@@ -989,8 +974,6 @@ void add_startpgm(struct isel_context *ctx)
       unsigned interp_mode = needs_interp_mode ? S_0286CC_PERSP_CENTER_ENA(1) : 0;
       ctx->program->config->spi_ps_input_ena |= interp_mode;
 
-      ctx->program->info->fs.input_mask |= ctx->input_mask >> VARYING_SLOT_VAR0;
-      ctx->program->info->fs.num_interp = util_bitcount64(ctx->input_mask);
       break;
    }
    case MESA_SHADER_COMPUTE: {
@@ -1149,32 +1132,7 @@ setup_variables(isel_context *ctx, nir_shader *nir)
          int idx = variable->data.location + variable->data.index;
          variable->data.driver_location = idx * 4;
       }
-      uint64_t flat_mask = 0;
-      nir_foreach_variable(variable, &nir->inputs)
-      {
-         int idx = variable->data.location;
-         variable->data.driver_location = idx * 4;
-         unsigned attrib_count = glsl_count_attribute_slots(variable->type, false);
-         if (idx >= VARYING_SLOT_VAR0 || idx == VARYING_SLOT_PNTC ||
-             idx == VARYING_SLOT_PRIMITIVE_ID || idx == VARYING_SLOT_LAYER) {
-            ctx->input_mask |= ((1ull << attrib_count) - 1ull) << idx;
-            if (variable->data.interpolation == INTERP_MODE_FLAT)
-               flat_mask |= ((1ull << attrib_count) - 1ull) << idx;
-         } else if (idx == VARYING_SLOT_CLIP_DIST0 || idx == VARYING_SLOT_CLIP_DIST1) {
-            assert(variable->data.compact);
-            unsigned length = DIV_ROUND_UP(glsl_get_length(variable->type), 4);
-            ctx->input_mask |= ((1ull << length) - 1ull) << idx;
-         }
-      }
-      uint64_t mask = ctx->input_mask;
-      while (mask) {
-         unsigned loc = u_bit_scan64(&mask);
-         unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << loc) - 1ull));
-         if (flat_mask & (1ull << loc))
-            ctx->program->info->fs.flat_shaded_mask |= 1ull << idx;
-      }
-      if (ctx->program->info->info.needs_multiview_view_index)
-         ctx->input_mask |= 1 << VARYING_SLOT_LAYER;
+
       ctx->program->info->fs.can_discard = nir->info.fs.uses_discard;
       ctx->program->info->fs.early_fragment_test = nir->info.fs.early_fragment_tests;
       break;
