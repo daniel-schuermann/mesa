@@ -998,6 +998,12 @@ void radv_GetPhysicalDeviceFeatures2(
 			features->shaderSharedInt64Atomics = HAVE_LLVM >= 0x0900;
 			break;
 		}
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES_EXT: {
+			VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT *features =
+				(VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT *)ext;
+			features->shaderDemoteToHelperInvocation = pdevice->use_aco;
+			break;
+		}
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_FEATURES_EXT: {
 			VkPhysicalDeviceInlineUniformBlockFeaturesEXT *features =
 				(VkPhysicalDeviceInlineUniformBlockFeaturesEXT *)ext;
