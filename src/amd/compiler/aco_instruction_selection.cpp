@@ -5602,6 +5602,20 @@ Temp apply_round_slice(isel_context *ctx, Temp coords, unsigned idx)
    return res;
 }
 
+void get_const_vec(nir_ssa_def *vec, nir_const_value *cv[4])
+{
+   if (vec->parent_instr->type != nir_instr_type_alu)
+      return;
+   nir_alu_instr *vec_instr = nir_instr_as_alu(vec->parent_instr);
+   if (vec_instr->op != nir_op_vec(vec->num_components))
+      return;
+
+   for (unsigned i = 0; i < vec->num_components; i++) {
+      cv[i] = vec_instr->src[i].swizzle[0] == 0 ?
+              nir_src_as_const_value(vec_instr->src[i].src) : NULL;
+   }
+}
+
 void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 {
    Builder bld(ctx->program, ctx->block);
@@ -5610,6 +5624,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    Temp resource, sampler, fmask_ptr, bias = Temp(), coords, compare = Temp(), sample_index = Temp(),
         lod = Temp(), offset = Temp(), ddx = Temp(), ddy = Temp(), derivs = Temp();
    nir_const_value *sample_index_cv = NULL;
+   nir_const_value *const_offset[4] = {NULL, NULL, NULL, NULL};
    enum glsl_base_type stype;
    tex_fetch_ptrs(ctx, instr, &resource, &sampler, &fmask_ptr, &stype);
 
@@ -5648,7 +5663,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          break;
       case nir_tex_src_offset:
          offset = get_ssa_temp(ctx, instr->src[i].src.ssa);
-         //offset_src = i;
+         get_const_vec(instr->src[i].src.ssa, const_offset);
          has_offset = true;
          break;
       case nir_tex_src_ddx:
@@ -5690,30 +5705,60 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (has_offset && instr->op != nir_texop_txf) {
       aco_ptr<Instruction> tmp_instr;
       Temp acc, pack = Temp();
+
+      uint32_t pack_const = 0;
+      for (unsigned i = 0; i < offset.size(); i++) {
+         if (!const_offset[i])
+            continue;
+         pack_const |= (const_offset[i]->u32 & 0x3Fu) << (8u * i);
+      }
+
       if (offset.type() == sgpr) {
          for (unsigned i = 0; i < offset.size(); i++) {
+            if (const_offset[i])
+               continue;
+
             acc = emit_extract_vector(ctx, offset, i, s1);
             acc = bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), acc, Operand(0x3Fu));
 
-            if (i == 0) {
+            if (i) {
+               acc = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), acc, Operand(8u * i));
+            }
+
+            if (pack == Temp()) {
                pack = acc;
             } else {
-               acc = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), acc, Operand(8u * i));
                pack = bld.sop2(aco_opcode::s_or_b32, bld.def(s1), bld.def(s1, scc), pack, acc);
             }
          }
+
+         if (pack_const && pack != Temp())
+            pack = bld.sop2(aco_opcode::s_or_b32, bld.def(s1), bld.def(s1, scc), Operand(pack_const), pack);
+         else
+            pack = bld.vop1(aco_opcode::v_mov_b32, bld.def(v1), Operand(pack_const));
       } else {
          for (unsigned i = 0; i < offset.size(); i++) {
+            if (const_offset[i])
+               continue;
+
             acc = emit_extract_vector(ctx, offset, i, v1);
             acc = bld.vop2(aco_opcode::v_and_b32, bld.def(v1), Operand(0x3Fu), acc);
 
-            if (i == 0) {
+            if (i) {
+               acc = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(8u * i), acc);
+            }
+
+            if (pack == Temp()) {
                pack = acc;
             } else {
-               acc = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(8u * i), acc);
                pack = bld.vop2(aco_opcode::v_or_b32, bld.def(v1), pack, acc);
             }
          }
+
+         if (pack_const && pack != Temp())
+            pack = bld.sop2(aco_opcode::v_or_b32, bld.def(v1), Operand(pack_const), pack);
+         else
+            pack = bld.vop1(aco_opcode::v_mov_b32, bld.def(v1), Operand(pack_const));
       }
       offset = pack;
    }
