@@ -2464,25 +2464,15 @@ void emit_load_frag_coord(isel_context *ctx, Temp dst, unsigned num_components)
 void visit_load_interpolated_input(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-
-   if (nir_intrinsic_base(instr) == VARYING_SLOT_POS) {
-      emit_load_frag_coord(ctx, dst, instr->dest.ssa.num_components);
-      return;
-   }
-
-   assert(nir_intrinsic_base(instr) != VARYING_SLOT_CLIP_DIST0);
-   uint64_t base = nir_intrinsic_base(instr) / 4;
-
-   nir_const_value* offset = nir_src_as_const_value(instr->src[1]);
-   if (offset)
-      base += offset->u32;
-
    Temp coords = get_ssa_temp(ctx, instr->src[0].ssa);
-   unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
+   unsigned idx = nir_intrinsic_base(instr);
    unsigned component = nir_intrinsic_component(instr);
    Temp prim_mask = ctx->prim_mask;
 
-   if (!offset) {
+   nir_const_value* offset = nir_src_as_const_value(instr->src[1]);
+   if (offset) {
+      assert(offset->u32 == 0);
+   } else {
       /* the lower 15bit of the prim_mask contain the offset into LDS
        * while the upper bits contain the number of prims */
       Temp offset_src = get_ssa_temp(ctx, instr->src[1].ssa);
@@ -2571,11 +2561,10 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
       }
 
    } else if (ctx->stage == MESA_SHADER_FRAGMENT) {
-      unsigned base = nir_intrinsic_base(instr) / 4;
       Temp prim_mask = ctx->prim_mask;
       nir_const_value* offset = nir_src_as_const_value(instr->src[0]);
       if (offset) {
-         base += offset->u32;
+         assert(offset->u32 == 0);
       } else {
          /* the lower 15bit of the prim_mask contain the offset into LDS
           * while the upper bits contain the number of prims */
@@ -2589,7 +2578,7 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
          prim_mask = bld.sop2(aco_opcode::s_add_i32, bld.def(s1, m0), bld.def(s1, scc), offset_src, prim_mask);
       }
 
-      unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
+      unsigned idx = nir_intrinsic_base(instr);
       unsigned component = nir_intrinsic_component(instr);
       Operand P0;
       P0.setFixed(PhysReg{2});
@@ -4832,8 +4821,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    }
    case nir_intrinsic_load_view_index:
    case nir_intrinsic_load_layer_id: {
-      unsigned base = VARYING_SLOT_LAYER / 4;
-      unsigned idx = util_bitcount64(ctx->input_mask & ((1ull << base) - 1ull));
+      unsigned idx = nir_intrinsic_base(instr);
       Operand P0;
       P0.setFixed(PhysReg{2});
       bld.vintrp(aco_opcode::v_interp_mov_f32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)),
