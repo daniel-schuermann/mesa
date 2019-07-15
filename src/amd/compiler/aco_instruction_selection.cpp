@@ -2305,26 +2305,33 @@ void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 
    } else if (index == FRAG_RESULT_STENCIL) {
 
-      assert(!ctx->program->info->info.ps.writes_z && "unimplemented");
+      if (ctx->program->info->info.ps.writes_z) {
+         target = V_008DFC_SQ_EXP_MRTZ;
+         enabled_channels = 0x2;
+         col_format = (unsigned) -1;
 
-      aco_ptr<Instruction> shift{create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1)};
-      shift->getOperand(0) = Operand((uint32_t) 16);
-      shift->getOperand(1) = values[0];
-      Temp tmp = {ctx->program->allocateId(), v1};
-      shift->getDefinition(0) = Definition(tmp);
-      ctx->block->instructions.emplace_back(std::move(shift));
+         values[1] = values[0];
+         values[0] = Operand(v1);
+      } else {
+         aco_ptr<Instruction> shift{create_instruction<VOP2_instruction>(aco_opcode::v_lshlrev_b32, Format::VOP2, 2, 1)};
+         shift->getOperand(0) = Operand((uint32_t) 16);
+         shift->getOperand(1) = values[0];
+         Temp tmp = {ctx->program->allocateId(), v1};
+         shift->getDefinition(0) = Definition(tmp);
+         ctx->block->instructions.emplace_back(std::move(shift));
 
-      aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
-      exp->valid_mask = false; // TODO
-      exp->done = false; // TODO
-      exp->compressed = true;
-      exp->dest = V_008DFC_SQ_EXP_MRTZ;
-      exp->enabled_mask = 0x3;
-      exp->getOperand(0) = Operand(tmp);
-      for (int i = 1; i < 4; i++)
-         exp->getOperand(i) = Operand(v1);
-      ctx->block->instructions.emplace_back(std::move(exp));
-      return;
+         aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
+         exp->valid_mask = false; // TODO
+         exp->done = false; // TODO
+         exp->compressed = true;
+         exp->dest = V_008DFC_SQ_EXP_MRTZ;
+         exp->enabled_mask = 0x3;
+         exp->getOperand(0) = Operand(tmp);
+         for (int i = 1; i < 4; i++)
+            exp->getOperand(i) = Operand(v1);
+         ctx->block->instructions.emplace_back(std::move(exp));
+         return;
+      }
 
    } else {
       index = index - FRAG_RESULT_DATA0;
