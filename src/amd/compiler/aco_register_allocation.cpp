@@ -43,7 +43,7 @@ struct ra_ctx {
    std::map<unsigned, Temp> orig_names;
    unsigned max_used_sgpr = 0;
    unsigned max_used_vgpr = 0;
-   std::bitset<32> defs_done;
+   std::bitset<64> defs_done; /* see MAX_ARGS in aco_instruction_selection_setup.cpp */
 
    ra_ctx(Program* program) : program(program) {}
 };
