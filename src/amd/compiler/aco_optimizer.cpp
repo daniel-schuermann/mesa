@@ -1447,6 +1447,9 @@ void create_vop3_for_op3(opt_ctx& ctx, aco_opcode opcode, aco_ptr<Instruction>& 
 
 bool combine_minmax3(opt_ctx& ctx, aco_ptr<Instruction>& instr, aco_opcode new_op)
 {
+   uint32_t omod_clamp = ctx.info[instr->getDefinition(0).tempId()].label &
+                         (label_omod_success | label_clamp_success);
+
    for (unsigned swap = 0; swap < 2; swap++) {
       Operand operands[3];
       bool neg[3], abs[3], opsel[3], clamp, inbetween_neg, inbetween_abs;
@@ -1460,6 +1463,10 @@ bool combine_minmax3(opt_ctx& ctx, aco_ptr<Instruction>& instr, aco_opcode new_o
          abs[1] |= inbetween_abs;
          abs[2] |= inbetween_abs;
          create_vop3_for_op3(ctx, new_op, instr, operands, neg, abs, opsel, clamp, omod);
+         if (omod_clamp & label_omod_success)
+            ctx.info[instr->getDefinition(0).tempId()].set_omod_success(instr.get());
+         if (omod_clamp & label_clamp_success)
+            ctx.info[instr->getDefinition(0).tempId()].set_clamp_success(instr.get());
          return true;
       }
    }
@@ -1468,6 +1475,9 @@ bool combine_minmax3(opt_ctx& ctx, aco_ptr<Instruction>& instr, aco_opcode new_o
 
 bool combine_three_valu_op(opt_ctx& ctx, aco_ptr<Instruction>& instr, aco_opcode op2, aco_opcode new_op, const char *shuffle, uint8_t ops)
 {
+   uint32_t omod_clamp = ctx.info[instr->getDefinition(0).tempId()].label &
+                         (label_omod_success | label_clamp_success);
+
    for (unsigned swap = 0; swap < 2; swap++) {
       if (!((1 << swap) & ops))
          continue;
@@ -1481,6 +1491,10 @@ bool combine_three_valu_op(opt_ctx& ctx, aco_ptr<Instruction>& instr, aco_opcode
                              &clamp, &omod, NULL, NULL, NULL)) {
          ctx.uses[instr->getOperand(swap).tempId()]--;
          create_vop3_for_op3(ctx, new_op, instr, operands, neg, abs, opsel, clamp, omod);
+         if (omod_clamp & label_omod_success)
+            ctx.info[instr->getDefinition(0).tempId()].set_omod_success(instr.get());
+         if (omod_clamp & label_clamp_success)
+            ctx.info[instr->getDefinition(0).tempId()].set_clamp_success(instr.get());
          return true;
       }
    }
@@ -1657,6 +1671,9 @@ bool combine_clamp(opt_ctx& ctx, aco_ptr<Instruction>& instr,
    else
       return false;
 
+   uint32_t omod_clamp = ctx.info[instr->getDefinition(0).tempId()].label &
+                         (label_omod_success | label_clamp_success);
+
    for (unsigned swap = 0; swap < 2; swap++) {
       Operand operands[3];
       bool neg[3], abs[3], opsel[3], clamp, inbetween_neg, inbetween_abs;
@@ -1751,6 +1768,10 @@ bool combine_clamp(opt_ctx& ctx, aco_ptr<Instruction>& instr,
 
          ctx.uses[instr->getOperand(swap).tempId()]--;
          create_vop3_for_op3(ctx, med, instr, operands, neg, abs, opsel, clamp, omod);
+         if (omod_clamp & label_omod_success)
+            ctx.info[instr->getDefinition(0).tempId()].set_omod_success(instr.get());
+         if (omod_clamp & label_clamp_success)
+            ctx.info[instr->getDefinition(0).tempId()].set_clamp_success(instr.get());
 
          return true;
       }
