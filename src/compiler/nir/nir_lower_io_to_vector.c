@@ -34,8 +34,9 @@
  * when all is said and done.
  */
 
-/* +1 because of how this pass handles dual source blending */
-#define MAX_SLOTS MAX2(MAX_VARYINGS_INCL_PATCH, FRAG_RESULT_MAX+1)
+/* FRAG_RESULT_MAX+1 instead of just FRAG_RESULT_MAX because of how this pass
+ * handles dual source blending */
+#define MAX_SLOTS MAX2(VARYING_SLOT_TESS_MAX, FRAG_RESULT_MAX+1)
 
 static unsigned
 get_slot(const nir_variable *var)
@@ -44,6 +45,22 @@ get_slot(const nir_variable *var)
     * one render target is supported, but it seems no driver supports more than
     * one. */
    return var->data.location + var->data.index;
+}
+
+static const struct glsl_type *
+get_per_vertex_type(const nir_shader *shader, const nir_variable *var,
+                    unsigned *num_vertices)
+{
+   if (nir_is_per_vertex_io(var, shader->info.stage)) {
+      assert(glsl_type_is_array(var->type));
+      if (num_vertices)
+         *num_vertices = glsl_get_length(var->type);
+      return glsl_get_array_element(var->type);
+   } else {
+      if (num_vertices)
+         *num_vertices = 0;
+      return var->type;
+   }
 }
 
 static const struct glsl_type *
@@ -60,26 +77,16 @@ resize_array_vec_type(const struct glsl_type *type, unsigned num_components)
 }
 
 static bool
-variable_can_rewrite(const nir_variable *var)
-{
-   /* Skip complex types we don't split in the first place */
-   if (!glsl_type_is_vector_or_scalar(glsl_without_array(var->type)))
-      return false;
-
-   /* TODO: add 64/16bit support ? */
-   if (glsl_get_bit_size(glsl_without_array(var->type)) != 32)
-      return false;
-
-   return true;
-}
-
-static bool
-variables_can_merge(nir_shader *shader,
+variables_can_merge(const nir_shader *shader,
                     const nir_variable *a, const nir_variable *b,
                     bool same_array_structure)
 {
    const struct glsl_type *a_type_tail = a->type;
    const struct glsl_type *b_type_tail = b->type;
+
+   if (nir_is_per_vertex_io(a, shader->info.stage) !=
+       nir_is_per_vertex_io(b, shader->info.stage))
+      return false;
 
    /* They must have the same array structure */
    if (same_array_structure) {
@@ -107,22 +114,32 @@ variables_can_merge(nir_shader *shader,
    if (glsl_get_base_type(a_type_tail) != glsl_get_base_type(b_type_tail))
       return false;
 
+   /* TODO: add 64/16bit support ? */
+   if (glsl_get_bit_size(a_type_tail) != 32)
+      return false;
+
    assert(a->data.mode == b->data.mode);
    if (shader->info.stage == MESA_SHADER_FRAGMENT &&
        a->data.mode == nir_var_shader_in &&
-       (a->data.interpolation != b->data.interpolation ||
-        a->data.index != b->data.index))
+       a->data.interpolation != b->data.interpolation)
+      return false;
+
+   if (shader->info.stage == MESA_SHADER_FRAGMENT &&
+       a->data.mode == nir_var_shader_out &&
+       a->data.index != b->data.index)
       return false;
 
    return true;
 }
 
 static const struct glsl_type *
-get_flat_type(nir_shader *shader, nir_variable *old_vars[MAX_SLOTS][4],
-              unsigned *loc, nir_variable **first_var)
+get_flat_type(const nir_shader *shader, nir_variable *old_vars[MAX_SLOTS][4],
+              unsigned *loc, nir_variable **first_var, unsigned *num_vertices)
 {
    unsigned todo = 1;
    unsigned slots = 0;
+   enum glsl_base_type base;
+   *num_vertices = 0;
    *first_var = NULL;
 
    while (todo) {
@@ -131,30 +148,37 @@ get_flat_type(nir_shader *shader, nir_variable *old_vars[MAX_SLOTS][4],
          nir_variable *var = old_vars[*loc][frac];
          if (!var)
             continue;
-         if ((*first_var && !variables_can_merge(shader, var, *first_var, false)) ||
+         if ((*first_var &&
+              !variables_can_merge(shader, var, *first_var, false)) ||
              var->data.compact) {
             (*loc)++;
             return NULL;
          }
 
-         if (!*first_var)
+         if (!*first_var) {
+            if (!glsl_type_is_vector_or_scalar(glsl_without_array(var->type))) {
+               (*loc)++;
+               return NULL;
+            }
             *first_var = var;
+            base = glsl_get_base_type(
+               glsl_without_array(get_per_vertex_type(shader, var, NULL)));
+         }
 
          bool vs_in = shader->info.stage == MESA_SHADER_VERTEX &&
                       var->data.mode == nir_var_shader_in;
-         unsigned slots = glsl_count_attribute_slots(var->type, vs_in);
-         todo = MAX2(todo, slots);
+         unsigned var_slots = glsl_count_attribute_slots(
+            get_per_vertex_type(shader, var, num_vertices), vs_in);
+         todo = MAX2(todo, var_slots);
       }
       todo--;
       slots++;
-      if (todo)
-         (*loc)++;
+      (*loc)++;
    }
 
    if (!*first_var)
       return NULL;
 
-   enum glsl_base_type base = glsl_get_base_type(glsl_without_array((*first_var)->type));
    return glsl_array_type(glsl_vector_type(base, 4), slots, 0);
 }
 
@@ -168,24 +192,27 @@ create_new_io_vars(nir_shader *shader, struct exec_list *io_list,
       return false;
 
    nir_foreach_variable(var, io_list) {
-      if (variable_can_rewrite(var)) {
-         unsigned frac = var->data.location_frac;
-         old_vars[get_slot(var)][frac] = var;
-      }
+      unsigned frac = var->data.location_frac;
+      old_vars[get_slot(var)][frac] = var;
    }
 
    bool merged_any_vars = false;
 
-   for (unsigned loc = 0; loc < MAX_SLOTS; loc++) {
+   for (unsigned loc = 0; loc < MAX_SLOTS;) {
       nir_variable *first_var;
+      unsigned num_vertices;
       unsigned new_loc = loc;
-      const struct glsl_type *flat_type = get_flat_type(shader, old_vars, &new_loc, &first_var);
+      const struct glsl_type *flat_type =
+         get_flat_type(shader, old_vars, &new_loc, &first_var, &num_vertices);
       if (flat_type) {
          merged_any_vars = true;
 
          nir_variable *var = nir_variable_clone(first_var, shader);
          var->data.location_frac = 0;
-         var->type = flat_type;
+         if (num_vertices)
+            var->type = glsl_array_type(flat_type, num_vertices, 0);
+         else
+            var->type = flat_type;
 
          nir_shader_add_variable(shader, var);
          for (unsigned i = 0; i < glsl_get_length(flat_type); i++) {
@@ -226,6 +253,10 @@ create_new_io_vars(nir_shader *shader, struct exec_list *io_list,
 
             const unsigned num_components =
                glsl_get_components(glsl_without_array(var->type));
+            if (!num_components) {
+               frac = 4;
+               break; /* The type was a struct. */
+            }
 
             /* We had better not have any overlapping vars */
             for (unsigned i = 1; i < num_components; i++)
@@ -275,8 +306,9 @@ build_array_index(nir_builder *b, nir_deref_instr *deref, nir_ssa_def *base,
    case nir_deref_type_array: {
       nir_ssa_def *index = nir_i2i(b, deref->arr.index.ssa,
                                    deref->dest.ssa.bit_size);
-      return nir_iadd(b, build_array_index(b, nir_deref_instr_parent(deref), base, vs_in),
-                      nir_imul_imm(b, index, glsl_count_attribute_slots(deref->type, vs_in)));
+      return nir_iadd(
+         b, build_array_index(b, nir_deref_instr_parent(deref), base, vs_in),
+         nir_imul_imm(b, index, glsl_count_attribute_slots(deref->type, vs_in)));
    }
    default:
       unreachable("Invalid deref instruction type");
@@ -288,10 +320,19 @@ build_array_deref_of_new_var_flat(nir_shader *shader,
                                   nir_builder *b, nir_variable *new_var,
                                   nir_deref_instr *leader, unsigned base)
 {
+   nir_deref_instr *deref = nir_build_deref_var(b, new_var);
+
+   if (nir_is_per_vertex_io(new_var, shader->info.stage)) {
+      assert(leader->deref_type == nir_deref_type_array);
+      nir_ssa_def *index = leader->arr.index.ssa;
+      leader = nir_deref_instr_parent(leader);
+      deref = nir_build_deref_array(b, deref, index);
+   }
+
    bool vs_in = shader->info.stage == MESA_SHADER_VERTEX &&
                 new_var->data.mode == nir_var_shader_in;
-   return nir_build_deref_array(b, nir_build_deref_var(b, new_var),
-                                build_array_index(b, leader, nir_imm_int(b, base), vs_in));
+   return nir_build_deref_array(
+      b, deref, build_array_index(b, leader, nir_imm_int(b, base), vs_in));
 }
 
 static bool
