@@ -3815,7 +3815,7 @@ static void visit_tex(struct ac_nir_context *ctx, nir_tex_instr *instr)
 		goto write_result;
 	}
 
-	if (args.offset && instr->op != nir_texop_txf) {
+	if (args.offset && instr->op != nir_texop_txf && instr->op != nir_texop_txf_ms) {
 		LLVMValueRef offset[3], pack;
 		for (unsigned chan = 0; chan < 3; ++chan)
 			offset[chan] = ctx->ac.i32_0;
@@ -3954,7 +3954,7 @@ static void visit_tex(struct ac_nir_context *ctx, nir_tex_instr *instr)
 			args.coords[sample_chan], fmask_ptr);
 	}
 
-	if (args.offset && instr->op == nir_texop_txf) {
+	if (args.offset && (instr->op == nir_texop_txf || instr->op == nir_texop_txf_ms)) {
 		int num_offsets = instr->src[offset_src].src.ssa->num_components;
 		num_offsets = MIN2(num_offsets, instr->coord_components);
 		for (unsigned i = 0; i < num_offsets; ++i) {
