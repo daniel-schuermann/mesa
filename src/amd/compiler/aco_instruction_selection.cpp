@@ -5825,7 +5825,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       return;
    }
 
-   if (has_offset && instr->op != nir_texop_txf) {
+   if (has_offset && instr->op != nir_texop_txf && instr->op != nir_texop_txf_ms) {
       aco_ptr<Instruction> tmp_instr;
       Temp acc, pack = Temp();
 
@@ -5946,7 +5946,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       sample_index = adjust_sample_index_using_fmask(ctx, da, coords, op, fmask_ptr);
    }
 
-   if (has_offset && instr->op == nir_texop_txf) {
+   if (has_offset && (instr->op == nir_texop_txf || instr->op == nir_texop_txf_ms)) {
       Temp split_coords[coords.size()];
       emit_split_vector(ctx, coords, coords.size());
       for (unsigned i = 0; i < coords.size(); i++)
