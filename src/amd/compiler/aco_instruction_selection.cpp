@@ -3681,11 +3681,11 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
          image_op = aco_opcode::image_atomic_add;
          break;
       case nir_intrinsic_image_deref_atomic_min:
-         buf_op = aco_opcode::buffer_atomic_umin;
+         buf_op = is_unsigned ? aco_opcode::buffer_atomic_umin : aco_opcode::buffer_atomic_smin;
          image_op = is_unsigned ? aco_opcode::image_atomic_umin : aco_opcode::image_atomic_smin;
          break;
       case nir_intrinsic_image_deref_atomic_max:
-         buf_op = aco_opcode::buffer_atomic_umax;
+         buf_op = is_unsigned ? aco_opcode::buffer_atomic_umax : aco_opcode::buffer_atomic_smax;
          image_op = is_unsigned ? aco_opcode::image_atomic_umax : aco_opcode::image_atomic_smax;
          break;
       case nir_intrinsic_image_deref_atomic_and:
@@ -4142,10 +4142,10 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
 
    Builder bld(ctx->program, ctx->block);
    Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[2].ssa));
-   assert(data.size() == 1 && "64bit ssbo atomics not yet implemented.");
 
    if (instr->intrinsic == nir_intrinsic_ssbo_atomic_comp_swap)
-      data = bld.pseudo(aco_opcode::p_create_vector, bld.def(v2), get_ssa_temp(ctx, instr->src[3].ssa), data);
+      data = bld.pseudo(aco_opcode::p_create_vector, bld.def(vgpr, data.size() * 2),
+                        get_ssa_temp(ctx, instr->src[3].ssa), data);
 
    Temp offset;
    if (ctx->options->chip_class < GFX8)
@@ -4158,42 +4158,52 @@ void visit_atomic_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
 
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
 
-   aco_opcode op;
+   aco_opcode op32, op64;
    switch (instr->intrinsic) {
       case nir_intrinsic_ssbo_atomic_add:
-         op = aco_opcode::buffer_atomic_add;
+         op32 = aco_opcode::buffer_atomic_add;
+         op64 = aco_opcode::buffer_atomic_add_x2;
          break;
       case nir_intrinsic_ssbo_atomic_imin:
-         op = aco_opcode::buffer_atomic_smin;
+         op32 = aco_opcode::buffer_atomic_smin;
+         op64 = aco_opcode::buffer_atomic_smin_x2;
          break;
       case nir_intrinsic_ssbo_atomic_umin:
-         op = aco_opcode::buffer_atomic_umin;
+         op32 = aco_opcode::buffer_atomic_umin;
+         op64 = aco_opcode::buffer_atomic_umin_x2;
          break;
       case nir_intrinsic_ssbo_atomic_imax:
-         op = aco_opcode::buffer_atomic_smax;
+         op32 = aco_opcode::buffer_atomic_smax;
+         op64 = aco_opcode::buffer_atomic_smax_x2;
          break;
       case nir_intrinsic_ssbo_atomic_umax:
-         op = aco_opcode::buffer_atomic_umax;
+         op32 = aco_opcode::buffer_atomic_umax;
+         op64 = aco_opcode::buffer_atomic_umax_x2;
          break;
       case nir_intrinsic_ssbo_atomic_and:
-         op = aco_opcode::buffer_atomic_and;
+         op32 = aco_opcode::buffer_atomic_and;
+         op64 = aco_opcode::buffer_atomic_and_x2;
          break;
       case nir_intrinsic_ssbo_atomic_or:
-         op = aco_opcode::buffer_atomic_or;
+         op32 = aco_opcode::buffer_atomic_or;
+         op64 = aco_opcode::buffer_atomic_or_x2;
          break;
       case nir_intrinsic_ssbo_atomic_xor:
-         op = aco_opcode::buffer_atomic_xor;
+         op32 = aco_opcode::buffer_atomic_xor;
+         op64 = aco_opcode::buffer_atomic_xor_x2;
          break;
       case nir_intrinsic_ssbo_atomic_exchange:
-         op = aco_opcode::buffer_atomic_swap;
+         op32 = aco_opcode::buffer_atomic_swap;
+         op64 = aco_opcode::buffer_atomic_swap_x2;
          break;
       case nir_intrinsic_ssbo_atomic_comp_swap:
-         op = aco_opcode::buffer_atomic_cmpswap;
+         op32 = aco_opcode::buffer_atomic_cmpswap;
+         op64 = aco_opcode::buffer_atomic_cmpswap_x2;
          break;
       default:
          unreachable("visit_atomic_ssbo should only be called with nir_intrinsic_ssbo_atomic_* instructions.");
    }
-
+   aco_opcode op = instr->dest.ssa.bit_size == 32 ? op32 : op64;
    aco_ptr<MUBUF_instruction> mubuf{create_instruction<MUBUF_instruction>(op, Format::MUBUF, 4, return_previous ? 1 : 0)};
    mubuf->getOperand(0) = offset.type() == vgpr ? Operand(offset) : Operand(v1);
    mubuf->getOperand(1) = Operand(rsrc);
