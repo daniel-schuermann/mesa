@@ -821,52 +821,45 @@ for i in range(8):
 
 
 # VOPP instructions: packed 16bit instructions - 1 or 2 inputs and 1 output
-
-VOPP_2 = [
-   "v_pk_mul_lo_u16",
-   "v_pk_add_i16",
-   "v_pk_sub_i16",
-   "v_pk_lshlrev_b16",
-   "v_pk_lshrrev_b16",
-   "v_pk_ashrrev_i16",
-   "v_pk_max_i16",
-   "v_pk_min_i16",
-   "v_pk_add_u16",
-   "v_pk_sub_u16",
-   "v_pk_max_u16",
-   "v_pk_min_u16",
-   "v_pk_add_f16",
-   "v_pk_mul_f16",
-   "v_pk_min_f16",
-   "v_pk_max_f16"
-]
-#for name in VOPP_2:
-#   opcode(name, 2, [v1])
-
-VOPP_3 = [
-   "v_pk_mad_i16",
-   "v_pk_mad_u16",
-   "v_pk_fma_f16",
-   "v_pk_mad_mix_f32",
-   "v_pk_mad_mixlo_f16",
-   "v_pk_mad_mixhi_f16"
-]
-#for name in VOPP_3:
-#   opcode(name, 3, [v1])
-
-VOPP = VOPP_2 + VOPP_3
+VOPP = {
+   (0x00, "v_pk_mad_i16"),
+   (0x01, "v_pk_mul_lo_u16"),
+   (0x02, "v_pk_add_i16"),
+   (0x03, "v_pk_sub_i16"),
+   (0x04, "v_pk_lshlrev_b16"),
+   (0x05, "v_pk_lshrrev_b16"),
+   (0x06, "v_pk_ashrrev_i16"),
+   (0x00, "v_pk_max_i16"),
+   (0x00, "v_pk_min_i16"),
+   (0x00, "v_pk_mad_u16"),
+   (0x00, "v_pk_add_u16"),
+   (0x00, "v_pk_sub_u16"),
+   (0x00, "v_pk_max_u16"),
+   (0x00, "v_pk_min_u16"),
+   (0x00, "v_pk_fma_f16"),
+   (0x00, "v_pk_add_f16"),
+   (0x00, "v_pk_mul_f16"),
+   (0x00, "v_pk_min_f16"),
+   (0x00, "v_pk_max_f16"),
+   (0x00, "v_pk_fma_mix_f32"), # v_pk_mad_mix_f32 in VEGA ISA
+   (0x00, "v_pk_fma_mixlo_f16"),
+   (0x00, "v_pk_fma_mixhi_f16"),
+}
+# (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (-1, -1, -1, code, code, name)
+for (code, name) in VOPP:
+   opcode(name, code, Format.VOP3P)
 
 
 # VINTERP instructions: 
 
-VINTRP = [
-   "v_interp_p1_f32",
-   "v_interp_p2_f32",
-   "v_interp_mov_f32"
-]
-opcode("v_interp_p1_f32", 0, Format.VINTRP)
-opcode("v_interp_p2_f32", 1, Format.VINTRP)
-opcode("v_interp_mov_f32", 2, Format.VINTRP)
+VINTRP = {
+   (0x00, "v_interp_p1_f32"),
+   (0x01, "v_interp_p2_f32"),
+   (0x02, "v_interp_mov_f32"),
+}
+# (gfx6, gfx7, gfx8, gfx9, gfx10, name) = (code, code, code, code, code, name)
+for (code, name) in VINTRP:
+   opcode(name, code, Format.VINTRP)
 
 # VOP3 instructions: 3 inputs, 1 output
 # VOP3b instructions: have a unique scalar output, e.g. VOP2 with vcc out
