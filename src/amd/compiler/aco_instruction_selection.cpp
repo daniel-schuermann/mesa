@@ -7368,6 +7368,141 @@ static void create_vs_exports(isel_context *ctx)
       export_vs_varying(ctx, i, false, NULL);
    }
 }
+
+static void emit_stream_output(isel_context *ctx,
+                               Temp const *so_buffers,
+                               Temp const *so_write_offset,
+                               const struct radv_stream_output *output)
+{
+   unsigned num_comps = util_bitcount(output->component_mask);
+   unsigned loc = output->location;
+   unsigned buf = output->buffer;
+   unsigned offset = output->offset;
+
+   assert(num_comps && num_comps <= 4);
+   if (!num_comps || num_comps > 4)
+      return;
+
+   unsigned start = ffs(output->component_mask) - 1;
+
+   Temp out[4]; //TODO: what if there are holes in the component_mask?
+   bool all_undef = true;
+   assert(ctx->stage == MESA_SHADER_VERTEX); //TODO: assert that it is a VS without TS/GS
+   for (unsigned i = 0; i < num_comps; i++) {
+      out[i] = ctx->vs_output.outputs[loc][start + i];
+      all_undef = all_undef && !out[i].id();
+   }
+   if (all_undef)
+      return;
+
+   Temp write_data = {ctx->program->allocateId(), RegClass(vgpr, num_comps)};
+   aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, num_comps, 1)};
+   for (unsigned i = 0; i < num_comps; ++i)
+      vec->getOperand(i) = Operand(out[i]);
+   vec->getDefinition(0) = Definition(write_data);
+   ctx->block->instructions.emplace_back(std::move(vec));
+
+   aco_opcode opcode;
+   switch (num_comps) {
+   case 1:
+      opcode = aco_opcode::buffer_store_dword;
+      break;
+   case 2:
+      opcode = aco_opcode::buffer_store_dwordx2;
+      break;
+   case 3:
+      opcode = aco_opcode::buffer_store_dwordx3;
+      break;
+   case 4:
+      opcode = aco_opcode::buffer_store_dwordx4;
+      break;
+   }
+
+   aco_ptr<MUBUF_instruction> store{create_instruction<MUBUF_instruction>(opcode, Format::MUBUF, 4, 0)};
+   store->getOperand(0) = Operand(so_write_offset[buf]);
+   store->getOperand(1) = Operand(so_buffers[buf]);
+   store->getOperand(2) = Operand((uint32_t) 0);
+   store->getOperand(3) = Operand(write_data);
+   store->offset = offset; //TODO: out-of-range issues?
+   store->offen = true;
+   store->glc = true;
+   store->slc = true;
+   store->can_reorder = true;
+   ctx->block->instructions.emplace_back(std::move(store));
+}
+
+static void emit_streamout(isel_context *ctx, unsigned stream)
+{
+   Builder bld(ctx->program, ctx->block);
+
+   Temp so_buffers[4];
+   Temp buf_ptr = convert_pointer_to_64_bit(ctx, ctx->streamout_buffers);
+   for (unsigned i = 0; i < 4; i++) {
+      unsigned stride = ctx->program->info->info.so.strides[i];
+      if (!stride)
+         continue;
+
+      so_buffers[i] = bld.smem(aco_opcode::s_load_dwordx4, bld.def(s4), buf_ptr, Operand(i * 16u));
+   }
+
+   Temp so_vtx_count = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), bld.def(s1, scc),
+                                ctx->streamout_config, Operand(0x70010u));
+
+   Temp tid = bld.vop3(aco_opcode::v_mbcnt_hi_u32_b32, bld.def(v1), Operand((uint32_t) -1),
+                       bld.vop3(aco_opcode::v_mbcnt_lo_u32_b32, bld.def(v1), Operand((uint32_t) -1), Operand(0u)));
+
+   Temp can_emit = bld.vopc(aco_opcode::v_cmp_gt_i32, bld.def(s2), so_vtx_count, tid);
+
+   if_context ic;
+   begin_divergent_if_then(ctx, &ic, can_emit);
+
+   bld.reset(ctx->block);
+
+   Temp so_write_index = bld.tmp(v1);
+   emit_v_add32(ctx, so_write_index, Operand(ctx->streamout_write_idx), Operand(tid));
+
+   Temp so_write_offset[4];
+
+   for (unsigned i = 0; i < 4; i++) {
+      unsigned stride = ctx->program->info->info.so.strides[i];
+      if (!stride)
+         continue;
+
+      if (stride == 1) {
+         Temp offset = bld.sop2(aco_opcode::s_add_i32, bld.def(s1), bld.def(s1, scc),
+                                ctx->streamout_write_idx, ctx->streamout_offset[i]);
+         Temp new_offset = bld.tmp(v1);
+         emit_v_add32(ctx, new_offset, Operand(offset), Operand(tid));
+
+         so_write_offset[i] = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(2u), new_offset);
+      } else {
+         Temp offset;
+         if (util_is_power_of_two_nonzero(stride))
+            offset = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(ffs(stride) - 1u + 2u), so_write_index);
+         else
+            offset = bld.vop3(aco_opcode::v_mul_lo_u32, bld.def(v1), so_write_index,
+                              bld.vop1(aco_opcode::v_mov_b32, bld.def(v1), Operand(stride * 4u)));
+
+         Temp offset2 = bld.sop2(aco_opcode::s_mul_i32, bld.def(s1), Operand(4u), ctx->streamout_offset[i]);
+
+         so_write_offset[i] = bld.tmp(v1);
+         emit_v_add32(ctx, so_write_offset[i], Operand(offset), Operand(offset2));
+      }
+   }
+
+   for (unsigned i = 0; i < ctx->program->info->info.so.num_outputs; i++) {
+      struct radv_stream_output *output =
+         &ctx->program->info->info.so.outputs[i];
+      if (stream != output->stream)
+         continue;
+
+      emit_stream_output(ctx, so_buffers, so_write_offset, output);
+   }
+
+   begin_divergent_if_else(ctx, &ic, can_emit);
+   end_divergent_if(ctx, &ic);
+}
+
 } /* end namespace */
 
 aco_ptr<Instruction> create_s_mov(Definition dst, Operand src) {
@@ -7433,6 +7568,9 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
 
    struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
    visit_cf_list(&ctx, &func->impl->body);
+
+   if (ctx.program->info->info.so.num_outputs/*&& !ctx->is_gs_copy_shader */)
+      emit_streamout(&ctx, 0);
 
    if (ctx.stage == MESA_SHADER_VERTEX)
       create_vs_exports(&ctx);
