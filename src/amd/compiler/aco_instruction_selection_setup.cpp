@@ -127,6 +127,12 @@ struct isel_context {
    unsigned num_clip_distances;
    unsigned num_cull_distances;
    vs_output_state vs_output;
+
+   /* Streamout */
+   Temp streamout_buffers = Temp(0, s1);
+   Temp streamout_write_idx = Temp(0, s1);
+   Temp streamout_config = Temp(0, s1);
+   Temp streamout_offset[4] = {Temp(0, s1), Temp(0, s1), Temp(0, s1), Temp(0, s1)};
 };
 
 fs_input get_interp_input(nir_intrinsic_op intrin, enum glsl_interp_mode interp)
@@ -679,6 +685,9 @@ static void allocate_user_sgprs(isel_context *ctx,
    if (ctx->program->info->info.loads_push_constants)
       user_sgpr_count += 1; /* we use 32bit pointers */
 
+   if (ctx->program->info->info.so.num_outputs)
+      user_sgpr_count += 1; /* we use 32bit pointers */
+
    uint32_t available_sgprs = ctx->options->chip_class >= GFX9 && ctx->stage != MESA_SHADER_COMPUTE ? 32 : 16;
    uint32_t remaining_sgprs = available_sgprs - user_sgpr_count;
    uint32_t num_desc_set = util_bitcount(ctx->program->info->info.desc_set_used_mask);
@@ -804,9 +813,8 @@ declare_global_input_sgprs(isel_context *ctx,
    }
 
    if (ctx->program->info->info.so.num_outputs) {
-      unreachable("Streamout not yet supported.");
-      //add_arg(args, s4, &ctx->streamout_buffers, user_sgpr_info->user_sgpr_idx);
-      //set_loc_shader_ptr(ctx, AC_UD_STREAMOUT_BUFFERS, &user_sgpr_info->user_sgpr_idx);
+      add_arg(args, s1, &ctx->streamout_buffers, user_sgpr_info->user_sgpr_idx);
+      set_loc_shader_ptr(ctx, AC_UD_STREAMOUT_BUFFERS, &user_sgpr_info->user_sgpr_idx);
    }
 }
 
@@ -824,6 +832,33 @@ declare_vs_input_vgprs(isel_context *ctx, struct arg_info *args)
          add_arg(args, v1, &ctx->vs_prim_id, vgpr_idx++);
       }
       add_arg(args, v1, NULL, vgpr_idx); /* unused */
+   }
+}
+
+static void
+declare_streamout_sgprs(isel_context *ctx, struct arg_info *args, unsigned *idx)
+{
+   /* Streamout SGPRs. */
+   if (ctx->program->info->info.so.num_outputs) {
+      assert(ctx->stage == MESA_SHADER_VERTEX ||
+             ctx->stage == MESA_SHADER_TESS_EVAL);
+
+      if (ctx->stage != MESA_SHADER_TESS_EVAL) {
+         add_arg(args, s1, &ctx->streamout_config, (*idx)++);
+      } else {
+         args->assign[args->count - 1] = &ctx->streamout_config;
+         args->types[args->count - 1] = s1;
+      }
+
+      add_arg(args, s1, &ctx->streamout_write_idx, (*idx)++);
+   }
+
+   /* A streamout buffer offset is loaded if the stride is non-zero. */
+   for (unsigned i = 0; i < 4; i++) {
+      if (!ctx->program->info->info.so.strides[i])
+         continue;
+
+      add_arg(args, s1, &ctx->streamout_offset[i], (*idx)++);
    }
 }
 
@@ -885,8 +920,13 @@ void add_startpgm(struct isel_context *ctx)
          add_arg(&args, s1, &ctx->view_index, user_sgpr_info.user_sgpr_idx);
          set_loc_shader(ctx, AC_UD_VIEW_INDEX, &user_sgpr_info.user_sgpr_idx, 1);
       }
+
+      assert(user_sgpr_info.user_sgpr_idx == user_sgpr_info.num_sgpr);
+      unsigned idx = user_sgpr_info.user_sgpr_idx;
       if (ctx->options->key.vs.out.as_es)
-         add_arg(&args, s1, &ctx->es2gs_offset, user_sgpr_info.user_sgpr_idx);
+         add_arg(&args, s1, &ctx->es2gs_offset, idx++);
+      else
+         declare_streamout_sgprs(ctx, &args, &idx);
 
       declare_vs_input_vgprs(ctx, &args);
       break;
