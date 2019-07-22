@@ -851,7 +851,6 @@ for (code, name) in VOPP:
 
 
 # VINTERP instructions: 
-
 VINTRP = {
    (0x00, "v_interp_p1_f32"),
    (0x01, "v_interp_p2_f32"),
@@ -863,147 +862,128 @@ for (code, name) in VINTRP:
 
 # VOP3 instructions: 3 inputs, 1 output
 # VOP3b instructions: have a unique scalar output, e.g. VOP2 with vcc out
-
-VOP3b = [
-   "v_div_scale_f32",
-   "v_div_scale_f64",
-   "v_mad_u64_u32",
-   "v_mad_i64_i32"
-]
-#TODO opcode("v_mad_u64_u32", 3, [1,1,2], 2, [2,2], [0, 1], 0, 1, 0, 0, [0, 0, 0])
-opcode("v_mad_u64_u32", 488, Format.VOP3B)
-
-
-VOP3a_32 = {
-   (448, "v_mad_legacy_f32", True, True),
-   (449, "v_mad_f32", True, True),
-   (450, "v_mad_i32_i24", False, False),
-   (451, "v_mad_u32_u24", False, False),
-   (452, "v_cubeid_f32", True, True),
-   (453, "v_cubesc_f32", True, True),
-   (454, "v_cubetc_f32", True, True),
-   (455, "v_cubema_f32", True, True),
-   (456, "v_bfe_u32", False, False),
-   (457, "v_bfe_i32", False, False),
-   (458, "v_bfi_b32", False, False),
-   (459, "v_fma_f32", True, True),
-   (460, "v_fma_f64", True, True),
-   (461, "v_lerp_u8", False, False),
-   (462, "v_alignbit_b32", False, False),
-   (463, "v_alignbyte_b32", False, False),
-   (464, "v_min3_f32", True, True),
-   (465, "v_min3_i32", False, False),
-   (466, "v_min3_u32", False, False),
-   (467, "v_max3_f32", True, True),
-   (468, "v_max3_i32", False, False),
-   (469, "v_max3_u32", False, False),
-   (470, "v_med3_f32", True, True),
-   (471, "v_med3_i32", False, False),
-   (472, "v_med3_u32", False, False),
-   (473, "v_sad_u8", False, False),
-   (474, "v_sad_hi_u8", False, False),
-   (475, "v_sad_u16", False, False),
-   (476, "v_sad_u32", False, False),
-   (477, "v_cvt_pk_u8_f32", True, False),
-   (478, "v_div_fixup_f32", True, True),
-   (479, "v_div_fixup_f64", True, True),
-   (484, "v_msad_u8", False, False),
-   (490, "v_mad_legacy_f16", True, True),
-   (491, "v_mad_legacy_u16", False, False),
-   (492, "v_mad_legacy_i16", False, False),
-   (493, "v_perm_b32", False, False),
-   (494, "v_fma_legacy_f16", True, True),
-   (495, "v_div_fixup_legacy_f16", True, True),
-   (497, "v_mad_u32_u16", False, False),
-   (498, "v_mad_i32_i16", False, False),
-   (499, "v_xad_u32", False, False),
-   (500, "v_min3_f16", True, True),
-   (501, "v_min3_i16", False, False),
-   (502, "v_min3_u16", False, False),
-   (503, "v_max3_f16", True, True),
-   (504, "v_max3_i16", False, False),
-   (505, "v_max3_u16", False, False),
-   (506, "v_med3_f16", True, True),
-   (507, "v_med3_i16", False, False),
-   (508, "v_med3_u16", False, False),
-   (509, "v_lshl_add_u32", False, False),
-   (510, "v_add_lshl_u32", False, False),
-   (511, "v_add3_u32", False, False),
-   (512, "v_lshl_or_b32", False, False),
-   (513, "v_and_or_b32", False, False),
-   (514, "v_or3_b32", False, False),
-   (515, "v_mad_f16", True, True),
-   (516, "v_mad_u16", False, False),
-   (517, "v_mad_i16", False, False),
-   (518, "v_fma_f16", True, True),
-   (519, "v_div_fixup_f16", True, True),
+VOP3 = {
+   (0x140, 0x140, 0x1c0, 0x1c0, 0x140, "v_mad_legacy_f32", True, True),
+   (0x141, 0x141, 0x1c1, 0x1c1, 0x141, "v_mad_f32", True, True),
+   (0x142, 0x142, 0x1c2, 0x1c2, 0x142, "v_mad_i32_i24", False, False),
+   (0x143, 0x143, 0x1c3, 0x1c3, 0x143, "v_mad_u32_u24", False, False),
+   (0x144, 0x144, 0x1c4, 0x1c4, 0x144, "v_cubeid_f32", True, True),
+   (0x145, 0x145, 0x1c5, 0x1c5, 0x145, "v_cubesc_f32", True, True),
+   (0x146, 0x146, 0x1c6, 0x1c6, 0x146, "v_cubetc_f32", True, True),
+   (0x147, 0x147, 0x1c7, 0x1c7, 0x147, "v_cubema_f32", True, True),
+   (0x148, 0x148, 0x1c8, 0x1c8, 0x148, "v_bfe_u32", False, False),
+   (0x149, 0x149, 0x1c9, 0x1c9, 0x149, "v_bfe_i32", False, False),
+   (0x14a, 0x14a, 0x1ca, 0x1ca, 0x14a, "v_bfi_b32", False, False),
+   (0x14b, 0x14b, 0x1cb, 0x1cb, 0x14b, "v_fma_f32", True, True),
+   (0x14c, 0x14c, 0x1cc, 0x1cc, 0x14c, "v_fma_f64", True, True),
+   (0x14d, 0x14d, 0x1cd, 0x1cd, 0x14d, "v_lerp_u8", False, False),
+   (0x14e, 0x14e, 0x1ce, 0x1ce, 0x14e, "v_alignbit_b32", False, False),
+   (0x14f, 0x14f, 0x1cf, 0x1cf, 0x14f, "v_alignbyte_b32", False, False),
+   (0x150, 0x150,    -1,    -1, 0x150, "v_mullit_f32", True, True),
+   (0x151, 0x151, 0x1d0, 0x1d0, 0x151, "v_min3_f32", True, True),
+   (0x152, 0x152, 0x1d1, 0x1d1, 0x152, "v_min3_i32", False, False),
+   (0x153, 0x153, 0x1d2, 0x1d2, 0x153, "v_min3_u32", False, False),
+   (0x154, 0x154, 0x1d3, 0x1d3, 0x154, "v_max3_f32", True, True),
+   (0x155, 0x155, 0x1d4, 0x1d4, 0x155, "v_max3_i32", False, False),
+   (0x156, 0x156, 0x1d5, 0x1d5, 0x156, "v_max3_u32", False, False),
+   (0x157, 0x157, 0x1d6, 0x1d6, 0x157, "v_med3_f32", True, True),
+   (0x158, 0x158, 0x1d7, 0x1d7, 0x158, "v_med3_i32", False, False),
+   (0x159, 0x159, 0x1d8, 0x1d8, 0x159, "v_med3_u32", False, False),
+   (0x15a, 0x15a, 0x1d9, 0x1d9, 0x15a, "v_sad_u8", False, False),
+   (0x15b, 0x15b, 0x1da, 0x1da, 0x15b, "v_sad_hi_u8", False, False),
+   (0x15c, 0x15c, 0x1db, 0x1db, 0x15c, "v_sad_u16", False, False),
+   (0x15d, 0x15d, 0x1dc, 0x1dc, 0x15d, "v_sad_u32", False, False),
+   (0x15e, 0x15e, 0x1dd, 0x1dd, 0x15e, "v_cvt_pk_u8_f32", True, False),
+   (0x15f, 0x15f, 0x1de, 0x1de, 0x15f, "v_div_fixup_f32", True, True),
+   (0x160, 0x160, 0x1df, 0x1df, 0x160, "v_div_fixup_f64", True, True),
+   (0x161, 0x161,    -1,    -1,    -1, "v_lshl_b64", False, False),
+   (0x162, 0x162,    -1,    -1,    -1, "v_lshr_b64", False, False),
+   (0x163, 0x163,    -1,    -1,    -1, "v_ashr_i64", False, False),
+   (0x164, 0x164, 0x280, 0x280, 0x164, "v_add_f64", True, True),
+   (0x165, 0x165, 0x281, 0x281, 0x165, "v_mul_f64", True, True),
+   (0x166, 0x166, 0x282, 0x282, 0x166, "v_min_f64", True, True),
+   (0x167, 0x167, 0x283, 0x283, 0x167, "v_max_f64", True, True),
+   (0x168, 0x168, 0x284, 0x284, 0x168, "v_ldexp_f64", False, True), # src1 can take input modifiers
+   (0x169, 0x169, 0x285, 0x285, 0x169, "v_mul_lo_u32", False, False),
+   (0x16a, 0x16a, 0x286, 0x286, 0x16a, "v_mul_hi_u32", False, False),
+   (0x16b, 0x16b, 0x285, 0x285, 0x16b, "v_mul_lo_i32", False, False), # identical to v_mul_lo_u32
+   (0x16c, 0x16c, 0x287, 0x287, 0x16c, "v_mul_hi_i32", False, False),
+   (0x16d, 0x16d, 0x1e0, 0x1e0, 0x16d, "v_div_scale_f32", True, True), # writes to VCC
+   (0x16e, 0x16e, 0x1e1, 0x1e1, 0x16e, "v_div_scale_f64", True, True), # writes to VCC
+   (0x16f, 0x16f, 0x1e2, 0x1e2, 0x16f, "v_div_fmas_f32", True, True), # takes VCC input
+   (0x170, 0x170, 0x1e3, 0x1e3, 0x170, "v_div_fmas_f64", True, True), # takes VCC input
+   (0x171, 0x171, 0x1e4, 0x1e4, 0x171, "v_msad_u8", False, False),
+   (0x172, 0x172, 0x1e5, 0x1e5, 0x172, "v_qsad_pk_u16_u8", False, False),
+   (0x172,    -1,    -1,    -1,    -1, "v_qsad_u8", False, False), # what's the difference?
+   (0x173, 0x173, 0x1e6, 0x1e6, 0x173, "v_mqsad_pk_u16_u8", False, False),
+   (0x173,    -1,    -1,    -1,    -1, "v_mqsad_u8", False, False), # what's the difference?
+   (0x174, 0x174, 0x292, 0x292, 0x174, "v_trig_preop_f64", False, False),
+   (   -1, 0x175, 0x1e7, 0x1e7, 0x175, "v_mqsad_u32_u8", False, False),
+   (   -1, 0x176, 0x1e8, 0x1e8, 0x176, "v_mad_u64_u32", False, False),
+   (   -1, 0x177, 0x1e9, 0x1e9, 0x177, "v_mad_i64_i32", False, False),
+   (   -1,    -1, 0x1ea, 0x1ea,    -1, "v_mad_legacy_f16", True, True),
+   (   -1,    -1, 0x1eb, 0x1eb,    -1, "v_mad_legacy_u16", False, False),
+   (   -1,    -1, 0x1ec, 0x1ec,    -1, "v_mad_legacy_i16", False, False),
+   (   -1,    -1, 0x1ed, 0x1ed, 0x344, "v_perm_b32", False, False),
+   (   -1,    -1, 0x1ee, 0x1ee,    -1, "v_fma_legacy_f16", True, True),
+   (   -1,    -1, 0x1ef, 0x1ef,    -1, "v_div_fixup_legacy_f16", True, True),
+   (0x12c, 0x12c, 0x1f0, 0x1f0,    -1, "v_cvt_pkaccum_u8_f32", True, False),
+   (   -1,    -1,    -1, 0x1f1, 0x373, "v_mad_u32_u16", False, False),
+   (   -1,    -1,    -1, 0x1f2, 0x375, "v_mad_i32_i16", False, False),
+   (   -1,    -1,    -1, 0x1f2, 0x345, "v_xad_u32", False, False),
+   (   -1,    -1,    -1, 0x1f4, 0x351, "v_min3_f16", True, True),
+   (   -1,    -1,    -1, 0x1f5, 0x352, "v_min3_i16", False, False),
+   (   -1,    -1,    -1, 0x1f6, 0x353, "v_min3_u16", False, False),
+   (   -1,    -1,    -1, 0x1f7, 0x354, "v_max3_f16", True, True),
+   (   -1,    -1,    -1, 0x1f8, 0x355, "v_max3_i16", False, False),
+   (   -1,    -1,    -1, 0x1f9, 0x356, "v_max3_u16", False, False),
+   (   -1,    -1,    -1, 0x1fa, 0x357, "v_med3_f16", True, True),
+   (   -1,    -1,    -1, 0x1fb, 0x358, "v_med3_i16", False, False),
+   (   -1,    -1,    -1, 0x1fc, 0x359, "v_med3_u16", False, False),
+   (   -1,    -1,    -1, 0x1fd, 0x346, "v_lshl_add_u32", False, False),
+   (   -1,    -1,    -1, 0x1fe, 0x347, "v_add_lshl_u32", False, False),
+   (   -1,    -1,    -1, 0x1ff, 0x36d, "v_add3_u32", False, False),
+   (   -1,    -1,    -1, 0x200, 0x36f, "v_lshl_or_b32", False, False),
+   (   -1,    -1,    -1, 0x201, 0x371, "v_and_or_b32", False, False),
+   (   -1,    -1,    -1, 0x202, 0x372, "v_or3_b32", False, False),
+   (   -1,    -1,    -1, 0x203,    -1, "v_mad_f16", True, True),
+   (   -1,    -1,    -1, 0x204, 0x340, "v_mad_u16", False, False),
+   (   -1,    -1,    -1, 0x205, 0x35e, "v_mad_i16", False, False),
+   (   -1,    -1,    -1, 0x206, 0x34b, "v_fma_f16", True, True),
+   (   -1,    -1,    -1, 0x207, 0x35f, "v_div_fixup_f16", True, True),
+   (   -1,    -1, 0x274, 0x274, 0x342, "v_interp_p1ll_f16", True, True),
+   (   -1,    -1, 0x275, 0x275, 0x343, "v_interp_p1lv_f16", True, True),
+   (   -1,    -1, 0x276, 0x276,    -1, "v_interp_p2_legacy_f16", True, True),
+   (   -1,    -1,    -1, 0x277, 0x35a, "v_interp_p2_f16", True, True),
+   (0x12b, 0x12b, 0x288, 0x288, 0x362, "v_ldexp_f32", False, True),
+   (0x101, 0x101, 0x289, 0x289, 0x360, "v_readlane_b32", False, False),
+   (0x102, 0x102, 0x28a, 0x28a, 0x361, "v_writelane_b32", False, False),
+   (0x122, 0x122, 0x28b, 0x28b, 0x364, "v_bcnt_u32_b32", False, False),
+   (0x123, 0x123, 0x28c, 0x28c, 0x365, "v_mbcnt_lo_u32_b32", False, False),
+   (0x124, 0x124, 0x28d, 0x28d, 0x366, "v_mbcnt_hi_u32_b32", False, False),
+   (   -1,    -1, 0x28f, 0x28f, 0x2ff, "v_lshlrev_b64", False, False),
+   (   -1,    -1, 0x290, 0x290, 0x300, "v_lshrrev_b64", False, False),
+   (   -1,    -1, 0x291, 0x291, 0x301, "v_ashrrev_i64", False, False),
+   (0x11e, 0x11e, 0x293, 0x293, 0x363, "v_bfm_b32", False, False),
+   (0x12d, 0x12d, 0x294, 0x294, 0x368, "v_cvt_pknorm_i16_f32", True, False),
+   (0x12e, 0x12e, 0x295, 0x295, 0x369, "v_cvt_pknorm_u16_f32", True, False),
+   (0x12f, 0x12f, 0x296, 0x296, 0x12f, "v_cvt_pkrtz_f16_f32", True, False), # GFX6_7_10 is VOP2 with opcode 0x02f
+   (0x130, 0x130, 0x297, 0x297, 0x36a, "v_cvt_pk_u16_u32", False, False),
+   (0x131, 0x131, 0x298, 0x298, 0x36b, "v_cvt_pk_i16_i32", False, False),
+   (   -1,    -1,    -1, 0x299, 0x312, "v_cvt_pknorm_i16_f16", True, False),
+   (   -1,    -1,    -1, 0x29a, 0x313, "v_cvt_pknorm_u16_f16", True, False),
+   (   -1,    -1,    -1, 0x29c, 0x37f, "v_add_i32", False, False),
+   (   -1,    -1,    -1, 0x29d, 0x376, "v_sub_i32", False, False),
+   (   -1,    -1,    -1, 0x29e, 0x30d, "v_add_i16", False, False),
+   (   -1,    -1,    -1, 0x29f, 0x30e, "v_sub_i16", False, False),
+   (   -1,    -1,    -1, 0x2a0, 0x311, "v_pack_b32_f16", True, False),
+   (   -1,    -1,    -1,    -1, 0x178, "v_xor3_b32", False, False),
+   (   -1,    -1,    -1,    -1, 0x377, "v_permlane16_b32", False, False),
+   (   -1,    -1,    -1,    -1, 0x378, "v_permlanex16_b32", False, False),
+# TODO: many 16bit instructions moved from VOP2 to VOP3 on GFX10
 }
-for code, name, in_mod, out_mod in VOP3a_32:
-   opcode(name, code, Format.VOP3A, in_mod, out_mod)
-
-
-#two parameters
-VOP3a_32_2 = {
-   (496, "v_cvt_pkaccum_u8_f32"),
-   (645, "v_mul_lo_u32"),
-   (646, "v_mul_hi_u32"),
-   (647, "v_mul_hi_i32"),
-   (648, "v_ldexp_f32"),
-   (650, "v_writelane_b32"),
-   (652, "v_mbcnt_lo_u32_b32"),
-   (653, "v_mbcnt_hi_u32_b32"),
-   (659, "v_bfm_b32"),
-   (660, "v_cvt_pknorm_i16_f32"),
-   (661, "v_cvt_pknorm_u16_f32"),
-   (662, "v_cvt_pkrtz_f16_f32"),
-   (663, "v_cvt_pk_u16_u32"),
-   (664, "v_cvt_pk_i16_i32"),
-   (665, "v_cvt_pknorm_i16_f16"),
-   (666, "v_cvt_pknorm_u16_f16"),
-   (668, "v_add_i32"),
-   (669, "v_sub_i32"),
-   (670, "v_add_i16"),
-   (671, "v_sub_i16"),
-   (672, "v_pack_b32_f16"),
-}
-for code, name in VOP3a_32_2:
-   opcode(name, code, Format.VOP3A)
-
-VOP3a_64_2 = [
-   (640, "v_add_f64"),
-   (641, "v_mul_f64"),
-   (642, "v_min_f64"),
-   (643, "v_max_f64"),
-   (644, "v_ldexp_f64"),
-   (655, "v_lshlrev_b64"),
-   (656, "v_lshrrev_b64"), #64bit
-   (657, "v_ashrrev_i64"), #64bit
-   (658, "v_trig_preop_f64"), #64bit
-]
-for code, name in VOP3a_64_2:
-   opcode(name, code, Format.VOP3A)
-   
-VOP3a_SPECIAL = [
-   "v_bcnt_u32_b32", # one input
-   "v_readlane_b32", # 2 inputs, returns sgpr
-   "v_div_fmas_f32", #uses vcc
-   "v_div_fmas_f64", #3 inputs, takes vcc
-   "v_qsad_pk_u16_u8", #(2,1,2)gpr's
-   "v_mqsad_pk_u16_u8", #(2,1,2)gpr's
-   "v_mqsad_u32_u8", #(2,1,4)gpr's
-
-   "v_interp_p1ll_f16", #parameters?
-   "v_interp_p1lv_f16", #parameters?
-   "v_interp_p2_legacy_f16",
-   "v_interp_p2_f16"
-]
-opcode("v_bcnt_u32_b32", 651, Format.VOP3A)
-opcode("v_readlane_b32", 649, Format.VOP3A)
-opcode("v_div_fmas_f32", 482, Format.VOP3A)
-opcode("v_div_fmas_f64", 483, Format.VOP3A)
-opcode("v_qsad_pk_u16_u8", 485, Format.VOP3A)
-opcode("v_mqsad_pk_u16_u8", 486, Format.VOP3A)
-opcode("v_mqsad_u32_u8", 487, Format.VOP3A)
+for (gfx6, gfx7, gfx8, gfx9, gfx10, name, in_mod, out_mod) in VOP3:
+   opcode(name, gfx9, Format.VOP3A, in_mod, out_mod)
 
 
 # DS instructions: 3 inputs (1 addr, 2 data), 1 output
@@ -1341,32 +1321,6 @@ MIMG = [
 ]
 for code, name in MIMG:
     opcode(name, code, Format.MIMG)
-
-NOT_DPP = [
-   "v_madmk_f32",
-   "v_madak_f32",
-   "v_madmk_f16",
-   "v_madak_f16",
-   "v_readfirstlane_b32",
-   "v_cvt_i32_f64",
-   "v_cvt_f64_i32",
-   "v_cvt_f32_f64",
-   "v_cvt_f64_f32",
-   "v_cvt_u32_f64",
-   "v_cvt_f64_u32",
-   "v_trunc_f64",
-   "v_ceil_f64",
-   "v_rndne_f64",
-   "v_floor_f64",
-   "v_rcp_f64",
-   "v_rsq_f64",
-   "v_sqrt_f64",
-   "v_frexp_exp_i32_f64",
-   "v_frexp_mant_f64",
-   "v_fract_f64",
-   "v_clrexcp",
-   "v_swap_b32"
-]
 
 GLOBAL = [
    (16, "global_load_ubyte"),
