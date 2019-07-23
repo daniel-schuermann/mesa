@@ -55,7 +55,7 @@ void setup_reduce_temp(Program* program)
 
    assert(maxSize == 1 || maxSize == 2);
    Temp reduceTmp(0, RegClass(vgpr, maxSize).as_linear());
-   Temp vtmp(0, v1.as_linear());
+   Temp vtmp(0, RegClass(vgpr, maxSize).as_linear());
    int inserted_at = -1;
    int vtmp_inserted_at = -1;
    bool reduceTmp_in_loop = false;
@@ -113,7 +113,9 @@ void setup_reduce_temp(Program* program)
          }
 
          /* same as before, except for the vector temporary instead of the reduce temporary */
-         bool need_vtmp = op == imul32;
+         bool need_vtmp = op == imul32 || op == fadd64 || op == fmul64 ||
+                          op == fmin64 || op == fmax64;
+
          need_vtmp |= static_cast<Pseudo_reduction_instruction *>(instr)->cluster_size == 32;
          vtmp_in_loop |= need_vtmp && block.loop_nest_depth > 0;
          if (need_vtmp && (int)last_top_level_block_idx != vtmp_inserted_at) {
@@ -131,17 +133,6 @@ void setup_reduce_temp(Program* program)
             }
          }
 
-         Temp val = reduceTmp;
-         if (val.size() != instr->getOperand(0).size()) {
-            assert(instr->getOperand(0).regClass() == v1 || instr->getOperand(0).regClass() == v2);
-            val = Temp{program->allocateId(), instr->getOperand(0).regClass().as_linear()};
-            aco_ptr<Pseudo_instruction> split{create_instruction<Pseudo_instruction>(aco_opcode::p_split_vector, Format::PSEUDO, 1, 2)};
-            split->getOperand(0) = Operand(reduceTmp);
-            split->getDefinition(0) = Definition(val);
-            it = block.instructions.insert(it, std::move(split));
-            it++;
-         }
-
          instr->getOperand(1) = Operand(reduceTmp);
          if (need_vtmp)
             instr->getOperand(2) = Operand(vtmp);
@@ -155,8 +146,9 @@ void setup_reduce_temp(Program* program)
              (op == imin32 || op == imin64 ||
               op == imax32 || op == imax64 ||
               op == fmin32 || op == fmin64 ||
-              op == fmax32 || op == fmax64)) {
-            instr->getDefinition(2) = bld.def(s1);
+              op == fmax32 || op == fmax64 ||
+              op == fmul64)) {
+            instr->getDefinition(2) = bld.def(RegClass(sgpr, instr->getOperand(0).size()));
          }
 
          /* vcc clobber */
