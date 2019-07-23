@@ -76,16 +76,13 @@ class if_info_RAII {
 
 public:
    if_info_RAII(isel_context* ctx, Block* merge_block)
-      : ctx(ctx), merge_old(ctx->cf_info.parent_if.merge_block),
-        divergent_old(ctx->cf_info.parent_if.is_divergent)
+      : ctx(ctx), divergent_old(ctx->cf_info.parent_if.is_divergent)
    {
-      ctx->cf_info.parent_if.merge_block = merge_block;
       ctx->cf_info.parent_if.is_divergent = true;
    }
 
    ~if_info_RAII()
    {
-      ctx->cf_info.parent_if.merge_block = merge_old;
       ctx->cf_info.parent_if.is_divergent = divergent_old;
    }
 };
@@ -6740,8 +6737,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       Block BB_endif = Block();
       BB_endif.loop_nest_depth = ctx->cf_info.loop_nest_depth;
       BB_endif.kind |= ctx->block->kind & block_kind_top_level;
-      Block* parent_if_merge_block = ctx->cf_info.parent_if.merge_block;
-      ctx->cf_info.parent_if.merge_block = &BB_endif;
 
       /** emit then block */
       Block* BB_then = ctx->program->create_and_insert_block();
@@ -6796,7 +6791,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          ctx->block = ctx->program->insert_block(std::move(BB_endif));
          append_logical_start(ctx->block);
       }
-      ctx->cf_info.parent_if.merge_block = parent_if_merge_block;
 
    } else { /* non-uniform condition */
       /**
@@ -6889,8 +6883,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0));
       branch->getOperand(0) = Operand(cond);
       ctx->block->instructions.push_back(std::move(branch));
-
-      ctx->cf_info.parent_if.merge_block = &BB_endif;
 
 
       /** emit logical else block */
