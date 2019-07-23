@@ -81,7 +81,6 @@ struct isel_context {
          bool has_divergent_branch = false;
       } parent_loop;
       struct {
-         Block* merge_block;
          bool is_divergent = false;
       } parent_if;
    } cf_info;
