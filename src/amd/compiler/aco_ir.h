@@ -331,6 +331,11 @@ public:
       return data_.temp.id();
    }
 
+   bool hasRegClass() const noexcept
+   {
+      return isTemp() || isUndefined();
+   }
+
    RegClass regClass() const noexcept
    {
       return data_.temp.regClass();
