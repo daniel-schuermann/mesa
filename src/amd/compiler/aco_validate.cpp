@@ -107,7 +107,7 @@ void validate(Program* program, FILE * output)
                unsigned sgpr_idx = instr->num_operands;
                for (unsigned i = 0; i < instr->num_operands; i++)
                {
-                  if (instr->getOperand(i).isTemp() && instr->getOperand(i).getTemp().type() == sgpr) {
+                  if (instr->getOperand(i).hasRegClass() && instr->getOperand(i).regClass().type() == sgpr) {
                      if (sgpr_idx == instr->num_operands || instr->getOperand(sgpr_idx).tempId() != instr->getOperand(i).tempId())
                         num_sgpr++;
                      sgpr_idx = i;
@@ -122,7 +122,7 @@ void validate(Program* program, FILE * output)
             if (instr->format == Format::SOP1 || instr->format == Format::SOP2) {
                check(instr->getDefinition(0).getTemp().type() == sgpr, "Wrong Definition type for SALU instruction", instr.get());
                for (unsigned i = 0; i < instr->num_operands; i++)
-                 check(instr->getOperand(i).isConstant() || instr->getOperand(i).isUndefined() || instr->getOperand(i).getTemp().type() <= sgpr,
+                 check(instr->getOperand(i).isConstant() || instr->getOperand(i).regClass().type() <= sgpr,
                        "Wrong Operand type for SALU instruction", instr.get());
             }
          }
@@ -136,19 +136,19 @@ void validate(Program* program, FILE * output)
                check(size == instr->getDefinition(0).size(), "Definition size does not match operand sizes", instr.get());
                if (instr->getDefinition(0).getTemp().type() == sgpr)
                   for (unsigned i = 0; i < instr->num_operands; i++)
-                     check(instr->getOperand(i).isConstant() || instr->getOperand(i).isUndefined() || instr->getOperand(i).getTemp().type() == sgpr,
+                     check(instr->getOperand(i).isConstant() || instr->getOperand(i).regClass().type() == sgpr,
                            "Wrong Operand type for scalar vector", instr.get());
             } else if (instr->opcode == aco_opcode::p_extract_vector) {
-               check((instr->getOperand(0).isUndefined() || instr->getOperand(0).isTemp()) && instr->getOperand(1).isConstant(), "Wrong Operand types", instr.get());
+               check((instr->getOperand(0).hasRegClass()) && instr->getOperand(1).isConstant(), "Wrong Operand types", instr.get());
                check(instr->getOperand(1).constantValue() < instr->getOperand(0).size(), "Index out of range", instr.get());
-               check(instr->getDefinition(0).getTemp().type() == vgpr || instr->getOperand(0).getTemp().type() == sgpr,
+               check(instr->getDefinition(0).getTemp().type() == vgpr || instr->getOperand(0).regClass().type() == sgpr,
                      "Cannot extract SGPR value from VGPR vector", instr.get());
             } else if (instr->opcode == aco_opcode::p_parallelcopy) {
                check(instr->num_definitions == instr->num_operands, "Number of Operands does not match number of Definitions", instr.get());
                for (unsigned i = 0; i < instr->num_operands; i++) {
                   if (instr->getOperand(i).isTemp())
-                     check((instr->getDefinition(i).getTemp().type() == instr->getOperand(i).getTemp().type()) ||
-                           (instr->getDefinition(i).getTemp().type() == vgpr && instr->getOperand(i).getTemp().type() == sgpr),
+                     check((instr->getDefinition(i).getTemp().type() == instr->getOperand(i).regClass().type()) ||
+                           (instr->getDefinition(i).getTemp().type() == vgpr && instr->getOperand(i).regClass().type() == sgpr),
                            "Operand and Definition types do not match", instr.get());
                }
             } else if (instr->opcode == aco_opcode::p_phi) {
@@ -163,9 +163,9 @@ void validate(Program* program, FILE * output)
          }
          case Format::SMEM: {
             if (instr->num_operands >= 1)
-               check(instr->getOperand(0).isTemp() && instr->getOperand(0).getTemp().type() == sgpr, "SMEM operands must be sgpr", instr.get());
+               check(instr->getOperand(0).isTemp() && instr->getOperand(0).regClass().type() == sgpr, "SMEM operands must be sgpr", instr.get());
             if (instr->num_operands >= 2)
-               check(instr->getOperand(1).isConstant() || (instr->getOperand(1).isTemp() && instr->getOperand(1).getTemp().type() == sgpr),
+               check(instr->getOperand(1).isConstant() || (instr->getOperand(1).isTemp() && instr->getOperand(1).regClass().type() == sgpr),
                      "SMEM offset must be constant or sgpr", instr.get());
             if (instr->num_definitions)
                check(instr->getDefinition(0).getTemp().type() == sgpr, "SMEM result must be sgpr", instr.get());
@@ -175,15 +175,15 @@ void validate(Program* program, FILE * output)
          case Format::MUBUF:
          case Format::MIMG: {
             check(instr->num_operands > 1, "VMEM instructions must have at least one operand", instr.get());
-            check(instr->getOperand(0).isUndefined() || (instr->getOperand(0).isTemp() && instr->getOperand(0).getTemp().type() == vgpr),
+            check(instr->getOperand(0).hasRegClass() && instr->getOperand(0).regClass().type() == vgpr,
                   "VADDR must be in vgpr for VMEM instructions", instr.get());
-            check(instr->getOperand(1).isTemp() && instr->getOperand(1).getTemp().type() == sgpr, "VMEM resource constant must be sgpr", instr.get());
-            check(instr->num_operands < 4 || (instr->getOperand(3).isTemp() && instr->getOperand(3).getTemp().type() == vgpr), "VMEM write data must be vgpr", instr.get());
+            check(instr->getOperand(1).isTemp() && instr->getOperand(1).regClass().type() == sgpr, "VMEM resource constant must be sgpr", instr.get());
+            check(instr->num_operands < 4 || (instr->getOperand(3).hasRegClass() && instr->getOperand(3).regClass().type() == vgpr), "VMEM write data must be vgpr", instr.get());
             break;
          }
          case Format::DS: {
             for (unsigned i = 0; i < instr->num_operands; i++)
-               check((instr->getOperand(i).isTemp() && instr->getOperand(i).getTemp().type() == vgpr) || instr->getOperand(i).physReg() == m0,
+               check((instr->getOperand(i).hasRegClass() && instr->getOperand(i).regClass().type() == vgpr) || instr->getOperand(i).physReg() == m0,
                      "Only VGPRs are valid DS instruction operands", instr.get());
             if (instr->num_definitions)
                check(instr->getDefinition(0).getTemp().type() == vgpr, "DS instruction must return VGPR", instr.get());
@@ -191,7 +191,7 @@ void validate(Program* program, FILE * output)
          }
          case Format::EXP: {
             for (unsigned i = 0; i < 4; i++)
-               check((!instr->getOperand(i).isConstant() && !instr->getOperand(i).isTemp()) || instr->getOperand(i).getTemp().type() == vgpr,
+               check(instr->getOperand(i).hasRegClass() && instr->getOperand(i).regClass().type() == vgpr,
                      "Only VGPRs are valid Export arguments", instr.get());
             break;
          }
@@ -200,13 +200,13 @@ void validate(Program* program, FILE * output)
             /* fallthrough */
          case Format::GLOBAL:
          case Format::SCRATCH: {
-            check(instr->getOperand(0).isTemp() && instr->getOperand(0).getTemp().type() == vgpr, "FLAT/GLOBAL/SCRATCH address must be vgpr", instr.get());
-            check(instr->getOperand(1).isUndefined() || (instr->getOperand(1).isTemp() && instr->getOperand(1).getTemp().type() == sgpr),
+            check(instr->getOperand(0).hasRegClass() && instr->getOperand(0).regClass().type() == vgpr, "FLAT/GLOBAL/SCRATCH address must be vgpr", instr.get());
+            check(instr->getOperand(1).hasRegClass() && instr->getOperand(1).regClass().type() == sgpr,
                   "FLAT/GLOBAL/SCRATCH sgpr address must be undefined or sgpr", instr.get());
             if (instr->num_definitions)
                check(instr->getDefinition(0).getTemp().type() == vgpr, "FLAT/GLOBAL/SCRATCH result must be vgpr", instr.get());
             else
-               check(instr->getOperand(2).getTemp().type() == vgpr, "FLAT/GLOBAL/SCRATCH data must be vgpr", instr.get());
+               check(instr->getOperand(2).regClass().type() == vgpr, "FLAT/GLOBAL/SCRATCH data must be vgpr", instr.get());
             break;
          }
          default:
