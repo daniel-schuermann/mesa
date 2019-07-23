@@ -5857,8 +5857,6 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
          if (pack_const && pack != Temp())
             pack = bld.sop2(aco_opcode::s_or_b32, bld.def(s1), bld.def(s1, scc), Operand(pack_const), pack);
-         else
-            pack = bld.vop1(aco_opcode::v_mov_b32, bld.def(v1), Operand(pack_const));
       } else {
          for (unsigned i = 0; i < offset.size(); i++) {
             if (const_offset[i])
@@ -5880,10 +5878,13 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 
          if (pack_const && pack != Temp())
             pack = bld.sop2(aco_opcode::v_or_b32, bld.def(v1), Operand(pack_const), pack);
-         else
-            pack = bld.vop1(aco_opcode::v_mov_b32, bld.def(v1), Operand(pack_const));
       }
-      offset = pack;
+      if (pack_const && pack == Temp())
+         offset = bld.vop1(aco_opcode::v_mov_b32, bld.def(v1), Operand(pack_const));
+      else if (pack == Temp())
+         has_offset = false;
+      else
+         offset = pack;
    }
 
    if (instr->sampler_dim == GLSL_SAMPLER_DIM_CUBE && instr->coord_components)
