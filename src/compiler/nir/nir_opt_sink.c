@@ -36,31 +36,63 @@
  * anscestor of consuming instructions.
  */
 
-static nir_loop *
-get_loop(nir_block *block)
+bool
+nir_can_move_instr(nir_instr *instr, nir_move_options options)
 {
-   nir_cf_node *node = &block->cf_node;
-   while (node) {
+   if ((options & nir_move_const_undef) && instr->type == nir_instr_type_load_const) {
+      return true;
+   }
+
+   if (instr->type == nir_instr_type_intrinsic) {
+       nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
+      if ((options & nir_move_load_ubo) && intrin->intrinsic == nir_intrinsic_load_ubo)
+         return true;
+
+      if ((options & nir_move_load_input) &&
+          (intrin->intrinsic == nir_intrinsic_load_interpolated_input ||
+           intrin->intrinsic == nir_intrinsic_load_input))
+         return true;
+   }
+
+   if ((options & nir_move_const_undef) && instr->type == nir_instr_type_ssa_undef) {
+      return true;
+   }
+
+   if ((options & nir_move_comparisons) && instr->type == nir_instr_type_alu &&
+       nir_alu_instr_is_comparison(nir_instr_as_alu(instr))) {
+      return true;
+   }
+
+   return false;
+}
+
+static nir_loop *
+get_innermost_loop(nir_cf_node *node)
+{
+   for (; node != NULL; node = node->parent) {
       if (node->type == nir_cf_node_loop)
          return (nir_loop*)node;
-      node = node->parent;
    }
    return NULL;
 }
 
-static bool
-inside_loop(nir_block *block, nir_loop *loop)
+/* return last block not after use_block with def_loop as it's innermost loop */
+static nir_block *
+adjust_block_for_loops(nir_block *use_block, nir_loop *def_loop)
 {
-   if (!loop)
-      return true;
-
-   nir_cf_node *node = &block->cf_node;
-   while (node) {
-      if (node->type == nir_cf_node_loop && (nir_loop*)node == loop)
-         return true;
-      node = node->parent;
+   nir_loop *use_loop = get_innermost_loop(&use_block->cf_node);
+   while (use_loop) {
+      nir_loop *next_loop = get_innermost_loop(use_loop->cf_node.parent);
+      if (next_loop != def_loop)
+         use_loop = next_loop;
+      else
+         break;
    }
-   return false;
+   if (use_loop) {
+      return nir_block_cf_tree_prev(nir_loop_first_block(use_loop));
+   } else {
+      return use_block;
+   }
 }
 
 /* iterate a ssa def's use's and try to find a more optimal block to
@@ -70,13 +102,13 @@ inside_loop(nir_block *block, nir_loop *loop)
  * the uses
  */
 static nir_block *
-get_preferred_block(nir_ssa_def *def, bool loop_aware)
+get_preferred_block(nir_ssa_def *def, bool sink_into_loops)
 {
    nir_block *lca = NULL;
 
-   /* hmm, probably ignore if-uses: */
-   if (!list_empty(&def->if_uses))
-      return NULL;
+   nir_loop *def_loop = NULL;
+   if (!sink_into_loops)
+      def_loop = get_innermost_loop(&def->parent_instr->block->cf_node);
 
    nir_foreach_use(use, def) {
       nir_instr *instr = use->parent_instr;
@@ -85,7 +117,7 @@ get_preferred_block(nir_ssa_def *def, bool loop_aware)
       /*
        * Kind of an ugly special-case, but phi instructions
        * need to appear first in the block, so by definition
-       * we can't move a load_immed into a block where it is
+       * we can't move an instruction into a block where it is
        * consumed by a phi instruction.  We could conceivably
        * move it into a dominator block.
        */
@@ -99,12 +131,28 @@ get_preferred_block(nir_ssa_def *def, bool loop_aware)
          use_block = phi_lca;
       }
 
-      if (loop_aware) {
-         nir_loop *use_loop = get_loop(use_block);
-         if (!inside_loop(def->parent_instr->block, use_loop)) {
-            use_block = nir_block_cf_tree_prev(nir_loop_first_block(use_loop));
-            assert(nir_block_dominates(def->parent_instr->block, use_block));
-         }
+      /* If we're moving a load_ubo or load_interpolated_input, we don't want to
+       * sink it down into loops, which may result in accessing memory or shared
+       * functions multiple times.  Sink it just above the start of the loop
+       * where it's used.  For load_consts, undefs, and comparisons, we expect
+       * the driver to be able to emit them as simple ALU ops, so sinking as far
+       * in as we can go is probably worth it for register pressure.
+       */
+      if (!sink_into_loops) {
+         use_block = adjust_block_for_loops(use_block, def_loop);
+         assert(nir_block_dominates(def->parent_instr->block, use_block));
+      }
+
+      lca = nir_dominance_lca(lca, use_block);
+   }
+
+   nir_foreach_if_use(use, def) {
+      nir_block *use_block =
+         nir_block_cf_tree_prev(nir_if_first_then_block(use->parent_if));
+
+      if (!sink_into_loops) {
+         use_block = adjust_block_for_loops(use_block, def_loop);
+         assert(nir_block_dominates(def->parent_instr->block, use_block));
       }
 
       lca = nir_dominance_lca(lca, use_block);
@@ -133,23 +181,8 @@ insert_after_phi(nir_instr *instr, nir_block *block)
    exec_list_push_tail(&block->instr_list, &instr->node);
 }
 
-static nir_ssa_def *
-get_move_def(nir_instr *instr, bool sink_intrinsics) {
-   if (instr->type == nir_instr_type_load_const) {
-      return &nir_instr_as_load_const(instr)->def;
-   } else if (instr->type == nir_instr_type_intrinsic && sink_intrinsics) {
-      nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
-      return intrin->intrinsic == nir_intrinsic_load_interpolated_input ||
-             intrin->intrinsic == nir_intrinsic_load_ubo ? &intrin->dest.ssa : NULL;
-   } else if (instr->type == nir_instr_type_ssa_undef) {
-      return &nir_instr_as_ssa_undef(instr)->def;
-   } else {
-      return NULL;
-   }
-}
-
 bool
-nir_opt_sink(nir_shader *shader, bool sink_intrinsics)
+nir_opt_sink(nir_shader *shader, nir_move_options options)
 {
    bool progress = false;
 
@@ -162,17 +195,14 @@ nir_opt_sink(nir_shader *shader, bool sink_intrinsics)
 
       nir_foreach_block_reverse(block, function->impl) {
          nir_foreach_instr_reverse_safe(instr, block) {
-            nir_ssa_def *def = get_move_def(instr, sink_intrinsics);
-            if (!def)
+            if (!nir_can_move_instr(instr, options))
                continue;
 
+            nir_ssa_def *def = nir_instr_ssa_def(instr);
             nir_block *use_block =
-                  get_preferred_block(def, instr->type == nir_instr_type_intrinsic);
+                  get_preferred_block(def, instr->type != nir_instr_type_intrinsic);
 
-            if (!use_block)
-               continue;
-
-            if (use_block == instr->block)
+            if (!use_block || use_block == instr->block)
                continue;
 
             exec_node_remove(&instr->node);

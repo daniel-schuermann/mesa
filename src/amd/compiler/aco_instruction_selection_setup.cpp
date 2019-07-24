@@ -1400,8 +1400,9 @@ setup_isel_context(Program* program, nir_shader *nir,
    nir_lower_phis_to_scalar(nir);
    nir_opt_dce(nir);
    nir_opt_shrink_load(nir);
-   nir_opt_sink(nir, true);
-   nir_opt_move_load_ubo(nir);
+   nir_move_options move_opts = (nir_move_options)(nir_move_const_undef | nir_move_load_ubo | nir_move_load_input);
+   nir_opt_sink(nir, move_opts);
+   nir_opt_move(nir, move_opts);
 
    nir_function_impl *func = nir_shader_get_entrypoint(nir);
    nir_index_ssa_defs(func);
