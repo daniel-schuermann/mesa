@@ -727,6 +727,9 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
       if (!instr->getOperand(i).isTemp() || !instr->getOperand(i).isKill() || instr->getOperand(i).getTemp().type() != rc.type())
          continue;
 
+      if (offset > instr->getOperand(i).physReg())
+         continue;
+
       unsigned reg_lo = instr->getOperand(i).physReg() - offset;
       unsigned reg_hi = reg_lo + size - 1;
       unsigned k = 0;
