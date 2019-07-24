@@ -108,13 +108,15 @@ void validate(Program* program, FILE * output)
                for (unsigned i = 0; i < instr->num_operands; i++)
                {
                   if (instr->getOperand(i).hasRegClass() && instr->getOperand(i).regClass().type() == sgpr) {
+                     check(i != 1 || (int) instr->format & (int) Format::VOP3A, "Wrong source position for SGPR argument", instr.get());
+
                      if (sgpr_idx == instr->num_operands || instr->getOperand(sgpr_idx).tempId() != instr->getOperand(i).tempId())
                         num_sgpr++;
                      sgpr_idx = i;
                   }
 
                   if (instr->getOperand(i).isConstant() && !instr->getOperand(i).isLiteral())
-                     check(i == 0 || (int) instr->format & (int) Format::VOP3A, "Wrong source position for SGPR argument", instr.get());
+                     check(i == 0 || (int) instr->format & (int) Format::VOP3A, "Wrong source position for constant argument", instr.get());
                }
                check(num_sgpr + num_literals <= 1, "Only 1 Literal OR 1 SGPR allowed", instr.get());
             }
