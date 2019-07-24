@@ -1360,7 +1360,7 @@ v3d_optimize_nir(struct nir_shader *s)
                 NIR_PASS(progress, s, nir_opt_undef);
         } while (progress);
 
-        NIR_PASS(progress, s, nir_opt_move_load_ubo);
+        NIR_PASS(progress, s, nir_opt_move, nir_move_load_ubo);
 }
 
 static int

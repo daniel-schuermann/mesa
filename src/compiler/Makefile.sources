@@ -286,7 +286,6 @@ NIR_FILES = \
 	nir/nir_lower_wpos_center.c \
 	nir/nir_lower_wpos_ytransform.c \
 	nir/nir_metadata.c \
-	nir/nir_move_load_const.c \
 	nir/nir_move_vec_src_uses_to_dest.c \
 	nir/nir_normalize_cubemap_coords.c \
 	nir/nir_opt_combine_stores.c \
@@ -306,12 +305,12 @@ NIR_FILES = \
 	nir/nir_opt_intrinsics.c \
 	nir/nir_opt_loop_unroll.c \
 	nir/nir_opt_large_constants.c \
-	nir/nir_opt_move_comparisons.c \
-	nir/nir_opt_move_load_ubo.c \
+	nir/nir_opt_move.c \
 	nir/nir_opt_peephole_select.c \
 	nir/nir_opt_rematerialize_compares.c \
 	nir/nir_opt_remove_phis.c \
 	nir/nir_opt_shrink_load.c \
+	nir/nir_opt_sink.c \
 	nir/nir_opt_trivial_continues.c \
 	nir/nir_opt_undef.c \
 	nir/nir_opt_vectorize.c \

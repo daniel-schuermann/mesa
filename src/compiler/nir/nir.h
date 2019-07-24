@@ -3959,9 +3959,18 @@ bool nir_opt_large_constants(nir_shader *shader,
 
 bool nir_opt_loop_unroll(nir_shader *shader, nir_variable_mode indirect_mask);
 
-bool nir_opt_move_comparisons(nir_shader *shader);
+typedef enum {
+    nir_move_const_undef = (1 << 0),
+    nir_move_load_ubo    = (1 << 1),
+    nir_move_load_input  = (1 << 2),
+    nir_move_comparisons = (1 << 3),
+} nir_move_options;
 
-bool nir_opt_move_load_ubo(nir_shader *shader);
+bool nir_can_move_instr(nir_instr *instr, nir_move_options options);
+
+bool nir_opt_sink(nir_shader *shader, nir_move_options options);
+
+bool nir_opt_move(nir_shader *shader, nir_move_options options);
 
 bool nir_opt_peephole_select(nir_shader *shader, unsigned limit,
                              bool indirect_load_ok, bool expensive_alu_ok);
@@ -3972,8 +3981,6 @@ bool nir_opt_remove_phis(nir_shader *shader);
 bool nir_opt_remove_phis_block(nir_block *block);
 
 bool nir_opt_shrink_load(nir_shader *shader);
-
-bool nir_opt_sink(nir_shader *shader, bool sink_intrinsics);
 
 bool nir_opt_trivial_continues(nir_shader *shader);
 
