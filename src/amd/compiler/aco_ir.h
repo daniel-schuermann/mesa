@@ -129,6 +129,7 @@ struct RegClass {
       v5 = 5  | (1 << 5),
       v6 = 6  | (1 << 5),
       v7 = 7  | (1 << 5),
+      v8 = 8  | (1 << 5),
       /* these are used for WWM and spills to vgpr */
       v1_linear = v1 | (1 << 6),
       v2_linear = v2 | (1 << 6),
@@ -166,6 +167,7 @@ static constexpr RegClass v4{RegClass::v4};
 static constexpr RegClass v5{RegClass::v5};
 static constexpr RegClass v6{RegClass::v6};
 static constexpr RegClass v7{RegClass::v7};
+static constexpr RegClass v8{RegClass::v8};
 
 /**
  * Temp Class
