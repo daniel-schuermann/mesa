@@ -2891,6 +2891,7 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       case 4:
          op = aco_opcode::s_buffer_load_dwordx4;
          break;
+      case 6:
       case 8:
          op = aco_opcode::s_buffer_load_dwordx8;
          break;
@@ -2981,13 +2982,14 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
          mubuf->getDefinition(0) = Definition(upper);
          ctx->block->instructions.emplace_back(std::move(mubuf));
          if (dst.size() == 6) {
+            assert(upper.size() == 2);
             bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
                        emit_extract_vector(ctx, lower, 0, v2),
                        emit_extract_vector(ctx, lower, 1, v2),
                        upper);
          } else {
             assert(dst.size() == 8);
-            emit_split_vector(ctx, lower, 2);
+            emit_split_vector(ctx, upper, 2);
             bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
                        emit_extract_vector(ctx, lower, 0, v2),
                        emit_extract_vector(ctx, lower, 1, v2),
