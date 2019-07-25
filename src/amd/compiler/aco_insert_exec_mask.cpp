@@ -840,7 +840,7 @@ void add_branch_code(exec_ctx& ctx, Block* block)
          discard->getDefinition(i) = Definition(new_mask);
          ctx.info[block->index].exec[i].first = new_mask;
       }
-      assert((ctx.info[block->index].exec[0].second & mask_type_wqm) == 0);
+      assert(!ctx.handle_wqm || (ctx.info[block->index].exec[0].second & mask_type_wqm) == 0);
       discard->getOperand(num) = Operand(cond);
       discard->getDefinition(num) = bld.def(s1, scc);
 
