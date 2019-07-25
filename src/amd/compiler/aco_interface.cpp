@@ -26,6 +26,9 @@
 #include "vulkan/radv_shader.h"
 
 #include <iostream>
+#ifndef NDEBUG
+#include <sstream>
+#endif
 void aco_compile_shader(struct nir_shader *shader,
                         struct radv_shader_binary **binary,
                         struct radv_shader_variant_info *info,
@@ -104,7 +107,17 @@ void aco_compile_shader(struct nir_shader *shader,
    }
    //std::cerr << binary->disasm_string;
 
-   size_t size = code.size() * sizeof(uint32_t) + sizeof(radv_shader_binary_legacy);
+   size_t size = 0;
+#ifndef NDEBUG
+   std::ostringstream stream;
+   if (options->record_llvm_ir)
+      aco::print_asm(program.get(), code, options->family, stream);
+   stream << '\0';
+   std::string disasm = stream.str();
+   size += disasm.size();
+#endif
+
+   size += code.size() * sizeof(uint32_t) + sizeof(radv_shader_binary_legacy);
    radv_shader_binary_legacy* legacy_binary = (radv_shader_binary_legacy*) malloc(size);
 
    legacy_binary->base.type = RADV_BINARY_TYPE_LEGACY;
@@ -118,6 +131,11 @@ void aco_compile_shader(struct nir_shader *shader,
    legacy_binary->config = config;
    legacy_binary->disasm_size = 0;
    legacy_binary->llvm_ir_size = 0;
+
+#ifndef NDEBUG
+   disasm.copy((char*) legacy_binary->data + legacy_binary->code_size, disasm.size());
+   legacy_binary->disasm_size = disasm.size() - 1;
+#endif
 
    *binary = (radv_shader_binary*) legacy_binary;
 }
