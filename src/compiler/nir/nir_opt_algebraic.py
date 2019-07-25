@@ -862,6 +862,13 @@ optimizations = [
    (('unpack_half_2x16_split_y', ('iand', a, 0xffff0000)), ('unpack_half_2x16_split_y', a)),
    (('unpack_32_2x16_split_y', ('iand', a, 0xffff0000)), ('unpack_32_2x16_split_y', a)),
    (('unpack_64_2x32_split_y', ('iand', a, 0xffffffff00000000)), ('unpack_64_2x32_split_y', a)),
+
+   # Addressing optimizations
+   # Some ISAs have a constant offset field for some load/store instructions.
+   # This transforms address calculations so that the load/store consumes an
+   # addition directly and the backend can combine it into the load/store.
+   # This might also help CSE/GVN.
+   (('ishl', ('iadd', 'a', '#b'), '#c'), ('iadd', ('ishl', a, 'c'), ('ishl', b, c))),
 ]
 
 # After the ('extract_u8', a, 0) pattern, above, triggers, there will be
