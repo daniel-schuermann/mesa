@@ -817,21 +817,32 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          ctx.info[instr->getDefinition(0).tempId()].set_literal(v);
       break;
    }
-   case aco_opcode::v_mul_f32: /* omod */
+   case aco_opcode::v_mul_f32: { /* omod */
       /* TODO: try to move the negate/abs modifier to the consumer instead */
-      if (instr->isVOP3())
-         break;
+      if (instr->isVOP3()) {
+         VOP3A_instruction *vop3 = static_cast<VOP3A_instruction*>(instr.get());
+         if (vop3->abs[0] || vop3->abs[1] || vop3->neg[0] || vop3->neg[1] || vop3->omod || vop3->clamp)
+            break;
+      }
 
-      if (instr->getOperand(0).isConstant() && instr->getOperand(1).isTemp()) {
-         if (instr->getOperand(0).constantValue() == 0x40000000) { /* 2.0 */
-            ctx.info[instr->getOperand(1).tempId()].set_omod2();
-         } else if (instr->getOperand(0).constantValue() == 0x40800000) { /* 4.0 */
-            ctx.info[instr->getOperand(1).tempId()].set_omod4();
-         } else if (instr->getOperand(0).constantValue() == 0x3f000000) { /* 0.5 */
-            ctx.info[instr->getOperand(1).tempId()].set_omod5();
+      for (unsigned i = 0; i < 2; i++) {
+         if (instr->getOperand(!i).isConstant() && instr->getOperand(i).isTemp()) {
+            if (instr->getOperand(!i).constantValue() == 0x40000000) { /* 2.0 */
+               ctx.info[instr->getOperand(i).tempId()].set_omod2();
+            } else if (instr->getOperand(!i).constantValue() == 0x40800000) { /* 4.0 */
+               ctx.info[instr->getOperand(i).tempId()].set_omod4();
+            } else if (instr->getOperand(!i).constantValue() == 0x3f000000) { /* 0.5 */
+               ctx.info[instr->getOperand(i).tempId()].set_omod5();
+            } else if (instr->getOperand(!i).constantValue() == 0x3f800000) { /* 1.0 */
+               ctx.info[instr->getDefinition(0).tempId()].set_temp(instr->getOperand(i).getTemp());
+            } else {
+               continue;
+            }
+            break;
          }
       }
       break;
+   }
    case aco_opcode::v_and_b32: /* abs */
       if (instr->getOperand(0).constantEquals(0x7FFFFFFF) && instr->getOperand(1).isTemp())
          ctx.info[instr->getDefinition(0).tempId()].set_abs(instr->getOperand(1).getTemp());
@@ -1870,8 +1881,10 @@ bool apply_omod_clamp(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          ctx.uses[instr->getDefinition(0).tempId()] = 0;
          return true;
       }
-      /* in all other cases, label this instruction as option for multiply-add */
-      ctx.info[instr->getDefinition(0).tempId()].set_mul(instr.get());
+      if (!ctx.info[instr->getDefinition(0).tempId()].label) {
+         /* in all other cases, label this instruction as option for multiply-add */
+         ctx.info[instr->getDefinition(0).tempId()].set_mul(instr.get());
+      }
    }
 
    /* check if we could apply clamp on predecessor */
