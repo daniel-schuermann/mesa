@@ -229,7 +229,7 @@ std::pair<PhysReg, bool> get_reg_simple(ra_ctx& ctx,
       reg_hi = reg_lo + size - 1;
       found = true;
       for (unsigned reg = reg_lo + 1; found && reg <= reg_hi; reg++) {
-         if (reg_file[reg] != 0)
+         if (reg_file[reg] != 0 || ctx.war_hint[reg])
             found = false;
       }
       if (found) {
@@ -720,6 +720,7 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
 
    unsigned best_pos = -1;
    unsigned num_moves = 0xFF;
+   bool best_war_hint = true;
 
    /* test for each operand which definition placement causes the least shuffle instructions */
    for (unsigned i = 0, offset = 0; i < instr->num_operands; offset += instr->getOperand(i).size(), i++) {
@@ -747,10 +748,12 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
       if (reg_hi < ub - 1 && reg_file[reg_hi] != 0 && reg_file[reg_hi] == reg_file[reg_hi + 1])
          continue;
 
-      /* count variables to be moved */
+      /* count variables to be moved and check war_hint */
+      bool war_hint = false;
       for (unsigned j = reg_lo; j <= reg_hi; j++) {
          if (reg_file[j] != 0)
             k++;
+         war_hint |= ctx.war_hint[j];
       }
 
       /* count operands in wrong positions */
@@ -763,11 +766,12 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
             k += instr->getOperand(j).size();
       }
       bool aligned = rc == RegClass::v4 && reg_lo % 4 == 0;
-      if (k > num_moves || (!aligned && k == num_moves))
+      if (k > num_moves || (!aligned && k == num_moves) || (war_hint && !best_war_hint))
          continue;
 
       best_pos = reg_lo;
       num_moves = k;
+      best_war_hint = war_hint;
    }
 
    if (num_moves >= size)
@@ -1391,8 +1395,12 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   operand.setFixed(new_reg);
                }
 
-               if (instr->format == Format::EXP)
+               if (instr->format == Format::EXP) {
                   ctx.war_hint.set(operand.physReg().reg);
+               } else if (instr->isVMEM() && i == 3 && program->chip_class < GFX8) {
+                  for (unsigned j = 0; j < operand.size(); j++)
+                     ctx.war_hint.set(operand.physReg().reg + j);
+               }
             }
             std::map<unsigned, phi_info>::iterator phi = phi_map.find(operand.getTemp().id());
             if (phi != phi_map.end())
