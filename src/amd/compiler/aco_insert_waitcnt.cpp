@@ -65,8 +65,9 @@ struct wait_entry {
    uint16_t exp_cnt;
    uint16_t lgkm_cnt;
    bool flat;
-   wait_entry(wait_type t, uint8_t vm, uint8_t exp, uint8_t lgkm, bool is_flat=false)
-           : type(t), vm_cnt(vm), exp_cnt(exp), lgkm_cnt(lgkm), flat(is_flat) {}
+   bool vmem_write;
+   wait_entry(wait_type t, uint8_t vm, uint8_t exp, uint8_t lgkm, bool is_flat=false, bool is_vmem_write=false)
+           : type(t), vm_cnt(vm), exp_cnt(exp), lgkm_cnt(lgkm), flat(is_flat), vmem_write(is_vmem_write) {}
 
    bool operator==(const wait_entry& rhs) const
    {
@@ -429,7 +430,7 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
 
             std::unordered_map<uint8_t,wait_entry>::iterator it;
             it = ctx.vgpr_map.find(reg);
-            if (it == ctx.vgpr_map.end() || !(it->second.type & ~exp_type))
+            if (it == ctx.vgpr_map.end() || !(it->second.type & ~exp_type) || it->second.vmem_write)
                continue;
 
             needs_waitcnt = true;
@@ -639,7 +640,7 @@ bool gen(Instruction* instr, wait_ctx& ctx)
          for (unsigned i = 0; i < instr->getOperand(3).size(); i++)
          {
             ctx.vgpr_map.emplace(instr->getOperand(3).physReg() + i,
-            wait_entry(vm_type, 0, ctx.max_exp_cnt, ctx.max_lgkm_cnt));
+            wait_entry(vm_type, 0, ctx.max_exp_cnt, ctx.max_lgkm_cnt, false, true));
          }
       }
       return true;
