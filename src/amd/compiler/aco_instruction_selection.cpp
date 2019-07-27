@@ -5513,7 +5513,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    }
    case nir_intrinsic_demote:
       bld.pseudo(aco_opcode::p_demote_to_helper);
-      ctx->block->kind |= block_kind_uses_discard_if; //FIXME: we probably can do better here.
+      ctx->block->kind |= block_kind_needs_lowering;
       ctx->program->needs_exact = true;
       break;
    case nir_intrinsic_demote_if: {
@@ -5521,7 +5521,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
                            as_divergent_bool(ctx, get_ssa_temp(ctx, instr->src[0].ssa), false),
                            Operand(exec, s2));
       bld.pseudo(aco_opcode::p_demote_to_helper, cond);
-      ctx->block->kind |= block_kind_uses_discard_if;
+      ctx->block->kind |= block_kind_needs_lowering;
       ctx->program->needs_exact = true;
       break;
    }
