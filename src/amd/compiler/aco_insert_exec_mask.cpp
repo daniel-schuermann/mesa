@@ -477,12 +477,13 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
 
       /* create phis for diverged exec masks */
       for (unsigned i = 0; i < num_exec_masks; i++) {
-         if (ctx.info[preds[0]].exec[i].first == ctx.info[preds[1]].exec[i].first) {
+         bool in_exec = i == num_exec_masks - 1 && !(block->kind & block_kind_merge);
+         if (!in_exec && ctx.info[preds[0]].exec[i].first == ctx.info[preds[1]].exec[i].first) {
             assert(ctx.info[preds[0]].exec[i].second == ctx.info[preds[1]].exec[i].second);
             ctx.info[idx].exec.emplace_back(ctx.info[preds[0]].exec[i]);
             continue;
          }
-         bool in_exec = i == num_exec_masks - 1 && !(block->kind & block_kind_merge);
+
          Temp phi = bld.pseudo(aco_opcode::p_linear_phi, in_exec ? bld.def(s2, exec) : bld.def(s2),
                                ctx.info[preds[0]].exec[i].first,
                                ctx.info[preds[1]].exec[i].first);
