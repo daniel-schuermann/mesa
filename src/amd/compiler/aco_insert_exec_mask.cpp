@@ -582,9 +582,18 @@ void process_instructions(exec_ctx& ctx, Block* block,
                           std::vector<aco_ptr<Instruction>>& instructions,
                           unsigned idx)
 {
+   WQMState state;
+   if (ctx.info[block->index].exec.back().second & mask_type_wqm)
+      state = WQM;
+   else {
+      assert(!ctx.handle_wqm || ctx.info[block->index].exec.back().second & mask_type_exact);
+      state = Exact;
+   }
+
    /* if the block doesn't need both, WQM and Exact, we can skip processing the instructions */
-   bool process = ctx.handle_wqm ||
-                  ctx.info[block->index].block_needs == (WQM | Exact) ||
+   bool process = (ctx.handle_wqm &&
+                   (ctx.info[block->index].block_needs & state) !=
+                   (ctx.info[block->index].block_needs & (WQM | Exact))) ||
                   block->kind & block_kind_uses_discard_if ||
                   block->kind & block_kind_needs_lowering;
    if (!process) {
@@ -596,13 +605,6 @@ void process_instructions(exec_ctx& ctx, Block* block,
    }
 
    Builder bld(ctx.program, &instructions);
-   WQMState state;
-   if (ctx.info[block->index].exec.back().second & mask_type_wqm)
-      state = WQM;
-   else {
-      assert(!ctx.handle_wqm || ctx.info[block->index].exec.back().second & mask_type_exact);
-      state = Exact;
-   }
 
    for (; idx < block->instructions.size(); idx++) {
       aco_ptr<Instruction> instr = std::move(block->instructions[idx]);
