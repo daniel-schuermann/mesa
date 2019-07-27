@@ -51,10 +51,12 @@ struct wqm_ctx {
    std::vector<uint16_t> defined_in;
    std::vector<bool> needs_wqm;
    std::vector<bool> branch_wqm; /* true if the branch condition in this block should be in wqm */
+   bool loop_wqm;
    wqm_ctx(Program* program) : program(program),
                                defined_in(program->peekAllocationId(), 0xFFFF),
                                needs_wqm(program->peekAllocationId()),
-                               branch_wqm(program->blocks.size())
+                               branch_wqm(program->blocks.size()),
+                               loop_wqm(false)
    {
       for (unsigned i = 0; i < program->blocks.size(); i++)
          worklist.insert(i);
@@ -203,14 +205,28 @@ void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
       instr_needs[i] = needs;
       info.block_needs |= needs;
    }
+
+   info.instr_needs = instr_needs;
+   if (block->loop_nest_depth > 0)
+      ctx.loop_wqm |= info.block_needs & WQM;
+   else
+      ctx.loop_wqm = 0;
+
    /* for "if (<cond>) <wqm code>" or "while (<cond>) <wqm code>",
     * <cond> should be computed in WQM */
    if (info.block_needs & WQM && !(block->kind & block_kind_top_level)) {
       for (unsigned pred_idx : block->logical_preds)
          mark_block_wqm(ctx, pred_idx);
    }
-
-   info.instr_needs = instr_needs;
+   if (block->kind & block_kind_loop_header && ctx.loop_wqm) {
+      /* mark all break conditions between loop entry and loop exit */
+      unsigned block_idx = block->index;
+      while (ctx.program->blocks[block_idx].loop_nest_depth >= block->loop_nest_depth) {
+         if (ctx.program->blocks[block_idx].kind & block_kind_break)
+            mark_block_wqm(ctx, block_idx);
+         block_idx++;
+      }
+   }
 }
 
 void calculate_wqm_needs(exec_ctx& exec_ctx)
@@ -797,7 +813,7 @@ void add_branch_code(exec_ctx& ctx, Block* block)
             block->instructions.pop_back();
             transition_to_WQM(ctx, bld, idx);
             bld.insert(std::move(branch));
-         } else if (needs == Exact) {
+         } else {
             aco_ptr<Instruction> branch = std::move(block->instructions.back());
             block->instructions.pop_back();
             transition_to_Exact(ctx, bld, idx);
