@@ -467,6 +467,7 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
             if ((ctx.info[idx].block_needs | ctx.info[idx].ever_again_needs) == 0 ||
                 (ctx.info[idx].block_needs | ctx.info[idx].ever_again_needs) == Exact) {
                ctx.info[idx].exec.back().second |= mask_type_global;
+               transition_to_Exact(ctx, bld, idx);
                ctx.handle_wqm = false;
             }
          }
@@ -524,6 +525,7 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
          if ((ctx.info[idx].block_needs | ctx.info[idx].ever_again_needs) == 0 ||
              (ctx.info[idx].block_needs | ctx.info[idx].ever_again_needs) == Exact) {
             ctx.info[idx].exec.back().second |= mask_type_global;
+            transition_to_Exact(ctx, bld, idx);
             ctx.handle_wqm = false;
          }
       }
@@ -744,15 +746,8 @@ void add_branch_code(exec_ctx& ctx, Block* block)
       }
       assert(ctx.info[idx].exec.size() <= 2);
 
-      if (ctx.info[idx].ever_again_needs == 0) {
-         if (ctx.info[idx].exec.size() == 2) {
-            ctx.info[idx].exec[0] = ctx.info[idx].exec[1];
-            ctx.info[idx].exec.pop_back();
-            //assert(ctx.info[idx].exec[0].second & mask_type_global);
-         }
-         ctx.handle_wqm = false;
-
-      } else if (ctx.info[idx].ever_again_needs == Exact) {
+      if (ctx.info[idx].ever_again_needs == 0 ||
+          ctx.info[idx].ever_again_needs == Exact) {
          /* transition to Exact */
          aco_ptr<Instruction> branch = std::move(block->instructions.back());
          block->instructions.pop_back();
@@ -768,18 +763,6 @@ void add_branch_code(exec_ctx& ctx, Block* block)
          transition_to_WQM(ctx, bld, idx);
          ctx.info[idx].exec.back().second &= ~mask_type_global;
          bld.insert(std::move(branch));
-      }
-      if (!(ctx.info[idx].ever_again_needs & Exact)) {
-         /* transition to WQM and disable WQM handling */
-         aco_ptr<Instruction> branch = std::move(block->instructions.back());
-         block->instructions.pop_back();
-         transition_to_WQM(ctx, bld, idx);
-         bld.insert(std::move(branch));
-         if (ctx.info[idx].exec.size() == 2) {
-            ctx.info[idx].exec[0] = ctx.info[idx].exec[1];
-            ctx.info[idx].exec.pop_back();
-         }
-         ctx.handle_wqm = false;
       }
    }
 
