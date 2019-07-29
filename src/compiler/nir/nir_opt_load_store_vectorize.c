@@ -293,10 +293,15 @@ create_entry_key_from_deref(void *mem_ctx, struct vectorize_ctx *ctx, nir_deref_
          key.var = deref->var;
          break;
       }
-      case nir_deref_type_array: {
+      case nir_deref_type_array:
+      case nir_deref_type_ptr_as_array: {
          assert(parent);
          nir_ssa_def *index = deref->arr.index.ssa;
-         uint32_t stride = array_stride(ctx, deref->mode, parent->type);
+         uint32_t stride;
+         if (deref->deref_type == nir_deref_type_ptr_as_array)
+            stride = nir_deref_instr_ptr_as_array_stride(deref);
+         else
+            stride = array_stride(ctx, deref->mode, parent->type);
 
          nir_ssa_def *base = index;
          uint32_t offset = 0, base_mul = 1;
