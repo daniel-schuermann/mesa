@@ -62,8 +62,6 @@ void setup_reduce_temp(Program* program)
    bool vtmp_in_loop = false;
 
    for (Block& block : program->blocks) {
-      if (block.kind & block_kind_top_level)
-         last_top_level_block_idx = block.index;
 
       /* insert p_end_linear_vgpr after the outermost loop */
       if (reduceTmp_in_loop && block.loop_nest_depth == 0) {
@@ -80,6 +78,10 @@ void setup_reduce_temp(Program* program)
          block.instructions.insert(it, std::move(end));
          reduceTmp_in_loop = false;
       }
+
+      if (block.kind & block_kind_top_level)
+         last_top_level_block_idx = block.index;
+
       if (!hasReductions[block.index])
          continue;
 
