@@ -138,6 +138,7 @@ get_flat_type(const nir_shader *shader, nir_variable *old_vars[MAX_SLOTS][4],
 {
    unsigned todo = 1;
    unsigned slots = 0;
+   unsigned num_vars = 0;
    enum glsl_base_type base;
    *num_vertices = 0;
    *first_var = NULL;
@@ -170,13 +171,14 @@ get_flat_type(const nir_shader *shader, nir_variable *old_vars[MAX_SLOTS][4],
          unsigned var_slots = glsl_count_attribute_slots(
             get_per_vertex_type(shader, var, num_vertices), vs_in);
          todo = MAX2(todo, var_slots);
+         num_vars++;
       }
       todo--;
       slots++;
       (*loc)++;
    }
 
-   if (!*first_var)
+   if (num_vars <= 1)
       return NULL;
 
    return glsl_array_type(glsl_vector_type(base, 4), slots, 0);
@@ -184,12 +186,13 @@ get_flat_type(const nir_shader *shader, nir_variable *old_vars[MAX_SLOTS][4],
 
 static bool
 create_new_io_vars(nir_shader *shader, struct exec_list *io_list,
-                   nir_variable *old_vars[MAX_SLOTS][4],
                    nir_variable *new_vars[MAX_SLOTS][4],
                    bool flat_vars[MAX_SLOTS])
 {
    if (exec_list_is_empty(io_list))
       return false;
+
+   nir_variable *old_vars[MAX_SLOTS][4] = {{0}};
 
    nir_foreach_variable(var, io_list) {
       unsigned frac = var->data.location_frac;
@@ -198,36 +201,7 @@ create_new_io_vars(nir_shader *shader, struct exec_list *io_list,
 
    bool merged_any_vars = false;
 
-   for (unsigned loc = 0; loc < MAX_SLOTS;) {
-      nir_variable *first_var;
-      unsigned num_vertices;
-      unsigned new_loc = loc;
-      const struct glsl_type *flat_type =
-         get_flat_type(shader, old_vars, &new_loc, &first_var, &num_vertices);
-      if (flat_type) {
-         merged_any_vars = true;
-
-         nir_variable *var = nir_variable_clone(first_var, shader);
-         var->data.location_frac = 0;
-         if (num_vertices)
-            var->type = glsl_array_type(flat_type, num_vertices, 0);
-         else
-            var->type = flat_type;
-
-         nir_shader_add_variable(shader, var);
-         for (unsigned i = 0; i < glsl_get_length(flat_type); i++) {
-            for (unsigned j = 0; j < 4; j++)
-               new_vars[loc + i][j] = var;
-            flat_vars[loc + i] = true;
-         }
-      }
-      loc = new_loc;
-   }
-
    for (unsigned loc = 0; loc < MAX_SLOTS; loc++) {
-      if (flat_vars[loc])
-         continue;
-
       unsigned frac = 0;
       while (frac < 4) {
          nir_variable *first_var = old_vars[loc][frac];
@@ -275,9 +249,42 @@ create_new_io_vars(nir_shader *shader, struct exec_list *io_list,
          var->type = resize_array_vec_type(var->type, frac - first);
 
          nir_shader_add_variable(shader, var);
-         for (unsigned i = first; i < frac; i++)
+         for (unsigned i = first; i < frac; i++) {
             new_vars[loc][i] = var;
+            old_vars[loc][i] = NULL;
+         }
+
+         old_vars[loc][first] = var;
       }
+   }
+
+   /* "flat" mode: tries to ensure there is at most one variable per slot by
+    * merging variables into vec4s
+    */
+   for (unsigned loc = 0; loc < MAX_SLOTS;) {
+      nir_variable *first_var;
+      unsigned num_vertices;
+      unsigned new_loc = loc;
+      const struct glsl_type *flat_type =
+         get_flat_type(shader, old_vars, &new_loc, &first_var, &num_vertices);
+      if (flat_type) {
+         merged_any_vars = true;
+
+         nir_variable *var = nir_variable_clone(first_var, shader);
+         var->data.location_frac = 0;
+         if (num_vertices)
+            var->type = glsl_array_type(flat_type, num_vertices, 0);
+         else
+            var->type = flat_type;
+
+         nir_shader_add_variable(shader, var);
+         for (unsigned i = 0; i < glsl_get_length(flat_type); i++) {
+            for (unsigned j = 0; j < 4; j++)
+               new_vars[loc + i][j] = var;
+            flat_vars[loc + i] = true;
+         }
+      }
+      loc = new_loc;
    }
 
    return merged_any_vars;
@@ -346,9 +353,7 @@ nir_lower_io_to_vector_impl(nir_function_impl *impl, nir_variable_mode modes)
    nir_metadata_require(impl, nir_metadata_dominance);
 
    nir_shader *shader = impl->function->shader;
-   nir_variable *old_inputs[MAX_SLOTS][4] = {{0}};
    nir_variable *new_inputs[MAX_SLOTS][4] = {{0}};
-   nir_variable *old_outputs[MAX_SLOTS][4] = {{0}};
    nir_variable *new_outputs[MAX_SLOTS][4] = {{0}};
    bool flat_inputs[MAX_SLOTS] = {0};
    bool flat_outputs[MAX_SLOTS] = {0};
@@ -361,8 +366,7 @@ nir_lower_io_to_vector_impl(nir_function_impl *impl, nir_variable_mode modes)
        * so we don't bother doing extra non-work.
        */
       if (!create_new_io_vars(shader, &shader->inputs,
-                              old_inputs, new_inputs,
-                              flat_inputs))
+                              new_inputs, flat_inputs))
          modes &= ~nir_var_shader_in;
    }
 
@@ -371,8 +375,7 @@ nir_lower_io_to_vector_impl(nir_function_impl *impl, nir_variable_mode modes)
        * so we don't bother doing extra non-work.
        */
       if (!create_new_io_vars(shader, &shader->outputs,
-                              old_outputs, new_outputs,
-                              flat_outputs))
+                              new_outputs, flat_outputs))
          modes &= ~nir_var_shader_out;
    }
 
