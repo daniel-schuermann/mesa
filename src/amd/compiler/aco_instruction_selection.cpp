@@ -2444,27 +2444,6 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
       emit_wqm(ctx, tmp.getTemp(), dst);
       break;
    }
-   case nir_op_urcp: {
-      if (dst.regClass() == v1 || dst.regClass() == s1) {
-         Temp src0 = get_alu_src(ctx, instr->src[0]);
-         aco_ptr<Instruction> instr;
-
-         Temp f_src0 = bld.vop1(aco_opcode::v_cvt_f32_u32, bld.def(v1), src0);
-         Temp rcp = bld.vop1(aco_opcode::v_rcp_iflag_f32, bld.def(v1), f_src0);
-         Temp f_dst = bld.vop2(aco_opcode::v_mul_f32, bld.def(v1), Operand(0x4f800000u), rcp);
-
-         Temp tmp = dst.regClass() == s1 ? bld.tmp(v1) : dst;
-         bld.vop1(aco_opcode::v_cvt_u32_f32, Definition(tmp), f_dst);
-
-         if (dst.regClass() == s1)
-            bld.pseudo(aco_opcode::p_as_uniform, Definition(dst), tmp);
-      } else {
-         fprintf(stderr, "Unimplemented NIR instr bit size: ");
-         nir_print_instr(&instr->instr, stderr);
-         fprintf(stderr, "\n");
-      }
-      break;
-   }
    default:
       fprintf(stderr, "Unknown NIR ALU instr: ");
       nir_print_instr(&instr->instr, stderr);
