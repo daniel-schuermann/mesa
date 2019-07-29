@@ -1373,7 +1373,7 @@ setup_isel_context(Program* program, nir_shader *nir,
 
    /* lower ALU operations */
    nir_opt_idiv_const(nir, 32);
-   nir_lower_idiv(nir, true);
+   nir_lower_idiv(nir, nir_lower_idiv_llvm);
 
    // TODO: implement logic64 in aco, it's more effective for sgprs
    nir_lower_int64(nir, (nir_lower_int64_options) (nir_lower_imul64 |
