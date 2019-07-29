@@ -797,26 +797,6 @@ static void visit_alu(struct ac_nir_context *ctx, const nir_alu_instr *instr)
 						      result);
 		}
 		break;
-	case nir_op_fsat:
-		result = emit_intrin_2f_param(&ctx->ac, "llvm.maxnum",
-						ac_to_float_type(&ctx->ac, def_type), src[0], ctx->ac.f32_0);
-		if (ctx->ac.chip_class < GFX9 &&
-		    instr->dest.dest.ssa.bit_size == 32) {
-			/* Only pre-GFX9 chips do not flush denorms. */
-			result = emit_intrin_1f_param(&ctx->ac, "llvm.canonicalize",
-						      ac_to_float_type(&ctx->ac, def_type),
-						      result);
-		}
-		result = emit_intrin_2f_param(&ctx->ac, "llvm.minnum",
-						ac_to_float_type(&ctx->ac, def_type), result, ctx->ac.f32_1);
-		if (ctx->ac.chip_class < GFX9 &&
-		    instr->dest.dest.ssa.bit_size == 32) {
-			/* Only pre-GFX9 chips do not flush denorms. */
-			result = emit_intrin_1f_param(&ctx->ac, "llvm.canonicalize",
-						      ac_to_float_type(&ctx->ac, def_type),
-						      result);
-		}
-		break;
 	case nir_op_ffma:
 		result = emit_intrin_3f_param(&ctx->ac, "llvm.fmuladd",
 		                              ac_to_float_type(&ctx->ac, def_type), src[0], src[1], src[2]);
@@ -971,21 +951,6 @@ static void visit_alu(struct ac_nir_context *ctx, const nir_alu_instr *instr)
 	case nir_op_unpack_half_2x16:
 		result = emit_unpack_half_2x16(&ctx->ac, src[0]);
 		break;
-	case nir_op_unpack_half_2x16_split_x: {
-		assert(ac_get_llvm_num_components(src[0]) == 1);
-		LLVMValueRef val = LLVMBuildTrunc(ctx->ac.builder, src[0], ctx->ac.i16, "");
-		val = LLVMBuildBitCast(ctx->ac.builder, val, ctx->ac.f16, "");
-		result = LLVMBuildFPExt(ctx->ac.builder, val, ctx->ac.f32, "");
-		break;
-	}
-	case nir_op_unpack_half_2x16_split_y: {
-		assert(ac_get_llvm_num_components(src[0]) == 1);
-		LLVMValueRef val = LLVMBuildLShr(ctx->ac.builder, src[0], LLVMConstInt(ctx->ac.i32, 16, false), "");
-		val = LLVMBuildTrunc(ctx->ac.builder, val, ctx->ac.i16, "");
-		val = LLVMBuildBitCast(ctx->ac.builder, val, ctx->ac.f16, "");
-		result = LLVMBuildFPExt(ctx->ac.builder, val, ctx->ac.f32, "");
-		break;
-	}
 	case nir_op_fddx:
 	case nir_op_fddy:
 	case nir_op_fddx_fine:
