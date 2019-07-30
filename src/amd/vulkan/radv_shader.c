@@ -298,7 +298,7 @@ radv_shader_compile_to_nir(struct radv_device *device,
 			.lower_ubo_ssbo_access_to_offsets = true,
 			.caps = {
 				.amd_gcn_shader = true,
-				.amd_shader_ballot = device->instance->perftest_flags & RADV_PERFTEST_SHADER_BALLOT,
+				.amd_shader_ballot = device->physical_device->use_shader_ballot,
 				.amd_trinary_minmax = true,
 				.demote_to_helper_invocation = device->physical_device->use_aco,
 				.derivative_group = true,

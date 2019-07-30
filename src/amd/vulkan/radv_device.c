@@ -390,7 +390,8 @@ radv_physical_device_init(struct radv_physical_device *device,
 	device->has_dcc_constant_encode = device->rad_info.family == CHIP_RAVEN2 ||
 					  device->rad_info.chip_class >= GFX10;
 
-	device->use_shader_ballot = device->instance->perftest_flags & RADV_PERFTEST_SHADER_BALLOT;
+	device->use_shader_ballot = device->use_aco ||
+		device->instance->perftest_flags & RADV_PERFTEST_SHADER_BALLOT;
 
 	radv_physical_device_init_mem_types(device);
 	radv_fill_device_extension_table(device, &device->supported_extensions);
