@@ -390,7 +390,8 @@ radv_physical_device_init(struct radv_physical_device *device,
 	device->has_dcc_constant_encode = device->rad_info.family == CHIP_RAVEN2 ||
 					  device->rad_info.chip_class >= GFX10;
 
-	device->use_shader_ballot = device->instance->perftest_flags & RADV_PERFTEST_SHADER_BALLOT;
+	device->use_shader_ballot = device->use_aco ||
+		device->instance->perftest_flags & RADV_PERFTEST_SHADER_BALLOT;
 
 	/* Determine the number of threads per wave for all stages. */
 	device->cs_wave_size = 64;
