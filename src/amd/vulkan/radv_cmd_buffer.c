@@ -3270,8 +3270,17 @@ radv_bind_descriptor_set(struct radv_cmd_buffer *cmd_buffer,
 			 struct radv_descriptor_set *set, unsigned idx)
 {
 	struct radeon_winsys *ws = cmd_buffer->device->ws;
+	struct radv_descriptor_state *descriptors_state =
+		radv_get_descriptors_state(cmd_buffer, bind_point);
+	bool changed;
+
+	changed = descriptors_state->sets[idx] != set ||
+		!(descriptors_state->valid & (1u << idx));
 
 	radv_set_descriptor_set(cmd_buffer, bind_point, set, idx);
+
+	if (!changed)
+		return;
 
 	assert(set);
 	assert(!(set->layout->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR));
