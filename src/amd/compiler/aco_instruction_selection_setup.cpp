@@ -89,6 +89,7 @@ struct isel_context {
       struct {
          bool is_divergent = false;
       } parent_if;
+      bool exec_potentially_empty = false;
    } cf_info;
 
    /* FS inputs */

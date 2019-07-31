@@ -67,11 +67,14 @@ public:
       ctx->cf_info.parent_loop.has_divergent_branch = divergent_branch_old;
       ctx->cf_info.parent_if.is_divergent = divergent_if_old;
       ctx->cf_info.loop_nest_depth = ctx->cf_info.loop_nest_depth - 1;
+      if (!ctx->cf_info.loop_nest_depth && !ctx->cf_info.parent_if.is_divergent)
+         ctx->cf_info.exec_potentially_empty = false;
    }
 };
 
 struct if_context {
    bool divergent_old;
+   bool exec_potentially_empty_old;
 
    unsigned BB_if_idx;
    unsigned invert_idx;
@@ -3340,6 +3343,9 @@ void visit_load_push_constant(isel_context *ctx, nir_intrinsic_instr *instr)
 
 void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
 {
+   if (ctx->cf_info.loop_nest_depth || ctx->cf_info.parent_if.is_divergent)
+      ctx->cf_info.exec_potentially_empty = true;
+
    ctx->program->needs_exact = true;
 
    Builder bld(ctx->program, ctx->block);
@@ -3353,6 +3359,9 @@ void visit_discard_if(isel_context *ctx, nir_intrinsic_instr *instr)
 void visit_discard(isel_context* ctx, nir_intrinsic_instr *instr)
 {
    Builder bld(ctx->program, ctx->block);
+
+   if (ctx->cf_info.loop_nest_depth || ctx->cf_info.parent_if.is_divergent)
+      ctx->cf_info.exec_potentially_empty = true;
 
    /* it can currently happen that NIR doesn't remove the unreachable code */
    if (!nir_instr_is_last(&instr->instr)) {
@@ -6758,10 +6767,17 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
       }
    }
 
-   phi.reset(create_instruction<Pseudo_instruction>(opcode, Format::PSEUDO, num_src, 1));
+   unsigned extra_src = 0;
+   if (opcode == aco_opcode::p_linear_phi && (ctx->block->kind & block_kind_loop_exit) &&
+       ctx->program->blocks[ctx->block->index-2].kind & block_kind_continue_or_break) {
+      extra_src++;
+   }
+
+   phi.reset(create_instruction<Pseudo_instruction>(opcode, Format::PSEUDO, num_src + extra_src, 1));
 
    /* if we have a linear phi on a divergent if, we know that one src is undef */
    if (opcode == aco_opcode::p_linear_phi && ctx->block->kind & block_kind_merge) {
+      assert(extra_src == 0);
       Block* block;
       /* we place the phi either in the invert-block or in the current block */
       if (phi_src.begin()->second->parent_instr->type != nir_instr_type_ssa_undef) {
@@ -6786,6 +6802,8 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
       phi->getOperand(i) = Operand(get_ssa_temp(ctx, it->second));
       ++it;
    }
+   for (unsigned i = 0; i < extra_src; i++)
+      phi->getOperand(num_src + i) = Operand(dst.regClass());
    phi->getDefinition(0) = Definition(dst);
    ctx->block->instructions.emplace(ctx->block->instructions.begin(), std::move(phi));
 }
@@ -6940,13 +6958,35 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
    append_logical_start(ctx->block);
    visit_cf_list(ctx, &loop->body);
 
+   //TODO: what if a loop ends with a unconditional or uniformly branched continue and this branch is never taken?
    if (!ctx->cf_info.has_branch) {
       append_logical_end(ctx->block);
+      if (ctx->cf_info.exec_potentially_empty) {
+         /* Discards can result in code running with an empty exec mask.
+          * This would result in divergent breaks not ever being taken. As a
+          * workaround, break the loop when the loop mask is empty instead of
+          * always continuing. */
+         ctx->block->kind |= (block_kind_continue_or_break | block_kind_uniform);
+
+         /* create "loop_almost_exit" to avoid critical edges */
+         unsigned block_idx = ctx->block->index;
+         Block *loop_almost_exit = ctx->program->create_and_insert_block();
+         loop_almost_exit->loop_nest_depth = ctx->cf_info.loop_nest_depth;
+         loop_almost_exit->kind = block_kind_uniform;
+         bld.reset(loop_almost_exit);
+         bld.branch(aco_opcode::p_branch);
+
+         add_linear_edge(block_idx, loop_almost_exit);
+         add_linear_edge(loop_almost_exit->index, &loop_exit);
+
+         ctx->block = &ctx->program->blocks[block_idx];
+      } else {
+         ctx->block->kind |= (block_kind_continue | block_kind_uniform);
+      }
       if (!ctx->cf_info.parent_loop.has_divergent_branch)
          add_edge(ctx->block->index, &ctx->program->blocks[loop_header_idx]);
       else
          add_linear_edge(ctx->block->index, &ctx->program->blocks[loop_header_idx]);
-      ctx->block->kind |= (block_kind_continue | block_kind_uniform);
       bld.reset(ctx->block);
       bld.branch(aco_opcode::p_branch);
    }
@@ -7017,8 +7057,10 @@ static void begin_divergent_if_then(isel_context *ctx, if_context *ic, Temp cond
    ic->BB_endif.loop_nest_depth = ctx->cf_info.loop_nest_depth;
    ic->BB_endif.kind |= (block_kind_merge | (ctx->block->kind & block_kind_top_level));
 
+   ic->exec_potentially_empty_old = ctx->cf_info.exec_potentially_empty;
    ic->divergent_old = ctx->cf_info.parent_if.is_divergent;
    ctx->cf_info.parent_if.is_divergent = true;
+   ctx->cf_info.exec_potentially_empty = false; /* divergent branches use cbranch_execz */
 
    /** emit logical then block */
    Block* BB_then_logical = ctx->program->create_and_insert_block();
@@ -7063,6 +7105,8 @@ static void begin_divergent_if_else(isel_context *ctx, if_context *ic, Temp cond
    branch->getOperand(0) = Operand(cond);
    ctx->block->instructions.push_back(std::move(branch));
 
+   ic->exec_potentially_empty_old |= ctx->cf_info.exec_potentially_empty;
+   ctx->cf_info.exec_potentially_empty = false; /* divergent branches use cbranch_execz */
 
    /** emit logical else block */
    Block* BB_else_logical = ctx->program->create_and_insert_block();
@@ -7109,6 +7153,10 @@ static void end_divergent_if(isel_context *ctx, if_context *ic)
 
 
    ctx->cf_info.parent_if.is_divergent = ic->divergent_old;
+   ctx->cf_info.exec_potentially_empty |= ic->exec_potentially_empty_old;
+   /* uniform control flow never has an empty exec-mask */
+   if (!ctx->cf_info.loop_nest_depth && !ctx->cf_info.parent_if.is_divergent)
+      ctx->cf_info.exec_potentially_empty = false;
 }
 
 static void visit_if(isel_context *ctx, nir_if *if_stmt)

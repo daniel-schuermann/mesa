@@ -856,6 +856,33 @@ void add_branch_code(exec_ctx& ctx, Block* block)
       /* no return here as it can be followed by a divergent break */
    }
 
+   if (block->kind & block_kind_continue_or_break) {
+      assert(block->instructions.back()->opcode == aco_opcode::p_branch);
+      block->instructions.pop_back();
+
+      /* because of how linear_succs is created, this needs to be swapped */
+      std::swap(block->linear_succs[0], block->linear_succs[1]);
+
+      assert(ctx.program->blocks[block->linear_succs[1]].kind & block_kind_loop_header);
+      assert(ctx.program->blocks[ctx.program->blocks[block->linear_succs[0]].linear_succs[0]].kind & block_kind_loop_exit);
+
+      if (ctx.info[idx].exec.back().second & mask_type_loop) {
+         bld.branch(aco_opcode::p_cbranch_nz, bld.exec(ctx.info[idx].exec.back().first), block->linear_succs[1], block->linear_succs[0]);
+      } else {
+         Temp cond = Temp();
+         for (int exec_idx = ctx.info[idx].exec.size() - 1; exec_idx >= 0; exec_idx--) {
+            if (ctx.info[idx].exec[exec_idx].second & mask_type_loop) {
+               cond = bld.sopc(aco_opcode::s_cmp_lg_u64, bld.def(s1, scc), ctx.info[idx].exec[exec_idx].first, Operand(0u));
+               break;
+            }
+         }
+         assert(cond != Temp());
+
+         bld.branch(aco_opcode::p_cbranch_nz, bld.scc(cond), block->linear_succs[1], block->linear_succs[0]);
+      }
+      return;
+   }
+
    if (block->kind & block_kind_uniform) {
       Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(block->instructions.back().get());
       if (branch->opcode == aco_opcode::p_branch) {
