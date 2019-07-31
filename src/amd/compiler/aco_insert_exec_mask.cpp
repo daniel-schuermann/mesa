@@ -850,6 +850,8 @@ void add_branch_code(exec_ctx& ctx, Block* block)
       discard->getDefinition(num) = bld.def(s1, scc);
 
       bld.insert(std::move(discard));
+      if ((block->kind & (block_kind_break | block_kind_uniform)) == block_kind_break)
+         ctx.info[idx].exec.back().first = cond;
       bld.insert(std::move(branch));
       /* no return here as it can be followed by a divergent break */
    }
@@ -925,7 +927,7 @@ void add_branch_code(exec_ctx& ctx, Block* block)
          cond = bld.tmp(s1);
          Temp exec_mask = ctx.info[idx].exec[exec_idx].first;
          exec_mask = bld.sop2(aco_opcode::s_andn2_b64, bld.def(s2), bld.scc(Definition(cond)),
-                              exec_mask, bld.exec(current_exec));
+                              exec_mask, current_exec);
          ctx.info[idx].exec[exec_idx].first = exec_mask;
          if (ctx.info[idx].exec[exec_idx].second & mask_type_loop)
             break;
