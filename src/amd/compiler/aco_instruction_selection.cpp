@@ -3363,18 +3363,11 @@ void visit_discard(isel_context* ctx, nir_intrinsic_instr *instr)
    if (ctx->cf_info.loop_nest_depth || ctx->cf_info.parent_if.is_divergent)
       ctx->cf_info.exec_potentially_empty = true;
 
-   /* it can currently happen that NIR doesn't remove the unreachable code */
-   if (!nir_instr_is_last(&instr->instr)) {
-      ctx->program->needs_exact = true;
-      /* save exec somewhere temporarily so that it doesn't get
-       * overwritten before the discard from outer exec masks */
-      Temp cond = bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), Operand(0xFFFFFFFF), Operand(exec, s2));
-      bld.pseudo(aco_opcode::p_discard_if, cond);
-      ctx->block->kind |= block_kind_uses_discard_if;
-      return;
-   }
+   bool divergent = ctx->cf_info.parent_if.is_divergent ||
+                    ctx->cf_info.parent_loop.has_divergent_continue;
 
-   if (ctx->block->loop_nest_depth) {
+   if (ctx->block->loop_nest_depth &&
+       ((nir_instr_is_last(&instr->instr) && !divergent) || divergent)) {
       /* we handle discards the same way as jump instructions */
       append_logical_end(ctx->block);
 
@@ -3382,9 +3375,9 @@ void visit_discard(isel_context* ctx, nir_intrinsic_instr *instr)
       Block *linear_target = ctx->cf_info.parent_loop.exit;
       ctx->block->kind |= block_kind_discard;
 
-      if (!ctx->cf_info.parent_if.is_divergent &&
-          !ctx->cf_info.parent_loop.has_divergent_continue) {
+      if (!divergent) {
          /* uniform discard - loop ends here */
+         assert(nir_instr_is_last(&instr->instr));
          ctx->block->kind |= block_kind_uniform;
          ctx->cf_info.has_branch = true;
          bld.branch(aco_opcode::p_branch);
@@ -3412,21 +3405,43 @@ void visit_discard(isel_context* ctx, nir_intrinsic_instr *instr)
       append_logical_start(continue_block);
       ctx->block = continue_block;
 
-   } else {
-      /* not inside loop */
+      return;
+   }
 
-      if (!ctx->cf_info.parent_if.is_divergent) {
-         /* program just ends here */
-         ctx->block->kind |= block_kind_uniform;
-         bld.exp(aco_opcode::exp, Operand(v1), Operand(v1), Operand(v1), Operand(v1),
-                 0 /* enabled mask */, 9 /* dest */,
-                 false /* compressed */, true/* done */, true /* valid mask */);
-         bld.sopp(aco_opcode::s_endpgm);
-         // TODO: it will potentiall be followed by a branch which is dead code to sanitize NIR phis
-      } else {
-         ctx->block->kind |= block_kind_discard;
-         /* branch and linear edge is added by visit_if() */
-      }
+   /* it can currently happen that NIR doesn't remove the unreachable code */
+   if (!nir_instr_is_last(&instr->instr)) {
+      ctx->program->needs_exact = true;
+      /* save exec somewhere temporarily so that it doesn't get
+       * overwritten before the discard from outer exec masks */
+      Temp cond = bld.sop2(aco_opcode::s_and_b64, bld.def(s2), bld.def(s1, scc), Operand(0xFFFFFFFF), Operand(exec, s2));
+      bld.pseudo(aco_opcode::p_discard_if, cond);
+      ctx->block->kind |= block_kind_uses_discard_if;
+      return;
+   }
+
+   /* This condition is incorrect for uniformly branched discards in a loop
+    * predicated by a divergent condition, but the above code catches that case
+    * and the discard would end up turning into a discard_if.
+    * For example:
+    * if (divergent) {
+    *    while (...) {
+    *       if (uniform) {
+    *          discard;
+    *       }
+    *    }
+    * }
+    */
+   if (!ctx->cf_info.parent_if.is_divergent) {
+      /* program just ends here */
+      ctx->block->kind |= block_kind_uniform;
+      bld.exp(aco_opcode::exp, Operand(v1), Operand(v1), Operand(v1), Operand(v1),
+              0 /* enabled mask */, 9 /* dest */,
+              false /* compressed */, true/* done */, true /* valid mask */);
+      bld.sopp(aco_opcode::s_endpgm);
+      // TODO: it will potentially be followed by a branch which is dead code to sanitize NIR phis
+   } else {
+      ctx->block->kind |= block_kind_discard;
+      /* branch and linear edge is added by visit_if() */
    }
 }
 
