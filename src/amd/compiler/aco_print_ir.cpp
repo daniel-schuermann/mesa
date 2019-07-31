@@ -485,6 +485,8 @@ aco_print_block_kind(uint16_t kind, FILE *output)
       fprintf(output, "continue, ");
    if (kind & block_kind_break)
       fprintf(output, "break, ");
+   if (kind & block_kind_continue_or_break)
+      fprintf(output, "continue_or_break, ");
    if (kind & block_kind_discard)
       fprintf(output, "discard, ");
    if (kind & block_kind_branch)
