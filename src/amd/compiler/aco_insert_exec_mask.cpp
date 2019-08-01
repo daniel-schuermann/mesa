@@ -278,7 +278,7 @@ void transition_to_WQM(exec_ctx& ctx, Builder bld, unsigned idx)
       return;
    if (ctx.info[idx].exec.back().second & mask_type_global) {
       Temp exec_mask = ctx.info[idx].exec.back().first;
-      exec_mask = bld.sop1(aco_opcode::s_wqm_b64, bld.def(s2, exec), bld.def(s1, scc), bld.exec(exec_mask));
+      exec_mask = bld.sop1(aco_opcode::s_wqm_b64, bld.def(s2, exec), bld.def(s1, scc), exec_mask);
       ctx.info[idx].exec.emplace_back(exec_mask, mask_type_global | mask_type_wqm);
       return;
    }
