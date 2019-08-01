@@ -58,8 +58,8 @@ bool regs_intersect(PhysReg a_reg, unsigned a_size, PhysReg b_reg, unsigned b_si
 }
 
 int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
-                            std::vector<aco_ptr<Instruction>>& old_instructions,
-                            std::vector<aco_ptr<Instruction>>& new_instructions)
+                       std::vector<aco_ptr<Instruction>>& old_instructions,
+                       std::vector<aco_ptr<Instruction>>& new_instructions)
 {
    int new_idx = new_instructions.size();
    int NOPs = 0;
@@ -104,7 +104,7 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
       }
    }
 
-   if (instr->isVALU()) {
+   if (instr->isVALU() || instr->format == Format::VINTRP) {
       if (instr->isDPP()) {
          /* VALU does not forward EXEC to DPP. */
          if (ctx.VALU_wrexec + 5 >= new_idx)
@@ -170,17 +170,26 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
       }
 
       /* Write VGPRs holding writedata > 64 bit from MIMG/MUBUF instructions */
-      if (new_idx > 0) { //FIXME: handle case if the last instruction of a block without branch is such store
+      // FIXME: handle case if the last instruction of a block without branch is such store
+      // TODO: confirm that DS instructions cannot cause WAR hazards here
+      if (new_idx > 0) {
          aco_ptr<Instruction>& pred = new_instructions.back();
          if (pred->isVMEM() &&
-             pred->num_operands == 3 &&
-             pred->getOperand(2).size() > 2 &&
+             pred->num_operands == 4 &&
+             pred->getOperand(3).size() > 2 &&
              pred->getOperand(1).size() != 8 &&
              (pred->format != Format::MUBUF || pred->getOperand(2).physReg() >= 102)) {
             /* Ops that use a 256-bit T# do not need a wait state.
              * BUFFER_STORE_* operations that use an SGPR for "offset"
              * do not require any wait states. */
-            NOPs = std::max(NOPs, 1);
+            PhysReg wrdata = pred->getOperand(3).physReg();
+            unsigned size = pred->getOperand(3).size();
+            assert(wrdata >= 256);
+            for (unsigned i = 0; i < instr->num_definitions; i++) {
+               Definition& def = instr->getDefinition(i);
+               if (regs_intersect(def.physReg(), def.size(), wrdata, size))
+                  NOPs = std::max(NOPs, 1);
+            }
          }
       }
 
