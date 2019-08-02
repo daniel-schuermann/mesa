@@ -347,7 +347,8 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
       assert(preds[0] == idx - 1);
       ctx.info[idx].exec = ctx.info[idx - 1].exec;
       loop_info& info = ctx.loop.back();
-      assert(ctx.info[idx].exec.size() == info.num_exec_masks);
+      while (ctx.info[idx].exec.size() > info.num_exec_masks)
+         ctx.info[idx].exec.pop_back();
 
       /* create ssa names for outer exec masks */
       if (info.has_discard) {
@@ -365,7 +366,7 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
          /* this phi might be trivial but ensures a parallelcopy on the loop header */
          aco_ptr<Pseudo_instruction> phi{create_instruction<Pseudo_instruction>(aco_opcode::p_linear_phi, Format::PSEUDO, preds.size(), 1)};
          phi->getDefinition(0) = bld.def(s2);
-         phi->getOperand(0) = Operand(ctx.info[preds[0]].exec.back().first);
+         phi->getOperand(0) = Operand(ctx.info[preds[0]].exec[info.num_exec_masks - 1].first);
          ctx.info[idx].exec.back().first = bld.insert(std::move(phi));
       }
 
@@ -405,10 +406,9 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
    if (block->kind & block_kind_loop_exit) {
       Block* header = ctx.loop.back().loop_header;
       loop_info& info = ctx.loop.back();
-      unsigned num_exec_masks = ctx.loop.back().num_exec_masks;
 
       for (MAYBE_UNUSED unsigned pred : preds)
-         assert(ctx.info[pred].exec.size() >= num_exec_masks);
+         assert(ctx.info[pred].exec.size() >= info.num_exec_masks);
 
       /* fill the loop header phis */
       std::vector<unsigned>& header_preds = header->linear_preds;
@@ -434,8 +434,10 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
             phi->getOperand(i) = Operand(ctx.info[header_preds[i]].exec[info.num_exec_masks].first);
       }
 
+      assert(!(block->kind & block_kind_top_level) || info.num_exec_masks <= 2);
+
       /* create the loop exit phis if not trivial */
-      for (unsigned k = 0; k < num_exec_masks; k++) {
+      for (unsigned k = 0; k < info.num_exec_masks; k++) {
          Temp same = ctx.info[preds[0]].exec[k].first;
          uint8_t type = ctx.info[header_preds[0]].exec[k].second;
          bool trivial = true;
@@ -456,7 +458,7 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
             ctx.info[idx].exec.emplace_back(bld.insert(std::move(phi)), type);
          }
       }
-      assert(ctx.info[idx].exec.size() == num_exec_masks);
+      assert(ctx.info[idx].exec.size() == info.num_exec_masks);
 
       /* create a parallelcopy to move the live mask to exec */
       unsigned i = 0;
@@ -809,8 +811,12 @@ void add_branch_code(exec_ctx& ctx, Block* block)
          }
       }
 
+      unsigned num_exec_masks = ctx.info[idx].exec.size();
+      if (block->kind & block_kind_top_level)
+         num_exec_masks = std::min(num_exec_masks, 2u);
+
       ctx.loop.emplace_back(&ctx.program->blocks[block->linear_succs[0]],
-                            ctx.info[idx].exec.size(),
+                            num_exec_masks,
                             needs,
                             has_divergent_break,
                             has_divergent_continue,
