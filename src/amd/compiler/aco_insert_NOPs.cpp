@@ -62,7 +62,6 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
                        std::vector<aco_ptr<Instruction>>& new_instructions)
 {
    int new_idx = new_instructions.size();
-   int NOPs = 0;
 
    // TODO: setreg / getreg / m0 writes
    // TODO: try to schedule the NOP-causing instruction up to reduce the number of stall cycles
@@ -102,9 +101,9 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
                return 1;
          }
       }
-   }
+   } else if (instr->isVALU() || instr->format == Format::VINTRP) {
+      int NOPs = 0;
 
-   if (instr->isVALU() || instr->format == Format::VINTRP) {
       if (instr->isDPP()) {
          /* VALU does not forward EXEC to DPP. */
          if (ctx.VALU_wrexec + 5 >= new_idx)
@@ -121,6 +120,16 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
             }
          }
       }
+
+      /* SALU writes M0 */
+      if (instr->format == Format::VINTRP && new_idx > 0 && ctx.chip_class >= GFX9) {
+         aco_ptr<Instruction>& pred = new_instructions.back();
+         if (pred->isSALU() &&
+             pred->num_definitions &&
+             pred->getDefinition(0).physReg() == m0)
+            NOPs = std::max(NOPs, 1);
+      }
+
       for (unsigned i = 0; i < instr->num_operands; i++) {
          /* VALU which uses VCCZ */
          if (instr->getOperand(i).physReg() == PhysReg{251} &&
@@ -204,10 +213,8 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
          }
       }
       return NOPs;
-   }
-
-   /* If the VALU writes the SGPR that is used by a VMEM, the user must add five wait states. */
-   if (instr->isVMEM() && ctx.VALU_wrsgpr + 5 >= new_idx) {
+   } else if (instr->isVMEM() && ctx.VALU_wrsgpr + 5 >= new_idx) {
+      /* If the VALU writes the SGPR that is used by a VMEM, the user must add five wait states. */
       for (int pred_idx = new_idx - 1; pred_idx >= 0 && pred_idx >= new_idx - 5; pred_idx--) {
          aco_ptr<Instruction>& pred = new_instructions[pred_idx];
          if (!(pred->isVALU() && VALU_writes_sgpr(pred)))
@@ -230,15 +237,6 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
             }
          }
       }
-   }
-
-   /* SALU writes M0 */
-   if (new_idx > 0 && ctx.chip_class >= GFX9 && instr->format == Format::VINTRP) {
-      aco_ptr<Instruction>& pred = new_instructions.back();
-      if (pred->isSALU() &&
-          pred->num_definitions &&
-          pred->getDefinition(0).physReg() == m0)
-         return 1;
    }
 
    return 0;
