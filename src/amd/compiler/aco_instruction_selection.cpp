@@ -2614,8 +2614,8 @@ void visit_store_fs_output(isel_context *ctx, nir_intrinsic_instr *instr)
       target = V_008DFC_SQ_EXP_MRT + index;
       col_format = (ctx->options->key.fs.col_format >> (4 * index)) & 0xf;
    }
-   MAYBE_UNUSED bool is_int8 = (ctx->options->key.fs.is_int8 >> index) & 1;
-   MAYBE_UNUSED bool is_int10 = (ctx->options->key.fs.is_int10 >> index) & 1;
+   ASSERTED bool is_int8 = (ctx->options->key.fs.is_int8 >> index) & 1;
+   ASSERTED bool is_int10 = (ctx->options->key.fs.is_int10 >> index) & 1;
    assert(!is_int8 && !is_int10);
 
    switch (col_format)
@@ -3726,7 +3726,7 @@ static Temp get_image_coords(isel_context *ctx, const nir_intrinsic_instr *instr
    Temp src0 = get_ssa_temp(ctx, instr->src[1].ssa);
    enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
    bool is_array = glsl_sampler_type_is_array(type);
-   MAYBE_UNUSED bool add_frag_pos = (dim == GLSL_SAMPLER_DIM_SUBPASS || dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
+   ASSERTED bool add_frag_pos = (dim == GLSL_SAMPLER_DIM_SUBPASS || dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
    assert(!add_frag_pos && "Input attachments should be lowered.");
    bool is_ms = (dim == GLSL_SAMPLER_DIM_MS || dim == GLSL_SAMPLER_DIM_SUBPASS_MS);
    bool gfx9_1d = ctx->options->chip_class >= GFX9 && dim == GLSL_SAMPLER_DIM_1D;

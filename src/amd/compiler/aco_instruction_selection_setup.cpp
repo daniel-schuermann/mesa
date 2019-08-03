@@ -26,6 +26,7 @@
 #include "aco_ir.h"
 #include "nir.h"
 #include "vulkan/radv_shader.h"
+#include "vulkan/radv_descriptor_set.h"
 #include "sid.h"
 #include "ac_exp_param.h"
 
@@ -96,7 +97,7 @@ struct isel_context {
    bool fs_vgpr_args[fs_input::max_inputs];
    Temp fs_inputs[fs_input::max_inputs];
    Temp prim_mask = Temp(0, s1);
-   Temp descriptor_sets[RADV_UD_MAX_SETS];
+   Temp descriptor_sets[MAX_SETS];
    Temp push_constants = Temp(0, s1);
    Temp inline_push_consts[MAX_INLINE_PUSH_CONSTS];
    unsigned num_inline_push_consts = 0;
@@ -1333,7 +1334,7 @@ setup_isel_context(Program* program, nir_shader *nir,
       program->sgpr_limit = 94; /* workaround hardware bug */
 
    program->stage = nir->info.stage;
-   for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i)
+   for (unsigned i = 0; i < MAX_SETS; ++i)
       program->info->user_sgprs_locs.descriptor_sets[i].sgpr_idx = -1;
    for (unsigned i = 0; i < AC_UD_MAX_UD; ++i)
       program->info->user_sgprs_locs.shader_data[i].sgpr_idx = -1;
@@ -1346,7 +1347,7 @@ setup_isel_context(Program* program, nir_shader *nir,
    for (unsigned i = 0; i < fs_input::max_inputs; ++i)
       ctx.fs_inputs[i] = Temp(0, v1);
    ctx.fs_inputs[fs_input::persp_pull_model] = Temp(0, v3);
-   for (unsigned i = 0; i < RADV_UD_MAX_SETS; ++i)
+   for (unsigned i = 0; i < MAX_SETS; ++i)
       ctx.descriptor_sets[i] = Temp(0, s1);
    for (unsigned i = 0; i < MAX_INLINE_PUSH_CONSTS; ++i)
       ctx.inline_push_consts[i] = Temp(0, s1);
