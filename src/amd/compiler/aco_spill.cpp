@@ -702,7 +702,7 @@ void add_coupling_code(spill_ctx& ctx, Block* block, unsigned block_idx)
    }
 
    /* loop header and merge blocks: check if all (linear) predecessors have been processed */
-   for (MAYBE_UNUSED unsigned pred : block->linear_preds)
+   for (ASSERTED unsigned pred : block->linear_preds)
       assert(ctx.processed[pred]);
 
    /* iterate the phi nodes for which operands to spill at the predecessor */
@@ -1251,8 +1251,8 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
       bool reloaded = ctx.is_reloaded[pair.first] || ctx.is_reloaded[pair.second];
       ctx.is_reloaded[pair.first] = ctx.is_reloaded[pair.second] = reloaded;
    }
-   for (MAYBE_UNUSED uint32_t i = 0; i < ctx.interferences.size(); i++)
-      for (MAYBE_UNUSED uint32_t id : ctx.interferences[i].second)
+   for (ASSERTED uint32_t i = 0; i < ctx.interferences.size(); i++)
+      for (ASSERTED uint32_t id : ctx.interferences[i].second)
          assert(i != id);
 
    /* for each spill slot, assign as many spill ids as possible */
