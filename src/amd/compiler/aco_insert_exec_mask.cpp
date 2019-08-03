@@ -407,7 +407,7 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
       Block* header = ctx.loop.back().loop_header;
       loop_info& info = ctx.loop.back();
 
-      for (MAYBE_UNUSED unsigned pred : preds)
+      for (ASSERTED unsigned pred : preds)
          assert(ctx.info[pred].exec.size() >= info.num_exec_masks);
 
       /* fill the loop header phis */

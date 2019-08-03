@@ -797,7 +797,7 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
       }
    }
 
-   MAYBE_UNUSED bool success = false;
+   ASSERTED bool success = false;
    success = get_regs_for_copies(ctx, reg_file, parallelcopies, vars, lb, ub, instr, best_pos, best_pos + size - 1);
    assert(success);
 
