@@ -41,3 +41,21 @@ D.u = CountOneBits(S0.u) + S1.u.
 
 The Vega ISA references doesn't say this (or doesn't make it clear), but
 the offset for SMEM stores must be in m0 if IMM == 0.
+
+## VMEM stores
+
+All reference guides say (under "Vector Memory Instruction Data Dependencies"):
+> When a VM instruction is issued, the address is immediately read out of VGPRs
+> and sent to the texture cache. Any texture or buffer resources and samplers
+> are also sent immediately. However, write-data is not immediately sent to the
+> texture cache.
+Reading that, one might think that waitcnts need to be added when writing to
+the registers used for a VMEM store's data. Experimentation has shown that this
+does not seem to be the case on GFX8 and GFX9 (GFX6 and GFX7 are untested). It
+also seems unlikely, since NOPs are apparently needed in a subset of these
+situations.
+
+## MIMG opcodes on GFX8/GCN3
+
+The `image_atomic_{swap,cmpswap,add,sub}` opcodes in the GCN3 ISA reference
+guide are incorrect. The Vega ISA reference guide has the correct ones.
