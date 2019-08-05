@@ -636,6 +636,7 @@ struct SOP2_instruction : public Instruction {
  */
 struct SMEM_instruction : public Instruction {
    bool glc; /* VI+: globally coherent */
+   bool dlc; /* NAVI: device level coherent */
    bool nv; /* VEGA only: Non-volatile */
    bool can_reorder;
    bool disable_wqm;
@@ -707,6 +708,7 @@ struct MUBUF_instruction : public Instruction {
    bool offen; /* Supply an offset from VGPR (VADDR) */
    bool idxen; /* Supply an index from VGPR (VADDR) */
    bool glc; /* globally coherent */
+   bool dlc; /* NAVI: device level coherent */
    bool slc; /* system level coherent */
    bool tfe; /* texture fail enable */
    bool lds; /* Return read-data to LDS instead of VGPRs */
@@ -724,12 +726,18 @@ struct MUBUF_instruction : public Instruction {
  *
  */
 struct MTBUF_instruction : public Instruction {
-   unsigned dfmt; /* Data Format of data in memory buffer */
-   unsigned nfmt; /* Numeric format of data in memory */
+   union {
+      struct {
+         uint8_t dfmt : 4; /* Data Format of data in memory buffer */
+         uint8_t nfmt : 3; /* Numeric format of data in memory */
+      };
+      uint8_t img_format; /* Buffer or image format as used by GFX10 */
+   };
    unsigned offset; /* Unsigned byte offset - 12 bit */
    bool offen; /* Supply an offset from VGPR (VADDR) */
    bool idxen; /* Supply an index from VGPR (VADDR) */
    bool glc; /* globally coherent */
+   bool dlc; /* NAVI: device level coherent */
    bool slc; /* system level coherent */
    bool tfe; /* texture fail enable */
    bool disable_wqm; /* Require an exec mask without helper invocations */
@@ -748,15 +756,14 @@ struct MTBUF_instruction : public Instruction {
 struct MIMG_instruction : public Instruction {
    unsigned dmask; /* Data VGPR enable mask */
    bool unrm; /* Force address to be un-normalized */
+   bool dlc; /* NAVI: device level coherent */
    bool glc; /* globally coherent */
    bool slc; /* system level coherent */
    bool tfe; /* texture fail enable */
    bool da; /* declare an array */
    bool lwe; /* Force data to be un-normalized */
-   union {
-      bool r128; /* Texture resource size */
-      bool a16; /* VEGA: Address components are 16-bits */
-   };
+   bool r128; /* NAVI: Texture resource size */
+   bool a16; /* VEGA, NAVI: Address components are 16-bits */
    bool d16; /* Convert 32-bit data to 16-bit data */
    bool disable_wqm; /* Require an exec mask without helper invocations */
    bool can_reorder;
@@ -1138,6 +1145,7 @@ void aco_print_program(Program *program, FILE *output);
 
 typedef struct {
    const int16_t opcode_gfx9[static_cast<int>(aco_opcode::num_opcodes)];
+   const int16_t opcode_gfx10[static_cast<int>(aco_opcode::num_opcodes)];
    const std::bitset<static_cast<int>(aco_opcode::num_opcodes)> can_use_input_modifiers;
    const std::bitset<static_cast<int>(aco_opcode::num_opcodes)> can_use_output_modifiers;
    const char *name[static_cast<int>(aco_opcode::num_opcodes)];

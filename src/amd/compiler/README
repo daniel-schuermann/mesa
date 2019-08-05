@@ -1,4 +1,4 @@
-# Unofficial GCN ISA reference errata
+# Unofficial GCN/RDNA ISA reference errata
 
 ## v_sad_u32
 
@@ -42,6 +42,15 @@ D.u = CountOneBits(S0.u) + S1.u.
 The Vega ISA references doesn't say this (or doesn't make it clear), but
 the offset for SMEM stores must be in m0 if IMM == 0.
 
+The RDNA ISA doesn't mention SMEM stores at all, but they seem to be supported
+by the chip and are present in LLVM. AMD devs however highly recommend avoiding
+these instructions.
+
+## SMEM atomics
+
+RDNA ISA: same as the SMEM stores, the ISA pretends they don't exist, but they
+are there in LLVM.
+
 ## VMEM stores
 
 All reference guides say (under "Vector Memory Instruction Data Dependencies"):
@@ -60,6 +69,12 @@ situations.
 The `image_atomic_{swap,cmpswap,add,sub}` opcodes in the GCN3 ISA reference
 guide are incorrect. The Vega ISA reference guide has the correct ones.
 
+## Legacy instructions
+
+Some instructions have a `_LEGACY` variant which implements "DX9 rules", in which
+the zero "wins" in multiplications, ie. `0.0*x` is always `0.0`. The VEGA ISA
+mentions `V_MAC_LEGACY_F32` but this instruction is not really there on VEGA.
+
 # Hardware Bugs
 
 ## SMEM corrupts VCCZ on SI/CI
@@ -69,3 +84,4 @@ After issuing a SMEM instructions, we need to wait for the SMEM instructions to
 finish and then write to vcc (for example, `s_mov_b64 vcc, vcc`) to correct vccz
 
 Currently, we don't do this.
+

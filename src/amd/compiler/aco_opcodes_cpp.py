@@ -46,6 +46,11 @@ extern const aco::Info instr_info = {
       ${opcodes[name].opcode_gfx9},
       % endfor
    },
+   .opcode_gfx10 = {
+      % for name in opcode_names:
+      ${opcodes[name].opcode_gfx10},
+      % endfor
+   },
    .can_use_input_modifiers = std::bitset<${len(opcode_names)}>("${can_use_input_modifiers}"),
    .can_use_output_modifiers = std::bitset<${len(opcode_names)}>("${can_use_output_modifiers}"),
    .name = {
