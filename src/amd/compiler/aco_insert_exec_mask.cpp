@@ -51,12 +51,14 @@ struct wqm_ctx {
    std::vector<uint16_t> defined_in;
    std::vector<bool> needs_wqm;
    std::vector<bool> branch_wqm; /* true if the branch condition in this block should be in wqm */
-   bool loop_wqm;
+   bool loop;
+   bool wqm;
    wqm_ctx(Program* program) : program(program),
                                defined_in(program->peekAllocationId(), 0xFFFF),
                                needs_wqm(program->peekAllocationId()),
                                branch_wqm(program->blocks.size()),
-                               loop_wqm(false)
+                               loop(false),
+                               wqm(false)
    {
       for (unsigned i = 0; i < program->blocks.size(); i++)
          worklist.insert(i);
@@ -170,6 +172,21 @@ void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
 {
    std::vector<WQMState> instr_needs(block->instructions.size());
 
+   if (block->kind & block_kind_top_level) {
+      if (ctx.loop && ctx.wqm) {
+         /* mark all break conditions as WQM */
+         unsigned block_idx = block->index + 1;
+         while (!(ctx.program->blocks[block_idx].kind & block_kind_top_level)) {
+            if (ctx.program->blocks[block_idx].kind & block_kind_break)
+               mark_block_wqm(ctx, block_idx);
+            block_idx++;
+         }
+      }
+
+      ctx.loop = false;
+      ctx.wqm = false;
+   }
+
    for (int i = block->instructions.size() - 1; i >= 0; --i)
    {
       aco_ptr<Instruction>& instr = block->instructions[i];
@@ -210,26 +227,16 @@ void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
    }
 
    info.instr_needs = instr_needs;
-   if (block->loop_nest_depth > 0)
-      ctx.loop_wqm |= info.block_needs & WQM;
-   else
-      ctx.loop_wqm = 0;
 
    /* for "if (<cond>) <wqm code>" or "while (<cond>) <wqm code>",
     * <cond> should be computed in WQM */
    if (info.block_needs & WQM && !(block->kind & block_kind_top_level)) {
       for (unsigned pred_idx : block->logical_preds)
          mark_block_wqm(ctx, pred_idx);
+      ctx.wqm = true;
    }
-   if (block->kind & block_kind_loop_header && ctx.loop_wqm) {
-      /* mark all break conditions between loop entry and loop exit */
-      unsigned block_idx = block->index;
-      while (ctx.program->blocks[block_idx].loop_nest_depth >= block->loop_nest_depth) {
-         if (ctx.program->blocks[block_idx].kind & block_kind_break)
-            mark_block_wqm(ctx, block_idx);
-         block_idx++;
-      }
-   }
+   if (block->kind & block_kind_loop_header)
+      ctx.loop = true;
 }
 
 void calculate_wqm_needs(exec_ctx& exec_ctx)
