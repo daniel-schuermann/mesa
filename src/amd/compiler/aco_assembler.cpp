@@ -60,7 +60,11 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
    }
 
    uint32_t opcode = ctx.opcode[(int)instr->opcode];
-   assert(opcode != (uint32_t)-1);
+   if (opcode == (uint32_t)-1) {
+      fprintf(stderr, "Unsupported opcode: ");
+      aco_print_instr(instr, stderr);
+      abort();
+   }
 
    switch (instr->format) {
    case Format::SOP2: {
