@@ -4007,7 +4007,6 @@ bool nir_opt_vectorize(nir_shader *shader);
 bool nir_opt_conditional_discard(nir_shader *shader);
 
 bool nir_opt_load_store_vectorize(nir_shader *shader, nir_variable_mode modes,
-                                  int (*type_size)(nir_variable_mode mode, const struct glsl_type *),
                                   int (*align)(nir_variable_mode, bool is_store, unsigned bit_size, unsigned num_components));
 
 void nir_strip(nir_shader *shader);

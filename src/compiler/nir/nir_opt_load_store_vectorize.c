@@ -28,7 +28,7 @@
  *
  * This doesn't handle copy_deref intrinsics and assumes that
  * nir_lower_alu_to_scalar() has been called and that the IR is free from ALU
- * modifiers.
+ * modifiers. It also assumes that derefs have explicitly laid out types.
  *
  * After vectorization, the backend may want to call nir_lower_alu_to_scalar()
  * and nir_lower_pack(). Also this creates cast instructions taking derefs as a
@@ -155,7 +155,6 @@ struct block_state {
 
 struct vectorize_ctx {
    nir_variable_mode modes;
-   int (*type_size)(nir_variable_mode, const struct glsl_type *);
    int (*align)(nir_variable_mode, bool, unsigned, unsigned);
    struct block_state *block_states;
 };
@@ -236,30 +235,11 @@ static int
 array_stride(struct vectorize_ctx *ctx, nir_variable_mode mode, const struct glsl_type *type)
 {
    unsigned explicit_stride = glsl_get_explicit_stride(type);
-   if (explicit_stride || (mode & (nir_var_mem_ubo | nir_var_mem_ssbo | nir_var_mem_global))) {
-      if ((glsl_type_is_matrix(type) &&
-           glsl_matrix_type_is_row_major(type)) ||
-          (glsl_type_is_vector(type) && explicit_stride == 0))
-         return type_scalar_size_bytes(type);
-      return explicit_stride;
-   }
-
-   return ctx->type_size(mode, glsl_get_array_element(type));
-}
-
-static int
-struct_field_offset(struct vectorize_ctx *ctx, nir_variable_mode mode, const struct glsl_type *type, unsigned field)
-{
-   int explicit_offset = glsl_get_struct_field_offset(type, field);
-   if (explicit_offset >= 0 || (mode & (nir_var_mem_ubo | nir_var_mem_ssbo | nir_var_mem_global))) {
-      /* taken from nir_lower_explicit_io() */
-      return explicit_offset;
-   }
-
-   unsigned offset = 0;
-   for (unsigned i = 0; i < field; i++)
-      offset += ctx->type_size(mode, glsl_get_struct_field(type, i));
-   return offset;
+   if ((glsl_type_is_matrix(type) &&
+        glsl_matrix_type_is_row_major(type)) ||
+       (glsl_type_is_vector(type) && explicit_stride == 0))
+      return type_scalar_size_bytes(type);
+   return explicit_stride;
 }
 
 static struct entry_key
@@ -329,7 +309,7 @@ create_entry_key_from_deref(void *mem_ctx, struct vectorize_ctx *ctx, nir_deref_
       }
       case nir_deref_type_struct: {
          assert(parent);
-         int offset = struct_field_offset(ctx, deref->mode, parent->type, deref->strct.index);
+         int offset = glsl_get_struct_field_offset(parent->type, deref->strct.index);
          key.offset_base += offset;
          break;
       }
@@ -1036,14 +1016,12 @@ process_block(nir_function_impl *impl, struct vectorize_ctx *ctx, nir_block *blo
 
 bool
 nir_opt_load_store_vectorize(nir_shader *shader, nir_variable_mode modes,
-                             int (*type_size)(nir_variable_mode, const struct glsl_type *),
                              int (*align)(nir_variable_mode, bool, unsigned, unsigned))
 {
    bool progress = false;
 
    struct vectorize_ctx *ctx = ralloc(NULL, struct vectorize_ctx);
    ctx->modes = modes;
-   ctx->type_size = type_size;
    ctx->align = align;
 
    nir_foreach_function(function, shader) {
