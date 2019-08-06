@@ -3098,7 +3098,6 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    Temp rsrc = get_ssa_temp(ctx, instr->src[0].ssa);
-   nir_const_value* const_offset = nir_src_as_const_value(instr->src[1]);
 
    Builder bld(ctx->program, ctx->block);
 
@@ -3152,10 +3151,7 @@ void visit_load_ubo(isel_context *ctx, nir_intrinsic_instr *instr)
       aco_ptr<SMEM_instruction> load{create_instruction<SMEM_instruction>(op, Format::SMEM, 2, 1)};
       load->getOperand(0) = Operand(rsrc);
 
-      if (const_offset && const_offset->u32 < 0xFFFFF)
-         load->getOperand(1) = Operand(const_offset->u32);
-      else
-         load->getOperand(1) = Operand(get_ssa_temp(ctx, instr->src[1].ssa));
+      load->getOperand(1) = Operand(get_ssa_temp(ctx, instr->src[1].ssa));
       load->getDefinition(0) = Definition(dst);
       load->can_reorder = true;
 
