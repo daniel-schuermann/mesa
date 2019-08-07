@@ -194,7 +194,7 @@ struct Temp {
    constexpr bool operator!=(Temp other) const noexcept { return id() != other.id(); }
 
 private:
-   uint32_t id_;
+   uint32_t id_:24;
    RegClass reg_class;
 };
 
@@ -1003,6 +1003,7 @@ public:
 
    uint32_t allocateId()
    {
+      assert(allocationID <= 16777215);
       return allocationID++;
    }
 
