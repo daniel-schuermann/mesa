@@ -112,7 +112,7 @@ struct wait_ctx {
             it->second.type = it->second.type | entry.second.type;
             it->second.exp_cnt = std::min(it->second.exp_cnt, entry.second.exp_cnt);
             it->second.vm_cnt = std::min(it->second.vm_cnt, entry.second.vm_cnt);
-            it->second.lgkm_cnt = std::min(it->second.lgkm_cnt, entry.second.vm_cnt);
+            it->second.lgkm_cnt = std::min(it->second.lgkm_cnt, entry.second.lgkm_cnt);
             if (entry.second.flat && !it->second.flat) {
                it->second.flat = true;
                pending_flat++;
@@ -422,6 +422,25 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
                   it++;
                }
             }
+            it = ctx.vgpr_map.begin();
+            while (it != ctx.vgpr_map.end())
+            {
+               if (entry.type & it->second.type) {
+                  if ((entry.type & lgkm_type) && entry.lgkm_cnt <= it->second.lgkm_cnt)
+                  {
+                     it->second.lgkm_cnt = ctx.max_lgkm_cnt;
+                     it->second.type = it->second.type &= ~lgkm_type;
+                  }
+                  if (it->second.type == done) {
+                     ctx.pending_flat -= it->second.flat;
+                     it = ctx.vgpr_map.erase(it);
+                  } else {
+                     it++;
+                  }
+               } else {
+                  it++;
+               }
+            }
             new_lgkm_cnt = std::min(new_lgkm_cnt, entry.lgkm_cnt);
          }
       } else {
@@ -459,6 +478,23 @@ uint16_t uses_gpr(Instruction* instr, wait_ctx& ctx)
                   } else {
                      it++;
                   }
+               } else {
+                  it++;
+               }
+            }
+            it = ctx.sgpr_map.begin();
+            while (it != ctx.sgpr_map.end())
+            {
+               if (entry.type & it->second.type) {
+                  if ((entry.type & lgkm_type) && entry.lgkm_cnt <= it->second.lgkm_cnt)
+                  {
+                     it->second.lgkm_cnt = ctx.max_lgkm_cnt;
+                     it->second.type = it->second.type &= ~lgkm_type;
+                  }
+                  if (it->second.type == done)
+                     it = ctx.sgpr_map.erase(it);
+                  else
+                     it++;
                } else {
                   it++;
                }
