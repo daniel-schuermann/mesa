@@ -496,7 +496,7 @@ public:
 
    bool isFixed() const noexcept
    {
-      return control_[0];
+      return isFixed_;
    }
 
    PhysReg physReg() const noexcept
@@ -506,45 +506,43 @@ public:
 
    void setFixed(PhysReg reg) noexcept
    {
-      control_[0] = 1;
+      isFixed_ = 1;
       reg_ = reg;
-   }
-
-   bool mustReuseInput() const noexcept
-   {
-      return control_[1];
-   }
-
-   void setReuseInput(bool v) noexcept
-   {
-      control_[1] = v;
    }
 
    void setHint(PhysReg reg) noexcept
    {
-      control_[2] = 1;
+      hasHint_ = 1;
       reg_ = reg;
    }
 
    bool hasHint() const noexcept
    {
-      return control_[2];
+      return hasHint_;
    }
 
    void setKill(bool flag) noexcept
    {
-      control_[3] = flag;
+      isKill_ = flag;
    }
 
    bool isKill() const noexcept
    {
-      return control_[3];
+      return isKill_;
    }
 
 private:
    Temp temp;
-   std::bitset<8> control_;
    PhysReg reg_;
+   union {
+      struct {
+         uint8_t isFixed_:1;
+         uint8_t hasHint_:1;
+         uint8_t isKill_:1;
+      };
+      /* can't initialize bit-fields in c++11, so work around using a union */
+      uint8_t control_ = 0;
+   };
 };
 
 class Block;
