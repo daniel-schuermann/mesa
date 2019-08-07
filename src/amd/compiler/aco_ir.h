@@ -234,16 +234,16 @@ public:
    {
       data_.temp = r;
       if (r.id()) {
-         control_[0] = 1; /* isTemp */
+         isTemp_ = true;
       } else {
-         control_[4] = 1; /* undef */
+         isUndef_ = true;
          setFixed(PhysReg{128});
       }
    };
    explicit Operand(uint32_t v) noexcept
    {
       data_.i = v;
-      control_[2] = 1; /* isConst */
+      isConstant_ = true;
       if (v <= 64)
          setFixed(PhysReg{128 + v});
       else if (v >= 0xFFFFFFF0) /* [-16 .. -1] */
@@ -271,8 +271,8 @@ public:
    };
    explicit Operand(uint64_t v) noexcept
    {
-      control_[2] = 1; /* isConst */
-      control_[6] = 1; /* is64BitConst */
+      isConstant_ = true;
+      is64BitConst_ = true;
       if (v <= 64)
          setFixed(PhysReg{128 + (uint32_t) v});
       else if (v >= 0xFFFFFFFFFFFFFFF0) /* [-16 .. -1] */
@@ -296,13 +296,13 @@ public:
       else if (v == 0x3fc45f306dc9c882) /* 1/(2*PI) */
          setFixed(PhysReg{248});
       else { /* Literal Constant: we don't know if it is a long or double.*/
-         control_[2] = 0;
+         isConstant_ = 0;
          assert(false && "attempt to create a 64-bit literal constant");
       }
    };
    explicit Operand(RegClass type=s1) noexcept
    {
-      control_[4] = 1; /* undefined */
+      isUndef_ = true;
       data_.temp = Temp(0, type);
       setFixed(PhysReg{128});
    };
@@ -314,12 +314,12 @@ public:
 
    bool isTemp() const noexcept
    {
-      return control_[0];
+      return isTemp_;
    }
 
    void setTemp(Temp t) {
-      assert(!control_[2]);
-      control_[0] = 1; /* isTemp */
+      assert(!isConstant_);
+      isTemp_ = true;
       data_.temp = t;
    }
 
@@ -346,14 +346,14 @@ public:
    unsigned size() const noexcept
    {
       if (isConstant())
-         return control_[6] ? 2 : 1;
+         return is64BitConst_ ? 2 : 1;
       else
          return data_.temp.size();
    }
 
    bool isFixed() const noexcept
    {
-      return control_[1];
+      return isFixed_;
    }
 
    PhysReg physReg() const noexcept
@@ -363,13 +363,13 @@ public:
 
    void setFixed(PhysReg reg) noexcept
    {
-      control_[1] = reg != (unsigned)-1;
+      isFixed_ = reg != (unsigned)-1;
       reg_ = reg;
    }
 
    bool isConstant() const noexcept
    {
-      return control_[2];
+      return isConstant_;
    }
 
    bool isLiteral() const noexcept
@@ -379,7 +379,7 @@ public:
 
    bool isUndefined() const noexcept
    {
-      return control_[4];
+      return isUndef_;
    }
 
    uint32_t constantValue() const noexcept
@@ -394,19 +394,19 @@ public:
 
    void setKill(bool flag) noexcept
    {
-      control_[3] = flag;
+      isKill_ = flag;
       if (!flag)
          setFirstKill(false);
    }
 
    bool isKill() const noexcept
    {
-      return control_[3] || isFirstKill();
+      return isKill_ || isFirstKill();
    }
 
    void setFirstKill(bool flag) noexcept
    {
-      control_[5] = flag;
+      isFirstKill_ = flag;
       if (flag)
          setKill(flag);
    }
@@ -415,7 +415,7 @@ public:
     * isFirstKill() is only returns true for the first one. */
    bool isFirstKill() const noexcept
    {
-      return control_[5];
+      return isFirstKill_;
    }
 
 private:
@@ -425,7 +425,19 @@ private:
       Temp temp;
    } data_;
    PhysReg reg_;
-   std::bitset<8> control_;
+   union {
+      struct {
+         uint8_t isTemp_:1;
+         uint8_t isFixed_:1;
+         uint8_t isConstant_:1;
+         uint8_t isKill_:1;
+         uint8_t isUndef_:1;
+         uint8_t isFirstKill_:1;
+         uint8_t is64BitConst_:1;
+      };
+      /* can't initialize bit-fields in c++11, so work around using a union */
+      uint8_t control_ = 0;
+   };
 };
 
 /**
