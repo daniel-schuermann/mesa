@@ -2597,8 +2597,8 @@ void visit_store_fs_output(isel_context *ctx, nir_intrinsic_instr *instr)
          ctx->block->instructions.emplace_back(std::move(shift));
 
          aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
-         exp->valid_mask = false; // TODO
-         exp->done = false; // TODO
+         exp->valid_mask = false;
+         exp->done = false;
          exp->compressed = true;
          exp->dest = V_008DFC_SQ_EXP_MRTZ;
          exp->enabled_mask = 0x3;
@@ -2695,8 +2695,8 @@ void visit_store_fs_output(isel_context *ctx, nir_intrinsic_instr *instr)
    }
 
    aco_ptr<Export_instruction> exp{create_instruction<Export_instruction>(aco_opcode::exp, Format::EXP, 4, 0)};
-   exp->valid_mask = false; // TODO
-   exp->done = false; // TODO
+   exp->valid_mask = false;
+   exp->done = false;
    exp->compressed = (bool) compr_op;
    exp->dest = target;
    exp->enabled_mask = enabled_channels;
@@ -7418,9 +7418,9 @@ static void emit_stream_output(isel_context *ctx,
 
    unsigned start = ffs(output->component_mask) - 1;
 
-   Temp out[4]; //TODO: what if there are holes in the component_mask?
+   Temp out[4];
    bool all_undef = true;
-   assert(ctx->stage == MESA_SHADER_VERTEX); //TODO: assert that it is a VS without TS/GS
+   assert(ctx->stage == MESA_SHADER_VERTEX);
    for (unsigned i = 0; i < num_comps; i++) {
       out[i] = ctx->vs_output.outputs[loc][start + i];
       all_undef = all_undef && !out[i].id();
@@ -7456,7 +7456,13 @@ static void emit_stream_output(isel_context *ctx,
    store->getOperand(1) = Operand(so_buffers[buf]);
    store->getOperand(2) = Operand((uint32_t) 0);
    store->getOperand(3) = Operand(write_data);
-   store->offset = offset; //TODO: out-of-range issues?
+   if (offset > 4095) {
+      /* Don't think this can happen in RADV, but maybe GL? It's easy to do this anyway. */
+      store->getOperand(0) = Operand(Temp{ctx->program->allocateId(), v1});
+      emit_v_add32(ctx, store->getOperand(0).getTemp(), Operand(offset), Operand(so_write_offset[buf]));
+   } else {
+      store->offset = offset;
+   }
    store->offen = true;
    store->glc = true;
    store->slc = true;
