@@ -34,6 +34,7 @@ enum WQMState : uint8_t {
    Exact = 1 << 0,
    WQM = 1 << 1, /* with control flow applied */
    Preserve_WQM = 1 << 2,
+   Exact_Branch = 1 << 3,
 };
 
 enum mask_type : uint8_t {
@@ -168,8 +169,10 @@ void mark_block_wqm(wqm_ctx &ctx, unsigned block_idx)
       mark_block_wqm(ctx, pred_idx);
 }
 
-void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
+void get_block_needs(wqm_ctx &ctx, exec_ctx &exec_ctx, Block* block)
 {
+   block_info& info = exec_ctx.info[block->index];
+
    std::vector<WQMState> instr_needs(block->instructions.size());
 
    if (block->kind & block_kind_top_level) {
@@ -181,6 +184,16 @@ void get_block_needs(wqm_ctx &ctx, block_info& info, Block* block)
                mark_block_wqm(ctx, block_idx);
             block_idx++;
          }
+      } else if (ctx.loop && !ctx.wqm) {
+         /* Ensure a branch never results in an exec mask with only helper
+          * invocations (which can cause a loop to repeat infinitively if it's
+          * break branches are done in exact). */
+         unsigned block_idx = block->index;
+         do {
+            if ((ctx.program->blocks[block_idx].kind & block_kind_branch))
+               exec_ctx.info[block_idx].block_needs |= Exact_Branch;
+            block_idx++;
+         } while (!(ctx.program->blocks[block_idx].kind & block_kind_top_level));
       }
 
       ctx.loop = false;
@@ -247,8 +260,7 @@ void calculate_wqm_needs(exec_ctx& exec_ctx)
       unsigned block_index = *std::prev(ctx.worklist.end());
       ctx.worklist.erase(std::prev(ctx.worklist.end()));
 
-      Block *block = &exec_ctx.program->blocks[block_index];
-      get_block_needs(ctx, exec_ctx.info[block_index], block);
+      get_block_needs(ctx, exec_ctx, &exec_ctx.program->blocks[block_index]);
    }
 
    uint8_t ever_again_needs = 0;
@@ -265,7 +277,7 @@ void calculate_wqm_needs(exec_ctx& exec_ctx)
           ever_again_needs & WQM)
          exec_ctx.info[i].block_needs |= Preserve_WQM;
 
-      ever_again_needs |= exec_ctx.info[i].block_needs;
+      ever_again_needs |= exec_ctx.info[i].block_needs & ~Exact_Branch;
       if (block.kind & block_kind_discard ||
           block.kind & block_kind_uses_discard_if)
          ever_again_needs |= Exact;
@@ -503,6 +515,8 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
       /* if one of the predecessors ends in exact mask, we pop it from stack */
       unsigned num_exec_masks = std::min(ctx.info[preds[0]].exec.size(),
                                          ctx.info[preds[1]].exec.size());
+      if (block->kind & block_kind_top_level && !(block->kind & block_kind_merge))
+         num_exec_masks = std::min(num_exec_masks, 2u);
 
       /* create phis for diverged exec masks */
       for (unsigned i = 0; i < num_exec_masks; i++) {
@@ -530,6 +544,12 @@ unsigned add_coupling_code(exec_ctx& ctx, Block* block,
 
    if (block->kind & block_kind_merge)
       ctx.info[idx].exec.pop_back();
+
+   if (block->kind & block_kind_top_level && ctx.info[idx].exec.size() == 3) {
+      assert(ctx.info[idx].exec.back().second == mask_type_exact);
+      assert(block->kind & block_kind_merge);
+      ctx.info[idx].exec.pop_back();
+   }
 
    /* try to satisfy the block's needs */
    if (ctx.handle_wqm) {
@@ -922,6 +942,10 @@ void add_branch_code(exec_ctx& ctx, Block* block)
       assert(block->instructions.back()->opcode == aco_opcode::p_cbranch_z);
       Temp cond = block->instructions.back()->getOperand(0).getTemp();
       block->instructions.pop_back();
+
+      if (ctx.info[idx].block_needs & Exact_Branch)
+         transition_to_Exact(ctx, bld, idx);
+
       Temp current_exec = ctx.info[idx].exec.back().first;
       uint8_t mask_type = ctx.info[idx].exec.back().second & (mask_type_wqm | mask_type_exact);
 
