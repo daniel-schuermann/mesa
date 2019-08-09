@@ -2545,7 +2545,6 @@ void radv_create_shaders(struct radv_pipeline *pipeline,
 			                   nir_lower_non_uniform_ssbo_access |
 			                   nir_lower_non_uniform_texture_access |
 			                   nir_lower_non_uniform_image_access);
-			NIR_PASS_V(nir[i], nir_lower_bool_to_int32);
 		}
 
 		if (radv_can_dump_shader(device, modules[i], false))
