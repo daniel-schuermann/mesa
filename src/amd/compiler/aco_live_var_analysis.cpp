@@ -107,8 +107,8 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
       if (insn->opcode == aco_opcode::p_phi ||
           insn->opcode == aco_opcode::p_linear_phi) {
          /* directly insert into the predecessors live-out set */
-         std::vector<unsigned>& preds = insn->opcode == aco_opcode::p_phi 
-                                      ? block->logical_preds 
+         std::vector<unsigned>& preds = insn->opcode == aco_opcode::p_phi
+                                      ? block->logical_preds
                                       : block->linear_preds;
          for (unsigned i = 0; i < preds.size(); ++i)
          {
@@ -121,7 +121,7 @@ void process_live_temps_per_block(Program *program, live& lives, Block* block,
             if (inserted) {
                operand.setFirstKill(true);
                worklist.insert(preds[i]);
-               if (insn->opcode == aco_opcode::p_phi && operand.getTemp().type() == sgpr)
+               if (insn->opcode == aco_opcode::p_phi && operand.getTemp().type() == RegType::sgpr)
                   phi_sgpr_ops[preds[i]] += operand.size();
             }
          }

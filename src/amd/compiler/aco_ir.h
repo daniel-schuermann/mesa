@@ -107,7 +107,7 @@ static inline Format asVOP3(Format format) {
    return (Format) ((uint32_t) Format::VOP3 | (uint32_t) format);
 };
 
-enum RegType {
+enum class RegType {
    none = 0,
    sgpr,
    vgpr,
@@ -146,7 +146,7 @@ struct RegClass {
    constexpr operator RC() const { return rc; }
    explicit operator bool() = delete;
 
-   constexpr RegType type() const { return rc <= RC::s16 ? sgpr : vgpr; }
+   constexpr RegType type() const { return rc <= RC::s16 ? RegType::sgpr : RegType::vgpr; }
    constexpr unsigned size() const { return (unsigned) rc & 0x1F; }
    constexpr bool is_linear() const { return rc <= RC::s16 || rc & (1 << 6); }
    constexpr RegClass as_linear() const { return RegClass((RC) (rc | (1 << 6))); }

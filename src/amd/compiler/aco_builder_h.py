@@ -1,6 +1,6 @@
 
 template = """\
-/* 
+/*
  * Copyright (c) 2019 Valve Corporation
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -213,8 +213,8 @@ public:
    Temp as_uniform(Op op)
    {
       assert(op.op.isTemp());
-      if (op.op.getTemp().type() == vgpr)
-         return pseudo(aco_opcode::p_as_uniform, def(RegClass(sgpr, op.op.size())), op);
+      if (op.op.getTemp().type() == RegType::vgpr)
+         return pseudo(aco_opcode::p_as_uniform, def(RegClass(RegType::sgpr, op.op.size())), op);
       else
          return op.op.getTemp();
    }
