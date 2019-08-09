@@ -143,12 +143,12 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
       uint16_t imm = sopp->imm;
       switch (instr->opcode) {
       case aco_opcode::s_waitcnt: {
-         /* we usually should check the chip class for vmcnt, but
+         /* we usually should check the chip class for vmcnt/lgkm, but
           * insert_waitcnt() should fill it in regardless. */
-         unsigned vmcnt = (imm & 0xF) | (imm & (0x3 << 14) >> 10);
+         unsigned vmcnt = (imm & 0xF) | ((imm & (0x3 << 14)) >> 10);
          if (vmcnt != 63) fprintf(output, " vmcnt(%d)", vmcnt);
          if (((imm >> 4) & 0x7) < 0x7) fprintf(output, " expcnt(%d)", (imm >> 4) & 0x7);
-         if (((imm >> 8) & 0xF) < 0xF) fprintf(output, " lgkmcnt(%d)", (imm >> 8) & 0xF);
+         if (((imm >> 8) & 0x3F) < 0x3F) fprintf(output, " lgkmcnt(%d)", (imm >> 8) & 0x3F);
          break;
       }
       case aco_opcode::s_endpgm:

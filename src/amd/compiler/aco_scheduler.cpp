@@ -99,25 +99,6 @@ static RegisterDemand getTempRegisters(aco_ptr<Instruction>& instr)
    return temp_registers;
 }
 
-barrier_interaction get_barrier_interaction(Instruction* instr)
-{
-   switch (instr->format) {
-   case Format::SMEM:
-      return static_cast<SMEM_instruction*>(instr)->barrier;
-   case Format::MUBUF:
-      return static_cast<MUBUF_instruction*>(instr)->barrier;
-   case Format::MIMG:
-      return static_cast<MIMG_instruction*>(instr)->barrier;
-   case Format::FLAT:
-   case Format::GLOBAL:
-      return barrier_buffer;
-   case Format::DS:
-      return barrier_shared;
-   default:
-      return barrier_none;
-   }
-}
-
 bool can_move_instr(aco_ptr<Instruction>& instr, Instruction* current, int moving_interaction)
 {
    /* don't move exports so that they stay closer together */
