@@ -1317,6 +1317,7 @@ setup_variables(isel_context *ctx, nir_shader *nir)
    }
 
    ctx->program->config->float_mode = V_00B028_FP_64_DENORMS;
+   ctx->program->info->info.wave_size = ctx->options->wave_size;
 }
 
 isel_context
@@ -1360,7 +1361,7 @@ setup_isel_context(Program* program, nir_shader *nir,
    setup_variables(&ctx, nir);
 
    /* optimize and lower memory operations */
-   nir_lower_to_explicit(nir, nir_var_mem_shared, shared_var_info);
+   nir_lower_vars_to_explicit_types(nir, nir_var_mem_shared, shared_var_info);
    if (nir_opt_load_store_vectorize(nir,
                                     (nir_variable_mode)(nir_var_mem_ssbo | nir_var_mem_ubo |
                                                         nir_var_mem_push_const | nir_var_mem_shared),
@@ -1369,7 +1370,7 @@ setup_isel_context(Program* program, nir_shader *nir,
       nir_lower_pack(nir);
    }
    nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
-   nir_lower_explicit_io(nir, nir_var_mem_shared, nir_address_format_32bit_global);
+   nir_lower_explicit_io(nir, nir_var_mem_shared, nir_address_format_32bit_offset);
    nir_lower_explicit_io(nir, nir_var_mem_global, nir_address_format_64bit_global);
 
    /* lower ALU operations */
