@@ -1409,9 +1409,9 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                   operand.setFixed(new_reg);
                }
 
-               if (instr->format == Format::EXP) {
-                  ctx.war_hint.set(operand.physReg().reg);
-               } else if (instr->isVMEM() && i == 3 && program->chip_class < GFX8) {
+               if (instr->format == Format::EXP ||
+                   (instr->isVMEM() && i == 3 && program->chip_class == GFX6) ||
+                   (instr->format == Format::DS && static_cast<DS_instruction*>(instr.get())->gds)) {
                   for (unsigned j = 0; j < operand.size(); j++)
                      ctx.war_hint.set(operand.physReg().reg + j);
                }

@@ -99,7 +99,8 @@ enum barrier_interaction {
    barrier_buffer = 0x1,
    barrier_image = 0x2,
    barrier_atomic = 0x4,
-   barrier_shared = 0x8
+   barrier_shared = 0x8,
+   barrier_count = 4,
 };
 
 static inline Format asVOP3(Format format) {
@@ -853,6 +854,25 @@ static inline bool is_phi(Instruction* instr)
 static inline bool is_phi(aco_ptr<Instruction>& instr)
 {
    return is_phi(instr.get());
+}
+
+static inline barrier_interaction get_barrier_interaction(Instruction* instr)
+{
+   switch (instr->format) {
+   case Format::SMEM:
+      return static_cast<SMEM_instruction*>(instr)->barrier;
+   case Format::MUBUF:
+      return static_cast<MUBUF_instruction*>(instr)->barrier;
+   case Format::MIMG:
+      return static_cast<MIMG_instruction*>(instr)->barrier;
+   case Format::FLAT:
+   case Format::GLOBAL:
+      return barrier_buffer;
+   case Format::DS:
+      return barrier_shared;
+   default:
+      return barrier_none;
+   }
 }
 
 enum block_kind {
