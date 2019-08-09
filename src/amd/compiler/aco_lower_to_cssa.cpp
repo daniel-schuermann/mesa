@@ -142,13 +142,13 @@ void hoist_copies(cssa_ctx& ctx)
             Block& idom = ctx.program->blocks[idom_idx];
             RegisterDemand& reg_pressure = ctx.live_vars.register_demand[idom_idx][idom.instructions.size() -1];;
 
-            if (info.phi->definitions[0].getTemp().type() == vgpr &&
+            if (info.phi->definitions[0].getTemp().type() == RegType::vgpr &&
                 reg_pressure.vgpr + int16_t(info.phi->definitions[0].size()) <= ctx.program->max_reg_demand.vgpr) {
                reg_pressure.vgpr += info.phi->definitions[0].size();
                target_block = idom_idx;
             }
 
-            if (info.phi->definitions[0].getTemp().type() == sgpr &&
+            if (info.phi->definitions[0].getTemp().type() == RegType::sgpr &&
                 reg_pressure.sgpr +  int16_t(info.phi->definitions[0].size()) <= ctx.program->max_reg_demand.sgpr) {
                reg_pressure.sgpr += info.phi->definitions[0].size();
                target_block = idom_idx;
@@ -165,7 +165,7 @@ void hoist_copies(cssa_ctx& ctx)
                /* check if register pressure between existing copy and current insertion point is low enough */
                bool can_reuse = true;
                uint16_t size = info.phi->definitions[0].size();
-               bool is_vgpr = info.phi->definitions[0].getTemp().type() == vgpr;
+               bool is_vgpr = info.phi->definitions[0].getTemp().type() == RegType::vgpr;
                for (unsigned i = it->second.last_live_block; i < target_block; i++) {
                   if ((is_vgpr && ctx.program->blocks[i].register_demand.vgpr + size > ctx.program->max_reg_demand.vgpr) ||
                       (!is_vgpr && ctx.program->blocks[i].register_demand.sgpr + size > ctx.program->max_reg_demand.sgpr)) {

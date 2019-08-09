@@ -122,7 +122,7 @@ void adjust_max_used_regs(ra_ctx& ctx, RegClass rc, unsigned reg)
 {
    unsigned max_addressible_sgpr = ctx.program->sgpr_limit;
    unsigned size = rc.size();
-   if (rc.type() == vgpr) {
+   if (rc.type() == RegType::vgpr) {
       assert(reg >= 256);
       unsigned hi = reg - 256 + size - 1;
       ctx.max_used_vgpr = std::max(ctx.max_used_vgpr, hi);
@@ -260,7 +260,7 @@ bool get_regs_for_copies(ra_ctx& ctx,
       std::pair<PhysReg, RegClass> var = ctx.assignments[id];
       uint32_t size = it->first;
       uint32_t stride = 1;
-      if (var.second.type() == sgpr) {
+      if (var.second.type() == RegType::sgpr) {
          if (size == 2)
             stride = 2;
          if (size > 3)
@@ -626,7 +626,7 @@ PhysReg get_reg(ra_ctx& ctx,
    uint32_t size = rc.size();
    uint32_t stride = 1;
    uint32_t lb, ub;
-   if (rc.type() == vgpr) {
+   if (rc.type() == RegType::vgpr) {
       lb = 256;
       ub = 256 + ctx.program->max_reg_demand.vgpr;
    } else {
@@ -640,7 +640,7 @@ PhysReg get_reg(ra_ctx& ctx,
 
    std::pair<PhysReg, bool> res = {{}, false};
    /* try to find space without live-range splits */
-   if (rc.type() == vgpr && (size == 4 || size == 8))
+   if (rc.type() == RegType::vgpr && (size == 4 || size == 8))
       res = get_reg_simple(ctx, reg_file, lb, ub, size, 4, rc);
    if (!res.second)
       res = get_reg_simple(ctx, reg_file, lb, ub, size, stride, rc);
@@ -665,10 +665,10 @@ PhysReg get_reg(ra_ctx& ctx,
 
    /* try using more registers */
    uint16_t max_addressible_sgpr = ctx.program->sgpr_limit;
-   if (rc.type() == vgpr && ctx.program->max_reg_demand.vgpr < 256) {
+   if (rc.type() == RegType::vgpr && ctx.program->max_reg_demand.vgpr < 256) {
       update_vgpr_sgpr_demand(ctx.program, RegisterDemand(ctx.program->max_reg_demand.vgpr + 1, ctx.program->max_reg_demand.sgpr));
       return get_reg(ctx, reg_file, rc, parallelcopies, instr);
-   } else if (rc.type() == sgpr && ctx.program->max_reg_demand.sgpr < max_addressible_sgpr) {
+   } else if (rc.type() == RegType::sgpr && ctx.program->max_reg_demand.sgpr < max_addressible_sgpr) {
       update_vgpr_sgpr_demand(ctx.program,  RegisterDemand(ctx.program->max_reg_demand.vgpr, ctx.program->max_reg_demand.sgpr + 1));
       return get_reg(ctx, reg_file, rc, parallelcopies, instr);
    }
@@ -686,7 +686,7 @@ std::pair<PhysReg, bool> get_reg_vec(ra_ctx& ctx,
    uint32_t size = rc.size();
    uint32_t stride = 1;
    uint32_t lb, ub;
-   if (rc.type() == vgpr) {
+   if (rc.type() == RegType::vgpr) {
       lb = 256;
       ub = 256 + ctx.program->max_reg_demand.vgpr;
    } else {
@@ -711,7 +711,7 @@ PhysReg get_reg_create_vector(ra_ctx& ctx,
    uint32_t size = rc.size();
    uint32_t stride = 1;
    uint32_t lb, ub;
-   if (rc.type() == vgpr) {
+   if (rc.type() == RegType::vgpr) {
       lb = 256;
       ub = 256 + ctx.program->max_reg_demand.vgpr;
    } else {
@@ -822,7 +822,7 @@ bool get_reg_specified(ra_ctx& ctx,
    uint32_t stride = 1;
    uint32_t lb, ub;
 
-   if (rc.type() == vgpr) {
+   if (rc.type() == RegType::vgpr) {
       lb = 256;
       ub = 256 + ctx.program->max_reg_demand.vgpr;
    } else {
@@ -1328,7 +1328,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             for (aco_ptr<Instruction>& phi : succ.instructions) {
                if (phi->opcode == aco_opcode::p_phi) {
                   if (phi->operands[idx].isTemp() &&
-                      phi->operands[idx].getTemp().type() == sgpr &&
+                      phi->operands[idx].getTemp().type() == RegType::sgpr &&
                       phi->operands[idx].isFirstKill()) {
                      Temp phi_op = read_variable(phi->operands[idx].getTemp(), block.index);
                      PhysReg reg = ctx.assignments[phi_op.id()].first;
@@ -1447,9 +1447,9 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          if (instr->opcode == aco_opcode::v_mad_f32 &&
              instr->operands[2].isTemp() &&
              instr->operands[2].isKill() &&
-             instr->operands[2].getTemp().type() == vgpr &&
+             instr->operands[2].getTemp().type() == RegType::vgpr &&
              instr->operands[1].isTemp() &&
-             instr->operands[1].getTemp().type() == vgpr) { /* TODO: swap src0 and src1 in this case */
+             instr->operands[1].getTemp().type() == RegType::vgpr) { /* TODO: swap src0 and src1 in this case */
             VOP3A_instruction* vop3 = static_cast<VOP3A_instruction*>(instr.get());
             bool can_use_mac = !(vop3->abs[0] || vop3->abs[1] || vop3->abs[2] ||
                                  vop3->opsel[0] || vop3->opsel[1] || vop3->opsel[2] ||
@@ -1629,8 +1629,8 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             } else
                definition.setFixed(get_reg(ctx, register_file, definition.regClass(), parallelcopy, instr));
 
-            assert(definition.isFixed() && ((definition.getTemp().type() == vgpr && definition.physReg() >= 256) ||
-                                            (definition.getTemp().type() != vgpr && definition.physReg() < 256)));
+            assert(definition.isFixed() && ((definition.getTemp().type() == RegType::vgpr && definition.physReg() >= 256) ||
+                                            (definition.getTemp().type() != RegType::vgpr && definition.physReg() < 256)));
             ctx.defs_done.set(i);
 
             /* set live if it has a kill point */
@@ -1662,7 +1662,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             bool sgpr_operands_alias_defs = false;
             uint64_t sgpr_operands[4] = {0, 0, 0, 0};
             for (unsigned i = 0; i < parallelcopy.size(); i++) {
-               if (temp_in_scc && parallelcopy[i].first.isTemp() && parallelcopy[i].first.getTemp().type() == sgpr) {
+               if (temp_in_scc && parallelcopy[i].first.isTemp() && parallelcopy[i].first.getTemp().type() == RegType::sgpr) {
                   if (!sgpr_operands_alias_defs) {
                      unsigned reg = parallelcopy[i].first.physReg().reg;
                      unsigned size = parallelcopy[i].first.getTemp().size();
@@ -1753,7 +1753,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
                bool can_sgpr = true;
                /* check, if we have to move to vgpr */
                for (const Operand& op : instr->operands) {
-                  if (op.isTemp() && op.getTemp().type() == sgpr) {
+                  if (op.isTemp() && op.getTemp().type() == RegType::sgpr) {
                      can_sgpr = false;
                      break;
                   }
@@ -1898,7 +1898,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
             has_phi = true;
 
             Definition& def = instr->definitions[0];
-            assert(def.getTemp().type() == sgpr);
+            assert(def.getTemp().type() == RegType::sgpr);
             for (unsigned i = 0; i < def.size(); i++)
                regs[def.physReg() + i] = 1;
             if (instr->operands[pred_index].isTemp()) {
