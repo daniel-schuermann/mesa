@@ -54,8 +54,8 @@ void setup_reduce_temp(Program* program)
       return;
 
    assert(maxSize == 1 || maxSize == 2);
-   Temp reduceTmp(0, RegClass(vgpr, maxSize).as_linear());
-   Temp vtmp(0, RegClass(vgpr, maxSize).as_linear());
+   Temp reduceTmp(0, RegClass(RegType::vgpr, maxSize).as_linear());
+   Temp vtmp(0, RegClass(RegType::vgpr, maxSize).as_linear());
    int inserted_at = -1;
    int vtmp_inserted_at = -1;
    bool reduceTmp_in_loop = false;
@@ -150,7 +150,7 @@ void setup_reduce_temp(Program* program)
               op == fmin32 || op == fmin64 ||
               op == fmax32 || op == fmax64 ||
               op == fmul64)) {
-            instr->definitions[2] = bld.def(RegClass(sgpr, instr->operands[0].size()));
+            instr->definitions[2] = bld.def(RegClass(RegType::sgpr, instr->operands[0].size()));
          }
 
          /* vcc clobber */

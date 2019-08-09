@@ -366,7 +366,7 @@ struct opt_ctx {
 bool can_swap_operands(aco_ptr<Instruction>& instr)
 {
    if (instr->operands[0].isConstant() ||
-       (instr->operands[0].isTemp() && instr->operands[0].getTemp().type() == sgpr))
+       (instr->operands[0].isTemp() && instr->operands[0].getTemp().type() == RegType::sgpr))
       return false;
 
    switch (instr->opcode) {
@@ -526,10 +526,10 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
       /* SALU / PSEUDO: propagate inline constants */
       if (instr->isSALU() || instr->format == Format::PSEUDO) {
-         if (info.is_temp() && info.temp.type() == sgpr) {
+         if (info.is_temp() && info.temp.type() == RegType::sgpr) {
             instr->operands[i].setTemp(info.temp);
             info = ctx.info[info.temp.id()];
-         } else if (info.is_temp() && info.temp.type() == vgpr) {
+         } else if (info.is_temp() && info.temp.type() == RegType::vgpr) {
             /* propagate vgpr if it can take it */
             switch (instr->opcode) {
             case aco_opcode::p_create_vector:
@@ -537,7 +537,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             case aco_opcode::p_extract_vector:
             case aco_opcode::p_phi: {
                const bool all_vgpr = std::none_of(instr->definitions.begin(), instr->definitions.end(),
-                                                  [] (const Definition& def) { return def.getTemp().type() != vgpr;});
+                                                  [] (const Definition& def) { return def.getTemp().type() != RegType::vgpr;});
                if (all_vgpr) {
                   instr->operands[i] = Operand(info.temp);
                   info = ctx.info[info.temp.id()];
@@ -557,7 +557,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       /* VALU: propagate neg, abs & inline constants */
       else if (instr->isVALU()) {
 
-         if (info.is_temp() && info.temp.type() == vgpr) {
+         if (info.is_temp() && info.temp.type() == RegType::vgpr) {
             instr->operands[i].setTemp(info.temp);
             info = ctx.info[info.temp.id()];
          }
@@ -767,7 +767,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
          /* convert this extract into a mov instruction */
          Operand vec_op = vec->operands[instr->operands[1].constantValue()];
-         bool is_vgpr = instr->definitions[0].getTemp().type() == vgpr;
+         bool is_vgpr = instr->definitions[0].getTemp().type() == RegType::vgpr;
          aco_opcode opcode = is_vgpr ? aco_opcode::v_mov_b32 : aco_opcode::s_mov_b32;
          Format format = is_vgpr ? Format::VOP1 : Format::SOP1;
          instr->opcode = opcode;
@@ -1115,7 +1115,7 @@ bool combine_ordering_test(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       if (original_temp_id(ctx, op0) != original_temp_id(ctx, op1))
          return false;
       /* shouldn't happen yet, but best to be safe */
-      if (op1.type() != vgpr)
+      if (op1.type() != RegType::vgpr)
          return false;
 
       op[i] = op1;
@@ -1433,7 +1433,7 @@ bool match_op3_for_vop3(opt_ctx &ctx, aco_opcode op1, aco_opcode op2,
       Operand op = operands[i];
       if (op.isLiteral()) {
          return false;
-      } else if (op.isTemp() && op.getTemp().type() == sgpr) {
+      } else if (op.isTemp() && op.getTemp().type() == RegType::sgpr) {
          if (sgpr_id && sgpr_id != op.tempId())
             return false;
          sgpr_id = op.tempId();
@@ -1814,13 +1814,13 @@ void apply_sgprs(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       }
       if (!instr->operands[i].isTemp())
          continue;
-      if (instr->operands[i].getTemp().type() == sgpr) {
+      if (instr->operands[i].getTemp().type() == RegType::sgpr) {
          has_sgpr = true;
          sgpr_ssa_id = instr->operands[i].tempId();
          continue;
       }
       ssa_info& info = ctx.info[instr->operands[i].tempId()];
-      if (info.is_temp() && info.temp.type() == sgpr) {
+      if (info.is_temp() && info.temp.type() == RegType::sgpr) {
          uint16_t uses = ctx.uses[instr->operands[i].tempId()];
          if (sgpr_info_id == 0 || uses < ctx.uses[sgpr_info_id]) {
             sgpr_idx = i;
@@ -2059,9 +2059,9 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          {
             if (op[i].isLiteral())
                return;
-            if (op[i].isTemp() && op[i].getTemp().type() == sgpr)
+            if (op[i].isTemp() && op[i].getTemp().type() == RegType::sgpr)
                num_sgpr++;
-            if (!(i == 0 || (op[i].isTemp() && op[i].getTemp().type() == vgpr)))
+            if (!(i == 0 || (op[i].isTemp() && op[i].getTemp().type() == RegType::vgpr)))
                need_vop3 = true;
          }
          // TODO: would be better to check this before selecting a mul instr?
@@ -2137,7 +2137,7 @@ void combine_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       for (unsigned i = 0; i < 2; i++) {
          if (instr->operands[i].isTemp() && ctx.info[instr->operands[i].tempId()].is_b2f() &&
              ctx.uses[instr->operands[i].tempId()] == 1 &&
-             instr->operands[!i].isTemp() && instr->operands[!i].getTemp().type() == vgpr) {
+             instr->operands[!i].isTemp() && instr->operands[!i].getTemp().type() == RegType::vgpr) {
             ctx.uses[instr->operands[i].tempId()]--;
             ctx.uses[ctx.info[instr->operands[i].tempId()].temp.id()]++;
 
@@ -2237,7 +2237,7 @@ void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             if (!instr->operands[i].isTemp())
                continue;
             /* if one of the operands is sgpr, we cannot add a literal somewhere else */
-            if (instr->operands[i].getTemp().type() == sgpr) {
+            if (instr->operands[i].getTemp().type() == RegType::sgpr) {
                if (ctx.info[instr->operands[i].tempId()].is_literal()) {
                   literal_uses = ctx.uses[instr->operands[i].tempId()];
                   literal_idx = i;
