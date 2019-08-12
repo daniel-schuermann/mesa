@@ -597,10 +597,12 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
       /* MUBUF: propagate constants and combine additions */
       else if (instr->format == Format::MUBUF) {
-
          MUBUF_instruction *mubuf = static_cast<MUBUF_instruction *>(instr.get());
          Temp base;
          uint32_t offset;
+         while (info.is_temp())
+            info = ctx.info[info.temp.id()];
+
          if (mubuf->offen && i == 0 && info.is_constant_or_literal() && mubuf->offset + info.val < 4096) {
             assert(!mubuf->idxen);
             instr->operands[i] = Operand(v1);
@@ -616,7 +618,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             instr->operands[i].setTemp(base);
             mubuf->offset += offset;
             continue;
-         } else if (i == 2 && parse_base_offset(ctx, instr.get(), i, &base, &offset) && base.regClass() == s1 && mubuf->offset + info.val < 4096) {
+         } else if (i == 2 && parse_base_offset(ctx, instr.get(), i, &base, &offset) && base.regClass() == s1 && mubuf->offset + offset < 4096) {
             instr->operands[i].setTemp(base);
             mubuf->offset += offset;
             continue;
