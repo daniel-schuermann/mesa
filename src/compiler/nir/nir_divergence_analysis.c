@@ -238,6 +238,7 @@ visit_intrinsic(nir_shader *shader, bool *divergent, nir_intrinsic_instr *instr)
    case nir_intrinsic_shared_atomic_exchange:
    case nir_intrinsic_shared_atomic_comp_swap:
    case nir_intrinsic_exclusive_scan:
+   case nir_intrinsic_load_scratch:
    default:
       is_divergent = true;
       break;
