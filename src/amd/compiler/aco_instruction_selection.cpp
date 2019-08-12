@@ -4993,6 +4993,129 @@ void visit_shared_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
    ctx->block->instructions.emplace_back(std::move(ds));
 }
 
+void visit_load_scratch(isel_context *ctx, nir_intrinsic_instr *instr) {
+   assert(instr->dest.ssa.bit_size == 32 || instr->dest.ssa.bit_size == 64);
+   Builder bld(ctx->program, ctx->block);
+   Temp scratch_addr = bld.smem(aco_opcode::s_load_dwordx2, bld.def(s2), ctx->private_segment_buffer, Operand(0u));
+   /* buffer res = addr + num_records = -1, index_stride = 64, add_tid_enable = true */
+   Temp rsrc = bld.pseudo(aco_opcode::p_create_vector, bld.def(s4), scratch_addr, Operand(-1u), Operand(0x00E00000u));
+   Temp offset = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
+   Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
+
+   aco_opcode op;
+   switch (dst.size()) {
+      case 1:
+         op = aco_opcode::buffer_load_dword;
+         break;
+      case 2:
+         op = aco_opcode::buffer_load_dwordx2;
+         break;
+      case 3:
+         op = aco_opcode::buffer_load_dwordx3;
+         break;
+      case 4:
+         op = aco_opcode::buffer_load_dwordx4;
+         break;
+      case 6:
+      case 8: {
+         std::array<Temp,NIR_MAX_VEC_COMPONENTS> elems;
+         Temp lower = bld.mubuf(aco_opcode::buffer_load_dwordx4,
+                                bld.def(v4), offset, rsrc,
+                                ctx->scratch_offset, 0, true);
+         Temp upper = bld.mubuf(dst.size() == 6 ? aco_opcode::buffer_load_dwordx2 :
+                                                  aco_opcode::buffer_load_dwordx4,
+                                dst.size() == 6 ? bld.def(v2) : bld.def(v4),
+                                offset, rsrc, ctx->scratch_offset, 16, true);
+         emit_split_vector(ctx, lower, 2);
+         elems[0] = emit_extract_vector(ctx, lower, 0, v2);
+         elems[1] = emit_extract_vector(ctx, lower, 1, v2);
+         if (dst.size() == 8) {
+            emit_split_vector(ctx, upper, 2);
+            elems[2] = emit_extract_vector(ctx, upper, 0, v2);
+            elems[3] = emit_extract_vector(ctx, upper, 1, v2);
+         } else {
+            elems[2] = upper;
+         }
+
+         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector,
+                                                                  Format::PSEUDO, dst.size() / 2, 1)};
+         for (unsigned i = 0; i < dst.size() / 2; i++)
+            vec->operands[i] = Operand(elems[i]);
+         vec->definitions[0] = Definition(dst);
+         bld.insert(std::move(vec));
+         ctx->allocated_vec.emplace(dst.id(), elems);
+         return;
+      }
+      default:
+         unreachable("Wrong dst size for nir_intrinsic_load_scratch");
+   }
+
+   bld.mubuf(op, Definition(dst), offset, rsrc, ctx->scratch_offset, 0, true);
+   emit_split_vector(ctx, dst, instr->num_components);
+}
+
+void visit_store_scratch(isel_context *ctx, nir_intrinsic_instr *instr) {
+   assert(instr->src[0].ssa->bit_size == 32 || instr->src[0].ssa->bit_size == 64);
+   Builder bld(ctx->program, ctx->block);
+   Temp scratch_addr = bld.smem(aco_opcode::s_load_dwordx2, bld.def(s2), ctx->private_segment_buffer, Operand(0u));
+   Temp rsrc = bld.pseudo(aco_opcode::p_create_vector, bld.def(s4), scratch_addr, Operand(-1u), Operand(0x00E00000u));
+   Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
+   Temp offset = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
+
+   unsigned elem_size_bytes = instr->src[0].ssa->bit_size / 8;
+   unsigned writemask = nir_intrinsic_write_mask(instr);
+
+   while (writemask) {
+      int start, count;
+      u_bit_scan_consecutive_range(&writemask, &start, &count);
+      int num_bytes = count * elem_size_bytes;
+
+      if (num_bytes > 16) {
+         assert(elem_size_bytes == 8);
+         writemask |= (((count - 2) << 1) - 1) << (start + 2);
+         count = 2;
+         num_bytes = 16;
+      }
+
+      // TODO: check alignment of sub-dword stores
+      // TODO: split 3 bytes. there is no store instruction for that
+
+      Temp write_data;
+      if (count != instr->num_components) {
+         aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, count, 1)};
+         for (int i = 0; i < count; i++) {
+            Temp elem = emit_extract_vector(ctx, data, start + i, RegClass(RegType::vgpr, elem_size_bytes / 4));
+            vec->operands[i] = Operand(elem);
+         }
+         write_data = bld.tmp(RegClass(vgpr, count * elem_size_bytes / 4));
+         vec->definitions[0] = Definition(write_data);
+         ctx->block->instructions.emplace_back(std::move(vec));
+      } else {
+         write_data = data;
+      }
+
+      aco_opcode op;
+      switch (num_bytes) {
+         case 4:
+            op = aco_opcode::buffer_store_dword;
+            break;
+         case 8:
+            op = aco_opcode::buffer_store_dwordx2;
+            break;
+         case 12:
+            op = aco_opcode::buffer_store_dwordx3;
+            break;
+         case 16:
+            op = aco_opcode::buffer_store_dwordx4;
+            break;
+         default:
+            unreachable("Invalid data size for nir_intrinsic_store_scratch.");
+      }
+
+      bld.mubuf(op, offset, rsrc, ctx->scratch_offset, write_data, start * elem_size_bytes, true);
+   }
+}
+
 void visit_load_sample_mask_in(isel_context *ctx, nir_intrinsic_instr *instr) {
    uint8_t log2_ps_iter_samples;
    if (ctx->program->info->info.ps.force_persample) {
@@ -5231,17 +5354,17 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
             offset = bld.sop2(aco_opcode::s_lshl_b32, bld.def(s1), bld.def(s1, scc), addr, Operand(3u));
             offset = bld.sop2(aco_opcode::s_add_u32, bld.def(s1), bld.def(s1, scc), addr, Operand(sample_pos_offset));
          }
-         addr = ctx->ring_offsets;
+         addr = ctx->private_segment_buffer;
          sample_pos = bld.smem(aco_opcode::s_load_dwordx2, bld.def(s2), addr, Operand(offset));
 
       } else if (ctx->options->chip_class >= GFX9) {
          addr = bld.vop2(aco_opcode::v_lshlrev_b32, bld.def(v1), Operand(3u), addr);
-         sample_pos = bld.global(aco_opcode::global_load_dwordx2, bld.def(v2), addr, ctx->ring_offsets, sample_pos_offset);
+         sample_pos = bld.global(aco_opcode::global_load_dwordx2, bld.def(v2), addr, ctx->private_segment_buffer, sample_pos_offset);
       } else {
-         /* addr += ctx->ring_offsets + sample_pos_offset */
+         /* addr += ctx->private_segment_buffer + sample_pos_offset */
          Temp tmp0 = bld.tmp(s1);
          Temp tmp1 = bld.tmp(s1);
-         bld.pseudo(aco_opcode::p_split_vector, Definition(tmp0), Definition(tmp1), ctx->ring_offsets);
+         bld.pseudo(aco_opcode::p_split_vector, Definition(tmp0), Definition(tmp1), ctx->private_segment_buffer);
          Definition scc_tmp = bld.def(s1, scc);
          tmp0 = bld.sop2(aco_opcode::s_add_u32, bld.def(s1), scc_tmp, tmp0, Operand(sample_pos_offset));
          tmp1 = bld.sop2(aco_opcode::s_addc_u32, bld.def(s1), bld.def(s1, scc), tmp1, Operand(0u), scc_tmp.getTemp());
@@ -5389,6 +5512,12 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    case nir_intrinsic_ssbo_atomic_exchange:
    case nir_intrinsic_ssbo_atomic_comp_swap:
       visit_atomic_ssbo(ctx, instr);
+      break;
+   case nir_intrinsic_load_scratch:
+      visit_load_scratch(ctx, instr);
+      break;
+   case nir_intrinsic_store_scratch:
+      visit_store_scratch(ctx, instr);
       break;
    case nir_intrinsic_get_buffer_size:
       visit_get_buffer_size(ctx, instr);
