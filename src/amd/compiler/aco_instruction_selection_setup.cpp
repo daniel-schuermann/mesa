@@ -93,6 +93,11 @@ struct isel_context {
       bool exec_potentially_empty = false;
    } cf_info;
 
+   /* scratch */
+   bool scratch_enabled = false;
+   Temp private_segment_buffer = Temp(0, s2);
+   Temp scratch_offset = Temp(0, s1);
+
    /* FS inputs */
    bool fs_vgpr_args[fs_input::max_inputs];
    Temp fs_inputs[fs_input::max_inputs];
@@ -102,7 +107,6 @@ struct isel_context {
    Temp inline_push_consts[MAX_INLINE_PUSH_CONSTS];
    unsigned num_inline_push_consts = 0;
    unsigned base_inline_push_consts = 0;
-   Temp ring_offsets = Temp(0, s2);
 
    /* VS inputs */
    Temp vertex_buffers = Temp(0, s1);
@@ -410,6 +414,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                   case nir_intrinsic_shared_atomic_xor:
                   case nir_intrinsic_shared_atomic_exchange:
                   case nir_intrinsic_shared_atomic_comp_swap:
+                  case nir_intrinsic_load_scratch:
                      type = vgpr;
                      break;
                   case nir_intrinsic_shuffle:
@@ -892,10 +897,8 @@ void add_startpgm(struct isel_context *ctx)
    allocate_user_sgprs(ctx, needs_view_index, user_sgpr_info);
    arg_info args = {};
 
-   if (user_sgpr_info.need_ring_offsets/* && !ctx->options->supports_spill*/)
-      add_arg(&args, s2, &ctx->ring_offsets, 0);
-
-   if (ctx->options->supports_spill || user_sgpr_info.need_ring_offsets) {
+   if (ctx->options->supports_spill || user_sgpr_info.need_ring_offsets || ctx->scratch_enabled) {
+      add_arg(&args, s2, &ctx->private_segment_buffer, 0);
       set_loc_shader_ptr(ctx, AC_UD_SCRATCH_RING_OFFSETS, &user_sgpr_info.user_sgpr_idx);
    }
 
@@ -928,6 +931,9 @@ void add_startpgm(struct isel_context *ctx)
       else
          declare_streamout_sgprs(ctx, &args, &idx);
 
+      if (ctx->scratch_enabled)
+         add_arg(&args, s1, &ctx->scratch_offset, idx++);
+
       declare_vs_input_vgprs(ctx, &args);
       break;
    }
@@ -936,6 +942,9 @@ void add_startpgm(struct isel_context *ctx)
 
       assert(user_sgpr_info.user_sgpr_idx == user_sgpr_info.num_sgpr);
       add_arg(&args, s1, &ctx->prim_mask, user_sgpr_info.user_sgpr_idx);
+
+      if (ctx->scratch_enabled)
+         add_arg(&args, s1, &ctx->scratch_offset, user_sgpr_info.user_sgpr_idx + 1);
 
       ctx->program->config->spi_ps_input_addr = 0;
       ctx->program->config->spi_ps_input_ena = 0;
@@ -1054,6 +1063,8 @@ void add_startpgm(struct isel_context *ctx)
 
       if (ctx->program->info->info.cs.uses_local_invocation_idx)
          add_arg(&args, s1, &ctx->tg_size, idx++);
+      if (ctx->scratch_enabled)
+         add_arg(&args, s1, &ctx->scratch_offset, idx++);
 
       add_arg(&args, v1, &ctx->local_invocation_ids[0], vgpr_idx++);
       add_arg(&args, v1, &ctx->local_invocation_ids[1], vgpr_idx++);
@@ -1316,6 +1327,7 @@ setup_variables(isel_context *ctx, nir_shader *nir)
       unreachable("Unhandled shader stage.");
    }
 
+   ctx->scratch_enabled = nir->scratch_size > 0;
    ctx->program->config->float_mode = V_00B028_FP_64_DENORMS;
    ctx->program->info->info.wave_size = ctx->options->wave_size;
 }
