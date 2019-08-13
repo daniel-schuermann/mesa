@@ -80,6 +80,16 @@ get_innermost_loop(nir_cf_node *node)
 static nir_block *
 adjust_block_for_loops(nir_block *use_block, nir_loop *def_loop)
 {
+   if (def_loop) {
+      nir_block *block_before_loop =
+         nir_cf_node_as_block(nir_cf_node_prev(&def_loop->cf_node));
+      nir_block *block_after_loop =
+         nir_cf_node_as_block(nir_cf_node_next(&def_loop->cf_node));
+      if (use_block->index <= block_before_loop->index ||
+          use_block->index >= block_after_loop->index)
+         return use_block;
+   }
+
    nir_loop *use_loop = NULL;
 
    for (nir_cf_node *node = &use_block->cf_node; node != NULL; node = node->parent) {
