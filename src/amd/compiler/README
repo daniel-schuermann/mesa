@@ -59,3 +59,13 @@ situations.
 
 The `image_atomic_{swap,cmpswap,add,sub}` opcodes in the GCN3 ISA reference
 guide are incorrect. The Vega ISA reference guide has the correct ones.
+
+# Hardware Bugs
+
+## SMEM corrupts VCCZ on SI/CI
+
+https://github.com/llvm/llvm-project/blob/acb089e12ae48b82c0b05c42326196a030df9b82/llvm/lib/Target/AMDGPU/SIInsertWaits.cpp#L580-L616
+After issuing a SMEM instructions, we need to wait for the SMEM instructions to
+finish and then write to vcc (for example, `s_mov_b64 vcc, vcc`) to correct vccz
+
+Currently, we don't do this.
