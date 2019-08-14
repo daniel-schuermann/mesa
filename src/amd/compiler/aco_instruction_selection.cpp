@@ -1235,6 +1235,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_umul_high: {
       if (dst.regClass() == v1) {
          bld.vop3(aco_opcode::v_mul_hi_u32, Definition(dst), get_alu_src(ctx, instr->src[0]), get_alu_src(ctx, instr->src[1]));
+      } else if (dst.regClass() == s1 && ctx->options->chip_class >= GFX9) {
+         bld.sop2(aco_opcode::s_mul_hi_u32, Definition(dst), get_alu_src(ctx, instr->src[0]), get_alu_src(ctx, instr->src[1]));
       } else if (dst.regClass() == s1) {
          Temp tmp = bld.vop3(aco_opcode::v_mul_hi_u32, bld.def(v1), get_alu_src(ctx, instr->src[0]),
                              as_vgpr(ctx, get_alu_src(ctx, instr->src[1])));
@@ -1249,6 +1251,8 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
    case nir_op_imul_high: {
       if (dst.regClass() == v1) {
          bld.vop3(aco_opcode::v_mul_hi_i32, Definition(dst), get_alu_src(ctx, instr->src[0]), get_alu_src(ctx, instr->src[1]));
+      } else if (dst.regClass() == s1 && ctx->options->chip_class >= GFX9) {
+         bld.sop2(aco_opcode::s_mul_hi_i32, Definition(dst), get_alu_src(ctx, instr->src[0]), get_alu_src(ctx, instr->src[1]));
       } else if (dst.regClass() == s1) {
          Temp tmp = bld.vop3(aco_opcode::v_mul_hi_i32, bld.def(v1), get_alu_src(ctx, instr->src[0]),
                              as_vgpr(ctx, get_alu_src(ctx, instr->src[1])));
