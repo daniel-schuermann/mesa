@@ -431,6 +431,12 @@ void to_VOP3(opt_ctx& ctx, aco_ptr<Instruction>& instr)
    }
 }
 
+bool valu_can_accept_literal(opt_ctx& ctx, aco_ptr<Instruction>& instr)
+{
+   // TODO: VOP3 can take a literal on GFX10
+   return !instr->isSDWA() && !instr->isDPP() && !instr->isVOP3();
+}
+
 /* only covers special cases */
 bool can_accept_constant(aco_ptr<Instruction>& instr, unsigned operand)
 {
@@ -2280,7 +2286,7 @@ void select_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          if (ctx.uses[instr->operands[literal_idx].tempId()] == 0)
             instr->operands[literal_idx] = Operand(ctx.info[instr->operands[literal_idx].tempId()].val);
       }
-   } else if (instr->isVALU() && !instr->isVOP3() &&
+   } else if (instr->isVALU() && valu_can_accept_literal(ctx, instr) &&
        instr->operands[0].isTemp() &&
        ctx.info[instr->operands[0].tempId()].is_literal() &&
        ctx.uses[instr->operands[0].tempId()] < threshold) {
