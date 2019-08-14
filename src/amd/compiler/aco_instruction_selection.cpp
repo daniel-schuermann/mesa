@@ -2849,6 +2849,12 @@ Temp adjust_vertex_fetch_alpha(isel_context *ctx, unsigned adjustment, Temp alph
    return alpha;
 }
 
+/* workaround GCC bug where the MTBUF instruction's index operand does not get
+ * it's regclass initialized (issue #91). */
+#if __GNUC__ == 8 && __GNUC_MINOR__ <= 3
+#pragma GCC push_options
+#pragma GCC optimize ("-O0")
+#endif
 void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Builder bld(ctx->program, ctx->block);
@@ -3029,6 +3035,9 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
       unreachable("Shader stage not implemented");
    }
 }
+#if __GNUC__ == 8 && __GNUC_MINOR__ <= 3
+#pragma GCC pop_options
+#endif
 
 Temp load_desc_ptr(isel_context *ctx, unsigned desc_set)
 {
