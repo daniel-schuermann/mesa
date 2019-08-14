@@ -1156,7 +1156,22 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          if (!is_phi(phi))
             break;
          Definition& definition = phi->definitions[0];
-         if (definition.isKill() || !definition.isFixed())
+         if (!definition.isFixed())
+            continue;
+
+         /* check if a dead exec mask phi is needed */
+         if (definition.isKill()) {
+            for (Operand& op : phi->operands) {
+               assert(op.isTemp());
+               if (ctx.assignments.find(op.tempId()) == ctx.assignments.end() ||
+                   ctx.assignments[op.tempId()].first != exec) {
+                   definition.setKill(false);
+                   break;
+               }
+            }
+         }
+
+         if (definition.isKill())
             continue;
 
          assert(definition.physReg() == exec);
