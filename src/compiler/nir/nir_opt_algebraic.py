@@ -898,6 +898,8 @@ optimizations.extend([
    # Subtracts
    (('~fsub', a, ('fsub', 0.0, b)), ('fadd', a, b)),
    (('isub', a, ('isub', 0, b)), ('iadd', a, b)),
+   (('isub', ('iadd', a, b), b), a),
+   (('~fsub', ('fadd', a, b), b), a),
    (('ussub_4x8', a, 0), a),
    (('ussub_4x8', a, ~0), 0),
    (('fsub', a, b), ('fadd', a, ('fneg', b)), 'options->lower_sub'),
@@ -908,6 +910,7 @@ optimizations.extend([
    (('iadd', a, ('isub', 0, b)), ('isub', a, b)),
    (('fabs', ('fsub', 0.0, a)), ('fabs', a)),
    (('iabs', ('isub', 0, a)), ('iabs', a)),
+   (('~fsub', 1.0, ('fsat', a)), ('fsat', ('fsub', 1.0, a))),
 
    # Propagate negation up multiplication chains
    (('fmul(is_used_by_non_fsat)', ('fneg', a), b), ('fneg', ('fmul', a, b))),
