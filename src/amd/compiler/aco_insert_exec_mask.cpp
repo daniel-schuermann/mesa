@@ -932,6 +932,7 @@ void add_branch_code(exec_ctx& ctx, Block* block)
       if (ctx.handle_wqm &&
           ctx.info[idx].exec.size() >= 2 &&
           ctx.info[idx].exec.back().second == mask_type_exact &&
+          !(ctx.info[idx].block_needs & Exact_Branch) &&
           ctx.info[idx].exec[ctx.info[idx].exec.size() - 2].second & mask_type_wqm) {
          /* return to wqm before branching */
          ctx.info[idx].exec.pop_back();
