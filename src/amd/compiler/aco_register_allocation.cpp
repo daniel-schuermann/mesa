@@ -2122,6 +2122,7 @@ void register_allocation(Program *program, std::vector<TempSet>& live_out_per_bl
 
    /* num_gpr = rnd_up(max_used_gpr + 1) */
    program->config->num_vgprs = align(ctx.max_used_vgpr + 1, 4);
+   program->config->num_vgprs = MAX2(program->config->num_vgprs, 8); /* workaround incorrect shader with World of Final Fantasy under DXVK (issue #102) */
    if (program->family == CHIP_TONGA || program->family == CHIP_ICELAND) /* workaround hardware bug */
       program->config->num_sgprs = get_sgpr_alloc(program, program->sgpr_limit);
    else
