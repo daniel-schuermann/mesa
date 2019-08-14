@@ -99,6 +99,11 @@ static RegisterDemand getTempRegisters(aco_ptr<Instruction>& instr)
    return temp_registers;
 }
 
+static bool is_spill_reload(aco_ptr<Instruction>& instr)
+{
+   return instr->opcode == aco_opcode::p_spill || instr->opcode == aco_opcode::p_reload;
+}
+
 bool can_move_instr(aco_ptr<Instruction>& instr, Instruction* current, int moving_interaction)
 {
    /* don't move exports so that they stay closer together */
@@ -199,6 +204,7 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
    /* first, check if we have instructions before current to move down */
    int insert_idx = idx + 1;
    int moving_interaction = barrier_none;
+   bool moving_spill = false;
 
    for (int candidate_idx = idx - 1; k < max_moves && candidate_idx > (int) idx - window_size; candidate_idx--) {
       assert(candidate_idx >= 0);
@@ -230,9 +236,12 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
       if (writes_exec)
          break;
 
+      if (moving_spill && is_spill_reload(candidate))
+         can_move_down = false;
       if ((moving_interaction & barrier_shared) && candidate->format == Format::DS)
          can_move_down = false;
       moving_interaction |= get_barrier_interaction(candidate.get());
+      moving_spill |= is_spill_reload(candidate);
       if (!can_move_down) {
          for (const Operand& op : candidate->operands) {
             if (op.isTemp())
@@ -296,6 +305,7 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
    /* find the first instruction depending on current or find another MEM */
    insert_idx = idx + 1;
    moving_interaction = barrier_none;
+   moving_spill = false;
 
    bool found_dependency = false;
    /* second, check if we have instructions after current to move up */
@@ -316,9 +326,12 @@ void schedule_SMEM(sched_ctx& ctx, Block* block,
       /* check if candidate depends on current */
       bool is_dependency = std::any_of(candidate->operands.begin(), candidate->operands.end(),
                                        [&ctx](const Operand& op) { return op.isTemp() && ctx.depends_on[op.tempId()];});
+      if (moving_spill && is_spill_reload(candidate))
+         is_dependency = true;
       if ((moving_interaction & barrier_shared) && candidate->format == Format::DS)
          is_dependency = true;
       moving_interaction |= get_barrier_interaction(candidate.get());
+      moving_spill |= is_spill_reload(candidate);
       if (is_dependency) {
          for (const Definition& def : candidate->definitions) {
             if (def.isTemp())
@@ -421,6 +434,7 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
    /* first, check if we have instructions before current to move down */
    int insert_idx = idx + 1;
    int moving_interaction = barrier_none;
+   bool moving_spill = false;
 
    for (int candidate_idx = idx - 1; k < max_moves && candidate_idx > (int) idx - window_size; candidate_idx--) {
       assert(candidate_idx >= 0);
@@ -452,9 +466,12 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
       if (writes_exec)
          break;
 
+      if (moving_spill && is_spill_reload(candidate))
+         can_move_down = false;
       if ((moving_interaction & barrier_shared) && candidate->format == Format::DS)
          can_move_down = false;
       moving_interaction |= get_barrier_interaction(candidate.get());
+      moving_spill |= is_spill_reload(candidate);
       if (!can_move_down) {
          for (const Operand& op : candidate->operands) {
             if (op.isTemp())
@@ -517,6 +534,7 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
    /* find the first instruction depending on current or find another VMEM */
    insert_idx = idx;
    moving_interaction = barrier_none;
+   moving_spill = false;
 
    bool found_dependency = false;
    /* second, check if we have instructions after current to move up */
@@ -542,9 +560,12 @@ void schedule_VMEM(sched_ctx& ctx, Block* block,
             break;
          }
       }
+      if (moving_spill && is_spill_reload(candidate))
+         is_dependency = true;
       if ((moving_interaction & barrier_shared) && candidate->format == Format::DS)
          is_dependency = true;
       moving_interaction |= get_barrier_interaction(candidate.get());
+      moving_spill |= is_spill_reload(candidate);
       if (is_dependency) {
          for (const Definition& def : candidate->definitions) {
             if (def.isTemp())
@@ -635,6 +656,7 @@ void schedule_position_export(sched_ctx& ctx, Block* block,
    /* first, check if we have instructions before current to move down */
    int insert_idx = idx + 1;
    int moving_interaction = barrier_none;
+   bool moving_spill = false;
 
    for (int candidate_idx = idx - 1; k < max_moves && candidate_idx > (int) idx - window_size; candidate_idx--) {
       assert(candidate_idx >= 0);
@@ -662,9 +684,12 @@ void schedule_position_export(sched_ctx& ctx, Block* block,
       if (writes_exec)
          break;
 
+      if (moving_spill && is_spill_reload(candidate))
+         can_move_down = false;
       if ((moving_interaction & barrier_shared) && candidate->format == Format::DS)
          can_move_down = false;
       moving_interaction |= get_barrier_interaction(candidate.get());
+      moving_spill |= is_spill_reload(candidate);
       if (!can_move_down) {
          for (unsigned i = 0; i < candidate->operands.size(); i++) {
             if (candidate->operands[i].isTemp())
