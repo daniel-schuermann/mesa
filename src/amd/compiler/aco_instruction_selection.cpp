@@ -193,7 +193,7 @@ void emit_v_mov(isel_context *ctx, Temp src, Temp dst)
    }
 }
 
-Temp emit_wqm(isel_context *ctx, Temp src, Temp dst=Temp(0, s1))
+Temp emit_wqm(isel_context *ctx, Temp src, Temp dst=Temp(0, s1), bool program_needs_wqm = false)
 {
    Builder bld(ctx->program, ctx->block);
 
@@ -212,7 +212,7 @@ Temp emit_wqm(isel_context *ctx, Temp src, Temp dst=Temp(0, s1))
    }
 
    bld.pseudo(aco_opcode::p_wqm, Definition(dst), src);
-   ctx->program->needs_wqm = true;
+   ctx->program->needs_wqm |= program_needs_wqm;
    return dst;
 }
 
@@ -2445,7 +2445,7 @@ void visit_alu_instr(isel_context *ctx, nir_alu_instr *instr)
 
       Definition tmp = bld.def(v1);
       bld.vop2_dpp(aco_opcode::v_sub_f32, tmp, get_alu_src(ctx, instr->src[0]), tl.getTemp(), dpp_ctrl);
-      emit_wqm(ctx, tmp.getTemp(), dst);
+      emit_wqm(ctx, tmp.getTemp(), dst, true);
       break;
    }
    default:
@@ -5307,9 +5307,9 @@ void emit_interp_center(isel_context *ctx, Temp dst, Temp pos1, Temp pos2)
    tmp1 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddy_1, pos2, tmp1);
    tmp2 = bld.vop3(aco_opcode::v_mad_f32, bld.def(v1), ddy_2, pos2, tmp2);
    Temp wqm1 = bld.tmp(v1);
-   emit_wqm(ctx, tmp1, wqm1);
+   emit_wqm(ctx, tmp1, wqm1, true);
    Temp wqm2 = bld.tmp(v1);
-   emit_wqm(ctx, tmp2, wqm2);
+   emit_wqm(ctx, tmp2, wqm2, true);
    bld.pseudo(aco_opcode::p_create_vector, Definition(dst), wqm1, wqm2);
    return;
 }
@@ -6620,7 +6620,7 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    if (!(has_ddx && has_ddy) && !has_lod && !level_zero &&
        instr->sampler_dim != GLSL_SAMPLER_DIM_MS &&
        instr->sampler_dim != GLSL_SAMPLER_DIM_SUBPASS_MS)
-      coords = emit_wqm(ctx, coords);
+      coords = emit_wqm(ctx, coords, bld.tmp(coords.regClass()), true);
 
    std::vector<Operand> args;
    if (has_offset)
