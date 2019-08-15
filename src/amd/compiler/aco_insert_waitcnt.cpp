@@ -388,7 +388,7 @@ wait_imm kill(Instruction* instr, wait_ctx& ctx)
             it->second.remove_counter(counter_vm);
          if (imm.lgkm != wait_imm::unset_counter && imm.lgkm <= it->second.imm.lgkm)
             it->second.remove_counter(counter_lgkm);
-         if (imm.lgkm != wait_imm::unset_counter && imm.lgkm <= it->second.imm.vs)
+         if (imm.lgkm != wait_imm::unset_counter && imm.vs <= it->second.imm.vs)
             it->second.remove_counter(counter_vs);
          if (!it->second.counters)
             it = ctx.gpr_map.erase(it);
@@ -422,11 +422,11 @@ void update_barrier_imm(wait_ctx& ctx, uint8_t counters, barrier_interaction bar
       } else {
          if (counters & counter_lgkm && bar.lgkm != wait_imm::unset_counter && bar.lgkm < ctx.max_lgkm_cnt)
             bar.lgkm++;
-         if (counters & counter_vm && bar.vm != wait_imm::unset_counter && bar.lgkm < ctx.max_vm_cnt)
+         if (counters & counter_vm && bar.vm != wait_imm::unset_counter && bar.vm < ctx.max_vm_cnt)
             bar.vm++;
-         if (counters & counter_exp && bar.exp != wait_imm::unset_counter && bar.lgkm < ctx.max_exp_cnt)
+         if (counters & counter_exp && bar.exp != wait_imm::unset_counter && bar.exp < ctx.max_exp_cnt)
             bar.exp++;
-         if (counters & counter_vs && bar.vs != wait_imm::unset_counter && bar.lgkm < ctx.max_vs_cnt)
+         if (counters & counter_vs && bar.vs != wait_imm::unset_counter && bar.vs < ctx.max_vs_cnt)
             bar.vs++;
       }
    }
@@ -438,11 +438,11 @@ void update_counters(wait_ctx& ctx, wait_event event, barrier_interaction barrie
 
    if (counters & counter_lgkm && ctx.lgkm_cnt <= ctx.max_lgkm_cnt)
       ctx.lgkm_cnt++;
-   if (counters & counter_vm && ctx.lgkm_cnt <= ctx.max_vm_cnt)
+   if (counters & counter_vm && ctx.vm_cnt <= ctx.max_vm_cnt)
       ctx.vm_cnt++;
-   if (counters & counter_exp && ctx.lgkm_cnt <= ctx.max_exp_cnt)
+   if (counters & counter_exp && ctx.exp_cnt <= ctx.max_exp_cnt)
       ctx.exp_cnt++;
-   if (counters & counter_vs && ctx.lgkm_cnt <= ctx.max_vs_cnt)
+   if (counters & counter_vs && ctx.vs_cnt <= ctx.max_vs_cnt)
       ctx.vs_cnt++;
 
    update_barrier_imm(ctx, counters, barrier);
