@@ -207,6 +207,12 @@ void try_remove_simple_block(ssa_elimination_ctx& ctx, Block* block)
       if (falls_through) {
          branch->target[1] = succ.index;
       } else {
+         /* check if there is a fall-through path for the alternative target */
+         for (unsigned j = block->index + 1; j < branch->target[0]; j++) {
+            if (!ctx.program->blocks[j].instructions.empty())
+               return;
+         }
+
          /* This is a (uniform) break or continue block. The branch condition has to be inverted. */
          if (branch->opcode == aco_opcode::p_cbranch_z)
             branch->opcode = aco_opcode::p_cbranch_nz;
