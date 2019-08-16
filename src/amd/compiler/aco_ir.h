@@ -916,22 +916,22 @@ struct RegisterDemand {
       return a.vgpr == b.vgpr && a.sgpr == b.sgpr;
    }
 
-   constexpr bool exceeds(const RegisterDemand other) {
+   constexpr bool exceeds(const RegisterDemand other) const {
       return vgpr > other.vgpr || sgpr > other.sgpr;
    }
 
-   RegisterDemand operator+(const Temp t) {
+   RegisterDemand operator+(const Temp t) const {
       if (t.type() == RegType::sgpr)
          return RegisterDemand( vgpr, sgpr + t.size() );
       else
          return RegisterDemand( vgpr + t.size(), sgpr );
    }
 
-   RegisterDemand operator+(const RegisterDemand other) {
+   RegisterDemand operator+(const RegisterDemand other) const {
       return RegisterDemand(vgpr + other.vgpr, sgpr + other.sgpr);
    }
 
-   RegisterDemand operator-(const RegisterDemand other) {
+   RegisterDemand operator-(const RegisterDemand other) const {
       return RegisterDemand(vgpr - other.vgpr, sgpr - other.sgpr);
    }
 
