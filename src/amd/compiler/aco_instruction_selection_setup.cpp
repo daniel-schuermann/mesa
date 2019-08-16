@@ -1100,69 +1100,16 @@ type_size(const struct glsl_type *type, bool bindless)
    return glsl_count_attribute_slots(type, false);
 }
 
-/* Taken from src/intel/compiler/brw_fs.cpp
-   TODO: this might better go to core */
-int
-type_size_scalar(const struct glsl_type *type)
-{
-   unsigned int size, i;
-
-   switch (type->base_type) {
-   case GLSL_TYPE_UINT:
-   case GLSL_TYPE_INT:
-   case GLSL_TYPE_FLOAT:
-   case GLSL_TYPE_BOOL:
-      return type->components();
-   case GLSL_TYPE_UINT16:
-   case GLSL_TYPE_INT16:
-   case GLSL_TYPE_FLOAT16:
-      return DIV_ROUND_UP(type->components(), 2);
-   case GLSL_TYPE_UINT8:
-   case GLSL_TYPE_INT8:
-      return DIV_ROUND_UP(type->components(), 4);
-   case GLSL_TYPE_DOUBLE:
-   case GLSL_TYPE_UINT64:
-   case GLSL_TYPE_INT64:
-      return type->components() * 2;
-   case GLSL_TYPE_ARRAY:
-      return type_size_scalar(type->fields.array) * type->length;
-   case GLSL_TYPE_STRUCT:
-      size = 0;
-      for (i = 0; i < type->length; i++) {
-         size += type_size_scalar(type->fields.structure[i].type);
-      }
-      return size;
-   case GLSL_TYPE_SAMPLER:
-      /* Samplers take up no register space, since they're baked in at
-       * link time.
-       */
-      return 0;
-   case GLSL_TYPE_ATOMIC_UINT:
-      return 0;
-   case GLSL_TYPE_SUBROUTINE:
-      return 1;
-   case GLSL_TYPE_IMAGE:
-   case GLSL_TYPE_VOID:
-   case GLSL_TYPE_ERROR:
-   case GLSL_TYPE_INTERFACE:
-   case GLSL_TYPE_FUNCTION:
-      unreachable("not reached");
-   }
-
-   return 0;
-}
-
-int
-shared_var_size(const struct glsl_type *type)
-{
-   return type_size_scalar(type)*4;
-}
-
 void
 shared_var_info(const struct glsl_type *type, unsigned *size, unsigned *align)
 {
-   *size = shared_var_size(type);
-   *align = 1;
+   assert(glsl_type_is_vector_or_scalar(type));
+
+   uint32_t comp_size = glsl_type_is_boolean(type)
+      ? 4 : glsl_get_bit_size(type) / 8;
+   unsigned length = glsl_get_vector_elements(type);
+   *size = comp_size * length,
+   *align = comp_size;
 }
 
 int
@@ -1182,15 +1129,6 @@ get_align(nir_variable_mode mode, bool is_store, unsigned bit_size, unsigned num
    default:
       return -1;
    }
-}
-
-unsigned
-total_shared_var_size(const struct glsl_type *type)
-{
-   if (type->is_array())
-      return type->arrays_of_arrays_size() * shared_var_size(type->without_array());
-   else
-      return shared_var_size(type);
 }
 
 void
