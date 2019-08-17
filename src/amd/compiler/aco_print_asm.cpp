@@ -50,7 +50,10 @@ void print_asm(Program *program, std::vector<uint32_t>& binary, enum radeon_fami
 
       size_t new_pos;
       const int align_width = 60;
-      if (!l) {
+      if (program->chip_class == GFX9 && !l && ((binary[pos] & 0xffff8000) == 0xd1348000)) { /* not actually an invalid instruction */
+         out << std::left << std::setw(align_width) << std::setfill(' ') << "\tv_add_u32_e64 + clamp";
+         new_pos = pos + 2;
+      } else if (!l) {
          out << std::left << std::setw(align_width) << std::setfill(' ') << "(invalid instruction)";
          new_pos = pos + 1;
          invalid = true;
