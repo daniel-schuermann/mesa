@@ -524,9 +524,6 @@ void lower_to_hw_instr(Program* program)
             {
             case aco_opcode::p_extract_vector:
             {
-               if (instr->operands[0].isUndefined())
-                  break;
-
                unsigned reg = instr->operands[0].physReg() + instr->operands[1].constantValue() * instr->definitions[0].size();
                RegClass rc = RegClass(instr->operands[0].getTemp().type(), 1);
                RegClass rc_def = RegClass(instr->definitions[0].getTemp().type(), 1);
@@ -547,9 +544,6 @@ void lower_to_hw_instr(Program* program)
                RegClass rc_def = RegClass(instr->definitions[0].getTemp().type(), 1);
                unsigned reg_idx = 0;
                for (const Operand& op : instr->operands) {
-                  if (op.isUndefined())
-                     continue;
-
                   if (op.isConstant()) {
                      const PhysReg reg = PhysReg{instr->definitions[0].physReg() + reg_idx};
                      const Definition def = Definition(reg, rc_def);
@@ -572,9 +566,6 @@ void lower_to_hw_instr(Program* program)
             }
             case aco_opcode::p_split_vector:
             {
-               if (instr->operands[0].isUndefined())
-                  break;
-
                std::map<PhysReg, copy_operation> copy_operations;
                RegClass rc_op = instr->operands[0].isConstant() ? s1 : RegClass(instr->operands[0].regClass().type(), 1);
                for (unsigned i = 0; i < instr->definitions.size(); i++) {

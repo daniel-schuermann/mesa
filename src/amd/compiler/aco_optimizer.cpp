@@ -698,16 +698,11 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    switch (instr->opcode) {
    case aco_opcode::p_create_vector: {
       unsigned num_ops = instr->operands.size();
-      bool is_undefined = true;
       for (const Operand& op : instr->operands) {
-         if (!op.isUndefined())
-            is_undefined = false;
          if (op.isTemp() && ctx.info[op.tempId()].is_vec())
             num_ops += ctx.info[op.tempId()].instr->operands.size() - 1;
       }
-      if (is_undefined) {
-         ctx.info[instr->definitions[0].tempId()].set_undefined();
-      } else if (num_ops != instr->operands.size()) {
+      if (num_ops != instr->operands.size()) {
          aco_ptr<Instruction> old_vec = std::move(instr);
          instr.reset(create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, num_ops, 1));
          instr->definitions[0] = old_vec->definitions[0];
@@ -729,12 +724,6 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       break;
    }
    case aco_opcode::p_split_vector: {
-      if (instr->operands[0].isUndefined()) {
-         for (const Definition& def : instr->definitions) {
-            ctx.info[def.tempId()].set_undefined();
-         }
-         break;
-      }
       if (!ctx.info[instr->operands[0].tempId()].is_vec())
          break;
       Instruction* vec = ctx.info[instr->operands[0].tempId()].instr;
@@ -746,8 +735,6 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
                ctx.info[instr->definitions[i].tempId()].set_literal(vec_op.constantValue());
             else
                ctx.info[instr->definitions[i].tempId()].set_constant(vec_op.constantValue());
-         } else if (vec_op.isUndefined()) {
-            ctx.info[instr->definitions[i].tempId()].set_undefined();
          } else {
             assert(vec_op.isTemp());
             ctx.info[instr->definitions[i].tempId()].set_temp(vec_op.getTemp());
@@ -756,10 +743,6 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       break;
    }
    case aco_opcode::p_extract_vector: { /* mov */
-      if (instr->operands[0].isUndefined()) {
-         ctx.info[instr->definitions[0].tempId()].set_undefined();
-         break;
-      }
       if (!ctx.info[instr->operands[0].tempId()].is_vec())
          break;
       Instruction* vec = ctx.info[instr->operands[0].tempId()].instr;
@@ -780,8 +763,6 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
                ctx.info[instr->definitions[0].tempId()].set_literal(vec_op.constantValue());
             else
                ctx.info[instr->definitions[0].tempId()].set_constant(vec_op.constantValue());
-         } else if (vec_op.isUndefined()) {
-            ctx.info[instr->definitions[0].tempId()].set_undefined();
          } else {
             assert(vec_op.isTemp());
             ctx.info[instr->definitions[0].tempId()].set_temp(vec_op.getTemp());
@@ -802,8 +783,6 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
             ctx.info[instr->definitions[0].tempId()].set_constant(instr->operands[0].constantValue());
       } else if (instr->isDPP()) {
          // TODO
-      } else if (instr->operands[0].isUndefined()) {
-         ctx.info[instr->definitions[0].tempId()].set_undefined();
       } else if (instr->operands[0].isTemp()) {
          ctx.info[instr->definitions[0].tempId()].set_temp(instr->operands[0].getTemp());
       } else {

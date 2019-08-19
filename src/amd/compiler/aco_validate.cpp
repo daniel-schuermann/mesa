@@ -119,7 +119,7 @@ void validate(Program* program, FILE * output)
                unsigned sgpr_idx = instr->operands.size();
                for (unsigned i = 0; i < instr->operands.size(); i++)
                {
-                  if (instr->operands[i].hasRegClass() && instr->operands[i].regClass().type() == RegType::sgpr) {
+                  if (instr->operands[i].isTemp() && instr->operands[i].regClass().type() == RegType::sgpr) {
                      check(i != 1 || (int) instr->format & (int) Format::VOP3A, "Wrong source position for SGPR argument", instr.get());
 
                      if (sgpr_idx == instr->operands.size() || instr->operands[sgpr_idx].tempId() != instr->operands[i].tempId())
@@ -157,7 +157,7 @@ void validate(Program* program, FILE * output)
                   }
                }
             } else if (instr->opcode == aco_opcode::p_extract_vector) {
-               check((instr->operands[0].hasRegClass()) && instr->operands[1].isConstant(), "Wrong Operand types", instr.get());
+               check((instr->operands[0].isTemp()) && instr->operands[1].isConstant(), "Wrong Operand types", instr.get());
                check(instr->operands[1].constantValue() < instr->operands[0].size(), "Index out of range", instr.get());
                check(instr->definitions[0].getTemp().type() == RegType::vgpr || instr->operands[0].regClass().type() == RegType::sgpr,
                      "Cannot extract SGPR value from VGPR vector", instr.get());
@@ -196,12 +196,12 @@ void validate(Program* program, FILE * output)
             check(instr->operands[0].hasRegClass() && instr->operands[0].regClass().type() == RegType::vgpr,
                   "VADDR must be in vgpr for VMEM instructions", instr.get());
             check(instr->operands[1].isTemp() && instr->operands[1].regClass().type() == RegType::sgpr, "VMEM resource constant must be sgpr", instr.get());
-            check(instr->operands.size() < 4 || (instr->operands[3].hasRegClass() && instr->operands[3].regClass().type() == RegType::vgpr), "VMEM write data must be vgpr", instr.get());
+            check(instr->operands.size() < 4 || (instr->operands[3].isTemp() && instr->operands[3].regClass().type() == RegType::vgpr), "VMEM write data must be vgpr", instr.get());
             break;
          }
          case Format::DS: {
             for (const Operand& op : instr->operands) {
-               check((op.hasRegClass() && op.regClass().type() == RegType::vgpr) || op.physReg() == m0,
+               check((op.isTemp() && op.regClass().type() == RegType::vgpr) || op.physReg() == m0,
                      "Only VGPRs are valid DS instruction operands", instr.get());
             }
             if (!instr->definitions.empty())
@@ -219,7 +219,7 @@ void validate(Program* program, FILE * output)
             /* fallthrough */
          case Format::GLOBAL:
          case Format::SCRATCH: {
-            check(instr->operands[0].hasRegClass() && instr->operands[0].regClass().type() == RegType::vgpr, "FLAT/GLOBAL/SCRATCH address must be vgpr", instr.get());
+            check(instr->operands[0].isTemp() && instr->operands[0].regClass().type() == RegType::vgpr, "FLAT/GLOBAL/SCRATCH address must be vgpr", instr.get());
             check(instr->operands[1].hasRegClass() && instr->operands[1].regClass().type() == RegType::sgpr,
                   "FLAT/GLOBAL/SCRATCH sgpr address must be undefined or sgpr", instr.get());
             if (!instr->definitions.empty())

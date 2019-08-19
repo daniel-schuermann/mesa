@@ -87,13 +87,13 @@ int handle_instruction(NOP_ctx& ctx, aco_ptr<Instruction>& instr,
             return 1;
 
          for (const Operand& op : pred->operands) {
-            if (op.isConstant() || op.isUndefined() || !op.isFixed())
+            if (op.isConstant() || !op.isFixed())
                continue;
             if (regs_intersect(instr_def.physReg(), instr_def.size(), op.physReg(), op.size()))
                return 1;
          }
          for (const Operand& op : instr->operands) {
-            if (op.isConstant() || op.isUndefined() || !op.isFixed())
+            if (op.isConstant() || !op.isFixed())
                continue;
             if (regs_intersect(pred_def.physReg(), pred_def.size(), op.physReg(), op.size()))
                return 1;
