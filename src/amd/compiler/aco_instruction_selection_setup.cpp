@@ -1260,6 +1260,7 @@ setup_variables(isel_context *ctx, nir_shader *nir)
    }
 
    ctx->scratch_enabled = nir->scratch_size > 0;
+   ctx->program->config->scratch_bytes_per_wave = align(nir->scratch_size * ctx->options->wave_size, 1024);
    ctx->program->config->float_mode = V_00B028_FP_64_DENORMS;
    ctx->program->info->info.wave_size = ctx->options->wave_size;
 }
