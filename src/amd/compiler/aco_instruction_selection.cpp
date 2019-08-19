@@ -5001,8 +5001,14 @@ void visit_load_scratch(isel_context *ctx, nir_intrinsic_instr *instr) {
    assert(instr->dest.ssa.bit_size == 32 || instr->dest.ssa.bit_size == 64);
    Builder bld(ctx->program, ctx->block);
    Temp scratch_addr = bld.smem(aco_opcode::s_load_dwordx2, bld.def(s2), ctx->private_segment_buffer, Operand(0u));
+   uint32_t rsrc_conf;
+   /* older generations need element size = 16 bytes */
+   if (ctx->program->chip_class >= GFX9)
+      rsrc_conf = 0x00E00000u;
+   else
+      rsrc_conf = 0x00F80000u;
    /* buffer res = addr + num_records = -1, index_stride = 64, add_tid_enable = true */
-   Temp rsrc = bld.pseudo(aco_opcode::p_create_vector, bld.def(s4), scratch_addr, Operand(-1u), Operand(0x00E00000u));
+   Temp rsrc = bld.pseudo(aco_opcode::p_create_vector, bld.def(s4), scratch_addr, Operand(-1u), Operand(rsrc_conf));
    Temp offset = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
 
@@ -5062,7 +5068,14 @@ void visit_store_scratch(isel_context *ctx, nir_intrinsic_instr *instr) {
    assert(instr->src[0].ssa->bit_size == 32 || instr->src[0].ssa->bit_size == 64);
    Builder bld(ctx->program, ctx->block);
    Temp scratch_addr = bld.smem(aco_opcode::s_load_dwordx2, bld.def(s2), ctx->private_segment_buffer, Operand(0u));
-   Temp rsrc = bld.pseudo(aco_opcode::p_create_vector, bld.def(s4), scratch_addr, Operand(-1u), Operand(0x00E00000u));
+   uint32_t rsrc_conf;
+   /* older generations need element size = 16 bytes */
+   if (ctx->program->chip_class >= GFX9)
+      rsrc_conf = 0x00E00000u;
+   else
+      rsrc_conf = 0x00F80000u;
+   /* buffer res = addr + num_records = -1, index_stride = 64, add_tid_enable = true */
+   Temp rsrc = bld.pseudo(aco_opcode::p_create_vector, bld.def(s4), scratch_addr, Operand(-1u), Operand(rsrc_conf));
    Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[0].ssa));
    Temp offset = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[1].ssa));
 
