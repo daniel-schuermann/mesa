@@ -387,7 +387,7 @@ void expand_vector(isel_context* ctx, Temp vec_src, Temp dst, unsigned num_compo
             src = bld.as_uniform(src);
          vec->operands[i] = Operand(src);
       } else {
-         vec->operands[i] = Operand(RegClass(dst.type(), 1));
+         vec->operands[i] = Operand(0u);
       }
       elems[i] = vec->operands[i].getTemp();
    }
@@ -2687,8 +2687,8 @@ void visit_store_fs_output(isel_context *ctx, nir_intrinsic_instr *instr)
             enabled_channels |= enabled << (i*2);
             aco_ptr<VOP3A_instruction> compr{create_instruction<VOP3A_instruction>(compr_op, Format::VOP3A, 2, 1)};
             Temp tmp{ctx->program->allocateId(), v1};
-            compr->operands[0] = values[i*2];
-            compr->operands[1] = values[i*2+1];
+            compr->operands[0] = values[i*2].isUndefined() ? Operand(0u) : values[i*2];
+            compr->operands[1] = values[i*2+1].isUndefined() ? Operand(0u): values[i*2+1];
             compr->definitions[0] = Definition(tmp);
             values[i] = Operand(tmp);
             ctx->block->instructions.emplace_back(std::move(compr));
@@ -2749,6 +2749,9 @@ void emit_load_frag_coord(isel_context *ctx, Temp dst, unsigned num_components)
       Builder bld(ctx->program, ctx->block);
       vec->operands[3] = bld.vop1(aco_opcode::v_rcp_f32, bld.def(v1), ctx->fs_inputs[fs_input::frag_pos_3]);
    }
+
+   for (Operand& op : vec->operands)
+      op = op.isUndefined() ? Operand(0u) : op;
 
    vec->definitions[0] = Definition(dst);
    ctx->block->instructions.emplace_back(std::move(vec));
@@ -5436,9 +5439,11 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    }
    case nir_intrinsic_load_sample_pos: {
+      Temp posx = ctx->fs_inputs[fs_input::frag_pos_0];
+      Temp posy = ctx->fs_inputs[fs_input::frag_pos_1];
       bld.pseudo(aco_opcode::p_create_vector, Definition(get_ssa_temp(ctx, &instr->dest.ssa)),
-                 bld.vop1(aco_opcode::v_fract_f32, bld.def(v1), ctx->fs_inputs[fs_input::frag_pos_0]),
-                 bld.vop1(aco_opcode::v_fract_f32, bld.def(v1), ctx->fs_inputs[fs_input::frag_pos_1]));
+                 posx.id() ? bld.vop1(aco_opcode::v_fract_f32, bld.def(v1), posx) : Operand(0u),
+                 posy.id() ? bld.vop1(aco_opcode::v_fract_f32, bld.def(v1), posy) : Operand(0u));
       break;
    }
    case nir_intrinsic_load_interpolated_input:
@@ -5561,7 +5566,10 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
          ids = ctx->workgroup_ids;
       else
          ids = ctx->local_invocation_ids;
-      bld.pseudo(aco_opcode::p_create_vector, Definition(dst), ids[0], ids[1], ids[2]);
+      bld.pseudo(aco_opcode::p_create_vector, Definition(dst),
+                 ids[0].id() ? Operand(ids[0]) : Operand(1u),
+                 ids[1].id() ? Operand(ids[1]) : Operand(1u),
+                 ids[2].id() ? Operand(ids[2]) : Operand(1u));
       emit_split_vector(ctx, dst, 3);
       break;
    }
@@ -6828,6 +6836,15 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
 }
 
 
+Operand get_phi_operand(isel_context *ctx, nir_ssa_def *ssa)
+{
+   Temp tmp = get_ssa_temp(ctx, ssa);
+   if (ssa->parent_instr->type == nir_instr_type_ssa_undef)
+      return Operand(tmp.regClass());
+   else
+      return Operand(tmp);
+}
+
 void visit_phi(isel_context *ctx, nir_phi_instr *instr)
 {
    aco_ptr<Pseudo_instruction> phi;
@@ -6846,11 +6863,15 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
    if (all_undef) {
       Builder bld(ctx->program, ctx->block);
       if (dst.regClass() == s1) {
-         bld.sop1(aco_opcode::s_mov_b32, Definition(dst), Operand(s1));
+         bld.sop1(aco_opcode::s_mov_b32, Definition(dst), Operand(0u));
       } else if (dst.regClass() == v1) {
-         bld.vop1(aco_opcode::v_mov_b32, Definition(dst), Operand(v1));
+         bld.vop1(aco_opcode::v_mov_b32, Definition(dst), Operand(0u));
       } else {
-         bld.pseudo(aco_opcode::p_create_vector, Definition(dst), Operand(dst.regClass()));
+         aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size(), 1)};
+         for (unsigned i = 0; i < dst.size(); i++)
+            vec->operands[i] = Operand(0u);
+         vec->definitions[0] = Definition(dst);
+         ctx->block->instructions.emplace_back(std::move(vec));
       }
       return;
    }
@@ -6861,8 +6882,8 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
       bool can_scalarize = (opcode == aco_opcode::p_phi || !(ctx->block->kind & block_kind_merge));
       std::array<Temp, 4> new_vec;
       for (std::pair<const unsigned, nir_ssa_def*>& pair : phi_src) {
-         Temp src = get_ssa_temp(ctx, pair.second);
-         if (ctx->allocated_vec.find(src.id()) == ctx->allocated_vec.end()) {
+         Operand src = get_phi_operand(ctx, pair.second);
+         if (src.isTemp() && ctx->allocated_vec.find(src.tempId()) == ctx->allocated_vec.end()) {
             can_scalarize = false;
             break;
          }
@@ -6877,8 +6898,8 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
             phi.reset(create_instruction<Pseudo_instruction>(opcode, Format::PSEUDO, num_src, 1));
             std::map<unsigned, nir_ssa_def*>::iterator it = phi_src.begin();
             for (unsigned i = 0; i < num_src; i++) {
-               Temp src = get_ssa_temp(ctx, it->second);
-               phi->operands[i] = Operand(ctx->allocated_vec[src.id()][k]);
+               Operand src = get_phi_operand(ctx, it->second);
+               phi->operands[i] = src.isTemp() ? Operand(ctx->allocated_vec[src.tempId()][k]) : Operand(rc);
                ++it;
             }
             Temp phi_dst = {ctx->program->allocateId(), rc};
@@ -6912,11 +6933,11 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
          Block& linear_else = ctx->program->blocks[ctx->block->linear_preds[1]];
          block = &ctx->program->blocks[linear_else.linear_preds[0]];
          assert(block->kind & block_kind_invert);
-         phi->operands[0] = Operand(get_ssa_temp(ctx, phi_src.begin()->second));
+         phi->operands[0] = get_phi_operand(ctx, phi_src.begin()->second);
       } else {
          assert((++phi_src.begin())->second->parent_instr->type != nir_instr_type_ssa_undef);
          block = ctx->block;
-         phi->operands[0] = Operand(get_ssa_temp(ctx, (++phi_src.begin())->second));
+         phi->operands[0] = get_phi_operand(ctx, (++phi_src.begin())->second);
       }
       phi->operands[1] = Operand(dst.regClass());
       phi->definitions[0] = Definition(dst);
@@ -6926,7 +6947,7 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
 
    std::map<unsigned, nir_ssa_def*>::iterator it = phi_src.begin();
    for (unsigned i = 0; i < num_src; i++) {
-      phi->operands[i] = Operand(get_ssa_temp(ctx, it->second));
+      phi->operands[i] = get_phi_operand(ctx, it->second);
       ++it;
    }
    for (unsigned i = 0; i < extra_src; i++)
@@ -6939,17 +6960,19 @@ void visit_phi(isel_context *ctx, nir_phi_instr *instr)
 void visit_undef(isel_context *ctx, nir_ssa_undef_instr *instr)
 {
    Temp dst = get_ssa_temp(ctx, &instr->def);
-   aco_ptr<Instruction> undef;
+
    assert(dst.type() == RegType::sgpr);
 
    if (dst.size() == 1) {
-      undef.reset(create_instruction<SOP1_instruction>(aco_opcode::s_mov_b32, Format::SOP1, 1, 1));
+      aco_ptr<Instruction> mov = create_s_mov(Definition(dst), Operand(0u));
+      ctx->block->instructions.emplace_back(std::move(mov));
    } else {
-      undef.reset(create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, 1, 1));
+      aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size(), 1)};
+      for (unsigned i = 0; i < dst.size(); i++)
+         vec->operands[i] = Operand(0u);
+      vec->definitions[0] = Definition(dst);
+      ctx->block->instructions.emplace_back(std::move(vec));
    }
-   undef->operands[0] = Operand(dst.regClass());
-   undef->definitions[0] = Definition(dst);
-   ctx->block->instructions.emplace_back(std::move(undef));
 }
 
 void visit_jump(isel_context *ctx, nir_jump_instr *instr)
@@ -7573,7 +7596,7 @@ static void emit_stream_output(isel_context *ctx,
    Temp write_data = {ctx->program->allocateId(), RegClass(RegType::vgpr, num_comps)};
    aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, num_comps, 1)};
    for (unsigned i = 0; i < num_comps; ++i)
-      vec->operands[i] = Operand(out[i]);
+      vec->operands[i] = (ctx->vs_output.mask[loc] & 1 << i) ? Operand(out[i]) : Operand(0u);
    vec->definitions[0] = Definition(write_data);
    ctx->block->instructions.emplace_back(std::move(vec));
 
