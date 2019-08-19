@@ -516,7 +516,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
       ssa_info info = ctx.info[instr->operands[i].tempId()];
       /* propagate undef */
-      if (info.is_undefined())
+      if (info.is_undefined() && is_phi(instr))
          instr->operands[i] = Operand(instr->operands[i].regClass());
       /* propagate reg->reg of same type */
       if (info.is_temp() && info.temp.regClass() == instr->operands[i].getTemp().regClass()) {

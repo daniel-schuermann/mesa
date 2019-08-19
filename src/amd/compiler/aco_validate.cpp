@@ -76,6 +76,18 @@ void validate(Program* program, FILE * output)
                   "Format cannot have VOP3A/VOP3B applied", instr.get());
          }
 
+         /* check for undefs */
+         for (unsigned i = 0; i < instr->operands.size(); i++) {
+            if (instr->operands[i].isUndefined()) {
+               bool flat = instr->format == Format::FLAT || instr->format == Format::SCRATCH || instr->format == Format::GLOBAL;
+               bool can_be_undef = is_phi(instr) || instr->format == Format::EXP ||
+                                   instr->format == Format::PSEUDO_REDUCTION ||
+                                   (flat && i == 1) || (instr->format == Format::MIMG && i == 2) ||
+                                   ((instr->format == Format::MUBUF || instr->format == Format::MTBUF) && i == 0);
+               check(can_be_undef, "Undefs can only be used in certain operands", instr.get());
+            }
+         }
+
          /* check num literals */
          if (instr->isSALU() || instr->isVALU()) {
             unsigned num_literals = 0;

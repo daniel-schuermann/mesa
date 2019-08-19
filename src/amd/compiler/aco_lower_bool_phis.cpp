@@ -148,6 +148,9 @@ aco_ptr<Instruction> lower_divergent_bool_phi(Program *program, Block *block, ac
    for (unsigned i = 0; i < phi->operands.size(); i++) {
       Block *pred = &program->blocks[block->logical_preds[i]];
 
+      if (phi->operands[i].isUndefined())
+         continue;
+
       assert(phi->operands[i].isTemp());
       Temp phi_src = phi->operands[i].getTemp();
       if (phi_src.regClass() == s1) {
