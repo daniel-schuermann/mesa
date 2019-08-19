@@ -1465,18 +1465,15 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
          if (instr->opcode == aco_opcode::v_interp_p2_f32 ||
              instr->opcode == aco_opcode::v_mac_f32 ||
              instr->opcode == aco_opcode::v_writelane_b32) {
-            if (!instr->operands[2].isUndefined())
-               instr->definitions[0].setFixed(instr->operands[2].physReg());
+            instr->definitions[0].setFixed(instr->operands[2].physReg());
          } else if (instr->opcode == aco_opcode::s_addk_i32 ||
                     instr->opcode == aco_opcode::s_mulk_i32) {
-            if (!instr->operands[0].isUndefined())
-               instr->definitions[0].setFixed(instr->operands[0].physReg());
+            instr->definitions[0].setFixed(instr->operands[0].physReg());
          } else if ((instr->format == Format::MUBUF ||
                    instr->format == Format::MIMG) &&
                   instr->definitions.size() == 1 &&
                   instr->operands.size() == 4) {
-            if (!instr->operands[3].isUndefined())
-               instr->definitions[0].setFixed(instr->operands[3].physReg());
+            instr->definitions[0].setFixed(instr->operands[3].physReg());
          }
 
          ctx.defs_done.reset();
