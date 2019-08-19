@@ -3016,15 +3016,13 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
 
       unsigned idx = nir_intrinsic_base(instr);
       unsigned component = nir_intrinsic_component(instr);
-      Operand P0;
-      P0.setFixed(PhysReg{2});
 
       if (dst.size() == 1) {
-         bld.vintrp(aco_opcode::v_interp_mov_f32, Definition(dst), P0, bld.m0(prim_mask), idx, component);
+         bld.vintrp(aco_opcode::v_interp_mov_f32, Definition(dst), Operand(2u), bld.m0(prim_mask), idx, component);
       } else {
          aco_ptr<Pseudo_instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size(), 1)};
          for (unsigned i = 0; i < dst.size(); i++)
-            vec->operands[i] = bld.vintrp(aco_opcode::v_interp_mov_f32, bld.def(v1), P0, bld.m0(prim_mask), idx, component + i);
+            vec->operands[i] = bld.vintrp(aco_opcode::v_interp_mov_f32, bld.def(v1), Operand(2u), bld.m0(prim_mask), idx, component + i);
          vec->definitions[0] = Definition(dst);
          bld.insert(std::move(vec));
       }
@@ -5429,10 +5427,8 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       }
 
       unsigned idx = nir_intrinsic_base(instr);
-      Operand P0;
-      P0.setFixed(PhysReg{2});
       bld.vintrp(aco_opcode::v_interp_mov_f32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)),
-                 P0, bld.m0(ctx->prim_mask), idx, 0);
+                 Operand(2u), bld.m0(ctx->prim_mask), idx, 0);
       break;
    }
    case nir_intrinsic_load_frag_coord: {
