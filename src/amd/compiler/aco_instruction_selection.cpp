@@ -5001,7 +5001,9 @@ void visit_shared_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
 void visit_load_scratch(isel_context *ctx, nir_intrinsic_instr *instr) {
    assert(instr->dest.ssa.bit_size == 32 || instr->dest.ssa.bit_size == 64);
    Builder bld(ctx->program, ctx->block);
-   Temp scratch_addr = bld.smem(aco_opcode::s_load_dwordx2, bld.def(s2), ctx->private_segment_buffer, Operand(0u));
+   Temp scratch_addr = ctx->private_segment_buffer;
+   if (ctx->stage != MESA_SHADER_COMPUTE)
+      scratch_addr = bld.smem(aco_opcode::s_load_dwordx2, bld.def(s2), ctx->private_segment_buffer, Operand(0u));
    uint32_t rsrc_conf;
    /* older generations need element size = 16 bytes */
    if (ctx->program->chip_class >= GFX9)
@@ -5068,7 +5070,9 @@ void visit_load_scratch(isel_context *ctx, nir_intrinsic_instr *instr) {
 void visit_store_scratch(isel_context *ctx, nir_intrinsic_instr *instr) {
    assert(instr->src[0].ssa->bit_size == 32 || instr->src[0].ssa->bit_size == 64);
    Builder bld(ctx->program, ctx->block);
-   Temp scratch_addr = bld.smem(aco_opcode::s_load_dwordx2, bld.def(s2), ctx->private_segment_buffer, Operand(0u));
+   Temp scratch_addr = ctx->private_segment_buffer;
+   if (ctx->stage != MESA_SHADER_COMPUTE)
+      scratch_addr = bld.smem(aco_opcode::s_load_dwordx2, bld.def(s2), ctx->private_segment_buffer, Operand(0u));
    uint32_t rsrc_conf;
    /* older generations need element size = 16 bytes */
    if (ctx->program->chip_class >= GFX9)

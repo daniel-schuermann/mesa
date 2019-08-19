@@ -95,7 +95,7 @@ struct isel_context {
 
    /* scratch */
    bool scratch_enabled = false;
-   Temp private_segment_buffer = Temp(0, s2);
+   Temp private_segment_buffer = Temp(0, s2); /* also the part of the scratch descriptor on compute */
    Temp scratch_offset = Temp(0, s1);
 
    /* FS inputs */
@@ -896,6 +896,7 @@ void add_startpgm(struct isel_context *ctx)
    allocate_user_sgprs(ctx, needs_view_index, user_sgpr_info);
    arg_info args = {};
 
+   /* this needs to be in sgprs 0 and 1 */
    if (ctx->options->supports_spill || user_sgpr_info.need_ring_offsets || ctx->scratch_enabled) {
       add_arg(&args, s2, &ctx->private_segment_buffer, 0);
       set_loc_shader_ptr(ctx, AC_UD_SCRATCH_RING_OFFSETS, &user_sgpr_info.user_sgpr_idx);
