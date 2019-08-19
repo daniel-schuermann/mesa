@@ -128,7 +128,10 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       encoding |= opcode << 16;
       encoding |= interp->attribute << 10;
       encoding |= interp->component << 8;
-      encoding |= (0xFF & instr->operands[0].physReg().reg);
+      if (instr->opcode == aco_opcode::v_interp_mov_f32)
+         encoding |= (0x3 & instr->operands[0].constantValue());
+      else
+         encoding |= (0xFF & instr->operands[0].physReg().reg);
       out.push_back(encoding);
       break;
    }
@@ -294,8 +297,12 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
          encoding |= (0xFF & instr->definitions[0].physReg().reg);
          out.push_back(encoding);
          encoding = 0;
-         for (unsigned i = 0; i < instr->operands.size(); i++)
-            encoding |= instr->operands[i].physReg() << (i * 9);
+         if (instr->opcode == aco_opcode::v_interp_mov_f32) {
+            encoding = 0x3 & instr->operands[0].constantValue();
+         } else {
+            for (unsigned i = 0; i < instr->operands.size(); i++)
+               encoding |= instr->operands[i].physReg() << (i * 9);
+         }
          encoding |= vop3->omod << 27;
          for (unsigned i = 0; i < 3; i++)
             encoding |= vop3->neg[i] << (29+i);
