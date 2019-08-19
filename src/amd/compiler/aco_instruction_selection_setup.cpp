@@ -661,9 +661,8 @@ static void allocate_user_sgprs(isel_context *ctx,
       user_sgpr_info.need_ring_offsets = true;
 
    /* 2 user sgprs will nearly always be allocated for scratch/rings */
-   if (ctx->options->supports_spill || user_sgpr_info.need_ring_offsets) {
+   if (ctx->options->supports_spill || user_sgpr_info.need_ring_offsets || ctx->scratch_enabled)
       user_sgpr_count += 2;
-   }
 
    switch (ctx->stage) {
    case MESA_SHADER_VERTEX:
@@ -1076,8 +1075,7 @@ void add_startpgm(struct isel_context *ctx)
    }
 
    ctx->program->info->num_input_vgprs = 0;
-   ctx->program->info->num_input_sgprs = ctx->options->supports_spill ? 2 : 0;
-   ctx->program->info->num_input_sgprs += args.num_sgprs_used;
+   ctx->program->info->num_input_sgprs = args.num_sgprs_used;
    ctx->program->info->num_user_sgprs = user_sgpr_info.num_sgpr;
    ctx->program->info->num_input_vgprs = args.num_vgprs_used;
 
