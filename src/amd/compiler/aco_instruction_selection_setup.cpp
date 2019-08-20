@@ -1275,7 +1275,7 @@ setup_isel_context(Program* program, nir_shader *nir,
    program->chip_class = options->chip_class;
    program->family = options->family;
    program->sgpr_limit = options->chip_class >= GFX8 ? 102 : 104;
-   if (options->family == CHIP_TONGA)
+   if (options->family == CHIP_TONGA || options->family == CHIP_ICELAND)
       program->sgpr_limit = 94; /* workaround hardware bug */
 
    program->stage = nir->info.stage;
