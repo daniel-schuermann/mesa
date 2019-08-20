@@ -58,7 +58,7 @@ struct spill_ctx {
    std::vector<std::pair<uint32_t, uint32_t>> affinities;
    std::vector<bool> is_reloaded;
    std::map<Temp, remat_info> remat;
-   std::map<Instruction *, unsigned> remat_use_count;
+   std::map<Instruction *, bool> remat_used;
 
    spill_ctx(const RegisterDemand target_pressure, Program* program,
              std::vector<std::vector<RegisterDemand>> register_demand)
@@ -244,7 +244,7 @@ aco_ptr<Instruction> do_reload(spill_ctx& ctx, Temp tmp, Temp new_name, uint32_t
          if (instr->operands[i].isTemp()) {
             assert(false && "unsupported");
             if (ctx.remat.count(instr->operands[i].getTemp()))
-               ctx.remat_use_count[ctx.remat[instr->operands[i].getTemp()].instr]++;
+               ctx.remat_used[ctx.remat[instr->operands[i].getTemp()].instr] = true;
          }
       }
       res->definitions[0] = Definition(new_name);
@@ -271,7 +271,7 @@ void get_rematerialize_info(spill_ctx& ctx)
             for (const Definition& def : instr->definitions) {
                if (def.isTemp()) {
                   ctx.remat[def.getTemp()] = (remat_info){instr.get()};
-                  ctx.remat_use_count[instr.get()] = 0;
+                  ctx.remat_used[instr.get()] = false;
                }
             }
          }
@@ -992,7 +992,7 @@ void process_block(spill_ctx& ctx, unsigned block_idx, Block* block,
       for (const Operand& op : instr->operands) {
          /* prevent it's definining instruction from being DCE'd if it could be rematerialized */
          if (op.isTemp() && ctx.remat.count(op.getTemp()))
-            ctx.remat_use_count[ctx.remat[op.getTemp()].instr]++;
+            ctx.remat_used[ctx.remat[op.getTemp()].instr] = true;
       }
       instructions.emplace_back(std::move(instr));
       idx++;
@@ -1015,9 +1015,8 @@ void process_block(spill_ctx& ctx, unsigned block_idx, Block* block,
             if (ctx.renames[block_idx].find(op.getTemp()) != ctx.renames[block_idx].end())
                op.setTemp(ctx.renames[block_idx][op.getTemp()]);
             /* prevent it's definining instruction from being DCE'd if it could be rematerialized */
-            if (ctx.remat.count(op.getTemp())) {
-               ctx.remat_use_count[ctx.remat[op.getTemp()].instr]++;
-            }
+            if (ctx.remat.count(op.getTemp()))
+               ctx.remat_used[ctx.remat[op.getTemp()].instr] = true;
             continue;
          }
          /* the Operand is spilled: add it to reloads */
@@ -1146,7 +1145,7 @@ void spill_block(spill_ctx& ctx, unsigned block_idx)
    /* check conditions to process this block */
    bool process = RegisterDemand(block->register_demand - spilled_registers).exceeds(ctx.target_pressure) ||
                   !ctx.renames[block_idx].empty() ||
-                  ctx.remat_use_count.size();
+                  ctx.remat_used.size();
 
    std::map<Temp, uint32_t>::iterator it = current_spills.begin();
    while (!process && it != current_spills.end()) {
@@ -1171,6 +1170,16 @@ void spill_block(spill_ctx& ctx, unsigned block_idx)
 
    /* add coupling code to all loop header predecessors */
    add_coupling_code(ctx, loop_header, loop_header->index);
+
+   /* update remat_used for phis added in add_coupling_code() */
+   for (aco_ptr<Instruction>& instr : loop_header->instructions) {
+      if (!is_phi(instr))
+         break;
+      for (const Operand& op : instr->operands) {
+         if (op.isTemp() && ctx.remat.count(op.getTemp()))
+            ctx.remat_used[ctx.remat[op.getTemp()].instr] = true;
+      }
+   }
 
    /* propagate new renames through loop: i.e. repair the SSA */
    renames.swap(ctx.renames[loop_header->index]);
@@ -1486,7 +1495,7 @@ void assign_spill_slots(spill_ctx& ctx, unsigned spills_to_vgpr) {
             } else {
                unreachable("No spill slot assigned for spill id");
             }
-         } else if (!ctx.remat_use_count.count(it->get()) || ctx.remat_use_count[it->get()] > 0) {
+         } else if (!ctx.remat_used.count(it->get()) || ctx.remat_used[it->get()]) {
             instructions.emplace_back(std::move(*it));
          }
 
