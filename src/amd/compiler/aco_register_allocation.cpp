@@ -1933,7 +1933,7 @@ void register_allocation(Program *program, std::vector<std::set<Temp>> live_out_
 
    /* num_gpr = rnd_up(max_used_gpr + 1) */
    program->config->num_vgprs = (ctx.max_used_vgpr + 1 + 3) & ~3;
-   if (program->family == CHIP_TONGA) {
+   if (program->family == CHIP_TONGA || program->family == CHIP_ICELAND) {
       assert(ctx.max_used_sgpr <= 93);
       ctx.max_used_sgpr = 93; /* workaround hardware bug */
    }
