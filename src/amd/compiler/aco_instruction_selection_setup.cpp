@@ -1347,7 +1347,7 @@ setup_isel_context(Program* program, nir_shader *nir,
       nir_move_const_undef | nir_move_load_ubo | nir_move_load_input | nir_move_comparisons);
    nir_opt_sink(nir, move_opts);
    nir_opt_move(nir, move_opts);
-   nir_to_lcssa(nir, true, false);
+   nir_convert_to_lcssa(nir, true, false);
    nir_lower_phis_to_scalar(nir);
 
    nir_function_impl *func = nir_shader_get_entrypoint(nir);
@@ -1357,7 +1357,7 @@ setup_isel_context(Program* program, nir_shader *nir,
       fprintf(stderr, "NIR shader before instruction selection:\n");
       nir_print_shader(nir, stderr);
    }
-   ctx.divergent_vals = nir_divergence_analysis(nir);
+   ctx.divergent_vals = nir_divergence_analysis(nir, nir_divergence_view_index_uniform);
    init_context(&ctx, func);
 
    ctx.block = ctx.program->create_and_insert_block();
