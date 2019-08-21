@@ -6485,9 +6485,6 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
    unsigned dmask = nir_ssa_def_components_read(&instr->dest.ssa);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
    Temp tmp_dst = dst;
-   if ((util_bitcount(dmask) != instr->dest.ssa.num_components && instr->op != nir_texop_tg4) ||
-       tg4_integer_cube_workaround || dst.type() == RegType::sgpr || instr->op == nir_texop_samples_identical)
-      tmp_dst = Temp{ctx->program->allocateId(), RegClass(RegType::vgpr, util_bitcount(dmask))};
 
    /* gather4 selects the component by dmask and always returns vec4 */
    if (instr->op == nir_texop_tg4) {
@@ -6496,8 +6493,12 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
          dmask = 1;
       else
          dmask = 1 << instr->component;
-   } else if (instr->op == nir_texop_query_levels) {
-      dmask = 1 << 3;
+      if (tg4_integer_cube_workaround || dst.type() == RegType::sgpr)
+         tmp_dst = bld.tmp(v4);
+   } else if (instr->op == nir_texop_samples_identical) {
+      tmp_dst = bld.tmp(v1);
+   } else if (util_bitcount(dmask) != instr->dest.ssa.num_components || dst.type() == RegType::sgpr) {
+      tmp_dst = bld.tmp(RegClass(RegType::vgpr, util_bitcount(dmask)));
    }
 
    aco_ptr<MIMG_instruction> tex;
@@ -6520,6 +6521,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
           instr->sampler_dim == GLSL_SAMPLER_DIM_1D &&
           instr->is_array) {
          tex->dmask = (dmask & 0x1) | ((dmask & 0x2) << 1);
+      } else if (instr->op == nir_texop_query_levels) {
+         tex->dmask = 1 << 3;
       } else {
          tex->dmask = dmask;
       }
