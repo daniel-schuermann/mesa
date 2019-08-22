@@ -4197,7 +4197,7 @@ void visit_load_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
          ctx->block->instructions.emplace_back(std::move(instr));
          if (dst.size() == 8)
             emit_split_vector(ctx, upper, 2);
-         instr.reset(create_instruction<Instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size() / 2, 1));
+         instr.reset(create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector, Format::PSEUDO, dst.size() / 2, 1));
          instr->operands[0] = Operand(emit_extract_vector(ctx, lower, 0, v2));
          instr->operands[1] = Operand(emit_extract_vector(ctx, lower, 1, v2));
          instr->operands[2] = Operand(emit_extract_vector(ctx, upper, 0, v2));
@@ -5050,8 +5050,8 @@ void visit_load_scratch(isel_context *ctx, nir_intrinsic_instr *instr) {
             elems[2] = upper;
          }
 
-         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector,
-                                                                  Format::PSEUDO, dst.size() / 2, 1)};
+         aco_ptr<Instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector,
+                                                                         Format::PSEUDO, dst.size() / 2, 1)};
          for (unsigned i = 0; i < dst.size() / 2; i++)
             vec->operands[i] = Operand(elems[i]);
          vec->definitions[0] = Definition(dst);
@@ -6585,8 +6585,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
       if (tg4_integer_cube_workaround) {
          // see comment in ac_nir_to_llvm.c's lower_gather4_integer()
          Temp desc[resource.size()];
-         aco_ptr<Instruction> split{create_instruction<Instruction>(aco_opcode::p_split_vector,
-                                                                    Format::PSEUDO, 1, resource.size())};
+         aco_ptr<Instruction> split{create_instruction<Pseudo_instruction>(aco_opcode::p_split_vector,
+                                                                           Format::PSEUDO, 1, resource.size())};
          split->operands[0] = Operand(resource);
          for (unsigned i = 0; i < resource.size(); i++) {
             desc[i] = bld.tmp(s1);
@@ -6617,8 +6617,8 @@ void visit_tex(isel_context *ctx, nir_tex_instr *instr)
                             Operand((uint32_t)C_008F14_NUM_FORMAT));
          desc[1] = bld.sop2(aco_opcode::s_or_b32, bld.def(s1), bld.def(s1, scc), desc[1], nfmt);
 
-         aco_ptr<Instruction> vec{create_instruction<Instruction>(aco_opcode::p_create_vector,
-                                                                  Format::PSEUDO, resource.size(), 1)};
+         aco_ptr<Instruction> vec{create_instruction<Pseudo_instruction>(aco_opcode::p_create_vector,
+                                                                         Format::PSEUDO, resource.size(), 1)};
          for (unsigned i = 0; i < resource.size(); i++)
             vec->operands[i] = Operand(desc[i]);
          resource = bld.tmp(resource.regClass());
