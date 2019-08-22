@@ -887,7 +887,8 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
          ctx.info[instr->definitions[0].tempId()].set_b2f(instr->operands[2].getTemp());
       break;
    case aco_opcode::v_cmp_lg_u32:
-      if (instr->operands[0].constantEquals(0) &&
+      if (instr->format == Format::VOPC && /* don't optimize VOP3 / SDWA / DPP */
+          instr->operands[0].constantEquals(0) &&
           instr->operands[1].isTemp() && ctx.info[instr->operands[1].tempId()].is_vcc())
          ctx.info[instr->definitions[0].tempId()].set_temp(ctx.info[instr->operands[1].tempId()].temp);
       break;
