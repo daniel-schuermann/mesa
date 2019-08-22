@@ -45,6 +45,7 @@ void emit_dpp_op(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1, Ph
                  unsigned row_mask, unsigned bank_mask, bool bound_ctrl_zero, unsigned size,
                  Operand *identity=NULL) /* for VOP3 with sparse writes */
 {
+   RegClass rc = RegClass(RegType::vgpr, size);
    if (format == Format::VOP3) {
       Builder bld(ctx->program, &ctx->instructions);
 
@@ -58,9 +59,9 @@ void emit_dpp_op(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1, Ph
                       dpp_ctrl, row_mask, bank_mask, bound_ctrl_zero);
 
       if (clobber_vcc)
-         bld.vop3(op, Definition(dst, v1), Definition(vcc, s2), Operand(vtmp, v1), Operand(src1, v1));
+         bld.vop3(op, Definition(dst, rc), Definition(vcc, s2), Operand(vtmp, rc), Operand(src1, rc));
       else
-         bld.vop3(op, Definition(dst, v1), Operand(vtmp, v1), Operand(src1, v1));
+         bld.vop3(op, Definition(dst, rc), Operand(vtmp, rc), Operand(src1, rc));
    } else {
       assert(format == Format::VOP2 || format == Format::VOP1);
       assert(size == 1 || (op == aco_opcode::v_mov_b32));
@@ -69,10 +70,10 @@ void emit_dpp_op(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1, Ph
          aco_ptr<DPP_instruction> dpp{create_instruction<DPP_instruction>(
             op, (Format) ((uint32_t) format | (uint32_t) Format::DPP),
             format == Format::VOP2 ? 2 : 1, clobber_vcc ? 2 : 1)};
-         dpp->operands[0] = Operand(PhysReg{src0+i}, v1);
+         dpp->operands[0] = Operand(PhysReg{src0+i}, rc);
          if (format == Format::VOP2)
-            dpp->operands[1] = Operand(PhysReg{src1+i}, v1);
-         dpp->definitions[0] = Definition(PhysReg{dst+i}, v1);
+            dpp->operands[1] = Operand(PhysReg{src1+i}, rc);
+         dpp->definitions[0] = Definition(PhysReg{dst+i}, rc);
          if (clobber_vcc)
             dpp->definitions[1] = Definition(vcc, s2);
          dpp->dpp_ctrl = dpp_ctrl;
@@ -196,7 +197,7 @@ aco_opcode get_reduction_opcode(lower_context *ctx, ReduceOp op, bool *clobber_v
 }
 
 void emit_vopn(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1,
-               aco_opcode op, Format format, bool clobber_vcc)
+               RegClass rc, aco_opcode op, Format format, bool clobber_vcc)
 {
    aco_ptr<Instruction> instr;
    switch (format) {
@@ -209,9 +210,9 @@ void emit_vopn(lower_context *ctx, PhysReg dst, PhysReg src0, PhysReg src1,
    default:
       assert(false);
    }
-   instr->operands[0] = Operand(src0, v1);
-   instr->operands[1] = Operand(src1, v1);
-   instr->definitions[0] = Definition(dst, v1);
+   instr->operands[0] = Operand(src0, rc);
+   instr->operands[1] = Operand(src1, rc);
+   instr->definitions[0] = Definition(dst, rc);
    if (clobber_vcc)
       instr->definitions[1] = Definition(vcc, s2);
    ctx->instructions.emplace_back(std::move(instr));
@@ -280,7 +281,7 @@ void emit_reduction(lower_context *ctx, aco_opcode op, ReduceOp reduce_op, unsig
             bld.ds(aco_opcode::ds_swizzle_b32, Definition(PhysReg{vtmp+i}, v1), Operand(PhysReg{tmp+i}, s1), ds_pattern_bitmode(0x1f, 0, 0x10));
          bld.sop1(aco_opcode::s_mov_b64, Definition(exec, s2), Operand(stmp, s2));
          exec_restored = true;
-         emit_vopn(ctx, dst.physReg(), vtmp, tmp, reduce_opcode, format, should_clobber_vcc);
+         emit_vopn(ctx, dst.physReg(), vtmp, tmp, src.regClass(), reduce_opcode, format, should_clobber_vcc);
          dst_written = true;
       } else {
          assert(cluster_size == 64);
