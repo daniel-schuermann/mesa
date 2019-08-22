@@ -869,6 +869,17 @@ void handle_pseudo(ra_ctx& ctx,
       return;
    }
 
+   /* if all definitions are vgpr, no need to care for SCC */
+   bool writes_sgpr = false;
+   for (Definition& def : instr->definitions) {
+      if (def.getTemp().type() == RegType::sgpr) {
+         writes_sgpr = true;
+         break;
+      }
+   }
+   if (!writes_sgpr)
+      return;
+
    Pseudo_instruction *pi = (Pseudo_instruction *)instr;
    if (reg_file[scc.reg]) {
       pi->tmp_in_scc = true;
