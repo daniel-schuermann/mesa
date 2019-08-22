@@ -3936,7 +3936,6 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
    const nir_variable *var = nir_deref_instr_get_variable(nir_instr_as_deref(instr->src[0].ssa->parent_instr));
    const struct glsl_type *type = glsl_without_array(var->type);
    const enum glsl_sampler_dim dim = glsl_get_sampler_dim(type);
-   bool is_unsigned = glsl_get_sampler_result_type(type) == GLSL_TYPE_UINT;
    Builder bld(ctx->program, ctx->block);
 
    Temp data = as_vgpr(ctx, get_ssa_temp(ctx, instr->src[3].ssa));
@@ -3951,13 +3950,21 @@ void visit_image_atomic(isel_context *ctx, nir_intrinsic_instr *instr)
          buf_op = aco_opcode::buffer_atomic_add;
          image_op = aco_opcode::image_atomic_add;
          break;
-      case nir_intrinsic_image_deref_atomic_min:
-         buf_op = is_unsigned ? aco_opcode::buffer_atomic_umin : aco_opcode::buffer_atomic_smin;
-         image_op = is_unsigned ? aco_opcode::image_atomic_umin : aco_opcode::image_atomic_smin;
+      case nir_intrinsic_image_deref_atomic_umin:
+         buf_op = aco_opcode::buffer_atomic_umin;
+         image_op = aco_opcode::image_atomic_umin;
          break;
-      case nir_intrinsic_image_deref_atomic_max:
-         buf_op = is_unsigned ? aco_opcode::buffer_atomic_umax : aco_opcode::buffer_atomic_smax;
-         image_op = is_unsigned ? aco_opcode::image_atomic_umax : aco_opcode::image_atomic_smax;
+      case nir_intrinsic_image_deref_atomic_imin:
+         buf_op = aco_opcode::buffer_atomic_smin;
+         image_op = aco_opcode::image_atomic_smin;
+         break;
+      case nir_intrinsic_image_deref_atomic_umax:
+         buf_op = aco_opcode::buffer_atomic_umax;
+         image_op = aco_opcode::image_atomic_umax;
+         break;
+      case nir_intrinsic_image_deref_atomic_imax:
+         buf_op = aco_opcode::buffer_atomic_smax;
+         image_op = aco_opcode::image_atomic_smax;
          break;
       case nir_intrinsic_image_deref_atomic_and:
          buf_op = aco_opcode::buffer_atomic_and;
@@ -5499,8 +5506,10 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       visit_image_store(ctx, instr);
       break;
    case nir_intrinsic_image_deref_atomic_add:
-   case nir_intrinsic_image_deref_atomic_min:
-   case nir_intrinsic_image_deref_atomic_max:
+   case nir_intrinsic_image_deref_atomic_umin:
+   case nir_intrinsic_image_deref_atomic_imin:
+   case nir_intrinsic_image_deref_atomic_umax:
+   case nir_intrinsic_image_deref_atomic_imax:
    case nir_intrinsic_image_deref_atomic_and:
    case nir_intrinsic_image_deref_atomic_or:
    case nir_intrinsic_image_deref_atomic_xor:
