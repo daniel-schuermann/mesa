@@ -2468,6 +2468,14 @@ void radv_stop_feedback(VkPipelineCreationFeedbackEXT *feedback, bool cache_hit)
 }
 
 static
+bool radv_aco_supported_stage(gl_shader_stage stage, bool has_gs, bool has_ts)
+{
+	return (stage == MESA_SHADER_VERTEX && !has_gs && !has_ts) ||
+	       stage == MESA_SHADER_FRAGMENT ||
+	       stage == MESA_SHADER_COMPUTE;
+}
+
+static
 void radv_create_shaders(struct radv_pipeline *pipeline,
                          struct radv_device *device,
                          struct radv_pipeline_cache *cache,
@@ -2529,6 +2537,7 @@ void radv_create_shaders(struct radv_pipeline *pipeline,
 
 	bool has_gs = modules[MESA_SHADER_GEOMETRY];
 	bool has_ts = modules[MESA_SHADER_TESS_CTRL] || modules[MESA_SHADER_TESS_EVAL];
+	bool use_aco = device->physical_device->use_aco;
 
 	for (unsigned i = 0; i < MESA_SHADER_STAGES; ++i) {
 		const VkPipelineShaderStageCreateInfo *stage = pStages[i];
@@ -2538,10 +2547,11 @@ void radv_create_shaders(struct radv_pipeline *pipeline,
 
 		radv_start_feedback(stage_feedbacks[i]);
 
+		bool aco = use_aco && radv_aco_supported_stage(i, has_gs, has_ts);
 		nir[i] = radv_shader_compile_to_nir(device, modules[i],
 						    stage ? stage->pName : "main", i,
 						    stage ? stage->pSpecializationInfo : NULL,
-						    flags, pipeline->layout, has_gs, has_ts);
+						    flags, pipeline->layout, aco);
 
 		/* We don't want to alter meta shaders IR directly so clone it
 		 * first.
@@ -2580,10 +2590,11 @@ void radv_create_shaders(struct radv_pipeline *pipeline,
 		if (!pipeline->shaders[MESA_SHADER_FRAGMENT]) {
 			radv_start_feedback(stage_feedbacks[MESA_SHADER_FRAGMENT]);
 
+			bool aco = use_aco && radv_aco_supported_stage(MESA_SHADER_FRAGMENT, has_gs, has_ts);
 			pipeline->shaders[MESA_SHADER_FRAGMENT] =
 			       radv_shader_variant_compile(device, modules[MESA_SHADER_FRAGMENT], &nir[MESA_SHADER_FRAGMENT], 1,
 			                                  pipeline->layout, keys + MESA_SHADER_FRAGMENT,
-			                                  has_gs, has_ts, keep_executable_info, &binaries[MESA_SHADER_FRAGMENT]);
+			                                  keep_executable_info, aco, &binaries[MESA_SHADER_FRAGMENT]);
 
 			radv_stop_feedback(stage_feedbacks[MESA_SHADER_FRAGMENT], false);
 		}
@@ -2613,7 +2624,7 @@ void radv_create_shaders(struct radv_pipeline *pipeline,
 
 			pipeline->shaders[MESA_SHADER_TESS_CTRL] = radv_shader_variant_compile(device, modules[MESA_SHADER_TESS_CTRL], combined_nir, 2,
 			                                                                      pipeline->layout,
-			                                                                      &key, keep_executable_info, has_gs, has_ts,
+			                                                                      &key, keep_executable_info, false,
 			                                                                      &binaries[MESA_SHADER_TESS_CTRL]);
 
 			radv_stop_feedback(stage_feedbacks[MESA_SHADER_TESS_CTRL], false);
@@ -2632,7 +2643,7 @@ void radv_create_shaders(struct radv_pipeline *pipeline,
 
 			pipeline->shaders[MESA_SHADER_GEOMETRY] = radv_shader_variant_compile(device, modules[MESA_SHADER_GEOMETRY], combined_nir, 2,
 			                                                                     pipeline->layout,
-			                                                                     &keys[pre_stage], keep_executable_info, has_gs, has_ts,
+			                                                                     &keys[pre_stage], keep_executable_info, false,
 			                                                                     &binaries[MESA_SHADER_GEOMETRY]);
 
 			radv_stop_feedback(stage_feedbacks[MESA_SHADER_GEOMETRY], false);
@@ -2652,10 +2663,11 @@ void radv_create_shaders(struct radv_pipeline *pipeline,
 
 			radv_start_feedback(stage_feedbacks[i]);
 
+			bool aco = use_aco && radv_aco_supported_stage(i, has_gs, has_ts);
 			pipeline->shaders[i] = radv_shader_variant_compile(device, modules[i], &nir[i], 1,
 									  pipeline->layout,
 									  keys + i, keep_executable_info,
-									  has_gs, has_ts, &binaries[i]);
+									  aco, &binaries[i]);
 
 			radv_stop_feedback(stage_feedbacks[i], false);
 		}

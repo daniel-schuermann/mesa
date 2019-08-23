@@ -384,7 +384,7 @@ radv_shader_compile_to_nir(struct radv_device *device,
 			   const VkSpecializationInfo *spec_info,
 			   const VkPipelineCreateFlags flags,
 			   const struct radv_pipeline_layout *layout,
-			   bool has_gs, bool has_ts);
+			   bool use_aco);
 
 void *
 radv_alloc_shader_memory(struct radv_device *device,
@@ -405,7 +405,7 @@ radv_shader_variant_compile(struct radv_device *device,
 			    struct radv_pipeline_layout *layout,
 			    const struct radv_shader_variant_key *key,
 			    bool keep_shader_info,
-			    bool has_gs, bool has_ts,
+			    bool use_aco,
 			    struct radv_shader_binary **binary_out);
 
 struct radv_shader_variant *

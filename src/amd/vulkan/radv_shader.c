@@ -131,16 +131,6 @@ radv_can_dump_shader_stats(struct radv_device *device,
 	       module && !module->nir;
 }
 
-static bool
-should_use_aco(struct radv_device *device, gl_shader_stage stage, bool has_gs, bool has_ts)
-{
-	bool llvm_vs = device->instance->perftest_flags & RADV_PERFTEST_LLVM_VS;
-	return device->physical_device->use_aco &&
-	       (stage == MESA_SHADER_FRAGMENT ||
-	        stage == MESA_SHADER_COMPUTE ||
-	        (stage == MESA_SHADER_VERTEX && !llvm_vs && !has_gs && !has_ts));
-}
-
 unsigned shader_io_get_unique_index(gl_varying_slot slot)
 {
 	/* handle patch indices separate */
@@ -298,11 +288,11 @@ radv_shader_compile_to_nir(struct radv_device *device,
 			   const VkSpecializationInfo *spec_info,
 			   const VkPipelineCreateFlags flags,
 			   const struct radv_pipeline_layout *layout,
-			   bool has_gs, bool has_ts)
+			   bool use_aco)
 {
 	nir_shader *nir;
-	const nir_shader_compiler_options *nir_options =
-		should_use_aco(device, stage, has_gs, has_ts) ? &nir_options_aco : &nir_options_llvm;
+	const nir_shader_compiler_options *nir_options = use_aco ? &nir_options_aco :
+								   &nir_options_llvm;
 	if (module->nir) {
 		/* Some things such as our meta clear/blit code will give us a NIR
 		 * shader directly.  In that case, we just ignore the SPIR-V entirely
@@ -1174,15 +1164,12 @@ shader_variant_compile(struct radv_device *device,
 		       struct radv_nir_compiler_options *options,
 		       bool gs_copy_shader,
 		       bool keep_shader_info,
-		       bool has_gs, bool has_ts,
+		       bool use_aco,
 		       struct radv_shader_binary **binary_out)
 {
 	enum radeon_family chip_family = device->physical_device->rad_info.family;
-	enum ac_target_machine_options tm_options = 0;
-	struct ac_llvm_compiler ac_llvm;
 	struct radv_shader_binary *binary = NULL;
 	struct radv_shader_variant_info variant_info = {0};
-	bool thread_compiler;
 
 	if (shaders[0]->info.stage == MESA_SHADER_FRAGMENT)
 		lower_fs_io(shaders[0], &variant_info);
@@ -1207,41 +1194,45 @@ shader_variant_compile(struct radv_device *device,
 	else
 		options->wave_size = device->physical_device->ge_wave_size;
 
-	if (options->supports_spill)
-		tm_options |= AC_TM_SUPPORTS_SPILL;
-	if (device->instance->perftest_flags & RADV_PERFTEST_SISCHED)
-		tm_options |= AC_TM_SISCHED;
-	if (options->check_ir)
-		tm_options |= AC_TM_CHECK_IR;
-	if (device->instance->debug_flags & RADV_DEBUG_NO_LOAD_STORE_OPT)
-		tm_options |= AC_TM_NO_LOAD_STORE_OPT;
-
-	thread_compiler = !(device->instance->debug_flags & RADV_DEBUG_NOTHREADLLVM);
-	radv_init_llvm_once();
-	radv_init_llvm_compiler(&ac_llvm,
-				thread_compiler,
-				chip_family, tm_options,
-				options->wave_size);
-
-	if (gs_copy_shader) {
+	if (use_aco) {
 		assert(shader_count == 1);
-		radv_compile_gs_copy_shader(&ac_llvm, *shaders, &binary,
-					    &variant_info, options);
+		radv_nir_shader_info_init(&variant_info.info);
+		radv_nir_shader_info_pass(shaders[0], options, &variant_info.info);
+		aco_compile_shader(shaders[0], &binary, &variant_info, options);
+		binary->variant_info = variant_info;
 	} else {
-		bool use_aco = should_use_aco(device, shaders[0]->info.stage, has_gs, has_ts);
-		if (use_aco) {
+		enum ac_target_machine_options tm_options = 0;
+		struct ac_llvm_compiler ac_llvm;
+		bool thread_compiler;
+
+		if (options->supports_spill)
+			tm_options |= AC_TM_SUPPORTS_SPILL;
+		if (device->instance->perftest_flags & RADV_PERFTEST_SISCHED)
+			tm_options |= AC_TM_SISCHED;
+		if (options->check_ir)
+			tm_options |= AC_TM_CHECK_IR;
+		if (device->instance->debug_flags & RADV_DEBUG_NO_LOAD_STORE_OPT)
+			tm_options |= AC_TM_NO_LOAD_STORE_OPT;
+
+		thread_compiler = !(device->instance->debug_flags & RADV_DEBUG_NOTHREADLLVM);
+		radv_init_llvm_once();
+		radv_init_llvm_compiler(&ac_llvm,
+					thread_compiler,
+					chip_family, tm_options,
+					options->wave_size);
+
+		if (gs_copy_shader) {
 			assert(shader_count == 1);
-			radv_nir_shader_info_init(&variant_info.info);
-			radv_nir_shader_info_pass(shaders[0], options, &variant_info.info);
-			aco_compile_shader(shaders[0], &binary, &variant_info, options);
+			radv_compile_gs_copy_shader(&ac_llvm, *shaders, &binary,
+						    &variant_info, options);
 		} else {
 			radv_compile_nir_shader(&ac_llvm, &binary, &variant_info,
 						shaders, shader_count, options);
 		}
-	}
-	binary->variant_info = variant_info;
 
-	radv_destroy_llvm_compiler(&ac_llvm, thread_compiler);
+		binary->variant_info = variant_info;
+		radv_destroy_llvm_compiler(&ac_llvm, thread_compiler);
+	}
 
 	struct radv_shader_variant *variant = radv_shader_variant_create(device, binary,
 									 keep_shader_info);
@@ -1279,7 +1270,7 @@ radv_shader_variant_compile(struct radv_device *device,
 			   struct radv_pipeline_layout *layout,
 			   const struct radv_shader_variant_key *key,
 			   bool keep_shader_info,
-			   bool has_gs, bool has_ts,
+			   bool use_aco,
 			   struct radv_shader_binary **binary_out)
 {
 	struct radv_nir_compiler_options options = {0};
@@ -1293,7 +1284,7 @@ radv_shader_variant_compile(struct radv_device *device,
 	options.robust_buffer_access = device->robust_buffer_access;
 
 	return shader_variant_compile(device, module, shaders, shader_count, shaders[shader_count - 1]->info.stage,
-				     &options, false, keep_shader_info, has_gs, has_ts, binary_out);
+				     &options, false, keep_shader_info, use_aco, binary_out);
 }
 
 struct radv_shader_variant *
@@ -1308,7 +1299,7 @@ radv_create_gs_copy_shader(struct radv_device *device,
 	options.key.has_multiview_view_index = multiview;
 
 	return shader_variant_compile(device, NULL, &shader, 1, MESA_SHADER_VERTEX,
-				     &options, true, keep_shader_info, false, false, binary_out);
+				     &options, true, keep_shader_info, false, binary_out);
 }
 
 void
