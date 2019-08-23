@@ -248,6 +248,11 @@ public:
          uint32_t imm = op.constantValue();
          if (dst.regClass() == s1 && (imm >= 0xffff8000 || imm <= 0x7fff)) {
             return sopk(aco_opcode::s_movk_i32, dst, imm & 0xFFFFu);
+         } else if (util_bitreverse(imm) <= 64 || util_bitreverse(imm) >= 0xFFFFFFF0) {
+            uint32_t rev = util_bitreverse(imm);
+            return dst.regClass() == v1 ?
+                   vop1(aco_opcode::v_bfrev_b32, dst, Operand(rev)) :
+                   sop1(aco_opcode::s_brev_b32, dst, Operand(rev));
          }
       }
 
