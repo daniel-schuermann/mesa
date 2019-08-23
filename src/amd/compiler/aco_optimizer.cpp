@@ -813,6 +813,17 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
       }
       break;
    }
+   case aco_opcode::s_bfm_b32: {
+      if (instr->operands[0].isConstant() && instr->operands[1].isConstant()) {
+         unsigned size = instr->operands[0].constantValue() & 0x1f;
+         unsigned start = instr->operands[1].constantValue() & 0x1f;
+         uint32_t v = ((1u << size) - 1u) << start;
+         if (v <= 64 || v >= 0xfffffff0)
+            ctx.info[instr->definitions[0].tempId()].set_constant(v);
+         else
+            ctx.info[instr->definitions[0].tempId()].set_literal(v);
+      }
+   }
    case aco_opcode::v_mul_f32: { /* omod */
       /* TODO: try to move the negate/abs modifier to the consumer instead */
       if (instr->isVOP3()) {

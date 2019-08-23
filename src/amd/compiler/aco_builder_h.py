@@ -30,6 +30,7 @@ template = """\
 
 #include "aco_ir.h"
 #include "util/u_math.h"
+#include "util/bitscan.h"
 
 namespace aco {
 enum dpp_ctrl {
@@ -253,6 +254,11 @@ public:
             return dst.regClass() == v1 ?
                    vop1(aco_opcode::v_bfrev_b32, dst, Operand(rev)) :
                    sop1(aco_opcode::s_brev_b32, dst, Operand(rev));
+         } else if (imm != 0) {
+            unsigned start = (ffs(imm) - 1) & 0x1f;
+            unsigned size = util_bitcount(imm) & 0x1f;
+            if ((((1u << size) - 1u) << start) == imm)
+                return sop2(aco_opcode::s_bfm_b32, dst, Operand(size), Operand(start));
          }
       }
 
