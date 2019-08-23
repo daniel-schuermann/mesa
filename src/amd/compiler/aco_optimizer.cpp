@@ -796,7 +796,7 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
    case aco_opcode::s_movk_i32: {
       uint32_t v = static_cast<SOPK_instruction*>(instr.get())->imm;
       v = v & 0x8000 ? (v | 0xffff0000) : v;
-      if (v <= 64 && v >= 0xfffffff0)
+      if (v <= 64 || v >= 0xfffffff0)
          ctx.info[instr->definitions[0].tempId()].set_constant(v);
       else
          ctx.info[instr->definitions[0].tempId()].set_literal(v);
