@@ -29,6 +29,7 @@ template = """\
 #define _ACO_BUILDER_
 
 #include "aco_ir.h"
+#include "util/u_math.h"
 
 namespace aco {
 enum dpp_ctrl {
@@ -214,9 +215,102 @@ public:
    {
       assert(op.op.isTemp());
       if (op.op.getTemp().type() == RegType::vgpr)
-         return pseudo(aco_opcode::p_as_uniform, def(RegClass(RegType::sgpr, op.op.size())), op);
+         return pseudo(aco_opcode::p_as_uniform, def(RegType::sgpr, op.op.size()), op);
       else
          return op.op.getTemp();
+   }
+
+   Result v_mul_imm(Definition dst, Temp tmp, uint32_t imm, bool bits24=false)
+   {
+      assert(tmp.type() == RegType::vgpr);
+      if (imm == 0) {
+         return vop1(aco_opcode::v_mov_b32, dst, Operand(0u));
+      } else if (imm == 1) {
+         return copy(dst, Operand(tmp));
+      } else if (util_is_power_of_two_or_zero(imm)) {
+         return vop2(aco_opcode::v_lshlrev_b32, dst, Operand((uint32_t)ffs(imm) - 1u), tmp);
+      } else if (bits24) {
+        return vop2(aco_opcode::v_mul_u32_u24, dst, Operand(imm), tmp);
+      } else {
+        Temp imm_tmp = copy(def(v1), Operand(imm));
+        return vop3(aco_opcode::v_mul_lo_u32, dst, imm_tmp, tmp);
+      }
+   }
+
+   Result v_mul24_imm(Definition dst, Temp tmp, uint32_t imm)
+   {
+      return v_mul_imm(dst, tmp, imm, true);
+   }
+
+   Result copy(Definition dst, Op op_) {
+      Operand op = op_.op;
+      if (op.size() == 1 && op.isLiteral()) {
+         uint32_t imm = op.constantValue();
+         if (dst.regClass() == s1 && (imm >= 0xffff8000 || imm <= 0x7fff)) {
+            return sopk(aco_opcode::s_movk_i32, dst, imm & 0xFFFFu);
+         }
+      }
+
+      if (dst.regClass() == s2) {
+        return sop1(aco_opcode::s_mov_b64, dst, op);
+      } else if (op.size() > 1) {
+         return pseudo(aco_opcode::p_create_vector, dst, op);
+      } else if (dst.regClass() == v1 || dst.regClass() == v1.as_linear()) {
+        return vop1(aco_opcode::v_mov_b32, dst, op);
+      } else {
+        assert(dst.regClass() == s1);
+        return sop1(aco_opcode::s_mov_b32, dst, op);
+      }
+   }
+
+   Result vadd32(Definition dst, Op a, Op b, bool carry_out=false, Op carry_in=Op(Operand(s2))) {
+      if (!b.op.isTemp() || b.op.regClass().type() != RegType::vgpr)
+         std::swap(a, b);
+      assert(b.op.isTemp() && b.op.regClass().type() == RegType::vgpr);
+
+      if (!carry_in.op.isUndefined())
+         return vop2(aco_opcode::v_addc_co_u32, Definition(dst), hint_vcc(def(s2)), a, b, carry_in);
+      else if (program->chip_class < GFX9 || carry_out)
+         return vop2(aco_opcode::v_add_co_u32, Definition(dst), hint_vcc(def(s2)), a, b);
+      else
+         return vop2(aco_opcode::v_add_u32, Definition(dst), a, b);
+   }
+
+   Result vsub32(Definition dst, Op a, Op b, bool carry_out=false, Op borrow=Op(Operand(s2)))
+   {
+      if (!borrow.op.isUndefined() || program->chip_class < GFX9)
+         carry_out = true;
+
+      bool reverse = !b.op.isTemp() || b.op.regClass().type() != RegType::vgpr;
+      if (reverse)
+         std::swap(a, b);
+      assert(b.op.isTemp() && b.op.regClass().type() == RegType::vgpr);
+
+      aco_opcode op;
+      Temp carry;
+      if (carry_out) {
+         carry = tmp(s2);
+         if (borrow.op.isUndefined())
+            op = reverse ? aco_opcode::v_subrev_co_u32 : aco_opcode::v_sub_co_u32;
+         else
+            op = reverse ? aco_opcode::v_subbrev_co_u32 : aco_opcode::v_subb_co_u32;
+      } else {
+         op = reverse ? aco_opcode::v_subrev_u32 : aco_opcode::v_sub_u32;
+      }
+
+      int num_ops = borrow.op.isUndefined() ? 2 : 3;
+      int num_defs = carry_out ? 2 : 1;
+      aco_ptr<Instruction> sub{create_instruction<VOP2_instruction>(op, Format::VOP2, num_ops, num_defs)};
+      sub->operands[0] = a.op;
+      sub->operands[1] = b.op;
+      if (!borrow.op.isUndefined())
+         sub->operands[2] = borrow.op;
+      sub->definitions[0] = dst;
+      if (carry_out) {
+         sub->definitions[1] = Definition(carry);
+         sub->definitions[1].setHint(aco::vcc);
+      }
+      return insert(std::move(sub));
    }
 <%
 import itertools

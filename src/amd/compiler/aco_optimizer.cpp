@@ -30,6 +30,7 @@
 
 #include "aco_ir.h"
 #include "util/half_float.h"
+#include "util/u_math.h"
 
 namespace aco {
 
@@ -556,7 +557,6 @@ void label_instruction(opt_ctx &ctx, aco_ptr<Instruction>& instr)
 
       /* VALU: propagate neg, abs & inline constants */
       else if (instr->isVALU()) {
-
          if (info.is_temp() && info.temp.type() == RegType::vgpr) {
             instr->operands[i].setTemp(info.temp);
             info = ctx.info[info.temp.id()];

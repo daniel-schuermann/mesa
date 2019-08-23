@@ -408,10 +408,8 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
             preserve_scc = true;
          } else if (it->second.size == 2 && it->second.def.getTemp().type() == RegType::sgpr) {
             bld.sop1(aco_opcode::s_mov_b64, it->second.def, Operand(it->second.op.physReg(), s2));
-         } else if (it->second.def.getTemp().type() == RegType::sgpr) {
-            bld.insert(create_s_mov(it->second.def, it->second.op));
          } else {
-            bld.vop1(aco_opcode::v_mov_b32, it->second.def, it->second.op);
+            bld.copy(it->second.def, it->second.op);
          }
 
          /* reduce the number of uses of the operand reg by one */
@@ -500,10 +498,8 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
             continue;
          if (it->second.def.physReg() == scc) {
             bld.sopc(aco_opcode::s_cmp_lg_i32, Definition(scc, s1), Operand(0u), Operand(it->second.op.constantValue() ? 1u : 0u));
-         } else if (it->second.def.getTemp().type() == RegType::sgpr) {
-            bld.insert(std::move(create_s_mov(it->second.def, it->second.op)));
          } else {
-            bld.vop1(aco_opcode::v_mov_b32, it->second.def, it->second.op);
+            bld.copy(it->second.def, it->second.op);
          }
       }
    }
