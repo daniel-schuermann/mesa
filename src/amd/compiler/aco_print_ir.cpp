@@ -1,4 +1,5 @@
 #include "aco_ir.h"
+#include "aco_builder.h"
 
 #include "sid.h"
 
@@ -33,8 +34,7 @@ static const char *reduce_ops[] = {
    [ixor64] = "ixor64",
 };
 
-static
-void aco_print_reg_class(const RegClass rc, FILE *output)
+static void print_reg_class(const RegClass rc, FILE *output)
 {
    switch (rc) {
       case RegClass::s1: fprintf(output, " s1: "); return;
@@ -57,7 +57,7 @@ void aco_print_reg_class(const RegClass rc, FILE *output)
    }
 }
 
-void aco_print_physReg(unsigned reg, unsigned size, FILE *output)
+void print_physReg(unsigned reg, unsigned size, FILE *output)
 {
    if (reg == 124) {
       fprintf(output, ":m0");
@@ -78,59 +78,89 @@ void aco_print_physReg(unsigned reg, unsigned size, FILE *output)
    }
 }
 
-static
-void aco_print_operand(const Operand *operand, FILE *output)
+static void print_constant(uint8_t reg, FILE *output)
 {
-   if (operand->isConstant()) {
-      fprintf(output, "0x%x", operand->constantValue());
+   if (reg >= 128 && reg <= 192) {
+      fprintf(output, "%d", reg - 128);
+      return;
+   } else if (reg >= 192 && reg <= 208) {
+      fprintf(output, "%d", 192 - reg);
       return;
    }
-   if (operand->isUndefined()) {
-      aco_print_reg_class(operand->regClass(), output);
-      fprintf(output, "undef");
-      return;
-   }
-   fprintf(output, "%%%d", operand->tempId());
 
-   if (operand->isFixed())
-      aco_print_physReg(operand->physReg(), operand->size(), output);
+   switch (reg) {
+   case 240:
+      fprintf(output, "0.5");
+      break;
+   case 241:
+      fprintf(output, "-0.5");
+      break;
+   case 242:
+      fprintf(output, "1.0");
+      break;
+   case 243:
+      fprintf(output, "-1.0");
+      break;
+   case 244:
+      fprintf(output, "2.0");
+      break;
+   case 245:
+      fprintf(output, "-2.0");
+      break;
+   case 246:
+      fprintf(output, "4.0");
+      break;
+   case 247:
+      fprintf(output, "-4.0");
+      break;
+   case 248:
+      fprintf(output, "1/(2*PI)");
+      break;
+   }
 }
 
-static
-void aco_print_definition(const Definition *definition, FILE *output)
+static void print_operand(const Operand *operand, FILE *output)
 {
-   aco_print_reg_class(definition->regClass(), output);
+   if (operand->isLiteral()) {
+      fprintf(output, "0x%x", operand->constantValue());
+   } else if (operand->isConstant()) {
+      print_constant(operand->physReg().reg, output);
+   } else if (operand->isUndefined()) {
+      print_reg_class(operand->regClass(), output);
+      fprintf(output, "undef");
+   } else {
+      fprintf(output, "%%%d", operand->tempId());
+
+      if (operand->isFixed())
+         print_physReg(operand->physReg(), operand->size(), output);
+   }
+}
+
+static void print_definition(const Definition *definition, FILE *output)
+{
+   print_reg_class(definition->regClass(), output);
    fprintf(output, "%%%d", definition->tempId());
 
    if (definition->isFixed())
-      aco_print_physReg(definition->physReg(), definition->size(), output);
+      print_physReg(definition->physReg(), definition->size(), output);
 }
 
-static
-void aco_print_barrier_reorder(bool can_reorder, barrier_interaction barrier, FILE *output)
+static void print_barrier_reorder(bool can_reorder, barrier_interaction barrier, FILE *output)
 {
    if (can_reorder)
       fprintf(output, " reorder");
-   switch (barrier) {
-   case barrier_buffer:
+
+   if (barrier & barrier_buffer)
       fprintf(output, " buffer");
-      break;
-   case barrier_image:
+   if (barrier & barrier_image)
       fprintf(output, " image");
-      break;
-   case barrier_atomic:
+   if (barrier & barrier_atomic)
       fprintf(output, " atomic");
-      break;
-   case barrier_shared:
+   if (barrier & barrier_shared)
       fprintf(output, " shared");
-      break;
-   case barrier_none:
-      break;
-   }
 }
 
-static
-void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
+static void print_instr_format_specific(struct Instruction *instr, FILE *output)
 {
    switch (instr->format) {
    case Format::SOPK: {
@@ -177,7 +207,7 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
          fprintf(output, " glc");
       if (smem->nv)
          fprintf(output, " nv");
-      aco_print_barrier_reorder(smem->can_reorder, smem->barrier, output);
+      print_barrier_reorder(smem->can_reorder, smem->barrier, output);
       break;
    }
    case Format::VINTRP: {
@@ -213,7 +243,7 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
          fprintf(output, " lds");
       if (mubuf->disable_wqm)
          fprintf(output, " disable_wqm");
-      aco_print_barrier_reorder(mubuf->can_reorder, mubuf->barrier, output);
+      print_barrier_reorder(mubuf->can_reorder, mubuf->barrier, output);
       break;
    }
    case Format::MIMG: {
@@ -245,7 +275,7 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
          fprintf(output, " d16");
       if (mimg->disable_wqm)
          fprintf(output, " disable_wqm");
-      aco_print_barrier_reorder(mimg->can_reorder, mimg->barrier, output);
+      print_barrier_reorder(mimg->can_reorder, mimg->barrier, output);
       break;
    }
    case Format::EXP: {
@@ -353,7 +383,7 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
          fprintf(output, " tfe");
       if (mtbuf->disable_wqm)
          fprintf(output, " disable_wqm");
-      aco_print_barrier_reorder(mtbuf->can_reorder, mtbuf->barrier, output);
+      print_barrier_reorder(mtbuf->can_reorder, mtbuf->barrier, output);
       break;
    }
    default: {
@@ -387,21 +417,21 @@ void aco_print_instr_format_specific(struct Instruction *instr, FILE *output)
          fprintf(output, " row_shr:%d", dpp->dpp_ctrl & 0xf);
       } else if (dpp->dpp_ctrl >= 0x121 && dpp->dpp_ctrl <= 0x12f) {
          fprintf(output, " row_ror:%d", dpp->dpp_ctrl & 0xf);
-      } else if (dpp->dpp_ctrl == 0x130) {
+      } else if (dpp->dpp_ctrl == dpp_wf_sl1) {
          fprintf(output, " wave_shl:1");
-      } else if (dpp->dpp_ctrl == 0x134) {
+      } else if (dpp->dpp_ctrl == dpp_wf_rl1) {
          fprintf(output, " wave_rol:1");
-      } else if (dpp->dpp_ctrl == 0x138) {
+      } else if (dpp->dpp_ctrl == dpp_wf_sr1) {
          fprintf(output, " wave_shr:1");
-      } else if (dpp->dpp_ctrl == 0x13c) {
+      } else if (dpp->dpp_ctrl == dpp_wf_rr1) {
          fprintf(output, " wave_ror:1");
-      } else if (dpp->dpp_ctrl == 0x140) {
+      } else if (dpp->dpp_ctrl == dpp_row_mirror) {
          fprintf(output, " row_mirror");
-      } else if (dpp->dpp_ctrl == 0x141) {
+      } else if (dpp->dpp_ctrl == dpp_row_half_mirror) {
          fprintf(output, " row_half_mirror");
-      } else if (dpp->dpp_ctrl == 0x142) {
+      } else if (dpp->dpp_ctrl == dpp_row_bcast15) {
          fprintf(output, " row_bcast:15");
-      } else if (dpp->dpp_ctrl == 0x143) {
+      } else if (dpp->dpp_ctrl == dpp_row_bcast31) {
          fprintf(output, " row_bcast:31");
       } else {
          fprintf(output, " dpp_ctrl:0x%.3x", dpp->dpp_ctrl);
@@ -421,7 +451,7 @@ void aco_print_instr(struct Instruction *instr, FILE *output)
 {
    if (!instr->definitions.empty()) {
       for (unsigned i = 0; i < instr->definitions.size(); ++i) {
-         aco_print_definition(&instr->definitions[i], output);
+         print_definition(&instr->definitions[i], output);
          if (i + 1 != instr->definitions.size())
             fprintf(output, ", ");
       }
@@ -460,16 +490,15 @@ void aco_print_instr(struct Instruction *instr, FILE *output)
             fprintf(output, "-");
          if (abs[i])
             fprintf(output, "|");
-         aco_print_operand(&instr->operands[i], output);
+         print_operand(&instr->operands[i], output);
          if (abs[i])
             fprintf(output, "|");
        }
    }
-   aco_print_instr_format_specific(instr, output);
+   print_instr_format_specific(instr, output);
 }
 
-static void
-aco_print_block_kind(uint16_t kind, FILE *output)
+static void print_block_kind(uint16_t kind, FILE *output)
 {
    if (kind & block_kind_uniform)
       fprintf(output, "uniform, ");
@@ -511,7 +540,7 @@ void aco_print_block(const struct Block* block, FILE *output)
    for (unsigned pred : block->linear_preds)
       fprintf(output, "BB%d, ", pred);
    fprintf(output, "/ kind: ");
-   aco_print_block_kind(block->kind, output);
+   print_block_kind(block->kind, output);
    fprintf(output, "*/\n");
    for (auto const& instr : block->instructions) {
       fprintf(output, "\t");
