@@ -516,7 +516,8 @@ void lower_to_hw_instr(Program* program)
       ctx.program = program;
       Builder bld(program, &ctx.instructions);
 
-      for (aco_ptr<Instruction>& instr : block->instructions) {
+      for (size_t j = 0; j < block->instructions.size(); j++) {
+         aco_ptr<Instruction>& instr = block->instructions[j];
          aco_ptr<Instruction> mov;
          if (instr->format == Format::PSEUDO) {
             Pseudo_instruction *pi = (Pseudo_instruction*)instr.get();
@@ -607,7 +608,13 @@ void lower_to_hw_instr(Program* program)
             }
             case aco_opcode::p_discard_if:
             {
-               if (!discard_block) {
+               bool early_exit = false;
+               if (block->instructions[j + 1]->opcode != aco_opcode::p_logical_end ||
+                   block->instructions[j + 2]->opcode != aco_opcode::s_endpgm) {
+                  early_exit = true;
+               }
+
+               if (early_exit && !discard_block) {
                   discard_block = program->create_and_insert_block();
                   block = &program->blocks[i];
 
@@ -634,10 +641,12 @@ void lower_to_hw_instr(Program* program)
                            discard_cond);
                }
 
-               bld.sopp(aco_opcode::s_cbranch_scc0, bld.scc(branch_cond.getTemp()), discard_block);
+               if (early_exit) {
+                  bld.sopp(aco_opcode::s_cbranch_scc0, bld.scc(branch_cond.getTemp()), discard_block);
 
-               discard_block->linear_preds.push_back(block->index);
-               block->linear_succs.push_back(discard_block->index);
+                  discard_block->linear_preds.push_back(block->index);
+                  block->linear_succs.push_back(discard_block->index);
+               }
 
                break;
             }
