@@ -251,9 +251,9 @@ public:
 
    Result copy(Definition dst, Op op_) {
       Operand op = op_.op;
-      if (op.size() == 1 && op.isLiteral()) {
+      if (dst.regClass() == s1 && op.size() == 1 && op.isLiteral()) {
          uint32_t imm = op.constantValue();
-         if (dst.regClass() == s1 && (imm >= 0xffff8000 || imm <= 0x7fff)) {
+         if (imm >= 0xffff8000 || imm <= 0x7fff) {
             return sopk(aco_opcode::s_movk_i32, dst, imm & 0xFFFFu);
          } else if (util_bitreverse(imm) <= 64 || util_bitreverse(imm) >= 0xFFFFFFF0) {
             uint32_t rev = util_bitreverse(imm);
