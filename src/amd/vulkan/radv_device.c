@@ -392,8 +392,6 @@ radv_physical_device_init(struct radv_physical_device *device,
 					  device->rad_info.family == CHIP_RENOIR ||
 					  device->rad_info.chip_class >= GFX10;
 
-	device->use_aco = device->instance->perftest_flags & RADV_PERFTEST_ACO;
-
 	device->use_shader_ballot = device->rad_info.chip_class >= GFX8 &&
 				    (device->use_aco || device->instance->perftest_flags & RADV_PERFTEST_SHADER_BALLOT);
 
