@@ -142,6 +142,12 @@ public:
       instructions = &block->instructions;
    }
 
+   void reset(std::vector<aco_ptr<Instruction>> *instrs) {
+      use_iterator = false;
+      start = false;
+      instructions = instrs;
+   }
+
    Result insert(aco_ptr<Instruction> instr) {
       Instruction *instr_ptr = instr.get();
       if (instructions) {

@@ -507,12 +507,16 @@ void handle_operands(std::map<PhysReg, copy_operation>& copy_map, lower_context*
 
 void lower_to_hw_instr(Program* program)
 {
-   for (Block& block : program->blocks) {
+   Block *discard_block = NULL;
+
+   for (size_t i = 0; i < program->blocks.size(); i++)
+   {
+      Block *block = &program->blocks[i];
       lower_context ctx;
       ctx.program = program;
       Builder bld(program, &ctx.instructions);
 
-      for (aco_ptr<Instruction>& instr : block.instructions) {
+      for (aco_ptr<Instruction>& instr : block->instructions) {
          aco_ptr<Instruction> mov;
          if (instr->format == Format::PSEUDO) {
             Pseudo_instruction *pi = (Pseudo_instruction*)instr.get();
@@ -603,6 +607,20 @@ void lower_to_hw_instr(Program* program)
             }
             case aco_opcode::p_discard_if:
             {
+               if (!discard_block) {
+                  discard_block = program->create_and_insert_block();
+                  block = &program->blocks[i];
+
+                  bld.reset(discard_block);
+                  bld.exp(aco_opcode::exp, Operand(v1), Operand(v1), Operand(v1), Operand(v1),
+                          0, V_008DFC_SQ_EXP_NULL, false, true, true, true);
+                  if (program->wb_smem_l1_on_end)
+                     bld.smem(aco_opcode::s_dcache_wb);
+                  bld.sopp(aco_opcode::s_endpgm);
+
+                  bld.reset(&ctx.instructions);
+               }
+
                // TODO: optimize uniform conditions
                Definition branch_cond = instr->definitions.back();
                Operand discard_cond = instr->operands.back();
@@ -616,17 +634,11 @@ void lower_to_hw_instr(Program* program)
                            discard_cond);
                }
 
-               unsigned jump_dwords = program->wb_smem_l1_on_end ? 5 : 3; /* (8 + (wb_smem ? 8 : 0) + 4 dwords) / 4 */;
-               bld.sopp(aco_opcode::s_cbranch_scc1, bld.scc(branch_cond.getTemp()), NULL, jump_dwords);
+               bld.sopp(aco_opcode::s_cbranch_scc0, bld.scc(branch_cond.getTemp()), discard_block);
 
-               bld.exp(aco_opcode::exp, Operand(v1), Operand(v1), Operand(v1), Operand(v1),
-                       0, V_008DFC_SQ_EXP_NULL, false, true, true, true);
+               discard_block->linear_preds.push_back(block->index);
+               block->linear_succs.push_back(discard_block->index);
 
-               if (program->wb_smem_l1_on_end) {
-                  bld.smem(aco_opcode::s_dcache_wb);
-               }
-
-               bld.sopp(aco_opcode::s_endpgm);
                break;
             }
             case aco_opcode::p_spill:
@@ -667,8 +679,8 @@ void lower_to_hw_instr(Program* program)
          } else if (instr->format == Format::PSEUDO_BRANCH) {
             Pseudo_branch_instruction* branch = static_cast<Pseudo_branch_instruction*>(instr.get());
             /* check if all blocks from current to target are empty */
-            bool can_remove = block.index < branch->target[0];
-            for (unsigned i = block.index + 1; can_remove && i < branch->target[0]; i++) {
+            bool can_remove = block->index < branch->target[0];
+            for (unsigned i = block->index + 1; can_remove && i < branch->target[0]; i++) {
                if (program->blocks[i].instructions.size())
                   can_remove = false;
             }
@@ -678,11 +690,11 @@ void lower_to_hw_instr(Program* program)
             aco_ptr<SOPP_instruction> sopp;
             switch (instr->opcode) {
                case aco_opcode::p_branch:
-                  assert(block.linear_succs[0] == branch->target[0]);
+                  assert(block->linear_succs[0] == branch->target[0]);
                   bld.sopp(aco_opcode::s_branch, &program->blocks[branch->target[0]]);
                   break;
                case aco_opcode::p_cbranch_nz:
-                  assert(block.linear_succs[1] == branch->target[0]);
+                  assert(block->linear_succs[1] == branch->target[0]);
                   if (branch->operands[0].physReg() == exec)
                      bld.sopp(aco_opcode::s_cbranch_execnz, &program->blocks[branch->target[0]]);
                   else if (branch->operands[0].physReg() == vcc)
@@ -693,7 +705,7 @@ void lower_to_hw_instr(Program* program)
                   }
                   break;
                case aco_opcode::p_cbranch_z:
-                  assert(block.linear_succs[1] == branch->target[0]);
+                  assert(block->linear_succs[1] == branch->target[0]);
                   if (branch->operands[0].physReg() == exec)
                      bld.sopp(aco_opcode::s_cbranch_execz, &program->blocks[branch->target[0]]);
                   else if (branch->operands[0].physReg() == vcc)
@@ -720,7 +732,7 @@ void lower_to_hw_instr(Program* program)
          }
 
       }
-      block.instructions.swap(ctx.instructions);
+      block->instructions.swap(ctx.instructions);
    }
 }
 
