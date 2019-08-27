@@ -626,6 +626,7 @@ void emit_waitcnt(wait_ctx& ctx, std::vector<aco_ptr<Instruction>>& instructions
    if (!imm.empty()) {
       SOPP_instruction* waitcnt = create_instruction<SOPP_instruction>(aco_opcode::s_waitcnt, Format::SOPP, 0, 0);
       waitcnt->imm = imm.pack(ctx.chip_class);
+      waitcnt->block = -1;
       instructions.emplace_back(waitcnt);
    }
 }

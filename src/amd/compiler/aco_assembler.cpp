@@ -6,12 +6,13 @@
 namespace aco {
 
 struct asm_context {
+   Program *program;
    enum chip_class chip_class;
    std::map<int, SOPP_instruction*> branches;
    const int16_t* opcode;
    // TODO: keep track of branch instructions referring blocks
    // and, when emitting the block, correct the offset in instr
-   asm_context(Program* program) : chip_class(program->chip_class) {
+   asm_context(Program* program) : program(program), chip_class(program->chip_class) {
       if (chip_class <= GFX9)
          opcode = &instr_info.opcode_gfx9[0];
    }
@@ -69,7 +70,7 @@ void emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction*
       uint32_t encoding = (0b101111111 << 23);
       encoding |= opcode << 16;
       encoding |= (uint16_t) sopp->imm;
-      if (sopp->block)
+      if (sopp->block != -1)
          ctx.branches.insert({out.size(), sopp});
       out.push_back(encoding);
       break;
@@ -413,7 +414,7 @@ void fix_branches(asm_context& ctx, std::vector<uint32_t>& out)
 {
    for (std::pair<int, SOPP_instruction*> branch : ctx.branches)
    {
-      int offset = (int)branch.second->block->offset - branch.first - 1;
+      int offset = (int)ctx.program->blocks[branch.second->block].offset - branch.first - 1;
       out[branch.first] |= (uint16_t) offset;
    }
 }

@@ -604,7 +604,7 @@ struct SOPK_instruction : public Instruction {
 
 struct SOPP_instruction : public Instruction {
    uint32_t imm;
-   Block *block;
+   int block;
 };
 
 struct SOPC_instruction : public Instruction {

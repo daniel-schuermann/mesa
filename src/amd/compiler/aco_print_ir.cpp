@@ -197,8 +197,8 @@ static void print_instr_format_specific(struct Instruction *instr, FILE *output)
          break;
       }
       }
-      if (sopp->block)
-         fprintf(output, " block:BB%d", sopp->block->index);
+      if (sopp->block != -1)
+         fprintf(output, " block:BB%d", sopp->block);
       break;
    }
    case Format::SMEM: {

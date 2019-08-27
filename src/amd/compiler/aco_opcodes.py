@@ -62,7 +62,7 @@ class Format(Enum):
       if self == Format.SOPK:
          return [('uint16_t', 'imm', None)]
       elif self == Format.SOPP:
-         return [('Block *', 'block', 'NULL'),
+         return [('uint32_t', 'block', '-1'),
                  ('uint32_t', 'imm', '0')]
       elif self == Format.SMEM:
          return [('bool', 'can_reorder', 'true'),

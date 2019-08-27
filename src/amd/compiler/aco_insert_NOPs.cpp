@@ -252,6 +252,7 @@ void handle_block(NOP_ctx& ctx, Block& block)
          /* create NOP */
          aco_ptr<SOPP_instruction> nop{create_instruction<SOPP_instruction>(aco_opcode::s_nop, Format::SOPP, 0, 0)};
          nop->imm = NOPs - 1;
+         nop->block = -1;
          instructions.emplace_back(std::move(nop));
       }
 
