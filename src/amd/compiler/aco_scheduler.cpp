@@ -794,7 +794,7 @@ void schedule_program(Program *program, live& live_vars)
    assert(ctx.num_waves);
    uint16_t total_sgpr_regs = program->chip_class >= GFX8 ? 800 : 512;
    uint16_t max_addressible_sgpr = program->sgpr_limit;
-   ctx.max_registers = { int16_t((256 / ctx.num_waves) & ~3), std::min<int16_t>(((total_sgpr_regs / ctx.num_waves) & ~7) - 2, max_addressible_sgpr)};
+   ctx.max_registers = { int16_t(((256 / ctx.num_waves) & ~3) - 2), std::min<int16_t>(((total_sgpr_regs / ctx.num_waves) & ~7) - 2, max_addressible_sgpr)};
 
    for (Block& block : program->blocks)
       schedule_block(ctx, program, &block, live_vars);
