@@ -895,6 +895,25 @@ static bool needs_view_index_sgpr(isel_context *ctx)
    }
 }
 
+static inline bool
+add_fs_arg(isel_context *ctx, arg_info *args, unsigned &vgpr_idx, fs_input input, unsigned value, bool enable_next = false, RegClass rc = v1)
+{
+   if (!ctx->fs_vgpr_args[input])
+      return false;
+
+   add_arg(args, rc, &ctx->fs_inputs[input], vgpr_idx);
+   vgpr_idx += rc.size();
+
+   if (enable_next) {
+      add_arg(args, rc, &ctx->fs_inputs[input + 1], vgpr_idx);
+      vgpr_idx += rc.size();
+   }
+
+   ctx->program->config->spi_ps_input_addr |= value;
+   ctx->program->config->spi_ps_input_ena |= value;
+   return true;
+}
+
 void add_startpgm(struct isel_context *ctx)
 {
    user_sgpr_info user_sgpr_info;
@@ -953,101 +972,47 @@ void add_startpgm(struct isel_context *ctx)
 
       ctx->program->config->spi_ps_input_addr = 0;
       ctx->program->config->spi_ps_input_ena = 0;
-      if (ctx->fs_vgpr_args[fs_input::persp_sample_p1]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::persp_sample_p1], vgpr_idx++);
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::persp_sample_p2], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_PERSP_SAMPLE_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_SAMPLE_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::persp_center_p1]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::persp_center_p1], vgpr_idx++);
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::persp_center_p2], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_PERSP_CENTER_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_CENTER_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::persp_centroid_p1]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::persp_centroid_p1], vgpr_idx++);
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::persp_centroid_p2], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_PERSP_CENTROID_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_CENTROID_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::persp_pull_model]) {
-         add_arg(&args, v3, &ctx->fs_inputs[fs_input::persp_pull_model], vgpr_idx);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_PERSP_PULL_MODEL_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_PERSP_PULL_MODEL_ENA(1);
-         vgpr_idx += 3;
-      }
-      if (ctx->fs_vgpr_args[fs_input::linear_sample_p1]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::linear_sample_p1], vgpr_idx++);
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::linear_sample_p2], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_LINEAR_SAMPLE_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_LINEAR_SAMPLE_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::linear_center_p1]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::linear_center_p1], vgpr_idx++);
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::linear_center_p2], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_LINEAR_CENTER_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_LINEAR_CENTER_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::linear_centroid_p1]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::linear_centroid_p1], vgpr_idx++);
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::linear_centroid_p2], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_LINEAR_CENTROID_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_LINEAR_CENTROID_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::line_stipple]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::line_stipple], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_LINE_STIPPLE_TEX_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_LINE_STIPPLE_TEX_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::frag_pos_0]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::frag_pos_0], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_POS_X_FLOAT_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_POS_X_FLOAT_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::frag_pos_1]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::frag_pos_1], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_POS_Y_FLOAT_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_POS_Y_FLOAT_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::frag_pos_2]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::frag_pos_2], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_POS_Z_FLOAT_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_POS_Z_FLOAT_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::frag_pos_3]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::frag_pos_3], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_POS_W_FLOAT_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_POS_W_FLOAT_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::front_face]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::front_face], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_FRONT_FACE_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_FRONT_FACE_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::ancillary]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::ancillary], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_ANCILLARY_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_ANCILLARY_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::sample_coverage]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::sample_coverage], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_SAMPLE_COVERAGE_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_SAMPLE_COVERAGE_ENA(1);
-      }
-      if (ctx->fs_vgpr_args[fs_input::fixed_pt]) {
-         add_arg(&args, v1, &ctx->fs_inputs[fs_input::fixed_pt], vgpr_idx++);
-         ctx->program->config->spi_ps_input_addr |= S_0286CC_POS_FIXED_PT_ENA(1);
-         ctx->program->config->spi_ps_input_ena |= S_0286CC_POS_FIXED_PT_ENA(1);
+
+      bool has_interp_mode = false;
+
+      has_interp_mode |= add_fs_arg(ctx, &args, vgpr_idx, fs_input::persp_sample_p1, S_0286CC_PERSP_SAMPLE_ENA(1), true);
+      has_interp_mode |= add_fs_arg(ctx, &args, vgpr_idx, fs_input::persp_center_p1, S_0286CC_PERSP_CENTER_ENA(1), true);
+      has_interp_mode |= add_fs_arg(ctx, &args, vgpr_idx, fs_input::persp_centroid_p1, S_0286CC_PERSP_CENTROID_ENA(1), true);
+      has_interp_mode |= add_fs_arg(ctx, &args, vgpr_idx, fs_input::persp_pull_model, S_0286CC_PERSP_PULL_MODEL_ENA(1), false, v3);
+
+      if (!has_interp_mode && ctx->fs_vgpr_args[fs_input::frag_pos_3]) {
+         /* If POS_W_FLOAT (11) is enabled, at least one of PERSP_* must be enabled too */
+         ctx->fs_vgpr_args[fs_input::persp_center_p1] = true;
+         has_interp_mode = add_fs_arg(ctx, &args, vgpr_idx, fs_input::persp_center_p1, S_0286CC_PERSP_CENTER_ENA(1), true);
       }
 
-      bool needs_interp_mode = !(ctx->program->config->spi_ps_input_addr & 0x7F) ||
-                               (G_0286CC_POS_W_FLOAT_ENA(ctx->program->config->spi_ps_input_addr)
-                                && !(ctx->program->config->spi_ps_input_addr & 0xF));
+      has_interp_mode |= add_fs_arg(ctx, &args, vgpr_idx, fs_input::linear_sample_p1, S_0286CC_LINEAR_SAMPLE_ENA(1), true);
+      has_interp_mode |= add_fs_arg(ctx, &args, vgpr_idx, fs_input::linear_center_p1, S_0286CC_LINEAR_CENTER_ENA(1), true);
+      has_interp_mode |= add_fs_arg(ctx, &args, vgpr_idx, fs_input::linear_centroid_p1, S_0286CC_LINEAR_CENTROID_ENA(1), true);
+      has_interp_mode |= add_fs_arg(ctx, &args, vgpr_idx, fs_input::line_stipple, S_0286CC_LINE_STIPPLE_TEX_ENA(1));
 
-      unsigned interp_mode = needs_interp_mode ? S_0286CC_PERSP_CENTER_ENA(1) : 0;
-      ctx->program->config->spi_ps_input_ena |= interp_mode;
+      if (!has_interp_mode) {
+         /* At least one of PERSP_* (0xF) or LINEAR_* (0x70) must be enabled */
+         ctx->fs_vgpr_args[fs_input::persp_center_p1] = true;
+         has_interp_mode = add_fs_arg(ctx, &args, vgpr_idx, fs_input::persp_center_p1, S_0286CC_PERSP_CENTER_ENA(1), true);
+      }
 
+      add_fs_arg(ctx, &args, vgpr_idx, fs_input::frag_pos_0, S_0286CC_POS_X_FLOAT_ENA(1));
+      add_fs_arg(ctx, &args, vgpr_idx, fs_input::frag_pos_1, S_0286CC_POS_Y_FLOAT_ENA(1));
+      add_fs_arg(ctx, &args, vgpr_idx, fs_input::frag_pos_2, S_0286CC_POS_Z_FLOAT_ENA(1));
+      add_fs_arg(ctx, &args, vgpr_idx, fs_input::frag_pos_3, S_0286CC_POS_W_FLOAT_ENA(1));
+
+      add_fs_arg(ctx, &args, vgpr_idx, fs_input::front_face, S_0286CC_FRONT_FACE_ENA(1));
+      add_fs_arg(ctx, &args, vgpr_idx, fs_input::ancillary, S_0286CC_ANCILLARY_ENA(1));
+      add_fs_arg(ctx, &args, vgpr_idx, fs_input::sample_coverage, S_0286CC_SAMPLE_COVERAGE_ENA(1));
+      add_fs_arg(ctx, &args, vgpr_idx, fs_input::fixed_pt, S_0286CC_POS_FIXED_PT_ENA(1));
+
+      ASSERTED bool unset_interp_mode = !(ctx->program->config->spi_ps_input_addr & 0x7F) ||
+                                        (G_0286CC_POS_W_FLOAT_ENA(ctx->program->config->spi_ps_input_addr)
+                                        && !(ctx->program->config->spi_ps_input_addr & 0xF));
+
+      assert(has_interp_mode);
+      assert(!unset_interp_mode);
       break;
    }
    case compute_cs: {
