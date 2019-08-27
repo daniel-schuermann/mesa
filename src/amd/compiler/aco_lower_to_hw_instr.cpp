@@ -620,7 +620,7 @@ void lower_to_hw_instr(Program* program)
 
                   bld.reset(discard_block);
                   bld.exp(aco_opcode::exp, Operand(v1), Operand(v1), Operand(v1), Operand(v1),
-                          0, V_008DFC_SQ_EXP_NULL, false, true, true, true);
+                          0, V_008DFC_SQ_EXP_NULL, false, true, true);
                   if (program->wb_smem_l1_on_end)
                      bld.smem(aco_opcode::s_dcache_wb);
                   bld.sopp(aco_opcode::s_endpgm);

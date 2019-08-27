@@ -534,8 +534,6 @@ void gen(Instruction* instr, wait_ctx& ctx)
    switch (instr->format) {
    case Format::EXP: {
       Export_instruction* exp_instr = static_cast<Export_instruction*>(instr);
-      if (exp_instr->waitcnt_ignore)
-         break;
 
       wait_event ev;
       if (exp_instr->dest <= 9)
