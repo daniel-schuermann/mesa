@@ -115,13 +115,8 @@ static void append_logical_end(Block *b)
 
 Temp get_ssa_temp(struct isel_context *ctx, nir_ssa_def *def)
 {
-   RegClass rc = ctx->reg_class[def->index];
-   auto it = ctx->allocated.find(def->index);
-   if (it != ctx->allocated.end())
-      return Temp{it->second, rc};
-   uint32_t id = ctx->program->allocateId();
-   ctx->allocated.insert({def->index, id});
-   return Temp{id, rc};
+   assert(ctx->allocated[def->index].id());
+   return ctx->allocated[def->index];
 }
 
 Temp emit_wqm(isel_context *ctx, Temp src, Temp dst=Temp(0, s1), bool program_needs_wqm = false)

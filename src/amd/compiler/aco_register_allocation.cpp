@@ -255,6 +255,7 @@ bool get_regs_for_copies(ra_ctx& ctx,
 {
 
    /* variables are sorted from small sized to large */
+   /* NOTE: variables are also sorted by ID. this only affects a very small number of shaders slightly though. */
    for (std::set<std::pair<unsigned, unsigned>>::reverse_iterator it = vars.rbegin(); it != vars.rend(); ++it) {
       unsigned id = it->second;
       std::pair<PhysReg, RegClass> var = ctx.assignments[id];
