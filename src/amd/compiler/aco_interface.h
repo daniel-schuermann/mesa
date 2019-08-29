@@ -34,7 +34,8 @@ struct ac_shader_config;
 struct radv_shader_variant_info;
 
 
-void aco_compile_shader(struct nir_shader *shader,
+void aco_compile_shader(unsigned shader_count,
+                        struct nir_shader *const *shaders,
                         struct radv_shader_binary** binary,
                         struct radv_shader_variant_info *info,
                         struct radv_nir_compiler_options *options);

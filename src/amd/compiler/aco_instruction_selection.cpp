@@ -73,6 +73,8 @@ public:
 };
 
 struct if_context {
+   Temp cond;
+
    bool divergent_old;
    bool exec_potentially_empty_old;
 
@@ -7078,6 +7080,8 @@ static void visit_loop(isel_context *ctx, nir_loop *loop)
 
 static void begin_divergent_if_then(isel_context *ctx, if_context *ic, Temp cond)
 {
+   ic->cond = cond;
+
    append_logical_end(ctx->block);
    ctx->block->kind |= block_kind_branch;
 
@@ -7111,7 +7115,7 @@ static void begin_divergent_if_then(isel_context *ctx, if_context *ic, Temp cond
    append_logical_start(BB_then_logical);
 }
 
-static void begin_divergent_if_else(isel_context *ctx, if_context *ic, Temp cond)
+static void begin_divergent_if_else(isel_context *ctx, if_context *ic)
 {
    Block *BB_then_logical = ctx->block;
    append_logical_end(BB_then_logical);
@@ -7143,7 +7147,7 @@ static void begin_divergent_if_else(isel_context *ctx, if_context *ic, Temp cond
 
    /* branch to linear else block (skip else) */
    branch.reset(create_instruction<Pseudo_branch_instruction>(aco_opcode::p_cbranch_nz, Format::PSEUDO_BRANCH, 1, 0));
-   branch->operands[0] = Operand(cond);
+   branch->operands[0] = Operand(ic->cond);
    ctx->block->instructions.push_back(std::move(branch));
 
    ic->exec_potentially_empty_old |= ctx->cf_info.exec_potentially_empty;
@@ -7324,7 +7328,7 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
       begin_divergent_if_then(ctx, &ic, cond);
       visit_cf_list(ctx, &if_stmt->then_list);
 
-      begin_divergent_if_else(ctx, &ic, cond);
+      begin_divergent_if_else(ctx, &ic);
       visit_cf_list(ctx, &if_stmt->else_list);
 
       end_divergent_if(ctx, &ic);
@@ -7582,7 +7586,7 @@ static void emit_streamout(isel_context *ctx, unsigned stream)
       emit_stream_output(ctx, so_buffers, so_write_offset, output);
    }
 
-   begin_divergent_if_else(ctx, &ic, can_emit);
+   begin_divergent_if_else(ctx, &ic);
    end_divergent_if(ctx, &ic);
 }
 
@@ -7620,27 +7624,60 @@ void handle_bc_optimize(isel_context *ctx)
    }
 }
 
-std::unique_ptr<Program> select_program(struct nir_shader *nir,
+std::unique_ptr<Program> select_program(unsigned shader_count,
+                                        struct nir_shader *const *shaders,
                                         ac_shader_config* config,
                                         struct radv_shader_variant_info *info,
                                         struct radv_nir_compiler_options *options)
 {
    std::unique_ptr<Program> program{new Program};
-   isel_context ctx = setup_isel_context(program.get(), nir, config, info, options);
+   isel_context ctx = setup_isel_context(program.get(), shader_count, shaders, config, info, options);
 
-   append_logical_start(ctx.block);
+   for (unsigned i = 0; i < shader_count; i++) {
+      nir_shader *nir = shaders[i];
+      init_context(&ctx, nir);
 
-   if (ctx.stage == fragment_fs)
-      handle_bc_optimize(&ctx);
+      if (!i) {
+         add_startpgm(&ctx); /* needs to be after init_context() for FS */
+         append_logical_start(ctx.block);
+      }
 
-   nir_function_impl *func = nir_shader_get_entrypoint(nir);
-   visit_cf_list(&ctx, &func->body);
+      if_context ic;
+      if (shader_count >= 2) {
+         Builder bld(ctx.program, ctx.block);
+         Temp count = bld.sop2(aco_opcode::s_bfe_u32, bld.def(s1), bld.def(s1, scc), ctx.merged_wave_info, Operand((8u << 16) | (i * 8u)));
+		   Temp thread_id = bld.vop3(aco_opcode::v_mbcnt_hi_u32_b32, bld.def(v1), Operand((uint32_t) -1),
+                                   bld.vop3(aco_opcode::v_mbcnt_lo_u32_b32, bld.def(v1), Operand((uint32_t) -1), Operand(0u)));
+         Temp cond = bld.vopc(aco_opcode::v_cmp_gt_u32, bld.hint_vcc(bld.def(s2)), count, thread_id);
 
-   if (ctx.program->info->info.so.num_outputs/*&& !ctx->is_gs_copy_shader */)
-      emit_streamout(&ctx, 0);
+         begin_divergent_if_then(&ctx, &ic, cond);
+      }
 
-   if (ctx.stage == vertex_vs)
-      create_vs_exports(&ctx);
+      if (i) {
+         Builder bld(ctx.program, ctx.block);
+         bld.barrier(aco_opcode::p_memory_barrier_shared); //TODO: different barriers are needed for different stages
+         bld.sopp(aco_opcode::s_barrier);
+      }
+
+      if (ctx.stage == fragment_fs)
+         handle_bc_optimize(&ctx);
+
+      nir_function_impl *func = nir_shader_get_entrypoint(nir);
+      visit_cf_list(&ctx, &func->body);
+
+      if (ctx.program->info->info.so.num_outputs/*&& !ctx->is_gs_copy_shader */)
+         emit_streamout(&ctx, 0);
+
+      if (ctx.stage == vertex_vs)
+         create_vs_exports(&ctx);
+
+      if (shader_count >= 2) {
+         begin_divergent_if_else(&ctx, &ic);
+         end_divergent_if(&ctx, &ic);
+      }
+
+      ralloc_free(ctx.divergent_vals);
+   }
 
    append_logical_end(ctx.block);
    ctx.block->kind |= block_kind_uniform;

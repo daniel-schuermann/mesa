@@ -1087,7 +1087,8 @@ struct live {
    std::vector<std::vector<RegisterDemand>> register_demand;
 };
 
-std::unique_ptr<Program> select_program(struct nir_shader *nir,
+std::unique_ptr<Program> select_program(unsigned shader_count,
+                                        struct nir_shader *const *shaders,
                                         ac_shader_config* config,
                                         struct radv_shader_variant_info *info,
                                         struct radv_nir_compiler_options *options);

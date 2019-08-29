@@ -29,18 +29,16 @@
 #ifndef NDEBUG
 #include <sstream>
 #endif
-void aco_compile_shader(struct nir_shader *shader,
+void aco_compile_shader(unsigned shader_count,
+                        struct nir_shader *const *shaders,
                         struct radv_shader_binary **binary,
                         struct radv_shader_variant_info *info,
                         struct radv_nir_compiler_options *options)
 {
-   if (shader->info.stage != MESA_SHADER_FRAGMENT && shader->info.stage != MESA_SHADER_VERTEX && shader->info.stage != MESA_SHADER_COMPUTE)
-      return;
-
    ac_shader_config config = {0};
 
    /* Instruction Selection */
-   auto program = aco::select_program(shader, &config, info, options);
+   auto program = aco::select_program(shader_count, shaders, &config, info, options);
    if (options->dump_preoptir) {
       std::cerr << "After Instruction Selection:\n";
       aco_print_program(program.get(), stderr);
@@ -119,7 +117,7 @@ void aco_compile_shader(struct nir_shader *shader,
    radv_shader_binary_legacy* legacy_binary = (radv_shader_binary_legacy*) malloc(size);
 
    legacy_binary->base.type = RADV_BINARY_TYPE_LEGACY;
-   legacy_binary->base.stage = shader->info.stage;
+   legacy_binary->base.stage = shaders[shader_count-1]->info.stage;
    legacy_binary->base.is_gs_copy_shader = false;
    legacy_binary->base.total_size = size;
 

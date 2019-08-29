@@ -70,6 +70,7 @@ struct vs_output_state {
 struct isel_context {
    struct radv_nir_compiler_options *options;
    Program *program;
+   nir_shader *shader;
    Block *block;
    bool *divergent_vals;
    std::unique_ptr<Temp[]> allocated;
@@ -94,6 +95,9 @@ struct isel_context {
    bool scratch_enabled = false;
    Temp private_segment_buffer = Temp(0, s2); /* also the part of the scratch descriptor on compute */
    Temp scratch_offset = Temp(0, s1);
+
+   /* inputs common for merged stages */
+   Temp merged_wave_info = Temp(0, s1);
 
    /* FS inputs */
    bool fs_vgpr_args[fs_input::max_inputs];
@@ -164,8 +168,13 @@ fs_input get_interp_input(nir_intrinsic_op intrin, enum glsl_interp_mode interp)
    return fs_input::max_inputs;
 }
 
-void init_context(isel_context *ctx, nir_function_impl *impl)
+void init_context(isel_context *ctx, nir_shader *shader)
 {
+   nir_function_impl *impl = nir_shader_get_entrypoint(shader);
+
+   ctx->shader = shader;
+   ctx->divergent_vals = nir_divergence_analysis(shader, nir_divergence_view_index_uniform);
+
    std::unique_ptr<Temp[]> allocated{new Temp[impl->ssa_alloc]()};
    memset(&ctx->fs_vgpr_args, false, sizeof(ctx->fs_vgpr_args));
 
@@ -645,7 +654,6 @@ static void allocate_inline_push_consts(isel_context *ctx,
 }
 
 static void allocate_user_sgprs(isel_context *ctx,
-                                /* TODO bool has_previous_stage, gl_shader_stage previous_stage, */
                                 bool needs_view_index, user_sgpr_info& user_sgpr_info)
 {
    memset(&user_sgpr_info, 0, sizeof(struct user_sgpr_info));
@@ -1250,32 +1258,49 @@ setup_variables(isel_context *ctx, nir_shader *nir)
    default:
       unreachable("Unhandled shader stage.");
    }
-
-   ctx->scratch_enabled = nir->scratch_size > 0;
-   ctx->program->config->scratch_bytes_per_wave = align(nir->scratch_size * ctx->options->wave_size, 1024);
-   ctx->program->config->float_mode = V_00B028_FP_64_DENORMS;
-   ctx->program->info->info.wave_size = ctx->options->wave_size;
 }
 
 isel_context
-setup_isel_context(Program* program, nir_shader *nir,
+setup_isel_context(Program* program,
+                   unsigned shader_count,
+                   struct nir_shader *const *shaders,
                    ac_shader_config* config,
                    radv_shader_variant_info *info,
                    radv_nir_compiler_options *options)
 {
-   switch (nir->info.stage) {
-   case MESA_SHADER_VERTEX:
-      program->stage = vertex_vs;
-      break;
-   case MESA_SHADER_FRAGMENT:
-      program->stage = fragment_fs;
-      break;
-   case MESA_SHADER_COMPUTE:
-      program->stage = compute_cs;
-      break;
-   default:
-      unreachable("Shader stage not implemented");
+   program->stage = 0;
+   for (unsigned i = 0; i < shader_count; i++) {
+      switch (shaders[i]->info.stage) {
+      case MESA_SHADER_VERTEX:
+         program->stage |= sw_vs;
+         break;
+      case MESA_SHADER_TESS_CTRL:
+         program->stage |= sw_tcs;
+         break;
+      case MESA_SHADER_TESS_EVAL:
+         program->stage |= sw_tes;
+         break;
+      case MESA_SHADER_GEOMETRY:
+         program->stage |= sw_gs;
+         break;
+      case MESA_SHADER_FRAGMENT:
+         program->stage |= sw_fs;
+         break;
+      case MESA_SHADER_COMPUTE:
+         program->stage |= sw_cs;
+         break;
+      default:
+         unreachable("Shader stage not implemented");
+      }
    }
+   if (program->stage == sw_vs)
+      program->stage |= hw_vs;
+   else if (program->stage == sw_fs)
+      program->stage |= hw_fs;
+   else if (program->stage == sw_cs)
+      program->stage |= hw_cs;
+   else
+      unreachable("Shader stage not implemented");
 
    program->config = config;
    program->info = info;
@@ -1307,70 +1332,81 @@ setup_isel_context(Program* program, nir_shader *nir,
          ctx.vs_output.outputs[i][j] = Temp(0, v1);
    }
 
-   /* the variable setup has to be done before lower_io / CSE */
-   nir_lower_vars_to_explicit_types(nir, nir_var_mem_shared, shared_var_info);
-   setup_variables(&ctx, nir);
+   for (unsigned i = 0; i < shader_count; i++) {
+      nir_shader *nir = shaders[i];
 
-   /* optimize and lower memory operations */
-   if (nir_opt_load_store_vectorize(nir,
-                                    (nir_variable_mode)(nir_var_mem_ssbo | nir_var_mem_ubo |
-                                                        nir_var_mem_push_const | nir_var_mem_shared),
-                                    get_align)) {
-      nir_lower_alu_to_scalar(nir, NULL);
-      nir_lower_pack(nir);
+      /* the variable setup has to be done before lower_io / CSE */
+      if (nir->info.stage == MESA_SHADER_COMPUTE)
+         nir_lower_vars_to_explicit_types(nir, nir_var_mem_shared, shared_var_info);
+      setup_variables(&ctx, nir);
+
+      /* optimize and lower memory operations */
+      if (nir_opt_load_store_vectorize(nir,
+                                       (nir_variable_mode)(nir_var_mem_ssbo | nir_var_mem_ubo |
+                                                           nir_var_mem_push_const | nir_var_mem_shared),
+                                       get_align)) {
+         nir_lower_alu_to_scalar(nir, NULL);
+         nir_lower_pack(nir);
+      }
+      if (nir->info.stage == MESA_SHADER_COMPUTE)
+         nir_lower_explicit_io(nir, nir_var_mem_shared, nir_address_format_32bit_offset);
+      else
+         nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
+      nir_lower_explicit_io(nir, nir_var_mem_global, nir_address_format_64bit_global);
+
+      /* lower ALU operations */
+      nir_opt_idiv_const(nir, 32);
+      nir_lower_idiv(nir, nir_lower_idiv_llvm);
+
+      // TODO: implement logic64 in aco, it's more effective for sgprs
+      nir_lower_int64(nir, (nir_lower_int64_options) (nir_lower_imul64 |
+                                                      nir_lower_imul_high64 |
+                                                      nir_lower_imul_2x32_64 |
+                                                      nir_lower_divmod64 |
+                                                      nir_lower_logic64 |
+                                                      nir_lower_minmax64 |
+                                                      nir_lower_iabs64 |
+                                                      nir_lower_ineg64));
+
+      /* optimize the lowered ALU operations */
+      nir_copy_prop(nir);
+      nir_opt_constant_folding(nir);
+      nir_opt_algebraic(nir);
+      nir_opt_algebraic_late(nir);
+      nir_opt_constant_folding(nir);
+
+      /* cleanup passes */
+      nir_lower_load_const_to_scalar(nir);
+      nir_opt_cse(nir);
+      nir_opt_dce(nir);
+      nir_opt_shrink_load(nir);
+      nir_move_options move_opts = (nir_move_options)(
+         nir_move_const_undef | nir_move_load_ubo | nir_move_load_input | nir_move_comparisons);
+      nir_opt_sink(nir, move_opts);
+      nir_opt_move(nir, move_opts);
+      nir_convert_to_lcssa(nir, true, false);
+      nir_lower_phis_to_scalar(nir);
+
+      nir_function_impl *func = nir_shader_get_entrypoint(nir);
+      nir_index_ssa_defs(func);
+
+      if (options->dump_preoptir) {
+         fprintf(stderr, "NIR shader before instruction selection:\n");
+         nir_print_shader(nir, stderr);
+      }
    }
-   nir_lower_io(nir, (nir_variable_mode)(nir_var_shader_in | nir_var_shader_out), type_size, (nir_lower_io_options)0);
-   nir_lower_explicit_io(nir, nir_var_mem_shared, nir_address_format_32bit_offset);
-   nir_lower_explicit_io(nir, nir_var_mem_global, nir_address_format_64bit_global);
 
-   /* lower ALU operations */
-   nir_opt_idiv_const(nir, 32);
-   nir_lower_idiv(nir, nir_lower_idiv_llvm);
-
-   // TODO: implement logic64 in aco, it's more effective for sgprs
-   nir_lower_int64(nir, (nir_lower_int64_options) (nir_lower_imul64 |
-                                                   nir_lower_imul_high64 |
-                                                   nir_lower_imul_2x32_64 |
-                                                   nir_lower_divmod64 |
-                                                   nir_lower_logic64 |
-                                                   nir_lower_minmax64 |
-                                                   nir_lower_iabs64 |
-                                                   nir_lower_ineg64));
-
-   /* optimize the lowered ALU operations */
-   nir_copy_prop(nir);
-   nir_opt_constant_folding(nir);
-   nir_opt_algebraic(nir);
-   nir_opt_algebraic_late(nir);
-   nir_opt_constant_folding(nir);
-
-   /* cleanup passes */
-   nir_lower_load_const_to_scalar(nir);
-   nir_opt_cse(nir);
-   nir_opt_dce(nir);
-   nir_opt_shrink_load(nir);
-   nir_move_options move_opts = (nir_move_options)(
-      nir_move_const_undef | nir_move_load_ubo | nir_move_load_input | nir_move_comparisons);
-   nir_opt_sink(nir, move_opts);
-   nir_opt_move(nir, move_opts);
-   nir_convert_to_lcssa(nir, true, false);
-   nir_lower_phis_to_scalar(nir);
-
-   nir_function_impl *func = nir_shader_get_entrypoint(nir);
-   nir_index_ssa_defs(func);
-
-   if (options->dump_preoptir) {
-      fprintf(stderr, "NIR shader before instruction selection:\n");
-      nir_print_shader(nir, stderr);
-   }
-   ctx.divergent_vals = nir_divergence_analysis(nir, nir_divergence_view_index_uniform);
-   init_context(&ctx, func);
+   unsigned scratch_size = 0;
+   for (unsigned i = 0; i < shader_count; i++)
+      scratch_size = std::max(scratch_size, shaders[i]->scratch_size);
+   ctx.scratch_enabled = scratch_size > 0;
+   ctx.program->config->scratch_bytes_per_wave = align(scratch_size * ctx.options->wave_size, 1024);
+   ctx.program->config->float_mode = V_00B028_FP_64_DENORMS;
+   ctx.program->info->info.wave_size = ctx.options->wave_size;
 
    ctx.block = ctx.program->create_and_insert_block();
    ctx.block->loop_nest_depth = 0;
    ctx.block->kind = block_kind_top_level;
-
-   add_startpgm(&ctx);
 
    return ctx;
 }
