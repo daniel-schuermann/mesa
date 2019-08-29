@@ -99,23 +99,21 @@ void aco_compile_shader(struct nir_shader *shader,
    /* Assembly */
    std::vector<uint32_t> code = aco::emit_program(program.get());
 
-   if (options->dump_shader) {
-      std::cerr << "After Assembly:\n";
-      //std::cerr << "Num VGPRs: " << program->config->num_vgprs << "\n";
-      //std::cerr << "Num SGPRs: " << program->config->num_sgprs << "\n";
-      aco::print_asm(program.get(), code, options->family, std::cerr);
-   }
-   //std::cerr << binary->disasm_string;
+   bool get_disasm = options->dump_shader;
+#ifndef NDEBUG
+   get_disasm = options->record_llvm_ir;
+#endif
 
    size_t size = 0;
-#ifndef NDEBUG
-   std::ostringstream stream;
-   if (options->record_llvm_ir)
+
+   std::string disasm;
+   if (get_disasm) {
+      std::ostringstream stream;
       aco::print_asm(program.get(), code, options->family, stream);
-   stream << '\0';
-   std::string disasm = stream.str();
-   size += disasm.size();
-#endif
+      stream << '\0';
+      disasm = stream.str();
+      size += disasm.size();
+   }
 
    size += code.size() * sizeof(uint32_t) + sizeof(radv_shader_binary_legacy);
    radv_shader_binary_legacy* legacy_binary = (radv_shader_binary_legacy*) malloc(size);
@@ -132,10 +130,10 @@ void aco_compile_shader(struct nir_shader *shader,
    legacy_binary->disasm_size = 0;
    legacy_binary->llvm_ir_size = 0;
 
-#ifndef NDEBUG
-   disasm.copy((char*) legacy_binary->data + legacy_binary->code_size, disasm.size());
-   legacy_binary->disasm_size = disasm.size() - 1;
-#endif
+   if (get_disasm) {
+      disasm.copy((char*) legacy_binary->data + legacy_binary->code_size, disasm.size());
+      legacy_binary->disasm_size = disasm.size() - 1;
+   }
 
    *binary = (radv_shader_binary*) legacy_binary;
 }
