@@ -119,7 +119,7 @@ void aco_compile_shader(struct nir_shader *shader,
    radv_shader_binary_legacy* legacy_binary = (radv_shader_binary_legacy*) malloc(size);
 
    legacy_binary->base.type = RADV_BINARY_TYPE_LEGACY;
-   legacy_binary->base.stage = program->stage;
+   legacy_binary->base.stage = shader->info.stage;
    legacy_binary->base.is_gs_copy_shader = false;
    legacy_binary->base.total_size = size;
 

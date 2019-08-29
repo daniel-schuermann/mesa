@@ -370,7 +370,7 @@ void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
       {
          if ((*it)->format == Format::EXP && endBlock) {
             Export_instruction* exp = static_cast<Export_instruction*>((*it).get());
-            if (program->stage == MESA_SHADER_VERTEX) {
+            if (program->stage & hw_vs) {
                if (exp->dest >= V_008DFC_SQ_EXP_POS && exp->dest <= (V_008DFC_SQ_EXP_POS + 3)) {
                   exp->done = true;
                   exported = true;
@@ -400,8 +400,8 @@ void fix_exports(asm_context& ctx, std::vector<uint32_t>& out, Program* program)
       exp->enabled_mask = 0;
       exp->compressed = false;
       exp->done = true;
-      exp->valid_mask = program->stage == MESA_SHADER_FRAGMENT;
-      if (program->stage == MESA_SHADER_FRAGMENT)
+      exp->valid_mask = program->stage & hw_fs;
+      if (program->stage & hw_fs)
          exp->dest = 9; /* NULL */
       else
          exp->dest = V_008DFC_SQ_EXP_POS;
@@ -424,7 +424,7 @@ std::vector<uint32_t> emit_program(Program* program)
    asm_context ctx(program);
    std::vector<uint32_t> out;
 
-   if (program->stage == MESA_SHADER_FRAGMENT || program->stage == MESA_SHADER_VERTEX)
+   if (program->stage & (hw_vs | hw_fs))
       fix_exports(ctx, out, program);
 
    for (Block& block : program->blocks) {

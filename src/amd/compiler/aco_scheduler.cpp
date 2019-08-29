@@ -758,7 +758,7 @@ void schedule_block(sched_ctx& ctx, Program *program, Block* block, live& live_v
          schedule_SMEM(ctx, block, live_vars.register_demand[block->index], current, idx);
    }
 
-   if (program->stage == MESA_SHADER_VERTEX && block->index == program->blocks.size() - 1) {
+   if ((program->stage & hw_vs) && block->index == program->blocks.size() - 1) {
       /* Try to move position exports as far up as possible, to reduce register
        * usage and because ISA reference guides say so. */
       for (unsigned idx = 0; idx < block->instructions.size(); idx++) {

@@ -126,7 +126,7 @@ Temp emit_wqm(isel_context *ctx, Temp src, Temp dst=Temp(0, s1), bool program_ne
    if (!dst.id())
       dst = bld.tmp(src.regClass());
 
-   if (ctx->stage != MESA_SHADER_FRAGMENT) {
+   if (ctx->stage != fragment_fs) {
       if (!dst.id())
          return src;
 
@@ -2612,9 +2612,9 @@ void visit_store_fs_output(isel_context *ctx, nir_intrinsic_instr *instr)
 
 void visit_store_output(isel_context *ctx, nir_intrinsic_instr *instr)
 {
-   if (ctx->stage == MESA_SHADER_VERTEX) {
+   if (ctx->stage == vertex_vs) {
       visit_store_vs_output(ctx, instr);
-   } else if (ctx->stage == MESA_SHADER_FRAGMENT) {
+   } else if (ctx->stage == fragment_fs) {
       visit_store_fs_output(ctx, instr);
    } else {
       unreachable("Shader stage not implemented");
@@ -2753,7 +2753,7 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
 {
    Builder bld(ctx->program, ctx->block);
    Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
-   if (ctx->stage == MESA_SHADER_VERTEX) {
+   if (ctx->stage & sw_vs) {
 
       nir_instr *off_instr = instr->src[0].ssa->parent_instr;
       if (off_instr->type != nir_instr_type_load_const) {
@@ -2880,7 +2880,7 @@ void visit_load_input(isel_context *ctx, nir_intrinsic_instr *instr)
          emit_split_vector(ctx, dst, dst.size());
       }
 
-   } else if (ctx->stage == MESA_SHADER_FRAGMENT) {
+   } else if (ctx->stage == fragment_fs) {
       nir_instr *off_instr = instr->src[0].ssa->parent_instr;
       if (off_instr->type != nir_instr_type_load_const ||
           nir_instr_as_load_const(off_instr)->value[0].u32 != 0) {
@@ -4184,7 +4184,7 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
                ctx->options->chip_class >= GFX8;
    if (smem)
       offset = bld.as_uniform(offset);
-   bool smem_nonfs = smem && ctx->stage != MESA_SHADER_FRAGMENT;
+   bool smem_nonfs = smem && ctx->stage != fragment_fs;
 
    while (writemask) {
       int start, count;
@@ -4248,7 +4248,7 @@ void visit_store_ssbo(isel_context *ctx, nir_intrinsic_instr *instr)
          default:
             unreachable("Store SSBO not implemented for this size.");
       }
-      if (ctx->stage == MESA_SHADER_FRAGMENT)
+      if (ctx->stage == fragment_fs)
          smem_op = aco_opcode::p_fs_buffer_store_smem;
 
       if (smem) {
@@ -5312,7 +5312,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
    }
    case nir_intrinsic_load_view_index:
    case nir_intrinsic_load_layer_id: {
-      if (instr->intrinsic == nir_intrinsic_load_view_index && ctx->stage == MESA_SHADER_VERTEX) {
+      if (instr->intrinsic == nir_intrinsic_load_view_index && (ctx->stage & sw_vs)) {
          Temp dst = get_ssa_temp(ctx, &instr->dest.ssa);
          bld.copy(Definition(dst), Operand(ctx->view_index));
          break;
@@ -5472,7 +5472,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    }
    case nir_intrinsic_load_subgroup_id: {
-      if (ctx->stage == MESA_SHADER_COMPUTE) {
+      if (ctx->stage == compute_cs) {
          Temp tg_num = bld.sop2(aco_opcode::s_and_b32, bld.def(s1), bld.def(s1, scc), Operand(0xfc0u), ctx->tg_size);
          bld.sop2(aco_opcode::s_lshr_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), bld.def(s1, scc), tg_num, Operand(0x6u));
       } else {
@@ -5486,7 +5486,7 @@ void visit_intrinsic(isel_context *ctx, nir_intrinsic_instr *instr)
       break;
    }
    case nir_intrinsic_load_num_subgroups: {
-      if (ctx->stage == MESA_SHADER_COMPUTE)
+      if (ctx->stage == compute_cs)
          bld.sop2(aco_opcode::s_and_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), bld.def(s1, scc), Operand(0x3fu), ctx->tg_size);
       else
          bld.sop1(aco_opcode::s_mov_b32, Definition(get_ssa_temp(ctx, &instr->dest.ssa)), Operand(0x1u));
@@ -7222,7 +7222,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
        *    to the loop exit/entry block. Otherwise, it branches to the next
        *    merge block.
        **/
-
       append_logical_end(ctx->block);
       ctx->block->kind |= block_kind_uniform;
 
@@ -7294,7 +7293,6 @@ static void visit_if(isel_context *ctx, nir_if *if_stmt)
          ctx->block = ctx->program->insert_block(std::move(BB_endif));
          append_logical_start(ctx->block);
       }
-
    } else { /* non-uniform condition */
       /**
        * To maintain a logical and linear CFG without critical edges,
@@ -7476,7 +7474,7 @@ static void emit_stream_output(isel_context *ctx,
 
    Temp out[4];
    bool all_undef = true;
-   assert(ctx->stage == MESA_SHADER_VERTEX);
+   assert(ctx->stage == vertex_vs);
    for (unsigned i = 0; i < num_comps; i++) {
       out[i] = ctx->vs_output.outputs[loc][start + i];
       all_undef = all_undef && !out[i].id();
@@ -7632,16 +7630,16 @@ std::unique_ptr<Program> select_program(struct nir_shader *nir,
 
    append_logical_start(ctx.block);
 
-   if (ctx.stage == MESA_SHADER_FRAGMENT)
+   if (ctx.stage == fragment_fs)
       handle_bc_optimize(&ctx);
 
-   struct nir_function *func = (struct nir_function *)exec_list_get_head(&nir->functions);
-   visit_cf_list(&ctx, &func->impl->body);
+   nir_function_impl *func = nir_shader_get_entrypoint(nir);
+   visit_cf_list(&ctx, &func->body);
 
    if (ctx.program->info->info.so.num_outputs/*&& !ctx->is_gs_copy_shader */)
       emit_streamout(&ctx, 0);
 
-   if (ctx.stage == MESA_SHADER_VERTEX)
+   if (ctx.stage == vertex_vs)
       create_vs_exports(&ctx);
 
    append_logical_end(ctx.block);

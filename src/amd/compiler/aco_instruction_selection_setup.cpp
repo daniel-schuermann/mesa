@@ -74,7 +74,7 @@ struct isel_context {
    bool *divergent_vals;
    std::unique_ptr<Temp[]> allocated;
    std::unordered_map<unsigned, std::array<Temp,4>> allocated_vec;
-   gl_shader_stage stage;
+   uint16_t stage; /* Stage */
    struct {
       bool has_branch;
       uint16_t loop_nest_depth = 0;
@@ -435,7 +435,7 @@ void init_context(isel_context *ctx, nir_function_impl *impl)
                      }
                      break;
                   case nir_intrinsic_load_view_index:
-                     type = ctx->stage == MESA_SHADER_FRAGMENT ? RegType::vgpr : RegType::sgpr;
+                     type = ctx->stage == fragment_fs ? RegType::vgpr : RegType::sgpr;
                      break;
                   case nir_intrinsic_load_front_face:
                   case nir_intrinsic_load_helper_invocation:
@@ -652,14 +652,12 @@ static void allocate_user_sgprs(isel_context *ctx,
    uint32_t user_sgpr_count = 0;
 
    /* until we sort out scratch/global buffers always assign ring offsets for gs/vs/es */
-   if (ctx->stage == MESA_SHADER_GEOMETRY ||
-       ctx->stage == MESA_SHADER_VERTEX ||
-       ctx->stage == MESA_SHADER_TESS_CTRL ||
-       ctx->stage == MESA_SHADER_TESS_EVAL
+   if (ctx->stage != fragment_fs &&
+       ctx->stage != compute_cs
        /*|| ctx->is_gs_copy_shader */)
       user_sgpr_info.need_ring_offsets = true;
 
-   if (ctx->stage == MESA_SHADER_FRAGMENT &&
+   if (ctx->stage == fragment_fs &&
        ctx->program->info->info.ps.needs_sample_positions)
       user_sgpr_info.need_ring_offsets = true;
 
@@ -668,17 +666,17 @@ static void allocate_user_sgprs(isel_context *ctx,
       user_sgpr_count += 2;
 
    switch (ctx->stage) {
-   case MESA_SHADER_VERTEX:
+   case vertex_vs:
    /* if (!ctx->is_gs_copy_shader) */ {
          if (ctx->program->info->info.vs.has_vertex_buffers)
             user_sgpr_count++;
          user_sgpr_count += ctx->program->info->info.vs.needs_draw_id ? 3 : 2;
       }
       break;
-   case MESA_SHADER_FRAGMENT:
+   case fragment_fs:
       //user_sgpr_count += ctx->program->info->info.ps.needs_sample_positions;
       break;
-   case MESA_SHADER_COMPUTE:
+   case compute_cs:
       if (ctx->program->info->info.cs.uses_grid_size)
          user_sgpr_count += 3;
       break;
@@ -695,7 +693,7 @@ static void allocate_user_sgprs(isel_context *ctx,
    if (ctx->program->info->info.so.num_outputs)
       user_sgpr_count += 1; /* we use 32bit pointers */
 
-   uint32_t available_sgprs = ctx->options->chip_class >= GFX9 && ctx->stage != MESA_SHADER_COMPUTE ? 32 : 16;
+   uint32_t available_sgprs = ctx->options->chip_class >= GFX9 && !(ctx->stage & hw_cs) ? 32 : 16;
    uint32_t remaining_sgprs = available_sgprs - user_sgpr_count;
    uint32_t num_desc_set = util_bitcount(ctx->program->info->info.desc_set_used_mask);
 
@@ -847,10 +845,9 @@ declare_streamout_sgprs(isel_context *ctx, struct arg_info *args, unsigned *idx)
 {
    /* Streamout SGPRs. */
    if (ctx->program->info->info.so.num_outputs) {
-      assert(ctx->stage == MESA_SHADER_VERTEX ||
-             ctx->stage == MESA_SHADER_TESS_EVAL);
+      assert(ctx->stage & hw_vs);
 
-      if (ctx->stage != MESA_SHADER_TESS_EVAL) {
+      if (ctx->stage != tess_eval_vs) {
          add_arg(args, s1, &ctx->streamout_config, (*idx)++);
       } else {
          args->assign[args->count - 1] = &ctx->streamout_config;
@@ -872,24 +869,21 @@ declare_streamout_sgprs(isel_context *ctx, struct arg_info *args, unsigned *idx)
 static bool needs_view_index_sgpr(isel_context *ctx)
 {
    switch (ctx->stage) {
-   case MESA_SHADER_VERTEX:
-      if (ctx->program->info->info.needs_multiview_view_index ||
-          (!ctx->options->key.vs.out.as_es && !ctx->options->key.vs.out.as_ls && ctx->options->key.has_multiview_view_index))
-         return true;
-      break;
-   case MESA_SHADER_TESS_EVAL:
-      if (ctx->program->info->info.needs_multiview_view_index || (!ctx->options->key.tes.out.as_es && ctx->options->key.has_multiview_view_index))
-         return true;
-      break;
-   case MESA_SHADER_GEOMETRY:
-   case MESA_SHADER_TESS_CTRL:
-      if (ctx->program->info->info.needs_multiview_view_index)
-         return true;
-      break;
+   case vertex_vs:
+      return ctx->program->info->info.needs_multiview_view_index || ctx->options->key.has_multiview_view_index;
+   case tess_eval_vs:
+      return ctx->program->info->info.needs_multiview_view_index && ctx->options->key.has_multiview_view_index;
+   case vertex_ls:
+   case vertex_tess_control_ls:
+   case vertex_geometry_es:
+   case tess_control_hs:
+   case tess_eval_es:
+	case tess_eval_geometry_es:
+   case geometry_gs:
+      return ctx->program->info->info.needs_multiview_view_index;
    default:
-      break;
+      return false;
    }
-   return false;
 }
 
 void add_startpgm(struct isel_context *ctx)
@@ -907,9 +901,8 @@ void add_startpgm(struct isel_context *ctx)
 
    unsigned vgpr_idx = 0;
    switch (ctx->stage) {
-   case MESA_SHADER_VERTEX: {
+   case vertex_vs: {
       declare_global_input_sgprs(ctx, &user_sgpr_info, &args, ctx->descriptor_sets);
-
       if (ctx->program->info->info.vs.has_vertex_buffers) {
          add_arg(&args, s1, &ctx->vertex_buffers, user_sgpr_info.user_sgpr_idx);
          set_loc_shader_ptr(ctx, AC_UD_VS_VERTEX_BUFFERS, &user_sgpr_info.user_sgpr_idx);
@@ -940,7 +933,7 @@ void add_startpgm(struct isel_context *ctx)
       declare_vs_input_vgprs(ctx, &args);
       break;
    }
-   case MESA_SHADER_FRAGMENT: {
+   case fragment_fs: {
       declare_global_input_sgprs(ctx, &user_sgpr_info, &args, ctx->descriptor_sets);
 
       assert(user_sgpr_info.user_sgpr_idx == user_sgpr_info.num_sgpr);
@@ -1048,7 +1041,7 @@ void add_startpgm(struct isel_context *ctx)
 
       break;
    }
-   case MESA_SHADER_COMPUTE: {
+   case compute_cs: {
       declare_global_input_sgprs(ctx, &user_sgpr_info, &args, ctx->descriptor_sets);
 
       if (ctx->program->info->info.cs.uses_grid_size) {
@@ -1136,9 +1129,6 @@ get_align(nir_variable_mode mode, bool is_store, unsigned bit_size, unsigned num
 void
 setup_vs_variables(isel_context *ctx, nir_shader *nir)
 {
-   assert(!ctx->program->info->vs.as_ls);
-   assert(!ctx->program->info->vs.as_es);
-
    nir_foreach_variable(variable, &nir->inputs)
    {
       variable->data.driver_location = variable->data.location * 4;
@@ -1169,10 +1159,10 @@ setup_vs_variables(isel_context *ctx, nir_shader *nir)
    {
       int idx = variable->data.location;
       unsigned slots = variable->type->count_attribute_slots(false);
-	   if (variable->data.compact) {
-		   unsigned component_count = variable->data.location_frac + variable->type->length;
-		   slots = (component_count + 3) / 4;
-	   }
+      if (variable->data.compact) {
+	      unsigned component_count = variable->data.location_frac + variable->type->length;
+	      slots = (component_count + 3) / 4;
+      }
 
       if (idx >= VARYING_SLOT_VAR0 || idx == VARYING_SLOT_LAYER || idx == VARYING_SLOT_PRIMITIVE_ID ||
           ((idx == VARYING_SLOT_CLIP_DIST0 || idx == VARYING_SLOT_CLIP_DIST1) && export_clip_dists)) {
@@ -1206,7 +1196,7 @@ setup_vs_variables(isel_context *ctx, nir_shader *nir)
    assert(outinfo->vs_output_param_offset[VARYING_SLOT_PRIMITIVE_ID] == AC_EXP_PARAM_UNDEFINED);
    outinfo->export_prim_id = false;
    if (ctx->options->key.vs.out.export_prim_id) {
-		outinfo->export_prim_id = true;
+      outinfo->export_prim_id = true;
       outinfo->vs_output_param_offset[VARYING_SLOT_PRIMITIVE_ID] = outinfo->param_exports++;
    }
 
@@ -1224,14 +1214,14 @@ setup_vs_variables(isel_context *ctx, nir_shader *nir)
    outinfo->cull_dist_mask <<= ctx->num_clip_distances;
 
    ctx->program->info->vs.export_prim_id = ctx->options->key.vs.out.export_prim_id;
-   ctx->program->info->vs.as_ls = false;
-   ctx->program->info->vs.as_es = false;
+   ctx->program->info->vs.as_ls = ctx->stage & hw_ls;
+   ctx->program->info->vs.as_es = ctx->stage & hw_es;
 }
 
 void
 setup_variables(isel_context *ctx, nir_shader *nir)
 {
-   switch (ctx->stage) {
+   switch (nir->info.stage) {
    case MESA_SHADER_FRAGMENT: {
       nir_foreach_variable(variable, &nir->outputs)
       {
@@ -1273,6 +1263,20 @@ setup_isel_context(Program* program, nir_shader *nir,
                    radv_shader_variant_info *info,
                    radv_nir_compiler_options *options)
 {
+   switch (nir->info.stage) {
+   case MESA_SHADER_VERTEX:
+      program->stage = vertex_vs;
+      break;
+   case MESA_SHADER_FRAGMENT:
+      program->stage = fragment_fs;
+      break;
+   case MESA_SHADER_COMPUTE:
+      program->stage = compute_cs;
+      break;
+   default:
+      unreachable("Shader stage not implemented");
+   }
+
    program->config = config;
    program->info = info;
    program->chip_class = options->chip_class;
@@ -1281,7 +1285,6 @@ setup_isel_context(Program* program, nir_shader *nir,
    if (options->family == CHIP_TONGA || options->family == CHIP_ICELAND)
       program->sgpr_limit = 94; /* workaround hardware bug */
 
-   program->stage = nir->info.stage;
    for (unsigned i = 0; i < MAX_SETS; ++i)
       program->info->user_sgprs_locs.descriptor_sets[i].sgpr_idx = -1;
    for (unsigned i = 0; i < AC_UD_MAX_UD; ++i)
@@ -1290,7 +1293,7 @@ setup_isel_context(Program* program, nir_shader *nir,
    isel_context ctx = {};
    ctx.program = program;
    ctx.options = options;
-   ctx.stage = nir->info.stage;
+   ctx.stage = program->stage;
 
    for (unsigned i = 0; i < fs_input::max_inputs; ++i)
       ctx.fs_inputs[i] = Temp(0, v1);
