@@ -26,9 +26,7 @@
 #include "vulkan/radv_shader.h"
 
 #include <iostream>
-#ifndef NDEBUG
 #include <sstream>
-#endif
 void aco_compile_shader(unsigned shader_count,
                         struct nir_shader *const *shaders,
                         struct radv_shader_binary **binary,
