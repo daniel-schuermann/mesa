@@ -491,6 +491,7 @@ static const struct debug_control radv_perftest_options[] = {
 	{"gewave32", RADV_PERFTEST_GE_WAVE_32},
 	{"dfsm", RADV_PERFTEST_DFSM},
 	{"aco", RADV_PERFTEST_ACO},
+	{"llvm", RADV_PERFTEST_LLVM},
 	{NULL, 0}
 };
 
@@ -642,6 +643,13 @@ VkResult radv_CreateInstance(
 
 	instance->perftest_flags = parse_debug_string(getenv("RADV_PERFTEST"),
 						   radv_perftest_options);
+
+	if (instance->perftest_flags & RADV_PERFTEST_ACO) {
+		instance->perftest_flags &= ~RADV_PERFTEST_LLVM;
+	} else if (!(instance->perftest_flags & RADV_PERFTEST_LLVM)) {
+		#warning "ACO enabled by default"
+		instance->perftest_flags |= RADV_PERFTEST_ACO;
+	}
 
 	if (instance->perftest_flags & RADV_PERFTEST_ACO)
 		fprintf(stderr, "WARNING: Experimental compiler backend enabled. Here be dragons! Incorrect rendering, GPU hangs and/or resets are likely\n");
